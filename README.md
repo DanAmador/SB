@@ -1,0 +1,74 @@
+# sb-workflow
+
+`/sb` is one slash command for the way Dan runs agents: the Obsidian vault
+(`~/Documents/Second Brain`) is the hub, wayfinder maps live there as markdown, and every session,
+model and harness syncs through it. Built 2026-10-25 from ~760 past sessions: each verb is a ritual
+that was being retyped by hand.
+
+## The loop
+
+```mermaid
+flowchart LR
+    idea([brain-dump]) -->|/sb chart| map[(vault map<br/>tickets + Route)]
+    notes([playtest notes<br/>findings]) -->|/sb capture| map
+    map -->|/sb tonight| propose{one confirm}
+    propose -->|go| run[[unattended run<br/>claim → implement → review → resolve]]
+    run -->|every ticket| cp[(checkpoint)]
+    run -->|limit / crash| resume[/sb resume/]
+    resume --> run
+    run -->|end of window| morning[/sb morning/]
+    morning -->|rulings, play| map
+    morning -->|queue more| propose
+    run -->|lanes, worktrees| land[/sb land/]
+    anysession([any session, any harness]) -->|/sb handoff| ho[(handoff + kickoff line)]
+    ho -->|"Read #lt;file#gt; and do what it says"| run
+```
+
+| verb | ritual it replaces |
+|---|---|
+| `chart <idea>` | "let's plan it with wayfinder", "grill me", "create a map" |
+| `tonight [h] [map]` | "what can I enqueue overnight? I'll be AFK 6 to 8 hours" |
+| `morning` | "tl;dr, I just woke up, what was accomplished?" |
+| `handoff` | "do you need a fresh context? give me a handoff to paste" |
+| `resume` | "another agent ran out of tokens, continue", "reorient me" |
+| `capture` | "add these as todos in wayfinder" |
+| `land` | "have you merged all the worktrees?" |
+
+## Layout
+
+```
+skills/sb/
+  SKILL.md            the router: vault, contract, verb table
+  verbs/              one file per verb, loaded only when that verb runs
+  reference/          contract (per-repo rules + owner defaults), models (tiers), output (report shape),
+                      architecture (mermaid decision tickets, the map's Route), obsidian (the CLI)
+  templates/          launch contract, checkpoint, handoff, implementer brief, architecture ticket
+  scripts/sbmap.py    frontier, next number, lint, Route diagram; stdlib Python, any harness.
+                      With Obsidian running it also asks the app: broken links, and `verify`
+                      (every mermaid block parses in Obsidian's own renderer)
+install.sh            links the skill into ~/.agents/skills and ~/.claude/skills
+```
+
+## Install
+
+```bash
+./install.sh
+```
+
+`~/.agents/skills` is the shared folder the other harnesses read; `~/.claude/skills/sb` is a
+relative link to it, like the other shared skills.
+
+## The tracker is Obsidian-native
+
+Tickets are Obsidian notes: fields in properties, every reference a wikilink, a Bases board per map
+(`board.base`, embedded in `map.md`) plus `wayfinder/frontier.base` across all maps, and a mermaid
+Route. The vault's `wayfinder/README.md` is the format's rulebook; `sbmap migrate` converted the old
+header-line tickets on 2026-10-25 (backup under `backups/`, git-ignored).
+
+## sbmap
+
+```bash
+python3 skills/sb/scripts/sbmap.py maps
+python3 skills/sb/scripts/sbmap.py status sk4te-one-tether
+python3 skills/sb/scripts/sbmap.py diagram sk4te-one-tether --write
+```
