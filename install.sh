@@ -12,7 +12,8 @@ link() {  # link <target> <link path>
     echo "linked $2 -> $1"
 }
 
-mkdir -p "$HOME/.agents/skills" "$HOME/.claude/skills"
+mkdir -p "$HOME/.agents/skills" "$HOME/.claude/skills" "$HOME/.gemini/config/skills"
 link "$here/skills/sb" "$HOME/.agents/skills/sb"
 link "../../.agents/skills/sb" "$HOME/.claude/skills/sb"
+link "$here/skills/sb" "$HOME/.gemini/config/skills/sb"
 chmod +x "$here/skills/sb/scripts/sbmap.py"
