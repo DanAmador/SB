@@ -60,7 +60,8 @@ SHAPES = {  # mermaid node shape per ticket type
     "prototype": ('[["', '"]]'),
     "architecture": ('{{"', '"}}'),
 }
-TICKET_KEYS = ["wayfinder", "number", "status", "type", "map", "blocked_by", "claimed_by",
+TICKET_KEYS = ["wayfinder", "operonId", "number", "aliases", "status", "type",
+               "priority", "created", "completed", "map", "blocked_by", "claimed_by",
                "github", "tags"]
 MAP_KEYS = ["wayfinder", "status", "aliases", "repo", "github", "tags"]
 LEGACY = {"Status": "status", "Type": "type", "Blocked by": "blocked_by", "GitHub": "github",
@@ -219,7 +220,26 @@ class Map:
                 self.tickets[t.num] = t
 
     @property
+    def rel_folder(self):
+        try:
+            return self.folder.resolve().relative_to(WAYFINDER.resolve())
+        except ValueError:
+            return Path(self.folder.name)
+
+    @property
+    def rel_name(self):
+        return str(self.rel_folder)
+
+    @property
+    def effort_slug(self):
+        parts = self.rel_folder.parts
+        return "-".join(parts) if len(parts) > 1 else self.folder.name
+
+    @property
     def repo(self):
+        parts = self.rel_folder.parts
+        if len(parts) > 1:
+            return parts[0]
         return self.folder.name.split("-", 1)[0]
 
     def link(self, alias=None):
@@ -245,7 +265,16 @@ class Map:
             n = int(ref.lstrip("#"))
             return self.tickets.get(n) or sibling_ticket(self, n)
         folder = WAYFINDER / ref
-        return Map(folder) if (folder / "map.md").exists() else None
+        if (folder / "map.md").exists():
+            return Map(folder)
+        if "-" in ref:
+            f2 = WAYFINDER / ref.replace("-", "/", 1)
+            if (f2 / "map.md").exists():
+                return Map(f2)
+        f3 = self.folder.parent / ref
+        if (f3 / "map.md").exists():
+            return Map(f3)
+        return None
 
     def blocker(self, ref):
         """(label, cleared, ticket-or-None) for one blocked_by entry."""
@@ -273,24 +302,47 @@ class Map:
 
 
 def sibling_ticket(m, num):
-    """A number not in this map: sk4te's moved-from-GitHub numbers are shared across its maps."""
-    hits = [f for f in WAYFINDER.glob(f"{m.repo}-*/issues/*.md")
+    """A number not in this map: shared across repo maps."""
+    hits = [f for f in WAYFINDER.glob(f"{m.repo}/**/issues/*.md")
             if re.match(rf"0*{num}-", f.name)]
+    if not hits:
+        hits = [f for f in WAYFINDER.glob(f"{m.repo}-*/issues/*.md")
+                if re.match(rf"0*{num}-", f.name)]
     return Ticket(hits[0]) if len(hits) == 1 else None
 
 
 def load(arg):
     p = Path(arg).expanduser()
+    if p.is_dir() and (p / "map.md").exists():
+        return Map(p)
+    if p.name == "map.md" and p.exists():
+        return Map(p.parent)
     folder = p if p.is_dir() else WAYFINDER / arg
     if folder.name == "map.md":
         folder = folder.parent
-    if not (folder / "map.md").exists():
-        sys.exit(f"sbmap: no map.md in {folder}")
-    return Map(folder)
+    if (folder / "map.md").exists():
+        return Map(folder)
+    if "-" in arg:
+        dash_p = WAYFINDER / arg.replace("-", "/", 1)
+        if (dash_p / "map.md").exists():
+            return Map(dash_p)
+    for f in WAYFINDER.glob("**/map.md"):
+        if "backups" in f.parts:
+            continue
+        rel_str = str(f.parent.relative_to(WAYFINDER))
+        slug = rel_str.replace("/", "-")
+        if f.parent.name == arg or rel_str == arg or slug == arg or f.parent.name.endswith(f"-{arg}"):
+            return Map(f.parent)
+    sys.exit(f"sbmap: no map.md in {folder}")
 
 
 def all_maps():
-    return [Map(f.parent) for f in sorted(WAYFINDER.glob("*/map.md"))]
+    maps = []
+    for f in sorted(WAYFINDER.glob("**/map.md")):
+        if "backups" in f.parts or ".system" in f.parts:
+            continue
+        maps.append(Map(f.parent))
+    return maps
 
 
 def obsidian(*args, timeout=15):
@@ -333,9 +385,13 @@ def belongs(m, repo):
 
 def trail(m):
     """Handoff and checkpoint files beside the maps that name this map or its repo prefix."""
-    return sorted(p for p in WAYFINDER.glob("*.md")
+    candidates = list(WAYFINDER.glob("*.md"))
+    if (WAYFINDER / m.repo).is_dir():
+        candidates += list((WAYFINDER / m.repo).glob("*.md"))
+    return sorted(p for p in set(candidates)
                   if re.search(r"-(handoff|checkpoint)\.md$", p.name)
-                  and (p.name.startswith(m.folder.name) or p.name.startswith(m.repo + "-")
+                  and (p.name.startswith(m.effort_slug) or p.name.startswith(m.repo + "-")
+                       or m.effort_slug in p.read_text(encoding="utf-8")
                        or m.folder.name in p.read_text(encoding="utf-8")))
 
 
@@ -351,7 +407,7 @@ def cmd_maps(args):
     for m in all_maps():
         if repo and not belongs(m, repo):
             continue
-        print(f"{m.folder.name:32} {m.status:9} {len(m.frontier()):2} on frontier · {counts(m)}")
+        print(f"{m.rel_name:32} {m.status:9} {len(m.frontier()):2} on frontier · {counts(m)}")
         print(f"{'':32} {m.title}")
 
 
@@ -380,7 +436,8 @@ def cmd_frontier(args):
 
 
 def next_number(m):
-    nums = [int(re.match(r"\d+", f.name).group()) for f in WAYFINDER.glob(f"{m.repo}-*/issues/*.md")
+    files = list(WAYFINDER.glob(f"{m.repo}/**/issues/*.md")) + list(WAYFINDER.glob(f"{m.repo}-*/issues/*.md"))
+    nums = [int(re.match(r"\d+", f.name).group()) for f in files
             if re.match(r"\d+", f.name)]
     return (max(nums) if nums else 0) + 1
 
@@ -511,9 +568,31 @@ def blocked_links(m, refs):
     return out
 
 
-def ticket_props(m, t_num, status="open", type_="task", blocked=(), extra=None):
-    props = {"wayfinder": "ticket", "number": t_num, "status": status, "type": type_,
-             "map": m.link(), "blocked_by": list(blocked), "tags": ["wayfinder/ticket"]}
+def ticket_props(m, t_num, status="open", type_="task", priority="normal", created=None, completed=None, blocked=(), extra=None):
+    operon_id = f"{m.effort_slug}-{t_num:03d}"
+    aliases = [f"#{t_num:03d}", f"{t_num:03d}"]
+    created_date = created or date.today().isoformat()
+    tags = [
+        "wayfinder/ticket",
+        f"wayfinder/map/{m.effort_slug}",
+        f"status/{status}",
+        f"type/{type_}"
+    ]
+    props = {
+        "wayfinder": "ticket",
+        "operonId": operon_id,
+        "number": t_num,
+        "aliases": aliases,
+        "status": status,
+        "type": type_,
+        "priority": priority,
+        "created": created_date,
+        "map": m.link(),
+        "blocked_by": list(blocked),
+        "tags": tags
+    }
+    if completed:
+        props["completed"] = completed
     props.update(extra or {})
     return props
 
@@ -522,6 +601,7 @@ def cmd_new(args):
     m = load(args[0])
     title = opt(args, "--title") or sys.exit("sbmap: --title is required")
     type_ = opt(args, "--type", "task")
+    priority = opt(args, "--priority", "normal")
     if type_ not in SHAPES:
         sys.exit(f"sbmap: type must be one of {', '.join(SHAPES)}")
     refs = [r for r in (opt(args, "--blocked-by", "") or "").split(",") if r.strip()]
@@ -529,7 +609,7 @@ def cmd_new(args):
     slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:60].rstrip("-")
     path = m.folder / "issues" / f"{n:03d}-{slug}.md"
     path.parent.mkdir(exist_ok=True)
-    props = ticket_props(m, n, type_=type_, blocked=blocked_links(m, refs))
+    props = ticket_props(m, n, status="open", type_=type_, priority=priority, blocked=blocked_links(m, refs))
     body = f"# {title}\n\n## Question\n\n\n\n## Done when\n\n\n\n## Comments\n"
     write_atomic(path, dump_fm(props, TICKET_KEYS) + body)
     print(path)
@@ -548,6 +628,12 @@ def cmd_set(args):
         if k == "blocked_by":
             sys.exit("sbmap: use `sbmap block` for blockers")
         props[k] = v
+        if k == "status":
+            tags = [tag for tag in props.get("tags", []) if not tag.startswith("status/")]
+            tags.append(f"status/{v}")
+            props["tags"] = sorted(tags)
+            if v == "resolved" and "completed" not in props:
+                props["completed"] = date.today().isoformat()
     if props.get("status") != "claimed":
         props.pop("claimed_by", None)
     t.save(props)
@@ -803,7 +889,8 @@ CODE = re.compile(r"```.*?```|`[^`\n]*`|\[\[[^\]]*\]\]|\[[^\]]*\]\([^)]*\)|<[^>\
 def number_index(repo):
     """number -> every ticket of this repo's maps carrying it."""
     idx = {}
-    for f in WAYFINDER.glob(f"{repo}-*/issues/*.md"):
+    files = list(WAYFINDER.glob(f"{repo}/**/issues/*.md")) + list(WAYFINDER.glob(f"{repo}-*/issues/*.md"))
+    for f in files:
         mm = re.match(r"(\d+)-", f.name)
         if mm:
             idx.setdefault(int(mm.group(1)), []).append(f)
@@ -885,6 +972,7 @@ def migrate_map(m, write):
     tickets = []
     for t in m.order():
         props = dict(t.props) if t.has_fm else {}
+        needed = False
         if not t.has_fm:
             f = legacy_fields(t.body)
             raw = [b.strip() for b in f.get("blocked_by", "").split(",") if b.strip()]
@@ -894,14 +982,49 @@ def migrate_map(m, write):
                 links.append(x.link() if x is not None else r)
             extra = {k: f[k] for k in ("claimed_by", "github") if f.get(k)}
             props = ticket_props(m, t.num, f.get("status", "open").lower(), f.get("type", "task").lower(),
-                                 links, extra)
+                                 priority="normal", blocked=links, extra=extra)
             changes.append(f"{t.id}: properties from header lines ({len(links)} blocker link(s))")
+            needed = True
+        else:
+            if "operonId" not in props:
+                props["operonId"] = f"{m.effort_slug}-{t.num:03d}"
+                needed = True
+            if "aliases" not in props:
+                props["aliases"] = [f"#{t.num:03d}", f"{t.num:03d}"]
+                needed = True
+            if "priority" not in props:
+                props["priority"] = "normal"
+                needed = True
+            if "created" not in props:
+                mtime = t.path.stat().st_mtime
+                props["created"] = date.fromtimestamp(mtime).isoformat()
+                needed = True
+            if t.status == "resolved" and "completed" not in props:
+                mtime = t.path.stat().st_mtime
+                props["completed"] = date.fromtimestamp(mtime).isoformat()
+                needed = True
+            curr_map_link = m.link()
+            if props.get("map") != curr_map_link:
+                props["map"] = curr_map_link
+                needed = True
+            tags = set(props.get("tags") or ["wayfinder/ticket"])
+            tags.add("wayfinder/ticket")
+            tags.add(f"wayfinder/map/{m.effort_slug}")
+            tags.add(f"status/{t.status}")
+            tags.add(f"type/{t.type}")
+            new_tags = sorted(tags)
+            if new_tags != props.get("tags"):
+                props["tags"] = new_tags
+                needed = True
+            if needed:
+                changes.append(f"{t.id}: backfilled operonId, aliases, priority, tags")
+
         body = strip_legacy(t.body) if not t.has_fm else t.body
         linked = link_numbers(body, m.repo, m.folder, t.path)
         n = len(re.findall(r"\[\[", linked)) - len(re.findall(r"\[\[", body))
         if n:
             changes.append(f"{t.id}: {n} number reference(s) -> wikilinks")
-        if write and (not t.has_fm or linked != t.body):
+        if write and (needed or not t.has_fm or linked != t.body):
             tickets.append((t, props, linked))
     mprops = dict(m.props) if m.has_fm else migrate_map_props(m)
     if m.has_fm and not mprops.get("aliases"):
@@ -927,7 +1050,10 @@ def migrate_map(m, write):
 def migrate_root_docs(repo, write):
     """Handoffs and checkpoints beside the maps: numbers that name one ticket become links."""
     changes = []
-    for p in sorted(WAYFINDER.glob(f"{repo}-*.md")):
+    candidates = list(WAYFINDER.glob(f"{repo}-*.md"))
+    if (WAYFINDER / repo).is_dir():
+        candidates += list((WAYFINDER / repo).glob("*.md"))
+    for p in sorted(set(candidates)):
         text = p.read_text(encoding="utf-8")
         linked = link_numbers(text, repo)
         n = len(re.findall(r"\[\[", linked)) - len(re.findall(r"\[\[", text))
