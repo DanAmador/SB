@@ -35,6 +35,7 @@ The vault is $SB_VAULT, else ~/Documents/Second Brain, so it runs from any direc
 Standard library only, so any harness with python3 can run it. The files are the source of
 truth; the Obsidian CLI adds checks when the app is running.
 """
+import hashlib
 import json
 import os
 import re
@@ -52,6 +53,22 @@ WAYFINDER = VAULT / "wayfinder"
 START, END = "%% sb:diagram:start %%", "%% sb:diagram:end %%"  # Obsidian comments: hidden in every view
 OLD_MARKERS = ("<!-- sb:diagram:start -->", "<!-- sb:diagram:end -->")
 STATUSES = ("open", "claimed", "resolved", "out-of-scope")
+WF_TO_OPERON_STATUS = {
+    "open": "Project.Planned",
+    "claimed": "Project.InProgress",
+    "resolved": "Project.Finished",
+    "out-of-scope": "Project.Dropped",
+}
+OPERON_TO_WF_STATUS = {
+    "project.planned": "open",
+    "project.inprogress": "claimed",
+    "project.finished": "resolved",
+    "project.dropped": "out-of-scope",
+    "planned": "open",
+    "inprogress": "claimed",
+    "finished": "resolved",
+    "dropped": "out-of-scope",
+}
 CLEARED = {"resolved", "out-of-scope"}
 SHAPES = {  # mermaid node shape per ticket type
     "task": ('["', '"]'),
@@ -179,7 +196,9 @@ class Ticket:
         self.props, self.body, self.has_fm = split_fm(self.text)
         fields = dict(self.props) if self.has_fm else legacy_fields(self.body)
         self.title = (re.search(r"^# (.+)$", self.body, re.M) or [None, path.stem])[1].strip()
-        self.status = str(fields.get("status") or "open").lower()
+        raw_status = str(fields.get("status") or "open").lower()
+        self.raw_status = fields.get("status") or "open"
+        self.status = OPERON_TO_WF_STATUS.get(raw_status, raw_status)
         self.type = str(fields.get("type") or "task").lower()
         raw = fields.get("blocked_by") or []
         self.blocked_by = raw if isinstance(raw, list) else [b.strip() for b in raw.split(",") if b.strip()]
@@ -210,7 +229,9 @@ class Map:
         self.props, self.body, self.has_fm = split_fm(self.md)
         fields = self.props if self.has_fm else legacy_fields(self.body)
         self.title = (re.search(r"^# (.+)$", self.body, re.M) or [None, folder.name])[1].strip()
-        self.status = str(fields.get("status") or "open").lower()
+        raw_status = str(fields.get("status") or "open").lower()
+        self.raw_status = fields.get("status") or "open"
+        self.status = OPERON_TO_WF_STATUS.get(raw_status, raw_status)
         self.github = str(fields.get("github") or "")
         issues = folder / "issues"
         self.tickets = {}
@@ -568,14 +589,21 @@ def blocked_links(m, refs):
     return out
 
 
+def make_operon_id(effort_slug, num):
+    """Operon requires operonId to be exactly 7 lowercase alphanumeric characters [a-z0-9]{7}."""
+    return hashlib.sha256(f"{effort_slug}-{num}".encode("utf-8")).hexdigest()[:7]
+
+
 def ticket_props(m, t_num, status="open", type_="task", priority="normal", created=None, completed=None, blocked=(), extra=None):
-    operon_id = f"{m.effort_slug}-{t_num:03d}"
+    operon_id = make_operon_id(m.effort_slug, t_num)
     aliases = [f"#{t_num:03d}", f"{t_num:03d}"]
     created_date = created or date.today().isoformat()
+    wf_status = OPERON_TO_WF_STATUS.get(status.lower(), status.lower())
+    op_status = WF_TO_OPERON_STATUS.get(wf_status, status)
     tags = [
         "wayfinder/ticket",
         f"wayfinder/map/{m.effort_slug}",
-        f"status/{status}",
+        f"status/{wf_status}",
         f"type/{type_}"
     ]
     props = {
@@ -583,7 +611,7 @@ def ticket_props(m, t_num, status="open", type_="task", priority="normal", creat
         "operonId": operon_id,
         "number": t_num,
         "aliases": aliases,
-        "status": status,
+        "status": op_status,
         "type": type_,
         "priority": priority,
         "created": created_date,
@@ -623,18 +651,21 @@ def cmd_set(args):
         sys.exit("sbmap: legacy ticket; run `sbmap migrate` first")
     for kv in args[2:]:
         k, _, v = kv.partition("=")
-        if k == "status" and v not in STATUSES:
-            sys.exit(f"sbmap: status must be one of {', '.join(STATUSES)}")
+        if k == "status":
+            wf_stat = OPERON_TO_WF_STATUS.get(v.lower(), v.lower())
+            if wf_stat not in STATUSES:
+                sys.exit(f"sbmap: status must be one of {', '.join(STATUSES)}")
+            v = WF_TO_OPERON_STATUS.get(wf_stat, v)
+            tags = [tag for tag in props.get("tags", []) if not tag.startswith("status/")]
+            tags.append(f"status/{wf_stat}")
+            props["tags"] = sorted(tags)
+            if wf_stat == "resolved" and "completed" not in props:
+                props["completed"] = date.today().isoformat()
         if k == "blocked_by":
             sys.exit("sbmap: use `sbmap block` for blockers")
         props[k] = v
-        if k == "status":
-            tags = [tag for tag in props.get("tags", []) if not tag.startswith("status/")]
-            tags.append(f"status/{v}")
-            props["tags"] = sorted(tags)
-            if v == "resolved" and "completed" not in props:
-                props["completed"] = date.today().isoformat()
-    if props.get("status") != "claimed":
+    curr_wf = OPERON_TO_WF_STATUS.get(str(props.get("status", "")).lower(), str(props.get("status", "")).lower())
+    if curr_wf != "claimed":
         props.pop("claimed_by", None)
     t.save(props)
     print(f"{t.id}: " + ", ".join(args[2:]))
@@ -986,8 +1017,8 @@ def migrate_map(m, write):
             changes.append(f"{t.id}: properties from header lines ({len(links)} blocker link(s))")
             needed = True
         else:
-            if "operonId" not in props:
-                props["operonId"] = f"{m.effort_slug}-{t.num:03d}"
+            if "operonId" not in props or not re.fullmatch(r"[a-z0-9]{7}", str(props.get("operonId", ""))):
+                props["operonId"] = make_operon_id(m.effort_slug, t.num)
                 needed = True
             if "aliases" not in props:
                 props["aliases"] = [f"#{t.num:03d}", f"{t.num:03d}"]
