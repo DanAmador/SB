@@ -38,12 +38,13 @@ flowchart LR
 
 ```
 skills/sb/
-  SKILL.md            the router: vault, contract, verb table
+  SKILL.md            the router: vault, contract, verb table, output contract
   verbs/              one file per verb, loaded only when that verb runs
   reference/          contract (per-repo rules + owner defaults), models (tiers), output (report shape),
                       architecture (mermaid decision tickets, the map's Route), obsidian (the CLI)
   templates/          launch contract, checkpoint, handoff, implementer brief, architecture ticket
-  scripts/sbmap.py    frontier, next number, lint, Route diagram; stdlib Python, any harness.
+  scripts/sbmap.py    full authoring CLI: init, new, show, comment, resolve, frontier, lint, Route diagram;
+                      stdlib Python, any harness. Auto-syncs Route diagram on every write.
                       With Obsidian running it also asks the app: broken links, and `verify`
                       (every mermaid block parses in Obsidian's own renderer)
 install.sh            links the skill into ~/.agents/skills and ~/.claude/skills
@@ -68,7 +69,14 @@ header-line tickets on 2026-10-25 (backup under `backups/`, git-ignored).
 ## sbmap
 
 ```bash
+# Read (dense, token-efficient digests)
 python3 skills/sb/scripts/sbmap.py maps
-python3 skills/sb/scripts/sbmap.py status sk4te-one-tether
-python3 skills/sb/scripts/sbmap.py diagram sk4te-one-tether --write
+python3 skills/sb/scripts/sbmap.py status sk4te/one-tether
+python3 skills/sb/scripts/sbmap.py show sk4te/one-tether 624
+
+# Write (author 100% through CLI with auto-sync diagram)
+python3 skills/sb/scripts/sbmap.py init my-repo/my-effort --title "Title" --destination "Goal" --done-when "Passes"
+python3 skills/sb/scripts/sbmap.py new sk4te/one-tether --title "Tether spring" --type task --question "..." --done-when "..."
+python3 skills/sb/scripts/sbmap.py comment sk4te/one-tether 624 --text "R1: ruling"
+python3 skills/sb/scripts/sbmap.py resolve sk4te/one-tether 624 --gist "..." --answer "..." --commit "sha"
 ```

@@ -64,9 +64,10 @@ Two phases with a hard line between them: **propose** (he is present; one round 
       rounds run on the mid tier.
    3. Verify the report against the tree yourself: the commit exists, touches only the ticket's
       paths, and the contract's per-ticket checks ran with results.
-   4. Resolve: write `## Answer` (commit, verified, **not** verified, rulings, model, every ticket it
-      mentions as a wikilink), then `sbmap resolve <map> <NNN> --gist "…" --commit <sha>`,
-      `sbmap diagram --write`, `sbmap check`, checkpoint updated. Then the next ticket.
+   4. Resolve via CLI:
+      `sbmap resolve <map> <NNN> --gist "<one line>" --answer "<commit, verified, rulings, model>" [--commit <sha>]`
+      Automatically stamps `## Answer`, resolves status, appends Decisions line to `map.md`, and syncs Route.
+      Run `sbmap check <map>`, update checkpoint. Then the next ticket.
 7. **Hold the line while unattended.**
    - A question is a ruling: take the recommendation, write `R: …, cost if wrong: …` on the ticket and in
      the checkpoint, continue. No question cards.

@@ -12,15 +12,21 @@ handoffs and checkpoints live there as plain markdown, so a fresh context in any
 one line: *"Read `<vault file>` and do what it says."* This skill is the owner's repeatable rituals
 around that vault, each one a verb.
 
-- **Vault:** `$SB_VAULT`, else `~/Documents/Second Brain`. Maps live in `wayfinder/`; its
-  `README.md` is the tracker's rulebook. Read it once per session before touching a map. Tickets
-  are Obsidian notes: fields in **properties**, every reference a **wikilink**, a **Bases** board per map.
-- **`sbmap`:** `python3 <this skill's dir>/scripts/sbmap.py` (no arguments prints every command).
-  It reads what you never compute by eye (`maps`, `status`, `frontier`, `check`, `verify`) and writes
-  what you never hand-type (`new`, `claim`, `block`, `set`, `resolve`, `link`, `diagram --write`,
-  `board`). Run `diagram --write` after every change to a map's tickets.
-- **Obsidian CLI:** when the app is running, `obsidian` adds its search, backlinks, renderer and
-  file history: [reference/obsidian.md](reference/obsidian.md).
+- **Vault:** `$SB_VAULT`, else `~/Documents/Second Brain`. Maps live in `wayfinder/`.
+- **`sbmap` CLI:** `python3 <this skill's dir>/scripts/sbmap.py` (run without args to list all commands).
+  - 🔒 **Token rule: Author and inspect 100% through the CLI.** Never use `read_file`, `write_file`, or `edit_file` on tickets or maps. Use `sbmap show` to read tickets, `sbmap new` with `--question` and `--done-when` to create, `sbmap comment` for rulings, and `sbmap resolve` with `--answer`. Changes auto-sync the Route diagram.
+  - 🔒 **Token rule: Never load external skills or the full vault.** The contract, ticket types, and output rules are self-contained here.
+- **Ticket types:** `task` (concrete unit, ~1.5 h), `grilling` (clarification), `research` (subagent spike in `<map>/research/`), `prototype` (throwaway code), `architecture` (structural design with mermaid).
+- **Obsidian CLI:** when the app is running, `obsidian` adds search, backlinks, renderer, and file history: [reference/obsidian.md](reference/obsidian.md).
+
+## Output contract (succinct, high-information, ADHD-friendly)
+
+- **Line 1 is the action or decision he can take now.**
+- Bullets, short. ≤5 visible per group.
+- **Status emojis only:** ✅ landed · 🎮 needs play · 👤 his call · ⚠️ problem/unverified · ⏳ running · 🔒 rule · 🗺️ map change. Never decorative.
+- Refer to tickets by name with number link: `[<name>](<path>)`.
+- Every question carries `➡️ recommendation`. Silence = accepted on recommendation.
+- End with one action in under two minutes. Zero conversational filler.
 
 ## Every verb starts here
 

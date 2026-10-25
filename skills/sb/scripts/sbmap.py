@@ -10,19 +10,26 @@ Bases see the whole route. It answers what an agent should never compute or type
     sbmap.py maps [--repo <path>]       every map in the vault (or one repo's), with counts
     sbmap.py status   <map>             counts, claimed tickets, the frontier, handoff/checkpoint files
     sbmap.py frontier <map>             open tickets whose every blocker is resolved, in map order
+    sbmap.py show     <map> <NNN>       succinct digest: status, type, blockers, question, done when
     sbmap.py next     <map>             the next free ticket number for this map's repo
     sbmap.py link     <map> <NNN>       the wikilink to a ticket, to paste into prose
     sbmap.py check    <map>             lint: unknown blockers, cycles, missing Answers or Decisions,
                                         legacy fields, and (Obsidian running) broken links
     sbmap.py verify   <map>             every mermaid block parses in Obsidian's own renderer
   write
-    sbmap.py new      <map> --title "<sentence>" [--type task] [--blocked-by 622,623]
-                                        a ticket file with its properties; prints its path
-    sbmap.py set      <map> <NNN> key=value ...   ticket properties (status, type, claimed_by, ...)
-    sbmap.py claim    <map> <NNN> --by "<session or harness/model>"
-    sbmap.py block    <map> <NNN> <refs, comma separated: numbers, map folder names, or none>
-    sbmap.py resolve  <map> <NNN> --gist "<one line>" [--commit <sha>]
-                                        needs `## Answer`; sets the status, appends the Decisions line
+    sbmap.py init     <map> --title "<name>" --destination "<goal>" [--done-when "..."] [--repo <path>]
+                                        scaffolds map.md, board.base, issues/ and initial Route
+    sbmap.py new      <map> --title "<sentence>" [--type task] [--question "..."] [--done-when "..."]
+                            [--blocked-by 622,623] [--comments "..."] [--no-sync]
+                                        full ticket creation with properties, wikilinks & auto-sync
+    sbmap.py comment  <map> <NNN> --text "<ruling or comment>"
+                                        appends dated entry to ## Comments
+    sbmap.py set      <map> <NNN> key=value ... [--no-sync]
+                                        ticket properties (status, type, claimed_by, ...)
+    sbmap.py claim    <map> <NNN> --by "<session or harness/model>" [--no-sync]
+    sbmap.py block    <map> <NNN> <refs, comma separated: numbers, map folder names, or none> [--no-sync]
+    sbmap.py resolve  <map> <NNN> --gist "<one line>" [--answer "..."] [--commit <sha>] [--no-sync]
+                                        records ## Answer, marks resolved, adds Decisions line, syncs Route
     sbmap.py diagram  <map> [--write] [--hide-resolved]
                                         the route as mermaid; --write stamps it into map.md
     sbmap.py board    <map>             (re)writes the map's board.base and embeds it in map.md
@@ -218,7 +225,9 @@ class Ticket:
         self.props, self.has_fm = props, True
         if body is not None:
             self.body = body
-        write_atomic(self.path, dump_fm(props, TICKET_KEYS) + self.body.lstrip("\n"))
+        self.text = dump_fm(props, TICKET_KEYS) + self.body.lstrip("\n")
+        self.has_answer = bool(re.search(r"^## (Answer|Resolved|Comments)\b", self.text, re.M))
+        write_atomic(self.path, self.text)
 
 
 class Map:
@@ -392,7 +401,11 @@ def rel(path):
 
 
 def opt(args, name, default=None):
-    return args[args.index(name) + 1] if name in args else default
+    if name in args:
+        idx = args.index(name)
+        if idx + 1 < len(args):
+            return args[idx + 1]
+    return default
 
 
 # ---- read commands --------------------------------------------------------
@@ -470,6 +483,33 @@ def cmd_next(args):
 def cmd_link(args):
     m = load(args[0])
     print(m.ticket(args[1]).link("#" + m.ticket(args[1]).id))
+
+
+def cmd_show(args):
+    m = load(args[0])
+    t = m.ticket(args[1])
+    print(f"#{t.num}: {t.title}")
+    blockers = ", ".join(t.blocked_by) if t.blocked_by else "none"
+    claimed = f" | claimed: {t.claimed_by}" if t.claimed_by else ""
+    print(f"status: {t.status} | type: {t.type} | priority: {t.props.get('priority', 'normal')}{claimed}")
+    print(f"blocked by: {blockers}")
+
+    sections = {}
+    curr_sec, curr_lines = None, []
+    for line in t.body.splitlines():
+        if line.startswith("## "):
+            if curr_sec:
+                sections[curr_sec] = "\n".join(curr_lines).strip()
+            curr_sec = line[3:].strip()
+            curr_lines = []
+        elif curr_sec is not None:
+            curr_lines.append(line)
+    if curr_sec:
+        sections[curr_sec] = "\n".join(curr_lines).strip()
+
+    for sec in ["Question", "Done when", "Answer", "Comments"]:
+        if sec in sections and sections[sec]:
+            print(f"\n## {sec}\n{sections[sec]}")
 
 
 def cmd_check(args):
@@ -625,6 +665,68 @@ def ticket_props(m, t_num, status="open", type_="task", priority="normal", creat
     return props
 
 
+def cmd_init(args):
+    folder_str = args[0]
+    folder = WAYFINDER / folder_str if not Path(folder_str).is_absolute() else Path(folder_str)
+    if (folder / "map.md").exists():
+        sys.exit(f"sbmap: {folder / 'map.md'} already exists")
+    title = opt(args, "--title") or sys.exit("sbmap: --title is required")
+    destination = opt(args, "--destination") or sys.exit("sbmap: --destination is required")
+    done_when = opt(args, "--done-when", "")
+    repo_arg = opt(args, "--repo")
+
+    if not repo_arg:
+        r = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+        if r.returncode == 0:
+            repo_arg = r.stdout.strip()
+        else:
+            repo_arg = str(Path.cwd())
+
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "issues").mkdir(exist_ok=True)
+
+    try:
+        rel_folder = folder.resolve().relative_to(WAYFINDER.resolve())
+    except ValueError:
+        rel_folder = Path(folder.name)
+    parts = rel_folder.parts
+    slug = "-".join(parts) if len(parts) > 1 else folder.name
+
+    props = {
+        "wayfinder": "map",
+        "status": "Project.Planned",
+        "repo": repo_arg,
+        "tags": [f"wayfinder/map/{slug}"]
+    }
+
+    dest_body = destination.replace("\\n", "\n").strip()
+    dw_body = done_when.replace("\\n", "\n").strip()
+    dw_section = f"\n\n### Done when\n\n{dw_body}\n" if dw_body else "\n"
+
+    body = (
+        f"# {title}\n\n"
+        f"## Destination\n\n"
+        f"{dest_body}"
+        f"{dw_section}\n"
+        f"## Route\n\n"
+        f"%% sb:diagram:start %%\n"
+        f"```mermaid\nflowchart TD\n```\n"
+        f"%% sb:diagram:end %%\n\n"
+        f"## Notes\n\n"
+        f"- Repo: `{repo_arg}`\n\n"
+        f"## Decisions so far\n\n"
+        f"## Not yet specified\n\n"
+        f"## Out of scope\n"
+    )
+
+    map_file = folder / "map.md"
+    write_atomic(map_file, dump_fm(props, MAP_KEYS) + body)
+    m = Map(folder)
+    write_board(m)
+    cmd_diagram([folder_str, "--write"])
+    print(f"initialized map: {map_file}")
+
+
 def cmd_new(args):
     m = load(args[0])
     title = opt(args, "--title") or sys.exit("sbmap: --title is required")
@@ -633,23 +735,58 @@ def cmd_new(args):
     if type_ not in SHAPES:
         sys.exit(f"sbmap: type must be one of {', '.join(SHAPES)}")
     refs = [r for r in (opt(args, "--blocked-by", "") or "").split(",") if r.strip()]
+    question = opt(args, "--question", "")
+    done_when = opt(args, "--done-when", "")
+    comments = opt(args, "--comments", "") or opt(args, "--ruling", "")
     n = next_number(m)
     slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:60].rstrip("-")
     path = m.folder / "issues" / f"{n:03d}-{slug}.md"
     path.parent.mkdir(exist_ok=True)
     props = ticket_props(m, n, status="open", type_=type_, priority=priority, blocked=blocked_links(m, refs))
-    body = f"# {title}\n\n## Question\n\n\n\n## Done when\n\n\n\n## Comments\n"
+
+    q_text = question.replace("\\n", "\n").strip() if question else ""
+    dw_text = done_when.replace("\\n", "\n").strip() if done_when else ""
+    body = f"# {title}\n\n## Question\n\n{q_text}\n\n## Done when\n\n{dw_text}\n\n## Comments\n"
+    if comments:
+        c_text = comments.replace("\\n", "\n").strip()
+        body += f"\n- **{date.today().isoformat()}**: {c_text}\n"
+
     write_atomic(path, dump_fm(props, TICKET_KEYS) + body)
     print(path)
+    if "--no-sync" not in args:
+        cmd_diagram([args[0], "--write"])
+
+
+def cmd_comment(args):
+    m = load(args[0])
+    t = m.ticket(args[1])
+    text = opt(args, "--text") or opt(args, "--ruling") or sys.exit("sbmap: --text or --ruling is required")
+    c_text = text.replace("\\n", "\n").strip()
+    body = t.body
+    today = date.today().isoformat()
+    entry = f"- **{today}**: {c_text}"
+    idx = body.find("## Comments")
+    if idx >= 0:
+        nxt = body.find("\n## ", idx + 11)
+        if nxt < 0:
+            body = body.rstrip() + f"\n\n{entry}\n"
+        else:
+            body = body[:nxt].rstrip() + f"\n\n{entry}\n\n" + body[nxt:].lstrip()
+    else:
+        body = body.rstrip() + f"\n\n## Comments\n\n{entry}\n"
+    t.save(t.props, body)
+    print(f"added comment to {t.id}")
 
 
 def cmd_set(args):
+    no_sync = "--no-sync" in args
+    kv_args = [a for a in args[2:] if a != "--no-sync"]
     m = load(args[0])
     t = m.ticket(args[1])
     props = dict(t.props) if t.has_fm else None
     if props is None:
         sys.exit("sbmap: legacy ticket; run `sbmap migrate` first")
-    for kv in args[2:]:
+    for kv in kv_args:
         k, _, v = kv.partition("=")
         if k == "status":
             wf_stat = OPERON_TO_WF_STATUS.get(v.lower(), v.lower())
@@ -668,7 +805,9 @@ def cmd_set(args):
     if curr_wf != "claimed":
         props.pop("claimed_by", None)
     t.save(props)
-    print(f"{t.id}: " + ", ".join(args[2:]))
+    print(f"{t.id}: " + ", ".join(kv_args))
+    if not no_sync:
+        cmd_diagram([args[0], "--write"])
 
 
 def cmd_claim(args):
@@ -678,7 +817,8 @@ def cmd_claim(args):
     if t.status == "claimed":
         sys.exit(f"sbmap: {t.id} is already claimed by {t.claimed_by or 'someone'}")
     stamp = date.today().isoformat() + " " + time.strftime("%H:%M")
-    cmd_set([args[0], args[1], "status=claimed", f"claimed_by={by}, {stamp}"])
+    no_sync = ["--no-sync"] if "--no-sync" in args else []
+    cmd_set([args[0], args[1], "status=claimed", f"claimed_by={by}, {stamp}"] + no_sync)
 
 
 def cmd_block(args):
@@ -689,6 +829,8 @@ def cmd_block(args):
     props["blocked_by"] = blocked_links(m, refs)
     t.save(props)
     print(f"{t.id} blocked by: {', '.join(props['blocked_by']) or 'nothing'}")
+    if "--no-sync" not in args:
+        cmd_diagram([args[0], "--write"])
 
 
 def cmd_resolve(args):
@@ -696,9 +838,30 @@ def cmd_resolve(args):
     t = m.ticket(args[1])
     gist = opt(args, "--gist") or sys.exit("sbmap: --gist is required")
     commit = opt(args, "--commit")
+    answer = opt(args, "--answer")
+    if answer:
+        ans_text = answer.replace("\\n", "\n").strip()
+        body = t.body
+        if "## Answer" in body:
+            idx = body.find("## Answer")
+            nxt = body.find("\n## ", idx + 9)
+            if nxt < 0:
+                body = body[:idx].rstrip() + f"\n\n## Answer\n\n{ans_text}\n"
+            else:
+                body = body[:idx].rstrip() + f"\n\n## Answer\n\n{ans_text}\n\n" + body[nxt:].lstrip()
+        else:
+            idx = body.find("## Comments")
+            if idx >= 0:
+                body = body[:idx].rstrip() + f"\n\n## Answer\n\n{ans_text}\n\n" + body[idx:]
+            else:
+                body = body.rstrip() + f"\n\n## Answer\n\n{ans_text}\n"
+        t.save(t.props, body)
+        t = m.ticket(args[1])
+
     if not re.search(r"^## Answer\b", t.text, re.M):
-        sys.exit(f"sbmap: {t.id} has no '## Answer' yet; write it first")
-    cmd_set([args[0], args[1], "status=resolved"])
+        sys.exit(f"sbmap: {t.id} has no '## Answer' yet; provide --answer or write it first")
+
+    cmd_set([args[0], args[1], "status=resolved", "--no-sync"])
     line = f"- [{t.title}](issues/{t.path.name}): {gist}" + (f", `{commit}`" if commit else "")
     m = load(args[0])
     body = m.body
@@ -711,6 +874,8 @@ def cmd_resolve(args):
         body = body[:nxt].rstrip() + "\n" + line + "\n" + body[nxt:]
     m.save(m.props if m.has_fm else migrate_map_props(m), body)
     print(f"resolved {t.id}; Decisions line added")
+    if "--no-sync" not in args:
+        cmd_diagram([args[0], "--write"])
 
 
 # ---- the Route (mermaid) --------------------------------------------------
@@ -1111,10 +1276,11 @@ def cmd_migrate(args):
     print("written" if write else "dry run: nothing written (add --write)")
 
 
-COMMANDS = {"maps": cmd_maps, "status": cmd_status, "frontier": cmd_frontier, "next": cmd_next,
-            "link": cmd_link, "check": cmd_check, "verify": cmd_verify, "new": cmd_new,
-            "set": cmd_set, "claim": cmd_claim, "block": cmd_block, "resolve": cmd_resolve,
-            "diagram": cmd_diagram, "board": cmd_board, "migrate": cmd_migrate}
+COMMANDS = {"maps": cmd_maps, "status": cmd_status, "frontier": cmd_frontier, "show": cmd_show,
+            "next": cmd_next, "link": cmd_link, "check": cmd_check, "verify": cmd_verify,
+            "init": cmd_init, "new": cmd_new, "set": cmd_set, "claim": cmd_claim,
+            "comment": cmd_comment, "ruling": cmd_comment, "block": cmd_block,
+            "resolve": cmd_resolve, "diagram": cmd_diagram, "board": cmd_board, "migrate": cmd_migrate}
 
 if __name__ == "__main__":
     if len(sys.argv) < 2 or sys.argv[1] not in COMMANDS or (sys.argv[1] != "maps" and len(sys.argv) < 3):
