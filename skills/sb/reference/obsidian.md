@@ -11,7 +11,7 @@ Every call targets the vault by name and takes vault-relative paths, quoted when
 
 | need | command |
 |---|---|
-| The frontier, as the owner's board shows it | `base:query path="wayfinder/<map>/board.base" view=Frontier format=paths` (agrees with `sbmap frontier`; every map at once: `wayfinder/frontier.base`, view *Every frontier*) |
+| The frontier, as the owner's board shows it | `base:query path="wayfinder/<map>/board.base" view=Frontier format=paths` (agrees with `sbmap frontier`; one repo's maps: `wayfinder/<repo>/board.base`; every map at once: `wayfinder/frontier.base`, view *Every frontier*, or *Frontier by project*) |
 | Who holds what right now | `base:query path="wayfinder/frontier.base" view="Claimed now" format=md` |
 | Read the vault beyond `wayfinder/` for what bears on an idea or ticket | `search:context query="<nouns>" limit=10` (Obsidian's index, every note) |
 | What points at a ticket before you change, merge or rule it out | `backlinks path="wayfinder/<map>/issues/<file>"` |
@@ -38,5 +38,9 @@ Since 2026-10-25 the tracker is shaped so Obsidian sees all of it (the vault REA
 - **Wikilinks** carry every reference, in `blocked_by`, `map` and prose, so the graph, backlinks and
   `unresolved` cover the whole route. A bare number in new text is a bug; `sbmap link` prints the link.
 - **Bases**: each map's `board.base` (views *Frontier*, *All tickets*, *Board*) is embedded in its
-  `map.md`; `wayfinder/frontier.base` spans every map. The frontier is a formula over `blocked_by`, so
+  `map.md`; `wayfinder/<repo>/board.base` spans one repo's maps; `wayfinder/frontier.base` spans every
+  map. Statuses are Operon's (`Project.Planned` … `Project.Finished`), and the formulas read them.
+- **Project and Operon**: every ticket and map carries `project: <repo>` and the tag `project/<repo>`,
+  and `priority` is an Operon letter (S highest, C the default). Operon's own boards filter on those or
+  on the folder; its filter sets and kanban presets are the owner's settings, never written by an agent. The frontier is a formula over `blocked_by`, so
   the board stays live with nothing regenerated. `sbmap board <map>` rewrites a map's board.

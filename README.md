@@ -74,7 +74,8 @@ relative link to it, like the other shared skills.
 ## The tracker is Obsidian-native
 
 Tickets are Obsidian notes: fields in properties, every reference a wikilink, a Bases board per map
-(`board.base`, embedded in `map.md`) plus `wayfinder/frontier.base` across all maps, and a mermaid
+(`board.base`, embedded in `map.md`), one per repo (`wayfinder/<repo>/board.base`) plus
+`wayfinder/frontier.base` across all maps, and a mermaid
 Route. The vault's `wayfinder/README.md` is the format's rulebook; `sbmap migrate` converted the old
 header-line tickets on 2026-10-25 (backup under `backups/`, git-ignored).
 
@@ -88,7 +89,7 @@ python3 skills/sb/scripts/sbmap.py show sk4te/one-tether 624
 
 # Write (author 100% through CLI with auto-sync diagram)
 python3 skills/sb/scripts/sbmap.py init my-repo/my-effort --title "Title" --destination "Goal" --done-when "Passes"
-python3 skills/sb/scripts/sbmap.py new sk4te/one-tether --title "Tether spring" --type task --question "..." --done-when "..."
+python3 skills/sb/scripts/sbmap.py new sk4te/one-tether --title "Tether spring" --type task --priority high --question "..." --done-when "..."
 python3 skills/sb/scripts/sbmap.py comment sk4te/one-tether 624 --text "R1: ruling"
 python3 skills/sb/scripts/sbmap.py resolve sk4te/one-tether 624 --gist "..." --answer "..." --commit "sha"
 python3 skills/sb/scripts/sbmap.py close sk4te/one-tether

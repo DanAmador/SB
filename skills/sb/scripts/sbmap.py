@@ -19,7 +19,8 @@ Bases see the whole route. It answers what an agent should never compute or type
   write
     sbmap.py init     <map> --title "<name>" --destination "<goal>" [--done-when "..."] [--repo <path>]
                                         scaffolds map.md, board.base, issues/ and initial Route
-    sbmap.py new      <map> --title "<sentence>" [--type task] [--question "..."] [--done-when "..."]
+    sbmap.py new      <map> --title "<sentence>" [--type task] [--priority S..F|high|normal|low]
+                            [--question "..."] [--done-when "..."]
                             [--blocked-by 622,623] [--comments "..."] [--no-sync]
                                         full ticket creation with properties, wikilinks & auto-sync
     sbmap.py comment  <map> <NNN> --text "<ruling or comment>"
@@ -32,7 +33,8 @@ Bases see the whole route. It answers what an agent should never compute or type
                                         records ## Answer, marks resolved, adds Decisions line, syncs Route
     sbmap.py diagram  <map> [--write] [--hide-resolved]
                                         the route as mermaid; --write stamps it into map.md
-    sbmap.py board    <map>             (re)writes the map's board.base and embeds it in map.md
+    sbmap.py board    <map>             (re)writes the map's board.base (embedded in map.md), its repo's
+                                        wayfinder/<repo>/board.base and wayfinder/frontier.base
     sbmap.py migrate  <map|--all> [--write]
                                         header lines -> properties, bare numbers -> wikilinks, plus
                                         the board; a dry run unless --write. Idempotent.
@@ -88,10 +90,15 @@ SHAPES = {  # mermaid node shape per ticket type
     "prototype": ('[["', '"]]'),
     "architecture": ('{{"', '"}}'),
 }
-TICKET_KEYS = ["wayfinder", "operonId", "number", "aliases", "status", "type",
+TICKET_KEYS = ["wayfinder", "operonId", "number", "project", "aliases", "status", "type",
                "priority", "created", "completed", "map", "blocked_by", "claimed_by",
                "github", "tags"]
-MAP_KEYS = ["wayfinder", "status", "aliases", "repo", "github", "tags"]
+MAP_KEYS = ["wayfinder", "project", "status", "aliases", "repo", "github", "tags"]
+# Operon's priorities are letters, S highest, C its default; sbmap takes either the letter or a word
+OPERON_PRIORITIES = ("S", "A", "B", "C", "D", "E", "F")
+PRIORITY_WORDS = {"urgent": "S", "critical": "S", "high": "A", "normal": "C", "medium": "C", "low": "E",
+                  "someday": "F"}
+FINISHED = '["Project.Finished", "Project.Dropped"]'  # the statuses that clear a blocker, as Operon writes them
 LEGACY = {"Status": "status", "Type": "type", "Blocked by": "blocked_by", "GitHub": "github",
           "Claimed by": "claimed_by"}
 
@@ -495,7 +502,7 @@ def cmd_show(args):
     print(f"#{t.num}: {t.title}")
     blockers = ", ".join(t.blocked_by) if t.blocked_by else "none"
     claimed = f" | claimed: {t.claimed_by}" if t.claimed_by else ""
-    print(f"status: {t.status} | type: {t.type} | priority: {t.props.get('priority', 'normal')}{claimed}")
+    print(f"status: {t.status} | type: {t.type} | priority: {t.props.get('priority', 'C')}{claimed}")
     print(f"blocked by: {blockers}")
 
     sections = {}
@@ -633,12 +640,21 @@ def blocked_links(m, refs):
     return out
 
 
+def operon_priority(value):
+    v = str(value or "normal").strip()
+    if v.upper() in OPERON_PRIORITIES:
+        return v.upper()
+    if v.lower() in PRIORITY_WORDS:
+        return PRIORITY_WORDS[v.lower()]
+    sys.exit(f"sbmap: priority must be one of {', '.join(OPERON_PRIORITIES)} or {', '.join(PRIORITY_WORDS)}")
+
+
 def make_operon_id(effort_slug, num):
     """Operon requires operonId to be exactly 7 lowercase alphanumeric characters [a-z0-9]{7}."""
     return hashlib.sha256(f"{effort_slug}-{num}".encode("utf-8")).hexdigest()[:7]
 
 
-def ticket_props(m, t_num, status="open", type_="task", priority="normal", created=None, completed=None, blocked=(), extra=None):
+def ticket_props(m, t_num, status="open", type_="task", priority="C", created=None, completed=None, blocked=(), extra=None):
     operon_id = make_operon_id(m.effort_slug, t_num)
     aliases = [f"#{t_num:03d}", f"{t_num:03d}"]
     created_date = created or date.today().isoformat()
@@ -647,6 +663,7 @@ def ticket_props(m, t_num, status="open", type_="task", priority="normal", creat
     tags = [
         "wayfinder/ticket",
         f"wayfinder/map/{m.effort_slug}",
+        f"project/{m.repo}",
         f"status/{wf_status}",
         f"type/{type_}"
     ]
@@ -654,10 +671,11 @@ def ticket_props(m, t_num, status="open", type_="task", priority="normal", creat
         "wayfinder": "ticket",
         "operonId": operon_id,
         "number": t_num,
+        "project": m.repo,
         "aliases": aliases,
         "status": op_status,
         "type": type_,
-        "priority": priority,
+        "priority": operon_priority(priority),
         "created": created_date,
         "map": m.link(),
         "blocked_by": list(blocked),
@@ -695,12 +713,14 @@ def cmd_init(args):
         rel_folder = Path(folder.name)
     parts = rel_folder.parts
     slug = "-".join(parts) if len(parts) > 1 else folder.name
+    project = parts[0] if len(parts) > 1 else folder.name.split("-", 1)[0]
 
     props = {
         "wayfinder": "map",
+        "project": project,
         "status": "Project.Planned",
         "repo": repo_arg,
-        "tags": [f"wayfinder/map/{slug}"]
+        "tags": [f"wayfinder/map/{slug}", f"project/{project}"]
     }
 
     dest_body = destination.replace("\\n", "\n").strip()
@@ -735,7 +755,7 @@ def cmd_new(args):
     m = load(args[0])
     title = opt(args, "--title") or sys.exit("sbmap: --title is required")
     type_ = opt(args, "--type", "task")
-    priority = opt(args, "--priority", "normal")
+    priority = operon_priority(opt(args, "--priority", "normal"))
     if type_ not in SHAPES:
         sys.exit(f"sbmap: type must be one of {', '.join(SHAPES)}")
     refs = [r for r in (opt(args, "--blocked-by", "") or "").split(",") if r.strip()]
@@ -804,6 +824,8 @@ def cmd_set(args):
                 props["completed"] = date.today().isoformat()
         if k == "blocked_by":
             sys.exit("sbmap: use `sbmap block` for blockers")
+        if k == "priority":
+            v = operon_priority(v)
         props[k] = v
     curr_wf = OPERON_TO_WF_STATUS.get(str(props.get("status", "")).lower(), str(props.get("status", "")).lower())
     if curr_wf != "claimed":
@@ -976,8 +998,8 @@ BOARD = """filters:
     - file.inFolder("{issues}")
     - wayfinder == "ticket"
 formulas:
-  open_blockers: if(blocked_by, blocked_by.filter(!["resolved", "out-of-scope"].contains(value.asFile().properties.status)).length, 0)
-  ready: status == "open" && formula.open_blockers == 0
+  open_blockers: if(blocked_by, blocked_by.filter(!{finished}.contains(value.asFile().properties.status)).length, 0)
+  ready: status == "Project.Planned" && formula.open_blockers == 0
 properties:
   file.name:
     displayName: Ticket
@@ -1030,8 +1052,8 @@ ALL_FRONTIERS = """filters:
     - file.inFolder("wayfinder")
     - wayfinder == "ticket"
 formulas:
-  open_blockers: if(blocked_by, blocked_by.filter(!["resolved", "out-of-scope"].contains(value.asFile().properties.status)).length, 0)
-  ready: status == "open" && formula.open_blockers == 0
+  open_blockers: if(blocked_by, blocked_by.filter(!{finished}.contains(value.asFile().properties.status)).length, 0)
+  ready: status == "Project.Planned" && formula.open_blockers == 0
 properties:
   file.name:
     displayName: Ticket
@@ -1056,29 +1078,101 @@ views:
     name: Claimed now
     filters:
       and:
-        - status == "claimed"
+        - status == "Project.InProgress"
     order:
       - file.name
       - map
       - claimed_by
+  - type: table
+    name: Frontier by project
+    filters:
+      and:
+        - formula.ready
+    groupBy:
+      property: project
+      direction: ASC
+    order:
+      - file.name
+      - map
+      - type
+      - priority
+"""
+
+REPO_BOARD = """filters:
+  and:
+    - file.inFolder("{repo}")
+    - wayfinder == "ticket"
+formulas:
+  open_blockers: if(blocked_by, blocked_by.filter(!{finished}.contains(value.asFile().properties.status)).length, 0)
+  ready: status == "Project.Planned" && formula.open_blockers == 0
+properties:
+  file.name:
+    displayName: Ticket
+  formula.open_blockers:
+    displayName: Open blockers
+  claimed_by:
+    displayName: Claimed by
+views:
+  - type: table
+    name: Frontier
+    filters:
+      and:
+        - formula.ready
+    groupBy:
+      property: map
+      direction: ASC
+    order:
+      - file.name
+      - type
+      - priority
+    sort:
+      - property: file.name
+        direction: ASC
+  - type: table
+    name: In progress
+    filters:
+      and:
+        - status == "Project.InProgress"
+    order:
+      - file.name
+      - map
+      - claimed_by
+  - type: cards
+    name: Board
+    groupBy:
+      property: status
+      direction: ASC
+    order:
+      - file.name
+      - map
+      - type
+      - formula.open_blockers
 """
 
 
 def write_board(m):
-    write_atomic(m.folder / "board.base", BOARD.format(issues=rel(m.folder / "issues")))
-    write_atomic(WAYFINDER / "frontier.base", ALL_FRONTIERS)
+    write_atomic(m.folder / "board.base", BOARD.replace("{finished}", FINISHED).format(issues=rel(m.folder / "issues")))
+    write_atomic(WAYFINDER / "frontier.base", ALL_FRONTIERS.replace("{finished}", FINISHED))
+    repo_board = ""
+    if len(m.rel_folder.parts) > 1:
+        path = WAYFINDER / m.repo / "board.base"
+        write_atomic(path, REPO_BOARD.replace("{finished}", FINISHED).replace("{repo}", rel(WAYFINDER / m.repo)))
+        repo_board = f"This repo's maps: [[{rel(path)}]]. "
     embed = f"![[{rel(m.folder / 'board.base')}#Frontier]]"
+    every = "Every map's frontier at once: [[wayfinder/frontier.base]]."
     m = Map(m.folder)
     if embed not in m.body:
         body = insert_section(m.body, "Board", embed + "\n\nThe live board (Bases): views *Frontier*, *All tickets*, *Board*. "
-                              "Every map's frontier at once: [[wayfinder/frontier.base]].")
+                              + repo_board + every)
         m.save(m.props if m.has_fm else migrate_map_props(m), body)
+    elif repo_board and repo_board not in m.body and every in m.body:
+        m.save(m.props if m.has_fm else migrate_map_props(m), m.body.replace(every, repo_board + every, 1))
 
 
 def cmd_board(args):
     m = load(args[0])
     write_board(m)
-    print(f"wrote {m.folder / 'board.base'} and wayfinder/frontier.base")
+    print(f"wrote {m.folder / 'board.base'}, wayfinder/{m.repo}/board.base and wayfinder/frontier.base")
 
 
 # ---- migration ------------------------------------------------------------
@@ -1159,8 +1253,8 @@ def guess_repo(m):
 
 def migrate_map_props(m):
     f = legacy_fields(m.body)
-    props = {"wayfinder": "map", "status": f.get("status", "open").lower(), "aliases": [m.title],
-             "repo": guess_repo(m), "tags": ["wayfinder/map"]}
+    props = {"wayfinder": "map", "project": m.repo, "status": f.get("status", "open").lower(), "aliases": [m.title],
+             "repo": guess_repo(m), "tags": ["wayfinder/map", f"project/{m.repo}"]}
     gh = f.get("github") or (re.search(r"^GitHub:\s*(\S+)", m.body, re.M) or [None, ""])[1]
     if gh:
         props["github"] = gh
@@ -1182,7 +1276,7 @@ def migrate_map(m, write):
                 links.append(x.link() if x is not None else r)
             extra = {k: f[k] for k in ("claimed_by", "github") if f.get(k)}
             props = ticket_props(m, t.num, f.get("status", "open").lower(), f.get("type", "task").lower(),
-                                 priority="normal", blocked=links, extra=extra)
+                                 blocked=links, extra=extra)
             changes.append(f"{t.id}: properties from header lines ({len(links)} blocker link(s))")
             needed = True
         else:
@@ -1192,9 +1286,15 @@ def migrate_map(m, write):
             if "aliases" not in props:
                 props["aliases"] = [f"#{t.num:03d}", f"{t.num:03d}"]
                 needed = True
-            if "priority" not in props:
-                props["priority"] = "normal"
-                needed = True
+            done = []
+            if props.get("project") != m.repo:
+                props["project"] = m.repo
+                done.append(f"project {m.repo}")
+            pr = str(props.get("priority", ""))
+            letter = operon_priority(pr) if pr.upper() in OPERON_PRIORITIES or pr.lower() in PRIORITY_WORDS else "C"
+            if pr != letter:
+                props["priority"] = letter
+                done.append(f"priority {pr or 'none'} -> {letter}")
             if "created" not in props:
                 mtime = t.path.stat().st_mtime
                 props["created"] = date.fromtimestamp(mtime).isoformat()
@@ -1210,14 +1310,18 @@ def migrate_map(m, write):
             tags = set(props.get("tags") or ["wayfinder/ticket"])
             tags.add("wayfinder/ticket")
             tags.add(f"wayfinder/map/{m.effort_slug}")
+            tags.add(f"project/{m.repo}")
             tags.add(f"status/{t.status}")
             tags.add(f"type/{t.type}")
             new_tags = sorted(tags)
             if new_tags != props.get("tags"):
                 props["tags"] = new_tags
                 needed = True
-            if needed:
-                changes.append(f"{t.id}: backfilled operonId, aliases, priority, tags")
+            if done:
+                changes.append(f"{t.id}: " + ", ".join(done))
+                needed = True
+            elif needed:
+                changes.append(f"{t.id}: backfilled operonId, aliases, created, map or tags")
 
         body = strip_legacy(t.body) if not t.has_fm else t.body
         linked = link_numbers(body, m.repo, m.folder, t.path)
@@ -1230,6 +1334,10 @@ def migrate_map(m, write):
     if m.has_fm and not mprops.get("aliases"):
         mprops["aliases"] = [m.title]
         changes.append("map.md: aliases (its title, for link autocomplete)")
+    if mprops.get("project") != m.repo or f"project/{m.repo}" not in (mprops.get("tags") or []):
+        mprops["project"] = m.repo
+        mprops["tags"] = sorted(set(mprops.get("tags") or []) | {f"project/{m.repo}"})
+        changes.append(f"map.md: project {m.repo}")
     if not m.has_fm:
         changes.append(f"map.md: properties (status {mprops['status']}, repo {mprops['repo'] or '?'})")
     mbody = strip_legacy(m.body) if not m.has_fm else m.body
