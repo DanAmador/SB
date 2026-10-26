@@ -7,7 +7,8 @@ the ones that matter here.)
 - **First line is the decision or action he can take now.** Context comes after, if at all.
 - Bullets, short. Numbered when it is a sequence. At most 5 items visible per group: rank and group.
 - **Emojis as status only**, one meaning each: ✅ landed · 🎮 needs his play · 👤 his call ·
-  ⚠️ problem or unverified · ⏳ running · 🔒 rule · 🗺️ map change. Never decoration.
+  ⚠️ problem or unverified · ⏳ running · 🔒 rule · 🗺️ map change · 🆕 created · 💬 added to ·
+  ♻️ reopened. Never decoration.
 - Refer to tickets by **name**, with the number inside the link, never a wall of numbers. In chat a
   markdown link to the file; in the vault a wikilink (`sbmap link`), so Obsidian's graph sees it.
 - Estimates in hours, from commits (see the contract). Say what he will *see* when it is done.

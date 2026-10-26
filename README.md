@@ -22,6 +22,11 @@ flowchart LR
     run -->|lanes, worktrees| land[/sb land/]
     anysession([any session, any harness]) -->|/sb handoff| ho[(handoff + kickoff line)]
     ho -->|"Read #lt;file#gt; and do what it says"| run
+    map -->|/sb close| report[(report: tick or correct each finding)]
+    map -->|/sb close| wiki[(wiki: articles that outlive the map)]
+    sources([links, clippings, research]) -->|/sb learn| wiki
+    report -->|your ticks and corrections, /sb learn| wiki
+    wiki -->|/sb ask, every verb's first read| run
 ```
 
 | verb | ritual it replaces |
@@ -33,6 +38,9 @@ flowchart LR
 | `resume` | "another agent ran out of tokens, continue", "reorient me" |
 | `capture` | "add these as todos in wayfinder" |
 | `land` | "have you merged all the worktrees?" |
+| `close <map>` | "write up what this map found so I can review it" |
+| `learn [source]` | "save this so future agents know it", "research X and keep the sources" |
+| `ask <question>` | "what did we find out about X?" |
 
 ## Layout
 
@@ -42,11 +50,15 @@ skills/sb/
   verbs/              one file per verb, loaded only when that verb runs
   reference/          contract (per-repo rules + owner defaults), models (tiers), output (report shape),
                       architecture (mermaid decision tickets, the map's Route), obsidian (the CLI)
-  templates/          launch contract, checkpoint, handoff, implementer brief, architecture ticket
-  scripts/sbmap.py    full authoring CLI: init, new, show, comment, resolve, frontier, lint, Route diagram;
-                      stdlib Python, any harness. Auto-syncs Route diagram on every write.
+  templates/          launch contract, checkpoint, handoff, implementer brief, architecture ticket,
+                      map report
+  scripts/sbmap.py    full authoring CLI: init, new, show, comment, resolve, frontier, lint, Route diagram,
+                      close; stdlib Python, any harness. Auto-syncs Route diagram on every write.
                       With Obsidian running it also asks the app: broken links, and `verify`
                       (every mermaid block parses in Obsidian's own renderer)
+  scripts/sbwiki.py   `sbmap wiki`: the compiled wiki (index, find, show, raw, new, set, log, backlog,
+                      check with grounding suspects)
+tests/                the CLI run against a throwaway vault: `python3 -m unittest discover tests`
 install.sh            links the skill into ~/.agents/skills and ~/.claude/skills
 ```
 
@@ -79,4 +91,11 @@ python3 skills/sb/scripts/sbmap.py init my-repo/my-effort --title "Title" --dest
 python3 skills/sb/scripts/sbmap.py new sk4te/one-tether --title "Tether spring" --type task --question "..." --done-when "..."
 python3 skills/sb/scripts/sbmap.py comment sk4te/one-tether 624 --text "R1: ruling"
 python3 skills/sb/scripts/sbmap.py resolve sk4te/one-tether 624 --gist "..." --answer "..." --commit "sha"
+python3 skills/sb/scripts/sbmap.py close sk4te/one-tether
+
+# The wiki (format: skills/sb/reference/wiki.md)
+python3 skills/sb/scripts/sbmap.py wiki index
+python3 skills/sb/scripts/sbmap.py wiki find tether spring --raw
+python3 skills/sb/scripts/sbmap.py wiki new physics/tether-spring --title "Tether spring" --type concept --summary "..." --sources sk4te/one-tether#624
+python3 skills/sb/scripts/sbmap.py wiki check --fix
 ```

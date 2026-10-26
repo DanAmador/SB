@@ -16,4 +16,6 @@ one screen.
    - **⚠️ Didn't**: failed, skipped, unverified, and why.
    - **🌿 Branch**: name, commits ahead, unpushed/unmerged, dirty files.
    - The map's frontier now, and the Route link (`obsidian open` the map, so it is on screen when he sits down).
+   - The wiki's backlog, when `sbmap wiki backlog` counts any: "<N> sources wait to be learned
+     (`/sb learn`)". A map the run finished: offer `/sb close <map>`.
 4. End with one question: queue more now (→ `/sb tonight`), or rule on the calls first?

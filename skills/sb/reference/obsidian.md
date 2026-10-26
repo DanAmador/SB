@@ -23,7 +23,8 @@ Every call targets the vault by name and takes vault-relative paths, quoted when
 ## The owner's app
 
 The app, its settings and his own notes are his. Read anything; write only the tracker
-(`wayfinder/`). Plugins, themes, snippets, sync, restart and reload, `delete`, and the `dev:` tools
+(`wayfinder/`) and the wiki (`wiki/`, through `sbmap wiki` and the article prose; `Clippings/` is
+his). Plugins, themes, snippets, sync, restart and reload, `delete`, and the `dev:` tools
 stay untouched. `eval` is for read-only probes (`sbmap verify` uses it). Daily notes are his notes:
 a run writes there only when he asks.
 

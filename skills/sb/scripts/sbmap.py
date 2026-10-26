@@ -36,6 +36,10 @@ Bases see the whole route. It answers what an agent should never compute or type
     sbmap.py migrate  <map|--all> [--write]
                                         header lines -> properties, bare numbers -> wikilinks, plus
                                         the board; a dry run unless --write. Idempotent.
+    sbmap.py close    <map>             refuses while a ticket is open or claimed; writes report.md
+                                        from templates/map-report.md and marks the map resolved
+  wiki
+    sbmap.py wiki <command> ...         the compiled wiki under wiki/: `sbmap.py wiki` lists its commands
 
 <map> is a folder name under the vault's wayfinder/ (`sk4te-single-player`) or a path.
 The vault is $SB_VAULT, else ~/Documents/Second Brain, so it runs from any directory.
@@ -1276,13 +1280,62 @@ def cmd_migrate(args):
     print("written" if write else "dry run: nothing written (add --write)")
 
 
+REPORT_TEMPLATE = Path(__file__).resolve().parent.parent / "templates" / "map-report.md"
+
+
+def drop_section(body, heading):
+    i = body.find(f"\n## {heading}\n")
+    if i < 0:
+        return body
+    nxt = body.find("\n## ", i + 4)
+    return body[:i + 1] + (body[nxt + 1:] if nxt >= 0 else "")
+
+
+def cmd_close(args):
+    import sbwiki
+    m = load(args[0])
+    report = m.folder / "report.md"
+    if report.exists():
+        sys.exit(f"sbmap: {rel(report)} already exists; edit it, never rewrite it")
+    waiting = [t for t in m.order() if t.status in ("open", "claimed")]
+    if waiting:
+        for t in waiting:
+            print(f"  {t.id} {t.title}  [{t.status}{': ' + t.claimed_by if t.claimed_by else ''}]")
+        sys.exit(f"sbmap: {len(waiting)} ticket(s) still open or claimed; resolve them or rule them out of scope")
+    here = rel(m.folder) + "/"
+    findings = sorted((n for n in sbwiki.articles()
+                       if any(sbwiki.entry_key(e).startswith(here) for e in n.refs("sources"))),
+                      key=lambda n: n.title.lower())
+    _, body, _ = split_fm(REPORT_TEMPLATE.read_text(encoding="utf-8"))
+    body = body.replace("<the map's title>", m.title)
+    if findings:
+        placeholder = next(line for line in body.splitlines() if line.startswith("- [ ] <One sentence.>"))
+        body = body.replace(placeholder, "\n".join(f"- [ ] <One sentence.> {n.link()}" for n in findings))
+    else:
+        body = drop_section(drop_section(body, "Findings"), "Also learned")
+    props = {"wayfinder": "report", "type": "report", "map": m.link(), "closed": date.today().isoformat(),
+             "findings": [n.link() for n in findings], "tags": ["wayfinder/report"]}
+    write_atomic(report, dump_fm(props, list(props)) + body.lstrip("\n"))
+    mprops = dict(m.props) if m.has_fm else migrate_map_props(m)
+    mprops["status"] = WF_TO_OPERON_STATUS["resolved"]
+    m.save(mprops, m.body)
+    print(rel(report))
+    print(f"{m.title}: resolved; {len(findings)} article(s) in findings")
+
+
+def cmd_wiki(args):
+    import sbwiki  # the wiki's commands live beside this file; see its docstring
+    sbwiki.main(args)
+
+
 COMMANDS = {"maps": cmd_maps, "status": cmd_status, "frontier": cmd_frontier, "show": cmd_show,
             "next": cmd_next, "link": cmd_link, "check": cmd_check, "verify": cmd_verify,
             "init": cmd_init, "new": cmd_new, "set": cmd_set, "claim": cmd_claim,
             "comment": cmd_comment, "ruling": cmd_comment, "block": cmd_block,
-            "resolve": cmd_resolve, "diagram": cmd_diagram, "board": cmd_board, "migrate": cmd_migrate}
+            "resolve": cmd_resolve, "diagram": cmd_diagram, "board": cmd_board, "migrate": cmd_migrate,
+            "close": cmd_close, "wiki": cmd_wiki}
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2 or sys.argv[1] not in COMMANDS or (sys.argv[1] != "maps" and len(sys.argv) < 3):
+    if len(sys.argv) < 2 or sys.argv[1] not in COMMANDS or (sys.argv[1] not in ("maps", "wiki") and len(sys.argv) < 3):
         sys.exit(__doc__)
     COMMANDS[sys.argv[1]](sys.argv[2:])
