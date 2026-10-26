@@ -4,7 +4,7 @@ type: report
 map: "[[wayfinder/<map>/map|Map: <title>]]"
 closed: <YYYY-MM-DD>
 findings:
-  - "[[wiki/<topic>/<slug>|<article title>]]"
+  - "[[wiki/<project>/<topic>/<slug>|<article title>]]"
 tags:
   - wayfinder/report
 ---
@@ -22,11 +22,11 @@ Plain words, no ticket numbers.>
 ## Findings
 
 - [ ] **<What this map added to the article, as one sentence that stands alone.>** <How it is known.>
-  <What a future agent does with it.> [[wiki/<topic>/<slug>|<article title>]]
+  <What a future agent does with it.> [[wiki/<project>/<topic>/<slug>|<article title>]]
 
 ## Also learned
 
-- [ ] <One sentence.> [[wiki/<topic>/<slug>|<article title>]]
+- [ ] <One sentence.> [[wiki/<project>/<topic>/<slug>|<article title>]]
 
 ## Decisions later work must respect
 

@@ -11,7 +11,7 @@ class Close(VaultCase):
         self.ticket("semantra/plugin", 8, "Ship it", type_="task")
 
     def article_citing(self, slug, title, ref):
-        self.sb("wiki", "new", f"obsidian/{slug}", "--title", title, "--type", "concept",
+        self.sb("wiki", "new", f"semantra/obsidian/{slug}", "--title", title, "--type", "concept",
                 "--summary", "S.", "--sources", ref, "--about", "Obsidian.")
 
     def test_refuses_while_tickets_are_open_or_claimed(self):
@@ -27,19 +27,19 @@ class Close(VaultCase):
         self.ticket("semantra/plugin", 9, "Dropped", status="Project.Dropped")
         self.sb("wiki", "init")
         self.article_citing("frontmatter-links", "Obsidian property links", "semantra/plugin#007")
-        self.write("wiki/raw/obsidian/other.md", "---\nwiki: raw\ntype: source\ntitle: O\nsource: s\n---\nB\n")
-        self.article_citing("unrelated", "Unrelated", "wiki/raw/obsidian/other")
+        self.write("wiki/raw/general/obsidian/other.md", "---\nwiki: raw\ntype: source\ntitle: O\nsource: s\n---\nB\n")
+        self.article_citing("unrelated", "Unrelated", "wiki/raw/general/obsidian/other")
         r = self.sb("close", "semantra/plugin")
         self.assertIn("wayfinder/semantra/plugin/report.md", r.stdout)
         report = self.read("wayfinder/semantra/plugin/report.md")
         self.assertTrue(report.startswith("---\nwayfinder: report\ntype: report\n"), report)
         self.assertIn('map: "[[wayfinder/semantra/plugin/map|Semantra Obsidian plugin]]"', report)
         self.assertIn(f"closed: {TODAY}", report)
-        self.assertIn('findings:\n  - "[[wiki/obsidian/frontmatter-links|Obsidian property links]]"\ntags:', report)
+        self.assertIn('findings:\n  - "[[wiki/semantra/obsidian/frontmatter-links|Obsidian property links]]"\ntags:', report)
         self.assertNotIn("Unrelated", report)
         self.assertIn("# Semantra Obsidian plugin: ", report)
         self.assertIn("## Findings", report)
-        self.assertIn("- [ ] <One sentence.> [[wiki/obsidian/frontmatter-links|Obsidian property links]]", report)
+        self.assertIn("- [ ] <One sentence.> [[wiki/semantra/obsidian/frontmatter-links|Obsidian property links]]", report)
         self.assertIn("status: Project.Finished", self.read("wayfinder/semantra/plugin/map.md"))
 
     def test_a_map_that_learned_nothing_has_no_findings_sections(self):

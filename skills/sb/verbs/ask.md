@@ -3,8 +3,9 @@
 "What do I know about X?" answered from the vault's wiki, citing it. Writes nothing in the vault
 unless the owner says to keep the answer. Format and commands: [reference/wiki.md](../reference/wiki.md).
 
-1. **Find.** `sbmap wiki index`, then `sbmap wiki find --raw` with the question's terms *and* their
-   synonyms; `--raw` reaches what is not compiled yet (research notes, resolved research tickets,
+1. **Find.** `sbmap wiki index --project <repo>`, then `sbmap wiki find --raw --project <repo>` with
+   the question's terms *and* their synonyms (the repo is the one the owner is working in; leave
+   `--project` off for a question about another repo or about everything); `--raw` reaches what is not compiled yet (research notes, resolved research tickets,
    clippings). With Obsidian running, also `search:context` across the vault. No `wiki/` at all →
    say so and offer `/sb learn`.
 2. **Read** what was found: `sbmap wiki show` (`--full` for the notes the answer rests on), tickets
@@ -25,9 +26,9 @@ Only an answer resting on at least one article is kept; otherwise `learn` its ra
 
 1. `sbmap wiki find` the question's terms among synthesis pages; an earlier page on the same
    question goes in `--related`.
-2. `sbmap wiki new <topic>/<slug> --type synthesis --title "<the question, as a title>" --summary
-   "…" --sources <the articles and raw notes cited>`, in the topic of the article cited most, the slug
-   from the title.
+2. `sbmap wiki new <project>/<topic>/<slug> --type synthesis --title "<the question, as a title>"
+   --summary "…" --sources <the articles and raw notes cited>`, in the project and topic of the
+   article cited most, the slug from the title.
 3. Write the answer as the body, by [Writing a finding](../reference/wiki.md#writing-a-finding):
    the Overview opens with the answer, citations go in `sources`, and claims from training stay out.
 4. `sbmap wiki log ask --subject "Archived: <the page>"`, then `sbmap wiki check --fix`.

@@ -24,24 +24,29 @@ cascade are shared, so compiling never runs in parallel.
    the raw, so grounding checks against what you actually read. A ticket is read with `sbmap show`;
    its knowledge is the Answer (measurements, gotchas, the reason behind a decision), and its
    progress log is no material.
-2. **Triage.** `sbmap wiki find` with the source's entities, their synonyms and abbreviations; with
-   Obsidian running, also `search:context query="path:wiki/ <terms>"`. Say the disposition in one
-   line:
+2. **Triage.** First the **project**: a ticket or research note belongs to its map's repo (the
+   folder under `wayfinder/`), a fetch or a paste to the repo the owner is working in. Knowledge that
+   another repo could use unchanged (a tool, a library, a technique) goes in `general` instead
+   ([Projects](../reference/wiki.md#layout)). Then `sbmap wiki find --project <project>` with the
+   source's entities, their synonyms and abbreviations; with Obsidian running, also
+   `search:context query="path:wiki/ <terms>"`. Say the project and the disposition in one line:
    - **New**: a concept no article covers.
    - **Update**: an article's Overview stays true and the source only adds evidence or detail.
    - **Disputed**: the source contradicts an article; combines with New or Update.
    - **No material**: the wiki already holds everything it says. A thin source never forces an
      article.
-3. **Keep the raw**, whatever the disposition: `sbmap wiki raw <topic> … --from <scratchpad file>`
-   for a fetch or a paste, in the topic the triage pointed to (`sbmap wiki index` lists them). A
+3. **Keep the raw**, whatever the disposition: `sbmap wiki raw <project>/<topic> … --from <scratchpad
+   file>` for a fetch or a paste, in the topic the triage pointed to (`sbmap wiki index --project
+   <project>` lists them). A
    vault note is raw already. No material: log it (step 6) and stop.
 4. **Compile**, by [Writing a finding](../reference/wiki.md#writing-a-finding). Locate every
    number, date and quote in the raw before writing it, and write it as found.
    - Update: `sbmap wiki set <article> sources+=<raw> updated=today`, then rewrite the sections it
      changes.
-   - New: `sbmap wiki new`, named after the concept rather than the source, with a `summary` an agent
-     can triage from. A source spanning topics lands in the closest one and links the rest through
-     `related`.
+   - New: `sbmap wiki new <project>/<topic>/<slug>`, named after the concept rather than the source,
+     with a `summary` an agent can triage from. A source spanning topics lands in the closest one and
+     links the rest through `related`. The heading names the project's own things in its own words
+     ("Assemblio part hierarchy"), so the article reads right outside its folder too.
    - Disputed: the Disputed callout under the contested claim, `status=disputed`; on both articles,
      with `disputes`, when the clash spans two.
 5. **Cascade.** For each entity and claim the source touches, run `wiki find` and open every article

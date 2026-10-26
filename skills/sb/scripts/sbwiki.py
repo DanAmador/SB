@@ -1,23 +1,31 @@
 """sbmap wiki: the vault's compiled knowledge, `reference/wiki.md` made executable.
 
   read
-    sbmap.py wiki index [--write]           every topic and article, one line each; --write restamps index.md
-    sbmap.py wiki find <terms…> [--raw] [--limit N]
+    sbmap.py wiki index [--project P] [--write]
+                                            every project, topic and article, one line each; --project
+                                            narrows to P and general; --write restamps index.md
+    sbmap.py wiki find <terms…> [--raw] [--project P] [--limit N]
                                             notes matching any term, scored: title/aliases 3, summary 2, body 1
     sbmap.py wiki show <note> [--full]      digest: properties, Overview, headings, Outdated/Disputed callouts
     sbmap.py wiki link <note>               the wikilink to paste into prose
-    sbmap.py wiki backlog [--limit N]       raw notes no article cites and the log has not marked no-material
+    sbmap.py wiki backlog [--project P] [--limit N]
+                                            raw notes no article cites and the log has not marked no-material
   write
     sbmap.py wiki init                      creates whatever of the layout is missing; never overwrites
-    sbmap.py wiki raw <topic> --title "…" --source "…" [--author "…"] [--published YYYY-MM-DD|Unknown]
+    sbmap.py wiki raw <project>/<topic> --title "…" --source "…" [--author "…"] [--published YYYY-MM-DD|Unknown]
                           --from <file|->   keeps a source as a raw note
-    sbmap.py wiki new <topic>/<slug> --title "…" --type concept|entity|synthesis --summary "…"
+    sbmap.py wiki new <project>/<topic>/<slug> --title "…" --type concept|entity|synthesis --summary "…"
                           --sources <refs> [--related <refs>] [--aliases "a, b"] [--about "…"]
     sbmap.py wiki set <note> key=value … [key+=<refs>] [key-=<refs>]
     sbmap.py wiki log <learn|ask|tend> --subject "…" [--disposition "…"] [--raw <refs>] [--updated <refs>]
     sbmap.py wiki check [--fix]             lint; exits non-zero on any format or link problem
+    sbmap.py wiki migrate <project> [topic…] [--write]
+                                            topics from before projects (wiki/<topic>/) move under
+                                            <project>, links in wiki/ and wayfinder/ follow; a dry run
+                                            unless --write
 
-<note> is a vault path, `<topic>/<slug>` or a wikilink. <refs> are comma-separated vault paths,
+<project> is a repo's folder name under wayfinder/ (`monorepo`), or `general` for knowledge that
+holds outside any one repo. <note> is a vault path, `<project>/<topic>/<slug>` or a wikilink. <refs> are comma-separated vault paths,
 wikilinks, or `<map>#<NNN>` for a ticket; each is written as a full-path wikilink.
 """
 import re
@@ -27,7 +35,7 @@ from pathlib import Path
 
 import sbmap as sb
 
-WIKI_KEYS = ["wiki", "type", "status", "title", "source", "author", "published", "created", "summary",
+WIKI_KEYS = ["wiki", "type", "project", "status", "title", "source", "author", "published", "created", "summary",
              "updated", "reviewed", "archived", "sources", "related", "supersedes", "superseded_by",
              "disputes", "aliases", "tags"]
 KINDS = {"article", "synthesis", "raw", "topic", "index", "log"}
@@ -38,6 +46,7 @@ REF_KEYS = ("sources", "related", "supersedes", "superseded_by", "disputes")
 RECIPROCAL = {"disputes": "disputes", "supersedes": "superseded_by", "superseded_by": "supersedes"}
 DATE_KEYS = ("updated", "reviewed", "archived", "created", "published")
 ROOT_FILES = ("index.md", "log.md", "README.md")
+GENERAL = "general"
 INDEX_START, INDEX_END = "%% sb:index:start %%", "%% sb:index:end %%"
 SLUG = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 DATED = re.compile(r"\d+-")
@@ -159,10 +168,15 @@ def articles():
     return [n for n in wiki_notes() if n.kind in ("article", "synthesis")]
 
 
+def is_folder_note(p):
+    return p.stem == p.parent.name and p.parent.parent != wiki_dir() / "raw"
+
+
 def slug_taken(slug):
+    """Article and source slugs are unique across the wiki; a topic's folder note is named after it."""
     w = wiki_dir()
     return w.is_dir() and any(p.stem == slug for p in w.rglob("*.md")
-                              if p.relative_to(w).as_posix() not in ROOT_FILES)
+                              if p.relative_to(w).as_posix() not in ROOT_FILES and not is_folder_note(p))
 
 
 def slugify(title):
@@ -216,44 +230,87 @@ def ref_links(refs_arg, kind=None, key="sources"):
 
 # ---- the index ------------------------------------------------------------
 
-def topics():
+def check_name(what, name):
+    if name == "raw" or not SLUG.fullmatch(name or ""):
+        die(f"{what} '{name}' must be kebab-case and not 'raw'")
+
+
+def is_old_topic(d):
+    """A topic folder straight under wiki/, from before projects."""
+    return d.parent == wiki_dir() and (d / f"{d.name}.md").exists()
+
+
+def old_raw(d):
+    """A source folder straight under wiki/raw/, from before projects."""
+    return d.parent == wiki_dir() / "raw" and any(d.glob("*.md"))
+
+
+def projects(only=None):
+    """Project folders, general first; with `only`, that project and general."""
     w = wiki_dir()
-    return sorted(d.name for d in w.iterdir() if d.is_dir() and d.name != "raw") if w.is_dir() else []
+    found = [d.name for d in w.iterdir() if d.is_dir() and d.name != "raw" and not is_old_topic(d)] if w.is_dir() else []
+    if only:
+        found = [p for p in found if p in (only, GENERAL)]
+    return sorted(found, key=lambda p: (p != GENERAL, p))
+
+
+def topics(project):
+    d = wiki_dir() / project
+    return sorted(t.name for t in d.iterdir() if t.is_dir()) if d.is_dir() else []
+
+
+def project_of(path):
+    """The project a note belongs to: its wiki folder, or its map's repo; None for a clipping."""
+    parts = Path(sb.rel(path)).parts
+    if parts[:2] == ("wiki", "raw"):
+        return parts[2] if len(parts) > 3 else None
+    if parts[:1] in (("wiki",), ("wayfinder",)) and len(parts) > 2:
+        return parts[1]
+    return None
+
+
+def in_scope(path, project):
+    return project is None or project_of(path) in (project, GENERAL, None)
 
 
 def esc(s):
     return str(s).replace("|", "\\|")
 
 
-def topic_rows(topic):
-    notes = [n for n in articles() if n.path.parent.name == topic]
+def topic_rows(project, topic):
+    notes = [n for n in articles() if n.path.parent == wiki_dir() / project / topic]
     return sorted(notes, key=lambda n: (n.kind == "synthesis", n.title.lower()))
 
 
-def folder_note(topic):
-    p = wiki_dir() / topic / f"{topic}.md"
+def folder_note(project, topic):
+    p = wiki_dir() / project / topic / f"{topic}.md"
     return Note(p) if p.exists() else None
 
 
 def index_block():
     lines = [INDEX_START, ""]
-    for t in topics():
-        fn = folder_note(t)
-        lines.append(f"## {t}")
-        lines.append("")
-        if fn and fn.props.get("summary"):
-            lines += [str(fn.props["summary"]), ""]
-        rows = topic_rows(t)
-        if rows:
-            lines += ["| Article | Type | Summary | Updated |", "|---|---|---|---|"]
-            for n in rows:
-                when = n.props.get("archived") if n.kind == "synthesis" else n.props.get("updated")
-                lines.append(f"| {esc(n.link())} | {n.props.get('type', '')} | "
-                             f"{esc(n.props.get('summary', ''))} | {when or ''} |")
-            lines.append("")
+    for project in projects():
+        lines += [f"## {project}", ""]
+        for t in topics(project):
+            fn = folder_note(project, t)
+            lines += [f"### {t}", ""]
+            if fn and fn.props.get("summary"):
+                lines += [str(fn.props["summary"]), ""]
+            lines += table(topic_rows(project, t))
     lines += ["*Generated by sbmap from the articles' properties; edit the articles, not this block.*",
               INDEX_END]
     return "\n".join(lines)
+
+
+def table(rows):
+    if not rows:
+        return []
+    lines = ["| Article | Type | Summary | Updated |", "|---|---|---|---|"]
+    for n in rows:
+        when = n.props.get("archived") if n.kind == "synthesis" else n.props.get("updated")
+        lines.append(f"| {esc(n.link())} | {n.props.get('type', '')} | "
+                     f"{esc(n.props.get('summary', ''))} | {when or ''} |")
+    return lines + [""]
 
 
 def stamped_index():
@@ -282,14 +339,19 @@ def cmd_index(args):
         write_index()
         print(f"wrote the index into {wiki_dir() / 'index.md'}")
         return
-    for t in topics():
-        fn = folder_note(t)
-        print(f"## {t}" + (f": {fn.props.get('summary')}" if fn and fn.props.get("summary") else ""))
-        for n in topic_rows(t):
-            status = n.props.get("status") or n.kind
-            print(f"  {n.rel[:-3]} · {n.props.get('type', '')} · {status} · {n.props.get('summary', '')}")
-    if not topics():
+    shown = projects(sb.opt(args, "--project"))
+    for project in shown:
+        print(f"# {project}")
+        for t in topics(project):
+            fn = folder_note(project, t)
+            print(f"## {t}" + (f": {fn.props.get('summary')}" if fn and fn.props.get("summary") else ""))
+            for n in topic_rows(project, t):
+                status = n.props.get("status") or n.kind
+                print(f"  {n.rel[:-3]} · {n.props.get('type', '')} · {status} · {n.props.get('summary', '')}")
+    if not shown:
         print("(the wiki is empty)")
+    if any(is_old_topic(d) for d in wiki_dir().iterdir() if d.is_dir()):
+        print("⚠️ topics from before projects sit straight under wiki/: `sbmap wiki migrate <project>`")
 
 
 # ---- init -----------------------------------------------------------------
@@ -318,7 +380,8 @@ Append-only, newest last, written by `sbmap wiki log`.
 
 README_MD = """# The wiki
 
-Compiled knowledge: articles under `<topic>/`, their sources under `raw/`. Start at `index.md`.
+Compiled knowledge: articles under `<project>/<topic>/`, their sources under `raw/<project>/<topic>/`.
+A project is a repo's folder name under `wayfinder/`, or `general`. Start at `index.md`.
 The format and the commands: the `sb` skill's `reference/wiki.md` (`sbmap wiki`).
 """
 
@@ -338,6 +401,7 @@ views:
         - '!reviewed || reviewed < updated'
     order:
       - file.name
+      - project
       - summary
       - updated
       - reviewed
@@ -345,15 +409,16 @@ views:
       - property: updated
         direction: DESC
   - type: table
-    name: By topic
+    name: By project
     filters:
       and:
         - wiki == "article"
     groupBy:
-      property: file.folder
+      property: project
       direction: ASC
     order:
       - file.name
+      - file.folder
       - type
       - status
       - summary
@@ -410,26 +475,34 @@ def cmd_init(args):
 
 # ---- new ------------------------------------------------------------------
 
-def make_topic(topic, about):
-    if topic == "raw" or not SLUG.fullmatch(topic):
-        die(f"topic '{topic}' must be kebab-case and not 'raw'")
-    if folder_note(topic):
+def make_topic(project, topic, about):
+    if folder_note(project, topic):
         return
     if not about:
-        die(f"'{topic}' is a new topic: --about \"<what it covers>\" writes its folder note")
-    if slug_taken(topic):
-        die(f"slug '{topic}' is taken")
-    (wiki_dir() / topic).mkdir(parents=True, exist_ok=True)
+        die(f"'{project}/{topic}' is a new topic: --about \"<what it covers>\" writes its folder note")
+    (wiki_dir() / project / topic).mkdir(parents=True, exist_ok=True)
     heading = topic.replace("-", " ").capitalize()
     n = Note.__new__(Note)
-    n.path, n.body = wiki_dir() / topic / f"{topic}.md", f"# {heading}\n\n{about.strip()}\n"
-    n.save({"wiki": "topic", "type": "topic", "summary": about.strip(), "tags": ["wiki/topic"]})
+    n.path, n.body = wiki_dir() / project / topic / f"{topic}.md", f"# {heading}\n\n{about.strip()}\n"
+    n.save({"wiki": "topic", "type": "topic", "project": project, "summary": about.strip(),
+            "tags": ["wiki/topic"]})
+
+
+def sources_project(refs_arg):
+    """The one repo every wayfinder source comes from, else general."""
+    found = {project_of(p) for p, _ in map(resolve_ref, split_refs(refs_arg))
+             if Path(sb.rel(p)).parts[:1] == ("wayfinder",)}
+    return found.pop() if len(found) == 1 else GENERAL
 
 
 def cmd_new(args):
-    if not args or "/" not in args[0]:
-        die("usage: wiki new <topic>/<slug> --title … --type … --summary … --sources …")
-    topic, slug = args[0].split("/", 1)
+    parts = args[0].split("/") if args else []
+    if len(parts) != 3:
+        hint = f"{sources_project(sb.opt(args, '--sources', ''))}/{args[0]}" if len(parts) == 2 else "<project>/<topic>/<slug>"
+        die(f"wiki new takes <project>/<topic>/<slug>: {hint}")
+    project, topic, slug = parts
+    check_name("project", project)
+    check_name("topic", topic)
     title = sb.opt(args, "--title") or die("--title is required")
     type_ = sb.opt(args, "--type") or die("--type is required")
     summary = sb.opt(args, "--summary") or die("--summary is required")
@@ -439,8 +512,6 @@ def cmd_new(args):
         die(f"slug '{slug}' must be kebab-case, at most 60 characters")
     if DATED.match(slug):
         die(f"slug '{slug}' starts with digits and a dash, which Semantra reads as a ticket number")
-    if topic == "raw":
-        die("'raw' is reserved for sources: `wiki raw`")
     if slug_taken(slug):
         die(f"slug '{slug}' is taken")
     kind = "synthesis" if type_ == "synthesis" else "article"
@@ -448,8 +519,8 @@ def cmd_new(args):
     if not sources:
         die("--sources is required")
     related = ref_links(sb.opt(args, "--related", ""), key="related")
-    make_topic(topic, sb.opt(args, "--about"))
-    props = {"wiki": kind, "type": type_}
+    make_topic(project, topic, sb.opt(args, "--about"))
+    props = {"wiki": kind, "type": type_, "project": project}
     if kind == "article":
         props.update(status="current", summary=summary, updated=today())
     else:
@@ -458,7 +529,7 @@ def cmd_new(args):
                  aliases=[a.strip() for a in (sb.opt(args, "--aliases") or "").split(",") if a.strip()],
                  tags=[f"wiki/{type_}"])
     n = Note.__new__(Note)
-    n.path = wiki_dir() / topic / f"{slug}.md"
+    n.path = wiki_dir() / project / topic / f"{slug}.md"
     n.save(props, f"# {title}\n\n## Overview\n\n{summary.removeprefix('[Archived] ')}\n")
     write_index()
     print(n.rel)
@@ -533,11 +604,13 @@ def describe(path):
 
 def cmd_find(args):
     limit = int(sb.opt(args, "--limit", 10))
+    project = sb.opt(args, "--project")
     terms = [a.lower() for i, a in enumerate(args)
-             if not a.startswith("--") and (i == 0 or args[i - 1] != "--limit")]
+             if not a.startswith("--") and (i == 0 or args[i - 1] not in ("--limit", "--project"))]
     if not terms:
         die("find needs at least one term")
     paths = [n.path for n in wiki_notes()] + (raw_notes() if "--raw" in args else [])
+    paths = [p for p in paths if in_scope(p, project)]
     scored = []
     for p in paths:
         n = Note(p)
@@ -559,9 +632,12 @@ def cmd_find(args):
 # ---- raw ------------------------------------------------------------------
 
 def cmd_raw(args):
-    topic = args[0] if args and not args[0].startswith("--") else die("usage: wiki raw <topic> …")
-    if topic == "raw" or not SLUG.fullmatch(topic):
-        die(f"topic '{topic}' must be kebab-case and not 'raw'")
+    parts = args[0].split("/") if args and not args[0].startswith("--") else []
+    if len(parts) != 2:
+        die("wiki raw takes <project>/<topic>: the repo's folder under wayfinder/, or general")
+    project, topic = parts
+    check_name("project", project)
+    check_name("topic", topic)
     title = sb.opt(args, "--title") or die("--title is required")
     source = sb.opt(args, "--source") or die("--source is required")
     src = sb.opt(args, "--from") or die("--from <file|-> is required")
@@ -576,10 +652,10 @@ def cmd_raw(args):
     while slug_taken(slug):
         i += 1
         slug = f"{base}-{i}"
-    props = {"wiki": "raw", "type": "source", "title": title, "source": source,
+    props = {"wiki": "raw", "type": "source", "project": project, "title": title, "source": source,
              "author": sb.opt(args, "--author", ""), "published": sb.opt(args, "--published", "Unknown"),
              "created": today(), "tags": ["wiki/source"]}
-    path = wiki_dir() / "raw" / topic / f"{slug}.md"
+    path = wiki_dir() / "raw" / project / topic / f"{slug}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     sb.write_atomic(path, sb.dump_fm(props, WIKI_KEYS) + text)
     print(sb.rel(path))
@@ -715,12 +791,12 @@ def no_material():
     return {entry_key(f) for f in found}
 
 
-def backlog():
+def backlog(project=None):
     done = cited() | no_material()
     out = []
     for p in raw_notes():
         key = sb.rel(p)[:-3]
-        if key in done or (raw_class(p) == "ticket" and sb.Ticket(p).type != "research"):
+        if key in done or not in_scope(p, project) or (raw_class(p) == "ticket" and sb.Ticket(p).type != "research"):
             continue
         created = str(Note(p).props.get("created") or date.fromtimestamp(p.stat().st_mtime).isoformat())
         out.append((created[:10], key, p))
@@ -729,7 +805,7 @@ def backlog():
 
 def cmd_backlog(args):
     limit = int(sb.opt(args, "--limit", 10))
-    items = backlog()
+    items = backlog(sb.opt(args, "--project"))
     for created, key, p in items[:limit]:
         print(f"{key} · {created} · {describe(p)[2]}")
     print(f"{len(items)} on the backlog" + (f", {limit} shown" if len(items) > limit else ""))
@@ -908,24 +984,33 @@ def cmd_check(args):
     def lab(p):
         return p.relative_to(w).as_posix()
 
-    every = [p for p in sorted(w.rglob("*.md")) if lab(p) not in ROOT_FILES]
-    # slugs and places
+    old = [d for d in sorted(w.iterdir()) if d.is_dir() and is_old_topic(d)]
+    old += [d for d in sorted((w / "raw").iterdir()) if d.is_dir() and old_raw(d)] if (w / "raw").is_dir() else []
+    for d in old:
+        problems.append(f"{lab(d)}: old layout, a topic outside any project: `sbmap wiki migrate <project>`")
+    every = [p for p in sorted(w.rglob("*.md")) if lab(p) not in ROOT_FILES
+             and not any(p.is_relative_to(d) for d in old)]
+    # slugs and places: wiki/<project>/<topic>/<slug>.md, wiki/raw/<project>/<topic>/<slug>.md
     stems = {}
     for p in every:
-        stems.setdefault(p.stem, []).append(lab(p))
+        if not is_folder_note(p):
+            stems.setdefault(p.stem, []).append(lab(p))
         parts = p.relative_to(w).parts
+        depth = 4 if parts[0] == "raw" else 3
         if DATED.match(p.stem):
             problems.append(f"{lab(p)}: slug starts with digits and a dash")
-        if len(parts) == 1:
-            problems.append(f"{lab(p)}: outside a topic folder")
-        elif (parts[0] == "raw" and len(parts) > 3) or (parts[0] != "raw" and len(parts) > 2):
-            problems.append(f"{lab(p)}: deeper than wiki/<topic>/" + (" (raw/<topic>/ for sources)" if parts[0] == "raw" else ""))
+        if len(parts) < depth:
+            problems.append(f"{lab(p)}: outside a topic folder; the place is wiki/"
+                            + ("raw/" if parts[0] == "raw" else "") + "<project>/<topic>/")
+        elif len(parts) > depth:
+            problems.append(f"{lab(p)}: deeper than wiki/" + ("raw/" if parts[0] == "raw" else "") + "<project>/<topic>/")
     for stem, where in stems.items():
         if len(where) > 1:
             problems.append(f"slug '{stem}' is taken twice: {', '.join(where)}")
-    for t in topics():
-        if not (w / t / f"{t}.md").exists():
-            problems.append(f"{t}: no folder note ({t}/{t}.md)")
+    for project in projects():
+        for t in topics(project):
+            if not (w / project / t / f"{t}.md").exists():
+                problems.append(f"{project}/{t}: no folder note ({project}/{t}/{t}.md)")
 
     for p in every:
         n = Note(p)
@@ -998,6 +1083,14 @@ def cmd_check(args):
             return m.group(0)
 
         props = dict(n.props)
+        here = p.relative_to(w).parts[0]
+        if props.get("project") != here:
+            if fix:
+                props["project"] = here
+                changed = True
+                fixed.append(f"{lab(p)}: project set to {here}")
+            else:
+                problems.append(f"{lab(p)}: project is {props.get('project') or 'missing'}; its folder says {here}")
         for key, v in n.props.items():
             if isinstance(v, list):
                 kept = []
@@ -1040,9 +1133,77 @@ def cmd_check(args):
     sys.exit(1 if problems else 0)
 
 
+# ---- migrate --------------------------------------------------------------
+
+def relink(text, moves):
+    """Every wikilink into a moved folder, repointed."""
+    def sub(m):
+        target = m.group(2).strip()
+        for old, new in moves:
+            if target == old or target.startswith(old + "/"):
+                target = new + target[len(old):]
+                return f"{m.group(1)}[[{target}{m.group(3) or ''}" + (f"|{m.group(4)}" if m.group(4) is not None else "") + "]]"
+        return m.group(0)
+    return LINK.sub(sub, text)
+
+
+def cmd_migrate(args):
+    write = "--write" in args
+    names = [a for a in args if not a.startswith("--")]
+    if not names:
+        die("usage: wiki migrate <project> [topic…] [--write]")
+    project, chosen = names[0], names[1:]
+    check_name("project", project)
+    w = wiki_dir()
+    topics_ = [d for d in sorted(w.iterdir()) if d.is_dir() and is_old_topic(d)] if w.is_dir() else []
+    raws = [d for d in sorted((w / "raw").iterdir()) if d.is_dir() and old_raw(d)] if (w / "raw").is_dir() else []
+    if chosen:
+        missing = set(chosen) - {d.name for d in topics_ + raws}
+        if missing:
+            die(f"no topic from before projects named {', '.join(sorted(missing))}")
+        topics_ = [d for d in topics_ if d.name in chosen]
+        raws = [d for d in raws if d.name in chosen]
+    moves = [(d, w / project / d.name) for d in topics_] + [(d, w / "raw" / project / d.name) for d in raws]
+    if not moves:
+        print("nothing to migrate: every topic is under a project")
+        return
+    for old, new in moves:
+        if new.exists():
+            die(f"{sb.rel(new)} exists already; move {sb.rel(old)} by hand")
+    pairs = [(sb.rel(old), sb.rel(new)) for old, new in moves]
+    edited, yours = [], []
+    for p in sorted(sb.VAULT.rglob("*.md")):
+        parts = p.relative_to(sb.VAULT).parts
+        if SKIP_DIRS & set(parts) or p.parent.parent == w / "raw" or parts[:2] == ("wiki", "raw"):
+            continue
+        text = p.read_text(encoding="utf-8")
+        if relink(text, pairs) != text:
+            (edited if parts[0] in ("wiki", "wayfinder") else yours).append(p)
+    for old, new in pairs:
+        print(f"{old} -> {new}")
+    print(f"links repointed in {len(edited)} note(s) under wiki/ and wayfinder/")
+    for p in yours:
+        print(f"⚠️ not rewritten, the owner's note: {sb.rel(p)} links into a moved topic")
+    if not write:
+        print("dry run: nothing written (add --write)")
+        return
+    for p in edited:
+        sb.write_atomic(p, relink(p.read_text(encoding="utf-8"), pairs))
+    for old, new in moves:
+        new.parent.mkdir(parents=True, exist_ok=True)
+        old.rename(new)
+        if new.parent != w / "raw" / project:  # sources are never edited
+            for q in new.glob("*.md"):
+                n = Note(q)
+                n.save({**n.props, "project": project})
+    write_index()
+    print("written")
+
+
 COMMANDS = {"index": cmd_index, "find": cmd_find, "show": cmd_show, "link": cmd_link,
             "backlog": cmd_backlog, "init": cmd_init, "raw": cmd_raw, "new": cmd_new, "set": cmd_set,
-            "log": cmd_log, "check": cmd_check}
+            "log": cmd_log, "check": cmd_check,
+            "migrate": cmd_migrate}
 
 
 def main(args):

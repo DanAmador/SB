@@ -10,29 +10,39 @@ lets Obsidian's graph, Bases, and Semantra read the wiki as typed data.
 
 ```
 <vault>/wiki/
-  index.md               the agent's entry point: generated, one row per article, by topic
-  log.md                 append-only: every learn, every archived ask, every tend
-  wiki.base              the owner's board (views below), embedded in index.md
-  README.md              three lines pointing here, for harnesses without this skill
-  raw/<topic>/<slug>.md  sources an agent fetched or the owner pasted
-  <topic>/<topic>.md     the topic's folder note: what the topic covers
-  <topic>/<slug>.md      articles and synthesis pages
+  index.md                         the agent's entry point: generated, one row per article,
+                                   by project, then topic
+  log.md                           append-only: every learn, every archived ask, every tend
+  wiki.base                        the owner's board (views below), embedded in index.md
+  README.md                        three lines pointing here, for harnesses without this skill
+  raw/<project>/<topic>/<slug>.md  sources an agent fetched or the owner pasted
+  <project>/<topic>/<topic>.md     the topic's folder note: what the topic covers
+  <project>/<topic>/<slug>.md      articles and synthesis pages
 ```
 
 **Raw** is every note an article may cite as evidence. It is read and never edited by the wiki:
 
 | raw class | where | on the backlog |
 |---|---|---|
-| fetched or pasted source | `wiki/raw/<topic>/` (written by `sbmap wiki raw`) | yes |
+| fetched or pasted source | `wiki/raw/<project>/<topic>/` (written by `sbmap wiki raw`) | yes |
 | clipping | `Clippings/` (the owner's web clipper) | yes |
 | research note | `wayfinder/**/research/` | yes |
 | ticket, `status: resolved` | `wayfinder/**/issues/` | `type: research` only; others when `learn` names them |
 
 The agent writes only under `wiki/` (and the tracker). `Clippings/` is the owner's.
 
-**Topics** are subject areas (`obsidian`, `unity-physics`, `threejs`), never repos or maps: one
-article serves every map that touches its subject. One level only: `wiki/<topic>/<slug>.md`. `raw`
-is reserved.
+**Projects** keep each repo's knowledge apart, the way `wayfinder/<repo>/` keeps its maps. A
+project is the repo's folder name under `wayfinder/` (`monorepo`, `semantra`, `sk4te`), so a map's
+findings land in its repo's project. Knowledge that holds outside any one repo (how Obsidian
+indexes links, a three.js technique, a library's API) goes in `general`, even when one repo's map
+found it: the test is whether another repo could use it unchanged. An article that applies one
+`general` article to a repo lives in the repo's project and links the general one through
+`related`.
+
+**Topics** are subject areas inside a project (`part-hierarchy`, `obsidian`, `unity-physics`), never
+maps: one article serves every map of the project that touches its subject. One level each:
+`wiki/<project>/<topic>/<slug>.md`. `raw` is reserved as a project and a topic name. A wiki from
+before projects (topics straight under `wiki/`) moves with `sbmap wiki migrate <project>`.
 
 **Slugs** are the title in kebab-case, ≤60 characters, unique across the whole wiki (so a link
 fixed by file name is never ambiguous). They never start with digits and a dash: Semantra's vault
@@ -46,14 +56,15 @@ index reads a leading `NNN-` (and so a `2026-` date) as a ticket number. Dates l
 ---
 wiki: article
 type: concept
+project: general
 status: current
 summary: "One line: what this article establishes."
 updated: 2026-10-26
 sources:
-  - "[[wiki/raw/obsidian/frontmatter-link-cache|Frontmatter link cache]]"
+  - "[[wiki/raw/general/obsidian/frontmatter-link-cache|Frontmatter link cache]]"
   - "[[wayfinder/semantra/obsidian-plugin/issues/007-does-the-plugin-read-links-and-tags-from-obsi|#007]]"
 related:
-  - "[[wiki/obsidian/metadata-cache|Metadata cache]]"
+  - "[[wiki/general/obsidian/metadata-cache|Metadata cache]]"
 aliases:
   - frontmatterLinks
 tags:
@@ -68,7 +79,7 @@ One paragraph: the article's thesis and the facts it rests on.
 ## <body sections>
 
 Distilled and reorganised from the sources, not copied. Other articles and tickets are wikilinks
-in prose: `[[wiki/<topic>/<slug>|Title]]`, a ticket's from `sbmap link`.
+in prose: `[[wiki/<project>/<topic>/<slug>|Title]]`, a ticket's from `sbmap link`.
 ```
 
 Properties, in this order; sbmap omits an empty list:
@@ -77,6 +88,7 @@ Properties, in this order; sbmap omits an empty list:
 |---|---|
 | `wiki` | `article`, `synthesis`, `raw`, `topic`, `index`, `log`: what sbmap and Bases filter on |
 | `type` | `concept` (an idea, technique, pattern, the reason behind a decision), `entity` (a named tool, library, API, service, product), `synthesis`, `source` (raw), `topic`: Semantra's node kind |
+| `project` | the project folder the note lives in, written by sbmap so Bases and Semantra can filter on it; `wiki check` keeps it in step with the folder |
 | `status` | `current`, `outdated`, `disputed`; articles only |
 | `summary` | the note's line in the index, written once, here |
 | `updated` | the last change to the knowledge, never a typo fix; articles only |
@@ -125,7 +137,7 @@ source read alike: `wiki: raw`, `type: source`, `title`, `source` (URL, or an or
 `tags: [wiki/source]`. The body is the source's own text, formatting noise removed, opinions and
 wording kept.
 
-A topic's folder note is `wiki: topic`, `type: topic`, `summary`, `tags: [wiki/topic]`, its `# `
+A topic's folder note is `wiki: topic`, `type: topic`, `project`, `summary`, `tags: [wiki/topic]`, its `# `
 heading, and the `--about` text as a paragraph of body: without a body, only the heading is
 embedded.
 
@@ -186,27 +198,28 @@ averaged, each counting the same, into **one vector for the whole note**. So:
 
 ## The index and the log
 
-`index.md` holds, between `%% sb:index:start %%` and `%% sb:index:end %%`, one `## <topic>` section
-per topic, alphabetical: the folder note's `summary`, then a table (Article as a wikilink, Type,
+`index.md` holds, between `%% sb:index:start %%` and `%% sb:index:end %%`, one `## <project>` section
+per project (`general` first, then alphabetical) and in it one `### <topic>` section per topic,
+alphabetical: the folder note's `summary`, then a table (Article as a wikilink, Type,
 Summary, Updated, which is `archived` for synthesis), articles by title, synthesis pages last. It is
 built from properties alone, so every `sbmap wiki` write regenerates it, the way writes resync a
 map's Route. Never hand-edit the block. Below it, `![[wiki/wiki.base#Needs attention]]`.
 
-`wiki.base` views: *To review* (`reviewed` empty or older than `updated`), *By topic* (articles
-grouped by folder), *Needs attention* (`status` not `current`), *Recently updated* (by `updated`,
+`wiki.base` views: *To review* (`reviewed` empty or older than `updated`), *By project* (articles
+grouped by `project`, each with its topic folder), *Needs attention* (`status` not `current`), *Recently updated* (by `updated`,
 descending), *Synthesis*.
 
 `log.md` is append-only, newest last. Its headings are the machine-readable inventory:
 
 ```markdown
-## [2026-10-26] learn | [[wiki/obsidian/frontmatter-links|Frontmatter links]]
+## [2026-10-26] learn | [[wiki/general/obsidian/frontmatter-links|Frontmatter links]]
 - Disposition: New; Disputed
-- Raw: [[wiki/raw/obsidian/frontmatter-link-cache|Frontmatter link cache]]
-- Updated: [[wiki/obsidian/metadata-cache|Metadata cache]]
+- Raw: [[wiki/raw/general/obsidian/frontmatter-link-cache|Frontmatter link cache]]
+- Updated: [[wiki/general/obsidian/metadata-cache|Metadata cache]]
 
 ## [2026-10-26] learn | no material: Clippings/Claude Artifact.md
 
-## [2026-10-26] ask | Archived: [[wiki/obsidian/how-semantra-reads-properties|How Semantra reads properties]]
+## [2026-10-26] ask | Archived: [[wiki/general/obsidian/how-semantra-reads-properties|How Semantra reads properties]]
 
 ## [2026-10-26] tend | 6 problems, 4 fixed
 ```
@@ -221,36 +234,40 @@ below them is the agent's prose, written with ordinary edit tools. Tickets cited
 read with `sbmap show`, as everywhere.
 
 - `<note>` is any note under `wiki/` (article, synthesis, raw, folder note): a vault path, a
-  `<topic>/<slug>`, or a wikilink.
+  `<project>/<topic>/<slug>`, or a wikilink.
+- `--project <repo>` narrows a read to that project plus `general`: what one repo's work can use.
 - `<refs>` are comma-separated vault paths, wikilinks, or `<map>#<NNN>` for a ticket; sbmap writes
   each as a full-path wikilink and refuses one that names no note.
 
 | command | does |
 |---|---|
 | **read** | |
-| `wiki index [--write]` | prints every topic and article, one line each. The first read of every verb. `--write` restamps the block into `index.md`, adding the markers if missing |
-| `wiki find <terms…> [--raw] [--limit N]` | case-insensitive; a note matches any term; scored 3 per hit on title or aliases, 2 on summary, 1 in the body. Prints the top N (default 10): path, type, status, summary, score. `--raw` searches raw notes too (every class above), so `ask` works with Obsidian closed |
+| `wiki index [--project P] [--write]` | prints every project, topic and article, one line each. The first read of every verb, with `--project` set to the repo's. `--write` restamps the block into `index.md`, adding the markers if missing |
+| `wiki find <terms…> [--raw] [--project P] [--limit N]` | case-insensitive; a note matches any term; scored 3 per hit on title or aliases, 2 on summary, 1 in the body. Prints the top N (default 10): path, type, status, summary, score. `--raw` searches raw notes too (every class above), so `ask` works with Obsidian closed |
 | `wiki show <note> [--full]` | digest: properties, Overview, headings, every Outdated/Disputed callout. `--full` prints the body |
 | `wiki link <note>` | the wikilink to paste into prose |
-| `wiki backlog [--limit N]` | raw notes on the backlog that no article's `sources` cites and the log has not marked no-material; oldest `created` first (file time when there is none); default 10, and the total |
+| `wiki backlog [--project P] [--limit N]` | raw notes on the backlog that no article's `sources` cites and the log has not marked no-material; oldest `created` first (file time when there is none); default 10, and the total |
 | **write** | |
 | `wiki init` | creates whatever of the layout is missing; never overwrites |
-| `wiki raw <topic> --title "…" --source "…" [--author "…"] [--published YYYY-MM-DD\|Unknown] --from <file\|->` | writes a raw note from a file or stdin; the slug comes from the title (`-2` when taken). A `source` URL another raw note already has prints that note and exits non-zero. Never overwrites |
-| `wiki new <topic>/<slug> --title "…" --type concept\|entity\|synthesis --summary "…" --sources <refs> [--related <refs>] [--aliases "a, b"] [--about "…"]` | scaffolds the note: properties, `# Title`, `## Overview` opening with the summary. A taken slug is an error. A new topic needs `--about`, which writes its folder note |
+| `wiki raw <project>/<topic> --title "…" --source "…" [--author "…"] [--published YYYY-MM-DD\|Unknown] --from <file\|->` | writes a raw note from a file or stdin; the slug comes from the title (`-2` when taken). A `source` URL another raw note already has prints that note and exits non-zero. Never overwrites |
+| `wiki new <project>/<topic>/<slug> --title "…" --type concept\|entity\|synthesis --summary "…" --sources <refs> [--related <refs>] [--aliases "a, b"] [--about "…"]` | scaffolds the note: properties, `# Title`, `## Overview` opening with the summary. A taken slug is an error. A new topic needs `--about`, which writes its folder note. Given only `<topic>/<slug>`, it refuses and names the project its sources come from |
 | `wiki set <note> key=value … [key+=<refs>] [key-=<refs>]` | `=` replaces (a list key takes `<refs>`), `+=`/`-=` add to or drop from a list; `updated=today` stamps the date. `disputes` and `supersedes`/`superseded_by` are written on both articles; setting `superseded_by` sets `status=outdated` |
 | `wiki log <learn\|ask\|tend> --subject "…" [--disposition "New; Update"] [--raw <refs>] [--updated <refs>]` | appends one dated entry; a note path in the subject (`Archived: <path>`) becomes its wikilink, other text stays as written |
 | `wiki check [--fix]` | the lint below. Exits non-zero on any format or link problem; grounding suspects and the backlog are printed, never counted |
+| `wiki migrate <project> [topic…] [--write]` | moves topics from before projects (`wiki/<topic>/`, `wiki/raw/<topic>/`) under `<project>`, all of them or the named ones; sets `project` on what moved (sources excepted: they are never edited) and repoints every link in `wiki/` and `wayfinder/`. Lists the owner's notes elsewhere that link in, without touching them. A dry run unless `--write` |
 
 ### What `wiki check` enforces
 
 - **Fixed with `--fix`:** the index block out of date; a wikilink whose target moved, when one note
-  has that file name; a `related` link to a note that no longer exists (dropped).
+  has that file name; a `related` link to a note that no longer exists (dropped); a `project`
+  property that disagrees with the note's folder.
 - **Format:** an unknown `wiki`, `type` or `status`; a property missing for its kind (an article
   without `summary`, `updated`, `status` or `sources`; a synthesis without `archived` or `sources`);
   `status` disagreeing with the rule under *Outdated and disputed claims*; an Outdated callout
   without its date; one end missing from `supersedes`/`superseded_by` or `disputes`; a topic folder
-  without its folder note; a slug taken twice, or starting with digits and a dash; a note deeper
-  than `wiki/<topic>/` outside `raw/`.
+  without its folder note; a slug taken twice (folder notes aside), or starting with digits and a
+  dash; a note anywhere but `wiki/<project>/<topic>/` or `wiki/raw/<project>/<topic>/`; a topic from
+  before projects.
 - **Links:** a markdown link to a vault note, or a wikilink by bare file name, where a full-path
   wikilink belongs; a bare `#NNN`; a `sources` entry of the wrong class for its note; a source ticket
   that is not resolved; broken links, read from the files, so Obsidian need not be running. Links

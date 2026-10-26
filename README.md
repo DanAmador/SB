@@ -94,8 +94,8 @@ python3 skills/sb/scripts/sbmap.py resolve sk4te/one-tether 624 --gist "..." --a
 python3 skills/sb/scripts/sbmap.py close sk4te/one-tether
 
 # The wiki (format: skills/sb/reference/wiki.md)
-python3 skills/sb/scripts/sbmap.py wiki index
-python3 skills/sb/scripts/sbmap.py wiki find tether spring --raw
-python3 skills/sb/scripts/sbmap.py wiki new physics/tether-spring --title "Tether spring" --type concept --summary "..." --sources sk4te/one-tether#624
+python3 skills/sb/scripts/sbmap.py wiki index --project sk4te
+python3 skills/sb/scripts/sbmap.py wiki find tether spring --raw --project sk4te
+python3 skills/sb/scripts/sbmap.py wiki new sk4te/physics/tether-spring --title "Tether spring" --type concept --summary "..." --sources sk4te/one-tether#624
 python3 skills/sb/scripts/sbmap.py wiki check --fix
 ```

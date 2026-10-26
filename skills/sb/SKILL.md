@@ -31,8 +31,9 @@ around that vault, each one a verb.
 ## Every verb starts here
 
 1. **Read the vault first.** Find this repo's maps (`sbmap maps --repo <repo path>`) and their
-   handoff/checkpoint files (`sbmap status <map>` names them); read the wiki's index
-   (`sbmap wiki index`) and `sbmap wiki find` the effort's nouns; search the rest of the vault for
+   handoff/checkpoint files (`sbmap status <map>` names them); read the wiki's index for this repo
+   (`sbmap wiki index --project <repo>`: its knowledge plus `general`) and `sbmap wiki find
+   --project <repo>` the effort's nouns; search the rest of the vault for
    them (`obsidian search:context`). Say in one line what they gave you, "nothing" included.
 2. **Resolve the contract**: the rules this run works under. [reference/contract.md](reference/contract.md).
    `learn` and `ask` skip this step: they write only the wiki.
