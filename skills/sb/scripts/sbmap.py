@@ -2,7 +2,7 @@
 """sbmap: the deterministic half of the vault's wayfinder tracker.
 
 Reads and writes the local tracker the vault's `wayfinder/README.md` defines: a folder per map
-(`map.md`, `issues/<NNN>-<slug>.md`, `board.base`), every ticket's fields in Obsidian properties
+(`map.md`, `issues/<NNN> <Title>.md`, `board.base`), every ticket's fields in Obsidian properties
 (frontmatter) and every reference between tickets a wikilink, so Obsidian's graph, backlinks and
 Bases see the whole route. It answers what an agent should never compute or type by eye.
 
@@ -93,7 +93,7 @@ SHAPES = {  # mermaid node shape per ticket type
     "prototype": ('[["', '"]]'),
     "architecture": ('{{"', '"}}'),
 }
-TICKET_KEYS = ["wayfinder", "operonId", "number", "project", "aliases", "status", "type",
+TICKET_KEYS = ["wayfinder", "operonId", "number", "title", "project", "aliases", "status", "type",
                "priority", "created", "completed", "map", "blocked_by", "claimed_by",
                "paths", "github", "tags"]
 MAP_KEYS = ["wayfinder", "project", "status", "aliases", "repo", "github", "tags"]
@@ -195,6 +195,23 @@ def write_atomic(path, text):
     os.replace(tmp, path)
 
 
+def md_target(name):
+    """A file name as a markdown link target, encoded the way Obsidian writes its own: spaces only."""
+    return name.replace(" ", "%20")
+
+
+def sources(listing):
+    """Obsidian's comma-joined source paths; a comma inside a file name is not a separator, and
+    the part after one holds no `/`."""
+    out = []
+    for part in listing.split(", "):
+        if out and "/" not in part:
+            out[-1] += ", " + part
+        else:
+            out.append(part.strip())
+    return out
+
+
 def wikilink(path, alias):
     target = rel(path)
     target = target[:-3] if target.endswith(".md") else target
@@ -219,7 +236,8 @@ class Ticket:
         self.text = path.read_text(encoding="utf-8")
         self.props, self.body, self.has_fm = split_fm(self.text)
         fields = dict(self.props) if self.has_fm else legacy_fields(self.body)
-        self.title = (re.search(r"^# (.+)$", self.body, re.M) or [None, path.stem])[1].strip()
+        # the title is a property; tickets from before it was one carry it as their H1
+        self.title = str(fields.get("title") or (re.search(r"^# (.+)$", self.body, re.M) or [None, path.stem])[1]).strip()
         raw_status = str(fields.get("status") or "open").lower()
         self.raw_status = fields.get("status") or "open"
         self.status = OPERON_TO_WF_STATUS.get(raw_status, raw_status)
@@ -612,7 +630,7 @@ def cmd_check(args):
                 problems.append(f"{t.id}: blocker '{b}' is not a wikilink; `sbmap block` writes them")
         if t.status == "resolved" and not t.has_answer:
             problems.append(f"{t.id}: resolved with no '## Answer'")
-        if t.status == "resolved" and t.path.stem not in decisions:
+        if t.status == "resolved" and t.path.stem not in decisions and md_target(t.path.stem) not in decisions:
             problems.append(f"{t.id}: resolved but missing from the map's Decisions so far")
         if t.status not in STATUSES:
             problems.append(f"{t.id}: unknown status '{t.status}'")
@@ -646,7 +664,7 @@ def cmd_check(args):
         for line in unresolved.splitlines():
             parts = line.split("\t")
             if len(parts) == 3:
-                for s in (s.strip() for s in parts[2].split(",")):
+                for s in sources(parts[2]):
                     if not s.startswith(folder):
                         continue
                     # Obsidian lists links to folders as unresolved; a folder that exists is fine
@@ -820,6 +838,13 @@ def cmd_init(args):
     print(f"initialized map: {map_file}")
 
 
+def file_title(title):
+    """The title as a file name: Operon shows the file name, so it is the title, less the
+    characters Obsidian refuses in a name or a link."""
+    name = " ".join(re.sub(r'[\\/:*?"<>|#^\[\]]', " ", title).split())
+    return name if len(name) <= 100 else name[:100].rsplit(" ", 1)[0]
+
+
 def cmd_new(args):
     m = load(args[0])
     title = opt(args, "--title") or sys.exit("sbmap: --title is required")
@@ -832,16 +857,16 @@ def cmd_new(args):
     done_when = opt(args, "--done-when", "")
     comments = opt(args, "--comments", "") or opt(args, "--ruling", "")
     n = next_number(m)
-    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:60].rstrip("-")
-    path = m.folder / "issues" / f"{n:03d}-{slug}.md"
+    path = m.folder / "issues" / f"{n:03d} {file_title(title)}.md"
     path.parent.mkdir(exist_ok=True)
-    props = ticket_props(m, n, status="open", type_=type_, priority=priority, blocked=blocked_links(m, refs))
+    props = ticket_props(m, n, status="open", type_=type_, priority=priority, blocked=blocked_links(m, refs),
+                         extra={"title": title})
     if opt(args, "--paths"):
         props["paths"] = split_list(opt(args, "--paths"))
 
     q_text = question.replace("\\n", "\n").strip() if question else ""
     dw_text = done_when.replace("\\n", "\n").strip() if done_when else ""
-    body = f"# {title}\n\n## Question\n\n{q_text}\n\n## Done when\n\n{dw_text}\n\n## Comments\n"
+    body = f"## Question\n\n{q_text}\n\n## Done when\n\n{dw_text}\n\n## Comments\n"
     if comments:
         c_text = comments.replace("\\n", "\n").strip()
         body += f"\n- **{date.today().isoformat()}**: {c_text}\n"
@@ -961,7 +986,7 @@ def cmd_resolve(args):
         sys.exit(f"sbmap: {t.id} has no '## Answer' yet; provide --answer or write it first")
 
     cmd_set([args[0], args[1], "status=resolved", "--no-sync"])
-    line = f"- [{t.title}](issues/{t.path.name}): {gist}" + (f", `{commit}`" if commit else "")
+    line = f"- [{t.title}](issues/{md_target(t.path.name)}): {gist}" + (f", `{commit}`" if commit else "")
     m = load(args[0])
     body = m.body
     i = body.find("## Decisions so far")
@@ -997,7 +1022,8 @@ def diagram(m, hide_resolved=False):
         if t.num not in shown:
             continue
         a, b = SHAPES.get(t.type, SHAPES["task"])
-        lines.append(f'    t{t.id}{a}{t.id} · {label(t.title)}{b}')
+        # Obsidian makes an internal-link node a link to the note its label names
+        lines.append(f'    t{t.id}{a}{t.path.stem}{b}')
         cls = ("done" if t.status == "resolved" else "out" if t.status == "out-of-scope"
                else "claimed" if t.status == "claimed" else "frontier" if t.num in frontier else "blocked")
         classes[cls].append(f"t{t.id}")
@@ -1025,10 +1051,13 @@ def diagram(m, hide_resolved=False):
     for cls, ids in classes.items():
         if ids:
             lines.append(f"    class {','.join(ids)} {cls}")
+    tickets = [f"t{t.id}" for t in m.order() if t.num in shown]
+    if tickets:
+        lines.append(f"    class {','.join(tickets)} internal-link")
     lines.append("```")
     legend = ("Blue, thick border: the frontier. Amber: claimed. Green: resolved. Grey: blocked. "
               "Dashed: out of scope or another map. Shape is the type: box task, rounded grilling, "
-              "slanted research, double box prototype, hexagon architecture.")
+              "slanted research, double box prototype, hexagon architecture. Click a ticket to open it.")
     if hide_resolved:
         legend += " Resolved tickets hidden."
     return "\n".join([START, "", "\n".join(lines), "",

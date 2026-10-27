@@ -36,7 +36,7 @@ class NewTicketsAndMaps(VaultCase):
     def test_set_maps_priority_too(self):
         self.sb("new", "monorepo/overrides", "--title", "First", "--no-sync")
         self.sb("set", "monorepo/overrides", "1", "priority=high", "--no-sync")
-        self.assertIn("priority: A", self.read("wayfinder/monorepo/overrides/issues/001-first.md"))
+        self.assertIn("priority: A", self.read("wayfinder/monorepo/overrides/issues/001 First.md"))
 
 
 class Boards(VaultCase):
