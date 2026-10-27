@@ -1,9 +1,9 @@
 # sb-workflow
 
-`/sb` is one slash command for the way Dan runs agents: the Obsidian vault
-(`~/Documents/Second Brain`) is the hub, wayfinder maps live there as markdown, and every session,
-model and harness syncs through it. Built 2026-10-25 from ~760 past sessions: each verb is a ritual
-that was being retyped by hand.
+`/sb` is one slash command for running coding agents from an Obsidian vault: the vault
+(`$SB_VAULT`, else `~/Documents/Second Brain`) is the hub, wayfinder maps and tickets live there as
+markdown notes, and every session, model and harness syncs through it. It was built from ~760 past
+agent sessions: each verb is a routine that kept being retyped by hand.
 
 ## The loop
 
