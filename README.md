@@ -76,6 +76,10 @@ install.sh            links the skill into ~/.agents/skills and ~/.claude/skills
   verbs still work from the files and say what they skipped.
 - The Operon plugin in that vault. Ticket and map statuses (`Project.Planned` … `Project.Finished`)
   and `priority` letters are Operon's, and its boards filter on them.
+- Claude Code, so `install.sh` can install the `obsidian-links` mod. sb's reports link tickets as
+  `obsidian://` links, and without the mod Claude Code Desktop won't open them in Obsidian.
+  `install.sh` looks for `claude` on the PATH, then in `~/.local/bin`, and says so when it skips
+  the mod.
 - Optional, work in progress: the Semantra CLI (`semantra search`). Once it lands, `sb find` and
   `sb ask` rank vault notes by meaning through it; until then they fall back to keyword scoring.
 

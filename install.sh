@@ -40,10 +40,18 @@ for k, v in json.load(open(sys.argv[1]))["skills"].items():
 # The repo is a folder marketplace, so Claude Code reads the mod from mods/ itself: an edit lands
 # with /reload-plugins, no reinstall. One install per config: ~/.claude, and any ~/.claude-*
 # config that has plugins.
-command -v claude >/dev/null || { echo "install: claude not on PATH; skipping the mod" >&2; exit 0; }
+# Shells often wrap claude in an alias or function a script cannot see, so fall back to the
+# native installer's path.
+claude="$(command -v claude || true)"
+[ -n "$claude" ] || [ ! -x "$HOME/.local/bin/claude" ] || claude="$HOME/.local/bin/claude"
+if [ -z "$claude" ]; then
+    echo "install: claude not found; skipped the obsidian-links mod, so obsidian:// links in chat" \
+         "will not open. Install Claude Code and rerun." >&2
+    exit 0
+fi
 for dir in "$HOME/.claude" "$HOME"/.claude-*; do
     [ "$dir" = "$HOME/.claude" ] || [ -d "$dir/plugins" ] || continue
-    cc() { CLAUDE_CONFIG_DIR="$dir" claude "$@"; }
+    cc() { CLAUDE_CONFIG_DIR="$dir" "$claude" "$@"; }
     cc plugin marketplace list 2>/dev/null | grep -q sb-workflow || cc plugin marketplace add "$here"
     cc plugin install obsidian-links@sb-workflow
 done
