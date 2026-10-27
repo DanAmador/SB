@@ -15,7 +15,7 @@
     sbmap.py wiki raw <project>/<topic> --title "…" --source "…" [--author "…"] [--published YYYY-MM-DD|Unknown]
                           --from <file|->   keeps a source as a raw note
     sbmap.py wiki new <project>/<topic>/<slug> --title "…" --type concept|entity|synthesis --summary "…"
-                          --sources <refs> [--related <refs>] [--aliases "a, b"] [--about "…"]
+                          --sources <refs> [--related <refs>] [--aliases "a, b"] [--tags "a, b"] [--about "…"]
     sbmap.py wiki set <note> key=value … [key+=<refs>] [key-=<refs>]
     sbmap.py wiki log <learn|ask|tend> --subject "…" [--disposition "…"] [--raw <refs>] [--updated <refs>]
     sbmap.py wiki check [--fix]             lint; exits non-zero on any format or link problem
@@ -259,6 +259,18 @@ def topics(project):
     return sorted(t.name for t in d.iterdir() if t.is_dir()) if d.is_dir() else []
 
 
+def base_tags(kind_tag, project, topic):
+    """The tags every wiki note carries. Semantra makes each one a `tag:<name>` node the note is
+    `tagged` to, so notes meet through shared tags; no tag notes are written."""
+    return [kind_tag, f"project/{project}", f"topic/{topic}"]
+
+
+def retag(props, project, topic):
+    """The note's tags with its project and topic tags made current, the owner's own kept."""
+    tags = [t for t in props.get("tags") or [] if not t.startswith(("project/", "topic/"))]
+    return tags + [t for t in base_tags(f"wiki/{props.get('type')}", project, topic) if t not in tags]
+
+
 def project_of(path):
     """The project a note belongs to: its wiki folder, or its map's repo; None for a clipping."""
     parts = Path(sb.rel(path)).parts
@@ -485,7 +497,7 @@ def make_topic(project, topic, about):
     n = Note.__new__(Note)
     n.path, n.body = wiki_dir() / project / topic / f"{topic}.md", f"# {heading}\n\n{about.strip()}\n"
     n.save({"wiki": "topic", "type": "topic", "project": project, "summary": about.strip(),
-            "tags": ["wiki/topic"]})
+            "tags": base_tags("wiki/topic", project, topic)})
 
 
 def sources_project(refs_arg):
@@ -527,7 +539,8 @@ def cmd_new(args):
         props.update(summary="[Archived] " + summary.removeprefix("[Archived] "), archived=today())
     props.update(sources=sources, related=related,
                  aliases=[a.strip() for a in (sb.opt(args, "--aliases") or "").split(",") if a.strip()],
-                 tags=[f"wiki/{type_}"])
+                 tags=base_tags(f"wiki/{type_}", project, topic)
+                 + [t.strip() for t in (sb.opt(args, "--tags") or "").split(",") if t.strip()])
     n = Note.__new__(Note)
     n.path = wiki_dir() / project / topic / f"{slug}.md"
     n.save(props, f"# {title}\n\n## Overview\n\n{summary.removeprefix('[Archived] ')}\n")
@@ -654,7 +667,7 @@ def cmd_raw(args):
         slug = f"{base}-{i}"
     props = {"wiki": "raw", "type": "source", "project": project, "title": title, "source": source,
              "author": sb.opt(args, "--author", ""), "published": sb.opt(args, "--published", "Unknown"),
-             "created": today(), "tags": ["wiki/source"]}
+             "created": today(), "tags": base_tags("wiki/source", project, topic)}
     path = wiki_dir() / "raw" / project / topic / f"{slug}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     sb.write_atomic(path, sb.dump_fm(props, WIKI_KEYS) + text)
@@ -1100,6 +1113,15 @@ def cmd_check(args):
                     if r is not None:
                         kept.append(r)
                 props[key] = kept
+        old, rel = list(props.get("tags") or []), p.relative_to(w).parts
+        tags = retag(props, here, rel[1]) if len(rel) > 2 else old
+        if set(tags) != set(old):
+            if fix:
+                props["tags"] = tags
+                changed = True
+                fixed.append(f"{lab(p)}: tags set to {', '.join(tags)}")
+            else:
+                problems.append(f"{lab(p)}: tags are {', '.join(old) or 'missing'}; the rule makes them {', '.join(tags)}")
         prose = outside_code(n.body, lambda seg: seg)
         body = outside_code(n.body, lambda seg: LINK.sub(lambda m: repair(m), seg), keep_code=True)
         for m in re.finditer(r"\[[^\]]*\]\((?!https?://|mailto:)([^)\s]+?\.md)\)", prose):
@@ -1195,7 +1217,7 @@ def cmd_migrate(args):
         if new.parent != w / "raw" / project:  # sources are never edited
             for q in new.glob("*.md"):
                 n = Note(q)
-                n.save({**n.props, "project": project})
+                n.save({**n.props, "project": project, "tags": retag(n.props, project, new.name)})
     write_index()
     print("written")
 

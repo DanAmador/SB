@@ -69,6 +69,9 @@ aliases:
   - frontmatterLinks
 tags:
   - wiki/concept
+  - project/general
+  - topic/obsidian
+  - obsidian/metadata-cache
 ---
 # Frontmatter links
 
@@ -99,11 +102,18 @@ Properties, in this order; sbmap omits an empty list:
 | `supersedes`, `superseded_by` | articles this one replaces, or that replace it; always both ends |
 | `disputes` | articles that disagree with this one; always both ends |
 | `aliases` | other names the concept goes by: what `wiki find` and Obsidian match |
-| `tags` | `wiki/<type>` |
+| `tags` | `wiki/<type>`, `project/<project>`, `topic/<topic>`, then the concept tags (`wiki new --tags`, `wiki set tags+=`) |
 
 **Every reference is a full-path wikilink**, its alias the target's `# ` heading. Semantra and
 Obsidian then resolve it to exactly one note. A bare `#NNN` resolves to the first ticket of that
 number in *any* map: always `sbmap link`. External sources are ordinary `https://` links.
+
+**Tags are edges.** Semantra makes every tag a `tag:<name>` node and links each note to it with a
+`tagged` edge, so articles meet through shared tags; a nested `a/b` will also hang under `tag:a`.
+So tag what an article is about with a concept tag (`obsidian/metadata-cache`, `three/instancing`),
+and never write tag notes: a note under `wiki/tags/` is an ordinary note, not a tag.
+`wiki check --fix` keeps `project/` and `topic/` current after a move. Outside Obsidian, Semantra's
+folder reader sees frontmatter tags only once its ticket 028 lands.
 
 ### Outdated and disputed claims
 
@@ -134,10 +144,10 @@ prefixes its summary with `[Archived]`.
 `sbmap wiki raw` writes the properties Obsidian's web clipper writes, so a clipping and a fetched
 source read alike: `wiki: raw`, `type: source`, `title`, `source` (URL, or an origin such as
 "pasted by the owner"), `author`, `published` (`YYYY-MM-DD` or `Unknown`), `created`,
-`tags: [wiki/source]`. The body is the source's own text, formatting noise removed, opinions and
+`tags: [wiki/source, project/<project>, topic/<topic>]`. The body is the source's own text, formatting noise removed, opinions and
 wording kept.
 
-A topic's folder note is `wiki: topic`, `type: topic`, `project`, `summary`, `tags: [wiki/topic]`, its `# `
+A topic's folder note is `wiki: topic`, `type: topic`, `project`, `summary`, `tags: [wiki/topic, project/<project>, topic/<topic>]`, its `# `
 heading, and the `--about` text as a paragraph of body: without a body, only the heading is
 embedded.
 

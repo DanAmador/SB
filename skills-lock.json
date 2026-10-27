@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "skills": {
+    "design-doc-mermaid": {
+      "source": "spillwavesolutions/design-doc-mermaid",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "379bb1b77bba960f4629114254cd68ca84618044de61c4c4f363801f2c6f0fe1"
+    },
+    "karpathy-llm-wiki": {
+      "source": "astro-han/karpathy-llm-wiki",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "e5160084a6095f7d9a276a462df9a5d2d2c1b9386388c0f087e8c23c968c9472"
+    },
+    "ponytail": {
+      "source": "dietrichgebert/ponytail",
+      "sourceType": "github",
+      "skillPath": "skills/ponytail/SKILL.md"
+    },
+    "i-have-adhd": {
+      "source": "ayghri/i-have-adhd",
+      "sourceType": "github",
+      "skillPath": "skills/i-have-adhd/SKILL.md"
+    }
+  }
+}

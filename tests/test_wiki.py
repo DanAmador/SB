@@ -292,6 +292,18 @@ class Check(Seeded):
         self.assertIn("[[wiki/general/cache/metadata-cache|the cache]]", text)
         self.assertNotIn("gone", text)
 
+    def test_tags_carry_project_and_topic_and_fix_makes_them_current(self):
+        self.sb("wiki", "new", "general/obsidian/metadata-cache", "--title", "Metadata cache", "--type", "entity",
+                "--summary", "S.", "--sources", "wiki/raw/general/obsidian/link-cache", "--tags", "graph, obsidian/api")
+        self.assertIn("  - wiki/entity\n  - project/general\n  - topic/obsidian\n  - graph\n  - obsidian/api\n",
+                      self.read("wiki/general/obsidian/metadata-cache.md"))
+        self.write(self.article, self.read(self.article).replace("  - topic/obsidian\n", "  - topic/old\n"))
+        self.problems("tags are wiki/concept, project/general, topic/old")
+        self.sb("wiki", "check", "--fix")
+        text = self.read(self.article)
+        self.assertIn("  - topic/obsidian\n", text)
+        self.assertNotIn("topic/old", text)
+
     def test_format_problems(self):
         self.write("wiki/general/obsidian/bad.md", "---\nwiki: article\ntype: concept\nstatus: wrong\n---\n# Bad\n")
         self.write("wiki/general/obsidian/deep/note.md", "---\nwiki: article\n---\n# Deep\n")

@@ -16,15 +16,16 @@ around that vault, each one a verb.
 - **`sbmap` CLI:** `python3 <this skill's dir>/scripts/sbmap.py` (run without args to list all commands).
   - 🔒 **Token rule: Author and inspect 100% through the CLI.** Never use `read_file`, `write_file`, or `edit_file` on tickets or maps. Use `sbmap show` to read tickets, `sbmap new` with `--question` and `--done-when` to create, `sbmap comment` for rulings, and `sbmap resolve` with `--answer`. Changes auto-sync the Route diagram.
   - 🔒 **Token rule: Never load external skills or the full vault.** The contract, ticket types, and output rules are self-contained here.
+- 🔒 **Build the least (ponytail):** every design and every implementer climbs the ladder in [reference/architecture.md](reference/architecture.md#build-the-least) before writing code: no new module, dependency or abstraction where an existing tool, the stdlib or one line holds.
 - **Ticket types:** `task` (concrete unit, ~1.5 h), `grilling` (clarification), `research` (subagent spike in `<map>/research/`), `prototype` (throwaway code), `architecture` (structural design with mermaid).
 - **Obsidian CLI:** when the app is running, `obsidian` adds search, backlinks, renderer, and file history: [reference/obsidian.md](reference/obsidian.md).
 
-## Output contract (succinct, high-information, ADHD-friendly)
+## Output contract (succinct, high-information, the i-have-adhd style)
 
 - **Line 1 is the action or decision he can take now.**
 - Bullets, short. ≤5 visible per group.
 - **Status emojis only:** ✅ landed · 🎮 needs play · 👤 his call · ⚠️ problem/unverified · ⏳ running · 🔒 rule · 🗺️ map change · 🆕 created · 💬 added to · ♻️ reopened. Never decorative.
-- Refer to tickets by name with number link: `[<name>](<path>)`.
+- Refer to tickets by name with number link: `[<name>](obsidian://open?path=<absolute path, percent-encoded>)`, so a click opens the note in Obsidian (the `obsidian-links` mod makes it clickable in Claude Code Desktop).
 - Every question carries `➡️ recommendation`. Silence = accepted on recommendation.
 - End with one action in under two minutes. Zero conversational filler.
 

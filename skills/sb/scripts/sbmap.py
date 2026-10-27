@@ -1240,8 +1240,10 @@ def link_numbers(text, repo, here=None, self_path=None):
 
 def guess_repo(m):
     """The checkout a map works on: a path it names, else a repo folder named in it or by its prefix."""
-    code = Path.home() / "Documents" / "Coding"
-    found = re.search(r"/Users/[^/\s`]+/Documents/Coding/([\w.-]+)", m.md)
+    code = Path(os.environ.get("SB_CODE", Path.home() / "Documents" / "Coding"))
+    if not code.is_dir():
+        return ""
+    found = re.search(rf"{re.escape(str(code))}/([\w.-]+)", m.md)
     names = [found.group(1)] if found else []
     names += sorted((d.name for d in code.iterdir() if d.is_dir() and (d / ".git").exists()
                      and re.search(rf"(?<![\w-]){re.escape(d.name)}(?![\w-])", m.md)), key=len, reverse=True)

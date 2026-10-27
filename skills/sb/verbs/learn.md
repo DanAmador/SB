@@ -44,7 +44,8 @@ cascade are shared, so compiling never runs in parallel.
    - Update: `sbmap wiki set <article> sources+=<raw> updated=today`, then rewrite the sections it
      changes.
    - New: `sbmap wiki new <project>/<topic>/<slug>`, named after the concept rather than the source,
-     with a `summary` an agent can triage from. A source spanning topics lands in the closest one and
+     with a `summary` an agent can triage from, and `--tags` for the concepts it is about (tags are
+     Semantra's edges: [the wiki](../reference/wiki.md)). A source spanning topics lands in the closest one and
      links the rest through `related`. The heading names the project's own things in its own words
      ("Assemblio part hierarchy"), so the article reads right outside its folder too.
    - Disputed: the Disputed callout under the contested claim, `status=disputed`; on both articles,

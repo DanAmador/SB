@@ -20,10 +20,28 @@ A ticket that only *uses* a structure stays a `task`; it is blocked by the archi
 links it (`[[…|#NNN]]`, or `![[…#Answer]]` to embed the diagram itself) instead of redrawing it.
 Obsidian's backlinks on the architecture ticket then list everything built on that structure.
 
+## Build the least
+
+Every structure starts from the `ponytail` skill's ladder (dietrichgebert/ponytail, MIT, pinned in
+`skills-lock.json`), inlined here so no run has to load it. Stop at the first rung that holds:
+
+1. Does it need to exist? A speculative need is skipped, in one line.
+2. Does a tool the repo already has do it (a CLI, a library in the lockfile, the platform)? Use it.
+3. Does the stdlib do it? Use it.
+4. Can it be one line? One line.
+5. Only then: the least new code that works, in the fewest files.
+
+No interface with one implementation, no config for a value that never changes, no scaffolding
+"for later". A deliberate shortcut with a known ceiling says so in a `ponytail:` comment naming the
+ceiling and the upgrade. Never simplified away: validation at trust boundaries, error handling
+that prevents data loss, security, anything the owner asked for. Non-trivial logic leaves one
+runnable check behind.
+
 ## Resolving one
 
 1. Read the code as it is. Draw **today** first, as its own diagram, when the change moves something.
-2. Draw the **decision**: the target structure. Every node is a real name (a file, type, module or
+2. Draw the **decision**: the target structure, the lowest rung of [the ladder](#build-the-least)
+   that holds; every new node names the rung it beat in one line under the diagram. Every node is a real name (a file, type, module or
    glossary term from the repo's `CONTEXT.md`), never a placeholder.
 3. Under the diagram, list each arrow or rule the diagram cannot show ("the bridge never imports
    `obsidian`"), and what was ruled without the owner (`R: …, cost if wrong: …`).

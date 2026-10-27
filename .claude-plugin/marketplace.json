@@ -1,0 +1,5 @@
+{
+  "name": "sb-workflow",
+  "owner": { "name": "Dan Amador" },
+  "plugins": [{ "name": "obsidian-links", "source": "./mods/obsidian-links" }]
+}

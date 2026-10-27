@@ -14,6 +14,13 @@ continue.
 
 <the map's contract block, verbatim>
 
+## Build the least
+
+Before any new file, module or dependency: does it need to exist; does a tool the repo already has
+do it; does the stdlib; can it be one line? Take the first that holds. No abstraction with one
+user, no scaffolding for later; the shortest working diff wins. A deliberate shortcut gets a
+`ponytail:` comment naming its ceiling. Never cut validation, data-loss handling or security.
+
 ## Git
 
 Commit only your own paths, by explicit pathspec, when the ticket's checks pass:

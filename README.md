@@ -58,8 +58,13 @@ skills/sb/
                       (every mermaid block parses in Obsidian's own renderer)
   scripts/sbwiki.py   `sbmap wiki`: the compiled wiki (index, find, show, raw, new, set, log, backlog,
                       check with grounding suspects)
+mods/obsidian-links/  Claude Code mod: a click on a vault link in chat opens the note in Obsidian
+.claude-plugin/       marketplace.json: makes this repo a folder marketplace for the mod
 tests/                the CLI run against a throwaway vault: `python3 -m unittest discover tests`
-install.sh            links the skill into ~/.agents/skills and ~/.claude/skills
+skills-lock.json      third-party skills sb leans on (karpathy-llm-wiki, design-doc-mermaid, ponytail, i-have-adhd),
+                      pinned by GitHub repo; install.sh fetches them, the repo never vendors them
+install.sh            links the skill into ~/.agents/skills and ~/.claude/skills, fetches the locked
+                      skills, installs the mod
 ```
 
 ## Install
@@ -70,6 +75,20 @@ install.sh            links the skill into ~/.agents/skills and ~/.claude/skills
 
 `~/.agents/skills` is the shared folder the other harnesses read; `~/.claude/skills/sb` is a
 relative link to it, like the other shared skills.
+
+The vault is `$SB_VAULT`, else `~/Documents/Second Brain`; set `SB_VAULT` if yours lives elsewhere.
+Repos are looked for under `$SB_CODE`, else `~/Documents/Coding`.
+Needs `python3` and `git`.
+
+It fetches each skill in `skills-lock.json` from GitHub into `~/.agents/skills/<name>` (one already
+there is kept; delete it and rerun to update) and links it into `~/.claude/skills`. To add one,
+add its repo and `skillPath` to the lock and rerun.
+
+It also installs the `obsidian-links` mod into each Claude Code config it finds (`~/.claude`, and
+any `~/.claude-*` config that has plugins), when `claude` is on the PATH. Reports link tickets as
+`obsidian://open?path=…`, which Claude Code Desktop does not open on its own; the mod redraws a
+reply holding vault links so a click runs `open obsidian://…`. It is read from `mods/` in place:
+edit it, then `/reload-plugins`.
 
 ## The tracker is Obsidian-native
 
