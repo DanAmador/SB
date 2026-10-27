@@ -1,0 +1,10 @@
+/* sb's Route diagrams: a ticket node is a link (class internal-link), but reads as plain text in
+   the node's status colour; it takes the link colour only on hover. */
+.mermaid g.node.internal-link a.internal-link {
+  color: inherit;
+  text-decoration: none;
+}
+.mermaid g.node.internal-link a.internal-link:hover {
+  color: var(--link-color-hover);
+  text-decoration: underline;
+}

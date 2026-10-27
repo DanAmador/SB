@@ -37,6 +37,15 @@ done < <(python3 -c 'import json, os, sys
 for k, v in json.load(open(sys.argv[1]))["skills"].items():
     print(k, v["source"], os.path.dirname(v["skillPath"]) or ".")' "$here/skills-lock.json")
 
+# Obsidian reads CSS snippets only from real files in the vault, so the Route's link styling is
+# copied, not linked: rerun after editing it, then enable it in Settings → Appearance → CSS snippets.
+vault="${SB_VAULT:-$HOME/Documents/Second Brain}"
+if [ -d "$vault/.obsidian" ]; then
+    mkdir -p "$vault/.obsidian/snippets"
+    cp "$here/obsidian/snippets/sb-route-links.css" "$vault/.obsidian/snippets/"
+    echo "copied sb-route-links.css into $vault/.obsidian/snippets"
+fi
+
 # The repo is a folder marketplace, so Claude Code reads the mod from mods/ itself: an edit lands
 # with /reload-plugins, no reinstall. One install per config: ~/.claude, and any ~/.claude-*
 # config that has plugins.

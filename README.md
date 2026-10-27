@@ -80,6 +80,9 @@ install.sh            links the skill into ~/.agents/skills and ~/.claude/skills
   `obsidian://` links, and without the mod Claude Code Desktop won't open them in Obsidian.
   `install.sh` looks for `claude` on the PATH, then in `~/.local/bin`, and says so when it skips
   the mod.
+- The `sb-route-links` CSS snippet, which `install.sh` copies into the vault: a map's Route links
+  each ticket node to its note, and the snippet keeps the label in its status colour until hover.
+  Enable it once in Settings → Appearance → CSS snippets.
 - Optional, work in progress: the Semantra CLI (`semantra search`). Once it lands, `sb find` and
   `sb ask` rank vault notes by meaning through it; until then they fall back to keyword scoring.
 
