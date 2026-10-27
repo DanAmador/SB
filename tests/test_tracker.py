@@ -28,6 +28,11 @@ class NewTicketsAndMaps(VaultCase):
             self.assertIn(f"priority: {letter}", (self.vault / path).read_text(), word)
         self.sb("new", "monorepo/overrides", "--title", "Bad", "--priority", "whenever", ok=False)
 
+    def test_aliases_are_text_so_obsidian_reads_them_as_aliases(self):
+        path = self.sb("new", "monorepo/overrides", "--title", "First", "--no-sync").stdout.strip()
+        self.assertIn('aliases:\n  - "#001"\n  - "001"\n', (self.vault / path).read_text())
+        self.assertIn("number: 1\n", (self.vault / path).read_text())
+
     def test_set_maps_priority_too(self):
         self.sb("new", "monorepo/overrides", "--title", "First", "--no-sync")
         self.sb("set", "monorepo/overrides", "1", "priority=high", "--no-sync")

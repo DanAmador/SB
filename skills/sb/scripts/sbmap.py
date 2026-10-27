@@ -159,7 +159,10 @@ def dump_fm(props, order):
             if not v:
                 continue
             lines.append(f"{k}:")
-            lines += [f"  - {scalar(x)}" for x in v]
+            # a bare 001 or true in a list is a number or a boolean to YAML, and Obsidian flags a
+            # list of text (aliases) holding one as a type mismatch
+            lines += [f'  - "{x}"' if re.fullmatch(r"[-+.\d]+|true|false|null|~", str(x), re.I)
+                      else f"  - {scalar(x)}" for x in v]
         elif v not in (None, ""):
             lines.append(f"{k}: {scalar(v)}")
     lines.append("---")
