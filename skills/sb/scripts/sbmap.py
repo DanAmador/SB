@@ -11,6 +11,9 @@ Bases see the whole route. It answers what an agent should never compute or type
     sbmap.py status   <map>             counts, claimed tickets, the frontier, handoff/checkpoint files
     sbmap.py frontier <map>             open tickets whose every blocker is resolved, in map order
     sbmap.py show     <map> <NNN>       succinct digest: status, type, blockers, question, done when
+    sbmap.py lanes    <map> [--max 2] [--json]
+                                        open tickets split into parallel lanes by their paths and
+                                        blockers, the rest serial (ticket 009's rule)
     sbmap.py next     <map>             the next free ticket number for this map's repo
     sbmap.py link     <map> <NNN>       the wikilink to a ticket, to paste into prose
     sbmap.py check    <map>             lint: unknown blockers, cycles, missing Answers or Decisions,
@@ -21,7 +24,7 @@ Bases see the whole route. It answers what an agent should never compute or type
                                         scaffolds map.md, board.base, issues/ and initial Route
     sbmap.py new      <map> --title "<sentence>" [--type task] [--priority S..F|high|normal|low]
                             [--question "..."] [--done-when "..."]
-                            [--blocked-by 622,623] [--comments "..."] [--no-sync]
+                            [--blocked-by 622,623] [--paths src/a.py,docs/] [--comments "..."] [--no-sync]
                                         full ticket creation with properties, wikilinks & auto-sync
     sbmap.py comment  <map> <NNN> --text "<ruling or comment>"
                                         appends dated entry to ## Comments
@@ -59,7 +62,7 @@ import tempfile
 import time
 import zlib
 from datetime import date
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 VAULT = Path(os.environ.get("SB_VAULT", Path.home() / "Documents" / "Second Brain"))
 WAYFINDER = VAULT / "wayfinder"
@@ -92,7 +95,7 @@ SHAPES = {  # mermaid node shape per ticket type
 }
 TICKET_KEYS = ["wayfinder", "operonId", "number", "project", "aliases", "status", "type",
                "priority", "created", "completed", "map", "blocked_by", "claimed_by",
-               "github", "tags"]
+               "paths", "github", "tags"]
 MAP_KEYS = ["wayfinder", "project", "status", "aliases", "repo", "github", "tags"]
 # Operon's priorities are letters, S highest, C its default; sbmap takes either the letter or a word
 OPERON_PRIORITIES = ("S", "A", "B", "C", "D", "E", "F")
@@ -221,6 +224,8 @@ class Ticket:
         raw = fields.get("blocked_by") or []
         self.blocked_by = raw if isinstance(raw, list) else [b.strip() for b in raw.split(",") if b.strip()]
         self.claimed_by = fields.get("claimed_by") or ""
+        raw = fields.get("paths") or []
+        self.paths = raw if isinstance(raw, list) else split_list(raw)
         # `## Answer` is the convention; tickets moved from GitHub carry `## Resolved in ...`
         # or the resolution as their last comment.
         self.has_answer = bool(re.search(r"^## (Answer|Resolved|Comments)\b", self.text, re.M))
@@ -411,6 +416,10 @@ def rel(path):
         return str(p)
 
 
+def split_list(value):
+    return [x.strip() for x in str(value).split(",") if x.strip()]
+
+
 def opt(args, name, default=None):
     if name in args:
         idx = args.index(name)
@@ -478,6 +487,63 @@ def cmd_frontier(args):
     m = load(args[0])
     for t in m.frontier():
         print(f"{t.id}\t{t.type}\t{t.title}\t{t.path}")
+
+
+def overlap(a, b):
+    """Two ticket path lists share a file: one path is the other or a folder holding it."""
+    return any(x.parts[:len(y.parts)] == y.parts or y.parts[:len(x.parts)] == x.parts
+               for x in map(PurePosixPath, a) for y in map(PurePosixPath, b))
+
+
+def plan_lanes(m, most=2):
+    """The lane split ticket 009 decided: open tickets in map order, each placed once its blockers
+    are cleared or placed. A ticket joins the lane it conflicts with (shared paths or a blocker),
+    opens a lane while there are fewer than `most`, else joins the shortest; one that conflicts with
+    two lanes or the serial tail, or has no paths, goes serial, after every lane."""
+    lanes, serial, placed = [], [], {}
+    waiting = [t for t in m.order() if t.status == "open"]
+    progress = True
+    while waiting and progress:
+        progress = False
+        for t in list(waiting):
+            blocks = [m.blocker(b) for b in t.blocked_by]
+            if not all(cleared or (x and x.num in placed) for _, cleared, x in blocks):
+                continue
+            mine = {x.num for _, cleared, x in blocks if x and not cleared}
+            clash = lambda group: any(u.num in mine or overlap(u.paths, t.paths) for u in group)
+            hit = [lane for lane in lanes if clash(lane)]
+            if not t.paths or clash(serial) or len(hit) > 1:
+                serial.append(t)
+            elif hit:
+                hit[0].append(t)
+            elif len(lanes) < most:
+                lanes.append([t])
+            else:
+                min(lanes, key=len).append(t)
+            placed[t.num] = t
+            waiting.remove(t)
+            progress = True
+    return lanes, serial
+
+
+def cmd_lanes(args):
+    m = load(args[0])
+    lanes, serial = plan_lanes(m, int(opt(args, "--max", "2")))
+    out = {"lanes": [{"lane": chr(65 + i), "tickets": [t.num for t in lane],
+                      "paths": sorted({p for t in lane for p in t.paths})} for i, lane in enumerate(lanes)],
+           "serial": [t.num for t in serial],
+           "needs_paths": [t.num for t in serial if not t.paths]}
+    if "--json" in args:
+        print(json.dumps(out))
+        return
+    for i, lane in enumerate(lanes):
+        print(f"lane {chr(65 + i)}: {', '.join(out['lanes'][i]['paths'])}")
+        for t in lane:
+            print(f"  {t.id} {t.title}")
+    if serial:
+        print("serial, after every lane:")
+        for t in serial:
+            print(f"  {t.id} {t.title}" + ("  (needs paths)" if not t.paths else ""))
 
 
 def next_number(m):
@@ -767,6 +833,8 @@ def cmd_new(args):
     path = m.folder / "issues" / f"{n:03d}-{slug}.md"
     path.parent.mkdir(exist_ok=True)
     props = ticket_props(m, n, status="open", type_=type_, priority=priority, blocked=blocked_links(m, refs))
+    if opt(args, "--paths"):
+        props["paths"] = split_list(opt(args, "--paths"))
 
     q_text = question.replace("\\n", "\n").strip() if question else ""
     dw_text = done_when.replace("\\n", "\n").strip() if done_when else ""
@@ -826,6 +894,8 @@ def cmd_set(args):
             sys.exit("sbmap: use `sbmap block` for blockers")
         if k == "priority":
             v = operon_priority(v)
+        if k == "paths":
+            v = split_list(v)
         props[k] = v
     curr_wf = OPERON_TO_WF_STATUS.get(str(props.get("status", "")).lower(), str(props.get("status", "")).lower())
     if curr_wf != "claimed":
@@ -1438,7 +1508,7 @@ def cmd_wiki(args):
     sbwiki.main(args)
 
 
-COMMANDS = {"maps": cmd_maps, "status": cmd_status, "frontier": cmd_frontier, "show": cmd_show,
+COMMANDS = {"maps": cmd_maps, "status": cmd_status, "frontier": cmd_frontier, "lanes": cmd_lanes, "show": cmd_show,
             "next": cmd_next, "link": cmd_link, "check": cmd_check, "verify": cmd_verify,
             "init": cmd_init, "new": cmd_new, "set": cmd_set, "claim": cmd_claim,
             "comment": cmd_comment, "ruling": cmd_comment, "block": cmd_block,

@@ -30,8 +30,9 @@ Two phases with a hard line between them: **propose** (he is present; one round 
    - Fill about 80% of the window, in map order. Blocked tickets count once their blockers are queued
      ahead of them. Tickets only the owner can close (a playtest, a call) never queue: list them as 👤.
    - A tier and model per ticket, and one for the orchestrator ([reference/models.md](../reference/models.md)).
-   - Lanes: infer each ticket's file set from the code it names. A second lane only when the sets are
-     disjoint and the contract allows more than one agent; write each lane's paths.
+   - Lanes: every queued ticket needs `paths` (the files or folders it will change). Set any missing
+     ones from the code the ticket names (`sbmap set <map> <NNN> paths=a,b`), then take the split
+     from `sbmap lanes <map> --max <the contract's agent cap> --json`; never pick lanes by eye.
    - A live peer under a one-agent contract: the default is to start once the peer is idle, doing
      code-only work until then. That default becomes a proposal question.
 4. **Present one proposal**, in the owner's shape ([reference/output.md](../reference/output.md)), in

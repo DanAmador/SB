@@ -36,8 +36,9 @@ Each line is a ruling the owner has repeated across sessions; the reason sits be
   the repo says so. A gameplay suite is slow; a web unit suite is usually fast. The repo's
   instructions name which is which; when they are silent, ask in the proposal.
 - **Main tree, serial by default.** Worktrees only when the owner asks: changes in another folder are
-  invisible to him. **Lanes** (parallel implementers) only on disjoint file sets, **max 2 at a time,
-  reviewers and researchers counted**: that is the token budget.
+  invisible to him. **Lanes** (parallel implementers) only on disjoint file sets, as `sbmap lanes`
+  splits them from each ticket's `paths`, **max 2 at a time, reviewers and researchers counted**:
+  that is the token budget.
 - **Every dispatch carries the git guardrails:** commit only your own paths; tree-wide git
   (`stash`, `checkout`, `reset`, `restore`, `clean`) is off limits because the stash and index are
   repo-global and one call wipes every peer. Write a `git diff > <outside-repo>.patch` snapshot

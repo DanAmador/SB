@@ -9,8 +9,10 @@ built in.
 3. **Grill:** destination first, then breadth-first. Every question carries ➡️ a recommendation; ask in rounds of ≤5; when he answers some, list the rest as accepted on recommendation.
 4. **Initialize the map:** `sbmap init <repo>/<effort> --title "<title>" --destination "<dest>" --done-when "<dw>"`. It creates `map.md`, `board.base`, and initial Route diagram automatically.
 5. **Author tickets via CLI:**
-   `sbmap new <map> --title "<title>" --type <type> --question "<question>" --done-when "<done-when>" [--blocked-by 624,625]`
+   `sbmap new <map> --title "<title>" --type <type> --question "<question>" --done-when "<done-when>" [--blocked-by 624,625] [--paths a,b]`
    - Each sized to one session (~1.5 h).
+   - `--paths`: the repo files or folders it will change, when the code already says. `sbmap lanes` runs
+     tickets with disjoint paths in parallel; a ticket without paths runs alone.
    - Structural decisions are `architecture` tickets.
    - Diagram syncs automatically on each ticket.
 6. **Verify:** `sbmap check <map>` clean, `sbmap verify <map>`. If Obsidian is open, `obsidian open path="wayfinder/<effort>/map.md"`.

@@ -52,7 +52,7 @@ skills/sb/
                       architecture (mermaid decision tickets, the map's Route), obsidian (the CLI)
   templates/          launch contract, checkpoint, handoff, implementer brief, architecture ticket,
                       map report
-  scripts/sbmap.py    full authoring CLI: init, new, show, comment, resolve, frontier, lint, Route diagram,
+  scripts/sbmap.py    full authoring CLI: init, new, show, comment, resolve, frontier, lanes, lint, Route diagram,
                       close; stdlib Python, any harness. Auto-syncs Route diagram on every write.
                       With Obsidian running it also asks the app: broken links, and `verify`
                       (every mermaid block parses in Obsidian's own renderer)
