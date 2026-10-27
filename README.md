@@ -67,6 +67,18 @@ install.sh            links the skill into ~/.agents/skills and ~/.claude/skills
                       skills, installs the mod
 ```
 
+## Requirements
+
+- `python3` and `git`, for `install.sh` and `sbmap`.
+- [Obsidian](https://obsidian.md) with the vault open, and its CLI (`obsidian` on the PATH,
+  Obsidian ≥ 1.12 with the CLI enabled). sb reads the frontier, backlinks and search through it, and
+  `sbmap check` and `sbmap verify` ask it for broken links and mermaid parsing. Without it the
+  verbs still work from the files and say what they skipped.
+- The Operon plugin in that vault. Ticket and map statuses (`Project.Planned` … `Project.Finished`)
+  and `priority` letters are Operon's, and its boards filter on them.
+- Optional, work in progress: the Semantra CLI (`semantra search`). Once it lands, `sb find` and
+  `sb ask` rank vault notes by meaning through it; until then they fall back to keyword scoring.
+
 ## Install
 
 ```bash
@@ -78,7 +90,6 @@ relative link to it, like the other shared skills.
 
 The vault is `$SB_VAULT`, else `~/Documents/Second Brain`; set `SB_VAULT` if yours lives elsewhere.
 Repos are looked for under `$SB_CODE`, else `~/Documents/Coding`.
-Needs `python3` and `git`.
 
 It fetches each skill in `skills-lock.json` from GitHub into `~/.agents/skills/<name>` (one already
 there is kept; delete it and rerun to update) and links it into `~/.claude/skills`. To add one,
