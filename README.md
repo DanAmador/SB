@@ -89,6 +89,8 @@ install.sh            links the skill into ~/.agents/skills and ~/.claude/skills
 ## Install
 
 ```bash
+git clone https://github.com/DanAmador/SB.git sb-workflow
+cd sb-workflow
 ./install.sh
 ```
 
