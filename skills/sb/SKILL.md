@@ -22,9 +22,9 @@ around that vault, each one a verb.
 
 ## Output contract (succinct, high-information, the i-have-adhd style)
 
-- **Line 1 is the action or decision he can take now.**
+- **Line 1 is the action or decision the owner can take now.**
 - Bullets, short. ≤5 visible per group.
-- **Status emojis only:** ✅ landed · 🎮 needs play · 👤 his call · ⚠️ problem/unverified · ⏳ running · 🔒 rule · 🗺️ map change · 🆕 created · 💬 added to · ♻️ reopened. Never decorative.
+- **Status emojis only:** ✅ landed · 🎮 needs play · 👤 owner's call · ⚠️ problem/unverified · ⏳ running · 🔒 rule · 🗺️ map change · 🆕 created · 💬 added to · ♻️ reopened. Never decorative.
 - Refer to tickets by name with number link: `[<name>](obsidian://open?path=<absolute path, percent-encoded>)`, so a click opens the note in Obsidian (the `obsidian-links` mod makes it clickable in Claude Code Desktop).
 - Every question carries `➡️ recommendation`. Silence = accepted on recommendation.
 - End with one action in under two minutes. Zero conversational filler.

@@ -1,11 +1,11 @@
 # /sb tonight [hours] [map]
 
 The owner is about to leave the machine (a night, a nap, a trip). Turn the vault's frontier into a
-queue that fills the window, get **one** confirm while he is still here, then run it unattended to
+queue that fills the window, get **one** confirm while the owner is still here, then run it unattended to
 the end. Default window: 8 h. Default map: this repo's open maps, in the order `sbmap maps` lists.
 
-Two phases with a hard line between them: **propose** (he is present; one round of questions) and
-**run** (he is gone; nothing waits on him).
+Two phases with a hard line between them: **propose** (the owner is present; one round of questions) and
+**run** (the owner is gone; nothing waits on them).
 
 ## Propose
 
@@ -40,15 +40,15 @@ Two phases with a hard line between them: **propose** (he is present; one round 
    1. One line: what "go" starts (map, tickets, lanes, until what clock time).
    2. One line: what the vault and reconciliation gave you (🗺️ closed, moved, half-built).
    3. The queue per lane: ticket name link · tier/model · hours, one line of what it does; ≤5 visible,
-      the rest folded; then what is not queued and why (👤 his, blocked deeper).
-   4. What he will *see* in the morning, per ticket; say plainly when a ticket is invisible structure.
+      the rest folded; then what is not queued and why (👤 the owner's, blocked deeper).
+   4. What the owner will *see* in the morning, per ticket; say plainly when a ticket is invisible structure.
    5. ⚠️ peers and contract conflicts.
-   6. Questions the evidence raised, each with ➡️ its default, applied if he says only "go". None is a
+   6. Questions the evidence raised, each with ➡️ its default, applied if the owner says only "go". None is a
       fine number.
    7. Tests: what runs per ticket, what runs once, or that nothing does, and the ruling behind it.
 
-   Wait for his answer. "go" / "yes" accepts everything; edits ("drop X", "no lane B") apply and
-   then go without a second round. This is the run's only stop for him.
+   Wait for the owner's answer. "go" / "yes" accepts everything; edits ("drop X", "no lane B") apply and
+   then go without a second round. This is the run's only stop for the owner.
 
 ## Run
 

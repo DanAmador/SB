@@ -6,7 +6,7 @@ built in.
 
 1. **Rules & scope.** Do not load external skill files or vault docs. Author 100% through `sbmap` CLI.
 2. **Scan existing context:** check other maps' Decisions (`sbmap maps --repo <path>`) and local ADRs. Say in one line what bears on it.
-3. **Grill:** destination first, then breadth-first. Every question carries ➡️ a recommendation; ask in rounds of ≤5; when he answers some, list the rest as accepted on recommendation.
+3. **Grill:** destination first, then breadth-first. Every question carries ➡️ a recommendation; ask in rounds of ≤5; when the owner answers some, list the rest as accepted on recommendation.
 4. **Initialize the map:** `sbmap init <repo>/<effort> --title "<title>" --destination "<dest>" --done-when "<dw>"`. It creates `map.md`, `board.base`, and initial Route diagram automatically.
 5. **Author tickets via CLI:**
    `sbmap new <map> --title "<title>" --type <type> --question "<question>" --done-when "<done-when>" [--blocked-by 624,625] [--paths a,b]`

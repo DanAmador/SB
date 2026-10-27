@@ -7,7 +7,8 @@ and every verb works from files alone. The CLI adds what only Obsidian knows. It
 machine), skip these steps and say so in one line.
 
 Every call targets the vault by name and takes vault-relative paths, quoted when they hold spaces:
-`obsidian vault="Second Brain" read path="wayfinder/sk4te-one-tether/map.md"`.
+`obsidian vault="<vault folder name>" read path="wayfinder/<repo>/<effort>/map.md"`, where the vault
+is the last folder of `$SB_VAULT` (sbmap passes it itself).
 
 | need | command |
 |---|---|
@@ -17,16 +18,16 @@ Every call targets the vault by name and takes vault-relative paths, quoted when
 | What points at a ticket before you change, merge or rule it out | `backlinks path="wayfinder/<map>/issues/<file>"` |
 | Broken links in a map | `sbmap check <map>` (it asks Obsidian) |
 | Every mermaid block in a map parses in the renderer the owner sees | `sbmap verify <map>`, after writing any diagram |
-| Show the owner the result, with its diagrams rendered | `open path="<file>"`, at the end of a verb he is present for; never during an unattended run |
+| Show the owner the result, with its diagrams rendered | `open path="<file>"`, at the end of a verb the owner is present for; never during an unattended run |
 | A vault file an agent clobbered (the vault has no git) | `history path=…`, `history:read path=… version=<n>`, then `history:restore` saying which version and why |
 
 ## The owner's app
 
-The app, its settings and his own notes are his. Read anything; write only the tracker
+The app, its settings and the owner's own notes are theirs. Read anything; write only the tracker
 (`wayfinder/`) and the wiki (`wiki/`, through `sbmap wiki` and the article prose; `Clippings/` is
-his). Plugins, themes, snippets, sync, restart and reload, `delete`, and the `dev:` tools
-stay untouched. `eval` is for read-only probes (`sbmap verify` uses it). Daily notes are his notes:
-a run writes there only when he asks.
+theirs). Plugins, themes, snippets, sync, restart and reload, `delete`, and the `dev:` tools
+stay untouched. `eval` is for read-only probes (`sbmap verify` uses it). Daily notes are the owner's:
+a run writes there only when they ask.
 
 ## What the tracker gives Obsidian
 
