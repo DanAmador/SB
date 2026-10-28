@@ -322,13 +322,14 @@ Repo-only files (the clone's README, AGENTS.md, CI, `wiki/index.md`, `wiki/log.m
 the vault, and the vault's index, log, `wiki.base` and `wayfinder/` never leave it. Sources that
 are tickets do not travel: keep a ticket's finding as a raw note before citing it in a shared project.
 
-Teammates work the shared repo without the vault: its `team-wiki` skill (`skills/team-wiki/` in the
-clone) runs ask, learn, verify and lint through this same `sbwiki.py`, fetched from GitHub at the
-commit pinned in `skills/team-wiki/scripts/SB_VERSION` by a small loader (`scripts/sb`), and the
-repo's CI runs `wiki check` through the same loader. Bump that pin in one pull request when the
-check changes; a teammate never carries a copy of sb. `wiki dump` writes the pull request's
-description to `.git/sb-dump-pr.md` in the clone (new and changed notes in tables, what changed,
-how to review), and team-wiki's learn PRs use the same shape.
+Teammates work the shared repo without the vault and without installing sb: the `team-wiki` skill
+(in the team's skills repo) runs ask, learn, verify, lint, and `export`/`import` (this file's dump
+and import, for anyone's own wiki folder) through `sbmap.py`, `sbwiki.py` and `sbsync.py`, fetched
+from GitHub at a pinned commit (`TOOLS_COMMIT`) into a per-user cache by a small loader. The shared
+repo's CI runs `wiki check` through a copy of that loader pinned to the same commit; bump both pins
+together when the tools change. `wiki dump` writes the pull request's description to
+`.git/sb-dump-pr.md` in the clone (new and changed notes in tables, what changed, how to review),
+and team-wiki's learn PRs use the same shape.
 
 ## How Semantra reads it
 
