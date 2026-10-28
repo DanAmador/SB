@@ -178,6 +178,31 @@ class ResolveStampsTheCommit(VaultCase):
         self.assertNotIn("ref:", text)
         self.assertIn("paths:\n  - c.py\n", text)
 
+    def test_a_merge_commit_gets_the_merged_branchs_files(self):
+        c = str(self.clone)
+        self.git("-C", c, "checkout", "-q", "-b", "side")
+        (self.clone / "c.py").write_text("c\n")
+        self.git("-C", c, "add", ".")
+        self.git("-C", c, "commit", "-q", "-m", "side")
+        self.git("-C", c, "checkout", "-q", "main")
+        (self.clone / "d.py").write_text("d\n")
+        self.git("-C", c, "add", ".")
+        self.git("-C", c, "commit", "-q", "-m", "main work")
+        self.git("-C", c, "merge", "-q", "--no-ff", "-m", "merge", "side")
+        merge = self.git("-C", c, "rev-parse", "HEAD").stdout.strip()
+        self.resolve("--commit", merge)
+        self.assertIn("paths:\n  - c.py\n", self.read(self.ticket_path))
+        self.assertNotIn("planned/", self.read(self.ticket_path))
+
+    def test_an_empty_diff_keeps_the_tickets_paths(self):
+        c = str(self.clone)
+        self.git("-C", c, "commit", "-q", "--allow-empty", "-m", "nothing")
+        empty = self.git("-C", c, "rev-parse", "HEAD").stdout.strip()
+        self.resolve("--commit", empty)
+        text = self.read(self.ticket_path)
+        self.assertIn(f"commit: {empty}\n", text)
+        self.assertIn("paths:\n  - planned/\n", text)
+
     def test_an_unknown_sha_writes_nothing(self):
         before = self.read(self.ticket_path), self.read("wayfinder/monorepo/overrides/map.md")
         self.resolve("--commit", "deadbeef", ok=False)

@@ -980,10 +980,15 @@ def commit_stamp(m, commit, root, paths):
     name = re.search(r"[:/]([\w.-]+/[\w.-]+?)(?:\.git)?/?$", origin)
     branch = git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
     reachable = branch != "HEAD" and git("merge-base", "--is-ancestor", sha, "HEAD", check=False).returncode == 0
-    if paths is None:
-        paths = git("diff-tree", "--root", "--no-commit-id", "--name-only", "-r", sha).stdout.split("\n")
+    auto = paths is None
+    if auto:  # first-parent diff: diff-tree prints nothing for a merge commit
+        rooted = git("rev-list", "--parents", "-n1", sha).stdout.split()[1:] == []
+        paths = (git("diff-tree", "--root", "--no-commit-id", "--name-only", "-r", sha) if rooted
+                 else git("diff", "--name-only", f"{sha}^1", sha)).stdout.split("\n")
     stamp = {"repo": name.group(1) if name else origin, "commit": sha, "ref": branch if reachable else "",
              "paths": [p for p in paths if p], "pr": ""}
+    if auto and not stamp["paths"]:
+        del stamp["paths"]  # an empty diff keeps the ticket's own paths
     try:  # no gh, no network or no PR: the ticket just has no pr
         r = subprocess.run(["gh", "pr", "list", "--search", sha, "--state", "all", "--json", "url"],
                            capture_output=True, text=True, cwd=root, timeout=30)
