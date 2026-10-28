@@ -38,7 +38,13 @@ cascade are shared, so compiling never runs in parallel.
 3. **Keep the raw**, whatever the disposition: `sbmap wiki raw <project>/<topic> … --from <scratchpad
    file>` for a fetch or a paste, in the topic the triage pointed to (`sbmap wiki index --project
    <project>` lists them). A
-   vault note is raw already. No material: log it (step 6) and stop.
+   vault note is raw already, except in a **shared project** (one a clone syncs, see
+   [Sharing projects](../reference/wiki.md#sharing-projects-through-a-git-clone)): there a ticket or
+   research note is first kept as a raw note in that project (its Question and Answer, or its body,
+   verbatim, with machine paths, personal emails and links into `wayfinder/` turned to plain text),
+   and the article cites that raw note, so every source travels with the wiki. A raw note read
+   from a repo also records where: `sbmap wiki set <raw> repo=<owner/name> commit=<full sha>
+   ref=<branch> paths=<files the claims rest on>`. No material: log it (step 6) and stop.
 4. **Compile**, by [Writing a finding](../reference/wiki.md#writing-a-finding). Locate every
    number, date and quote in the raw before writing it, and write it as found.
    - Update: `sbmap wiki set <article> sources+=<raw> updated=today`, then rewrite the sections it
