@@ -32,8 +32,11 @@ Bases see the whole route. It answers what an agent should never compute or type
                                         ticket properties (status, type, claimed_by, ...)
     sbmap.py claim    <map> <NNN> --by "<session or harness/model>" [--no-sync]
     sbmap.py block    <map> <NNN> <refs, comma separated: numbers, map folder names, or none> [--no-sync]
-    sbmap.py resolve  <map> <NNN> --gist "<one line>" [--answer "..."] [--commit <sha>] [--no-sync]
-                                        records ## Answer, marks resolved, adds Decisions line, syncs Route
+    sbmap.py resolve  <map> <NNN> --gist "<one line>" [--answer "..."] [--commit <sha>]
+                            [--repo-root <clone>] [--paths a,b] [--no-sync]
+                                        records ## Answer, marks resolved, adds Decisions line, syncs Route;
+                                        --commit also stamps repo, commit, ref, paths and pr (the PR
+                                        holding the commit, when gh finds one) on the ticket
     sbmap.py diagram  <map> [--write] [--hide-resolved]
                                         the route as mermaid; --write stamps it into map.md
     sbmap.py board    <map>             (re)writes the map's board.base (embedded in map.md), its repo's
@@ -95,7 +98,7 @@ SHAPES = {  # mermaid node shape per ticket type
 }
 TICKET_KEYS = ["wayfinder", "operonId", "number", "title", "project", "aliases", "status", "type",
                "priority", "created", "completed", "map", "blocked_by", "claimed_by",
-               "paths", "github", "tags"]
+               "paths", "repo", "commit", "ref", "pr", "github", "tags"]
 MAP_KEYS = ["wayfinder", "project", "status", "aliases", "repo", "github", "tags"]
 # Operon's priorities are letters, S highest, C its default; sbmap takes either the letter or a word
 OPERON_PRIORITIES = ("S", "A", "B", "C", "D", "E", "F")
@@ -957,11 +960,45 @@ def cmd_block(args):
         cmd_diagram([args[0], "--write"])
 
 
+def commit_stamp(m, commit, root, paths):
+    """The ticket properties a resolving commit gives: repo, full sha, branch, changed files, PR."""
+    if not root:
+        notes = re.search(r"^- Repo: `([^`]+)`", m.body, re.M)
+        root = notes.group(1) if notes else m.props.get("repo") or "."
+    root = str(Path(root).expanduser())
+
+    def git(*a, check=True):
+        r = subprocess.run(["git", "-C", root, *a], capture_output=True, text=True)
+        if check and r.returncode:
+            sys.exit(f"sbmap: git {' '.join(a)} in {root}: {r.stderr.strip() or 'failed'}")
+        return r
+    sha = git("rev-parse", "--verify", f"{commit}^{{commit}}").stdout.strip()
+    origin = git("remote", "get-url", "origin").stdout.strip()
+    name = re.search(r"[:/]([\w.-]+/[\w.-]+?)(?:\.git)?/?$", origin)
+    branch = git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+    reachable = branch != "HEAD" and git("merge-base", "--is-ancestor", sha, "HEAD", check=False).returncode == 0
+    if paths is None:
+        paths = git("diff-tree", "--root", "--no-commit-id", "--name-only", "-r", sha).stdout.split("\n")
+    stamp = {"repo": name.group(1) if name else origin, "commit": sha, "ref": branch if reachable else "",
+             "paths": [p for p in paths if p], "pr": ""}
+    try:  # no gh, no network or no PR: the ticket just has no pr
+        r = subprocess.run(["gh", "pr", "list", "--search", sha, "--state", "all", "--json", "url"],
+                           capture_output=True, text=True, cwd=root, timeout=30)
+        if r.returncode == 0:
+            stamp["pr"] = json.loads(r.stdout)[0]["url"]
+    except (OSError, ValueError, IndexError, KeyError, subprocess.SubprocessError):
+        pass
+    return stamp
+
+
 def cmd_resolve(args):
     m = load(args[0])
     t = m.ticket(args[1])
     gist = opt(args, "--gist") or sys.exit("sbmap: --gist is required")
     commit = opt(args, "--commit")
+    # first, so an unknown sha is an error before anything is written
+    stamp = commit_stamp(m, commit, opt(args, "--repo-root"),
+                         split_list(opt(args, "--paths")) if "--paths" in args else None) if commit else {}
     answer = opt(args, "--answer")
     if answer:
         ans_text = answer.replace("\\n", "\n").strip()
@@ -988,6 +1025,9 @@ def cmd_resolve(args):
     cmd_set([args[0], args[1], "status=resolved", "--no-sync"])
     line = f"- [{t.title}](issues/{md_target(t.path.name)}): {gist}" + (f", `{commit}`" if commit else "")
     m = load(args[0])
+    if stamp:
+        t = m.ticket(args[1])
+        t.save({**t.props, **stamp})
     body = m.body
     i = body.find("## Decisions so far")
     if i < 0:

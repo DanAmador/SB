@@ -1,4 +1,7 @@
+import os
+import subprocess
 import unittest
+from pathlib import Path
 
 from helpers import VaultCase
 
@@ -101,3 +104,89 @@ class MigrateBackfills(VaultCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ResolveStampsTheCommit(VaultCase):
+    MAP = "monorepo/overrides"
+
+    def setUp(self):
+        super().setUp()
+        self.clone = Path(self._tmp.name) / "clone"
+        self.git("init", "-q", "-b", "main", str(self.clone))
+        self.git("-C", str(self.clone), "remote", "add", "origin", "git@github.com:acme/widgets.git")
+        (self.clone / "a.py").write_text("a\n")
+        (self.clone / "docs").mkdir()
+        (self.clone / "docs" / "b.md").write_text("b\n")
+        self.git("-C", str(self.clone), "add", ".")
+        self.git("-C", str(self.clone), "commit", "-q", "-m", "work")
+        self.sha = self.git("-C", str(self.clone), "rev-parse", "HEAD").stdout.strip()
+        self.sb("init", self.MAP, "--title", "Overrides", "--destination", "Somewhere.", "--repo", str(self.clone))
+        self.sb("new", self.MAP, "--title", "First", "--paths", "planned/", "--no-sync")
+        self.ticket_path = "wayfinder/monorepo/overrides/issues/001 First.md"
+
+    def git(self, *args):
+        env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
+               "GIT_COMMITTER_EMAIL": "t@t"}
+        return subprocess.run(["git", *args], capture_output=True, text=True, check=True, env=env)
+
+    def gh(self, body):
+        """A fake gh first on PATH; the suite never reaches the network."""
+        d = Path(self._tmp.name) / "bin"
+        d.mkdir(exist_ok=True)
+        (d / "gh").write_text(f"#!/bin/sh\n{body}\n")
+        (d / "gh").chmod(0o755)
+        return f"{d}:/usr/bin:/bin"
+
+    def resolve(self, *extra, **kw):
+        return self.sb("resolve", self.MAP, "1", "--gist", "done", "--answer", "Yes.", "--no-sync", *extra, **kw)
+
+    def test_the_commit_gives_the_ticket_its_provenance_and_its_pr(self):
+        path = self.gh(f'echo \'[{{"url": "https://github.com/acme/widgets/pull/7"}}]\'; '
+                       f'[ "$4" = "{self.sha}" ] || exit 1')
+        self.resolve("--commit", self.sha[:8], path=path)
+        text = self.read(self.ticket_path)
+        self.assertIn(f"repo: acme/widgets\ncommit: {self.sha}\nref: main\npr: ", text)
+        self.assertIn('pr: "https://github.com/acme/widgets/pull/7"', text)
+        self.assertIn("paths:\n  - a.py\n  - docs/b.md\n", text)
+        self.assertNotIn("planned/", text)
+        self.assertIn("status: Project.Finished", text)
+        self.sb("check", self.MAP, ok=None)
+        self.assertNotIn("001", self.sb("check", self.MAP, ok=None).stdout.replace("001 First", ""))
+
+    def test_paths_override_the_diff_and_no_gh_leaves_no_pr(self):
+        self.resolve("--commit", self.sha, "--paths", "x/,y.py", "--repo-root", str(self.clone))
+        text = self.read(self.ticket_path)
+        self.assertIn("paths:\n  - x/\n  - y.py\n", text)
+        self.assertNotIn("pr:", text)
+
+    def test_a_failing_gh_or_no_pr_is_silent(self):
+        for body in ("exit 1", "echo []", "echo not json"):
+            self.resolve("--commit", self.sha, path=self.gh(body))
+            self.assertNotIn("pr:", self.read(self.ticket_path), body)
+            self.sb("set", self.MAP, "1", "status=open", "--no-sync")
+
+    def test_a_commit_off_the_current_branch_has_no_ref(self):
+        self.git("-C", str(self.clone), "checkout", "-q", "-b", "side")
+        (self.clone / "c.py").write_text("c\n")
+        self.git("-C", str(self.clone), "add", ".")
+        self.git("-C", str(self.clone), "commit", "-q", "-m", "side")
+        side = self.git("-C", str(self.clone), "rev-parse", "HEAD").stdout.strip()
+        self.git("-C", str(self.clone), "checkout", "-q", "main")
+        self.resolve("--commit", side)
+        text = self.read(self.ticket_path)
+        self.assertIn(f"commit: {side}\n", text)
+        self.assertNotIn("ref:", text)
+        self.assertIn("paths:\n  - c.py\n", text)
+
+    def test_an_unknown_sha_writes_nothing(self):
+        before = self.read(self.ticket_path), self.read("wayfinder/monorepo/overrides/map.md")
+        self.resolve("--commit", "deadbeef", ok=False)
+        self.assertEqual(before, (self.read(self.ticket_path), self.read("wayfinder/monorepo/overrides/map.md")))
+
+    def test_a_resolve_without_a_commit_stamps_nothing(self):
+        self.resolve()
+        text = self.read(self.ticket_path)
+        for key in ("repo:", "commit:", "ref:", "pr:"):
+            self.assertNotIn(key, text)
+        self.assertIn("planned/", text)
+        self.assertIn("status: Project.Finished", text)
