@@ -1503,8 +1503,21 @@ def drop_section(body, heading):
     return body[:i + 1] + (body[nxt + 1:] if nxt >= 0 else "")
 
 
+def wiki_module():
+    """The wiki's tools: the wikibrain skill (github.com/DanAmador/wikiBrain), pinned in skills-lock.json
+    and installed beside this skill by install.sh; WIKIBRAIN_DIR overrides where its scripts are."""
+    for d in (os.environ.get("WIKIBRAIN_DIR"), Path.home() / ".agents/skills/wikibrain/scripts",
+              Path.home() / ".claude/skills/wikibrain/scripts"):
+        if d and (Path(d) / "wikibrain.py").exists():
+            os.environ.setdefault("SB_VAULT", str(VAULT))
+            sys.path.insert(0, str(d))
+            import wikibrain
+            return wikibrain
+    sys.exit("sbmap: the wikibrain skill is missing: run install.sh (it is pinned in skills-lock.json)")
+
+
 def cmd_close(args):
-    import sbwiki
+    sbwiki = wiki_module()
     m = load(args[0])
     report = m.folder / "report.md"
     if report.exists():
@@ -1536,8 +1549,7 @@ def cmd_close(args):
 
 
 def cmd_wiki(args):
-    import sbwiki  # the wiki's commands live beside this file; see its docstring
-    sbwiki.main(args)
+    wiki_module().main(args)
 
 
 COMMANDS = {"maps": cmd_maps, "status": cmd_status, "frontier": cmd_frontier, "lanes": cmd_lanes, "show": cmd_show,

@@ -20,22 +20,30 @@ link "../../.agents/skills/sb" "$HOME/.claude/skills/sb"
 link "$here/skills/sb" "$HOME/.gemini/config/skills/sb"
 chmod +x "$here/skills/sb/scripts/sbmap.py"
 
-# Third-party skills: skills-lock.json names each one's GitHub repo and folder. A skill already
-# in ~/.agents/skills is left as it is; delete it and rerun to update.
-while read -r name repo dir; do
+# Third-party skills: skills-lock.json names each one's GitHub repo, folder and, when pinned, the
+# commit (`ref`). An unpinned skill already in ~/.agents/skills is left as it is (delete it and rerun
+# to update); a pinned one is reinstalled when its ref changes. A link (a local checkout you develop
+# in, e.g. ~/.agents/skills/wikibrain -> your wikiBrain clone) is never replaced.
+while read -r name repo dir ref; do
     dest="$HOME/.agents/skills/$name"
-    if [ ! -e "$dest" ]; then
+    [ -L "$dest" ] && { link "../../.agents/skills/$name" "$HOME/.claude/skills/$name"; continue; }
+    if [ ! -e "$dest" ] || { [ "$ref" != "-" ] && [ "$(cat "$dest/.lock-ref" 2>/dev/null)" != "$ref" ]; }; then
         tmp="$(mktemp -d)"
-        git clone -q --depth 1 "https://github.com/$repo.git" "$tmp"
-        rm -rf "$tmp/.git"
+        if [ "$ref" = "-" ]; then
+            git clone -q --depth 1 "https://github.com/$repo.git" "$tmp"
+        else
+            git clone -q "https://github.com/$repo.git" "$tmp" && git -C "$tmp" checkout -q "$ref"
+        fi
+        rm -rf "$tmp/.git" "$dest"
         cp -R "$tmp/$dir" "$dest"
+        [ "$ref" = "-" ] || echo "$ref" > "$dest/.lock-ref"
         rm -rf "$tmp"
-        echo "installed $name from $repo"
+        echo "installed $name from $repo${ref:+ at $ref}"
     fi
     link "../../.agents/skills/$name" "$HOME/.claude/skills/$name"
 done < <(python3 -c 'import json, os, sys
 for k, v in json.load(open(sys.argv[1]))["skills"].items():
-    print(k, v["source"], os.path.dirname(v["skillPath"]) or ".")' "$here/skills-lock.json")
+    print(k, v["source"], os.path.dirname(v["skillPath"]) or ".", v.get("ref") or "-")' "$here/skills-lock.json")
 
 # Obsidian reads CSS snippets only from real files in the vault, so the Route's link styling is
 # copied, not linked: rerun after editing it, then enable it in Settings → Appearance → CSS snippets.

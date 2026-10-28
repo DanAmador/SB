@@ -56,15 +56,13 @@ skills/sb/
                       close; stdlib Python, any harness. Auto-syncs Route diagram on every write.
                       With Obsidian running it also asks the app: broken links, and `verify`
                       (every mermaid block parses in Obsidian's own renderer)
-  scripts/sbwiki.py   `sbmap wiki`: the compiled wiki (index, find, show, raw with repo provenance,
-                      new, set, log, backlog, check with grounding suspects, verify: claims vs git)
-  scripts/sbsync.py   `sbmap wiki dump/import`: chosen projects synced both ways with a shared git
-                      clone by pull request (loaded only for those two commands)
+                      `sbmap wiki …` runs the wikibrain skill's tools (below)
 mods/obsidian-links/  Claude Code mod: a click on a vault link in chat opens the note in Obsidian
 .claude-plugin/       marketplace.json: makes this repo a folder marketplace for the mod
 tests/                the CLI run against a throwaway vault: `python3 -m unittest discover tests`
-skills-lock.json      third-party skills sb leans on (karpathy-llm-wiki, design-doc-mermaid, ponytail, i-have-adhd),
-                      pinned by GitHub repo; install.sh fetches them, the repo never vendors them
+skills-lock.json      skills sb leans on, by GitHub repo: wikibrain (the wiki's format and tools,
+                      github.com/DanAmador/wikiBrain, pinned to a commit), karpathy-llm-wiki, design-doc-mermaid,
+                      ponytail, i-have-adhd; install.sh fetches them, the repo never vendors them
 install.sh            links the skill into ~/.agents/skills and ~/.claude/skills, fetches the locked
                       skills, installs the mod
 ```
@@ -135,7 +133,7 @@ python3 skills/sb/scripts/sbmap.py comment sk4te/one-tether 624 --text "R1: ruli
 python3 skills/sb/scripts/sbmap.py resolve sk4te/one-tether 624 --gist "..." --answer "..." --commit "sha"
 python3 skills/sb/scripts/sbmap.py close sk4te/one-tether
 
-# The wiki (format: skills/sb/reference/wiki.md)
+# The wiki (format and tools: the wikibrain skill, github.com/DanAmador/wikiBrain)
 python3 skills/sb/scripts/sbmap.py wiki index --project sk4te
 python3 skills/sb/scripts/sbmap.py wiki find tether spring --raw --project sk4te
 python3 skills/sb/scripts/sbmap.py wiki new sk4te/physics/tether-spring --title "Tether spring" --type concept --summary "..." --sources sk4te/one-tether#624

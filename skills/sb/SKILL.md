@@ -59,4 +59,4 @@ around that vault, each one a verb.
 
 Reference, reached from the verbs: [models](reference/models.md) (which tier runs what),
 [architecture tickets](reference/architecture.md) (mermaid decisions), [the wiki](reference/wiki.md)
-(format, `sbmap wiki`, how to write a finding), and the [templates](templates/) every verb writes from.
+(a pointer: the format, `sbmap wiki` and how to write a finding live in the pinned wikibrain skill), and the [templates](templates/) every verb writes from.
