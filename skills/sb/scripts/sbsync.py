@@ -112,7 +112,8 @@ def base_rev(s):
 
 
 def clean(s):
-    if git(s.clone, "status", "--porcelain").stdout.strip():
+    if git(s.clone, "status", "--porcelain", "--untracked-files=no").stdout.strip() or \
+            git(s.clone, "status", "--porcelain", "--", "wiki").stdout.strip():
         die(f"{s.clone} has uncommitted changes: commit or discard them first")
 
 
