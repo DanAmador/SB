@@ -265,6 +265,9 @@ read with `sbmap show`, as everywhere.
 | `wiki log <learn\|ask\|tend> --subject "…" [--disposition "New; Update"] [--raw <refs>] [--updated <refs>]` | appends one dated entry; a note path in the subject (`Archived: <path>`) becomes its wikilink, other text stays as written |
 | `wiki check [--fix]` | the lint below. Exits non-zero on any format or link problem; grounding suspects and the backlog are printed, never counted |
 | `wiki migrate <project> [topic…] [--write]` | moves topics from before projects (`wiki/<topic>/`, `wiki/raw/<topic>/`) under `<project>`, all of them or the named ones; sets `project` on what moved (sources excepted: they are never edited) and repoints every link in `wiki/` and `wayfinder/`. Lists the owner's notes elsewhere that link in, without touching them. A dry run unless `--write` |
+| **sync** | |
+| `wiki dump <clone> [--projects a,b] [--exclude p/topic,…] [--base main]` | copies the listed projects' notes (`wiki/<p>/`, `wiki/raw/<p>/`, minus excluded topics) byte for byte into a git clone, on a new branch `wiki-dump/<date>` cut from the base, refreshes the clone's own `wiki/index.md` and `wiki/log.md`, commits there; never touches the base, never pushes. Refuses on a dirty clone, when the base moved since the last import, or when a note matches the leak gate (machine paths, `obsidian://`, ticket links, any `sb.leak` pattern) |
+| `wiki import <clone>` | fast-forwards the clone's base, copies what changed on it since the last import into the vault (adds, edits, deletions), lists a note changed on both sides instead of overwriting it (exit 1), then reindexes the vault. The last import is the ref `refs/sb/last-sync` in the clone |
 
 ### What `wiki check` enforces
 
@@ -288,6 +291,19 @@ read with `sbmap show`, as everywhere.
   both sides. A miss is a suspect, not a verdict: a derived value or a product name may be fine.
   Port the candidate set from the karpathy skill's `scripts/check_evidence.py`, keeping its MIT
   notice on the ported code.
+
+## Sharing projects through a git clone
+
+Some projects are shared with a team (the monorepo's knowledge with `assemblio-development/llm-wiki`).
+The vault stays whole and primary; a clone of the shared repo sits outside it, and `wiki dump` /
+`wiki import` move only the listed projects between them, byte for byte, so the format, the
+full-path wikilinks and the properties are identical on both sides and a round trip loses nothing.
+The clone remembers its projects, excluded topics, base branch and extra leak patterns in its git
+config (`sb.projects`, `sb.exclude`, `sb.base`, `sb.leak`). Every change reaches the base by pull
+request: dump makes the owner's branch, teammates make theirs, and import brings merged work back.
+Repo-only files (the clone's README, AGENTS.md, CI, `wiki/index.md`, `wiki/log.md`) never enter
+the vault, and the vault's index, log, `wiki.base` and `wayfinder/` never leave it. Sources that
+are tickets do not travel: keep a ticket's finding as a raw note before citing it in a shared project.
 
 ## How Semantra reads it
 

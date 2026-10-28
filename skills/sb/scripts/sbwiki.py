@@ -23,6 +23,10 @@
                                             topics from before projects (wiki/<topic>/) move under
                                             <project>, links in wiki/ and wayfinder/ follow; a dry run
                                             unless --write
+  sync (a shared git clone of chosen projects, byte for byte)
+    sbmap.py wiki dump <clone> [--projects a,b] [--exclude p/topic] [--base main]
+                                            the vault's changes onto a new wiki-dump/<date> branch
+    sbmap.py wiki import <clone>            merged changes from the base branch into the vault
 
 <project> is a repo's folder name under wayfinder/ (`monorepo`), or `general` for knowledge that
 holds outside any one repo. <note> is a vault path, `<project>/<topic>/<slug>` or a wikilink. <refs> are comma-separated vault paths,
@@ -34,6 +38,7 @@ from datetime import date
 from pathlib import Path
 
 import sbmap as sb
+import sbsync
 
 WIKI_KEYS = ["wiki", "type", "project", "status", "title", "source", "author", "published", "created", "summary",
              "updated", "reviewed", "archived", "sources", "related", "supersedes", "superseded_by",
@@ -1225,7 +1230,7 @@ def cmd_migrate(args):
 COMMANDS = {"index": cmd_index, "find": cmd_find, "show": cmd_show, "link": cmd_link,
             "backlog": cmd_backlog, "init": cmd_init, "raw": cmd_raw, "new": cmd_new, "set": cmd_set,
             "log": cmd_log, "check": cmd_check,
-            "migrate": cmd_migrate}
+            "migrate": cmd_migrate, **sbsync.COMMANDS}
 
 
 def main(args):
