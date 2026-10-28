@@ -177,7 +177,8 @@ def describe(raw):
     """(kind, title, summary or source, props, body) of a note's bytes."""
     props, body, _ = sb.split_fm(raw.decode("utf-8", errors="replace"))
     m = re.search(r"^# (.+)$", body, re.M)
-    title = m.group(1).strip() if m else str(props.get("title") or "")
+    title = str(props.get("title") or "") if props.get("wiki") == "raw" else ""
+    title = title or (m.group(1).strip() if m else str(props.get("title") or ""))
     return str(props.get("wiki", "")), title, str(props.get("summary") or props.get("source") or ""), props, body
 
 
@@ -212,7 +213,7 @@ def pr_body(s, start, changed, removed):
         out += [f"- `{rel}`" for rel in sorted(removed)] + [""]
     out += ["### Reviewing", "",
             "- New or rewritten articles: read the Overview; every number and quote must be in a raw note it cites.",
-            "- Raw notes are sources and are never edited; check their provenance (`repo`, `commit`, `ref`, `paths`).",
+            "- Raw notes are sources: their text is never edited, only their properties (provenance: `repo`, `commit`, `ref`, `paths`); check those point at real code.",
             "- CI runs `wiki check` (format and links)."]
     return "\n".join(out) + "\n"
 
