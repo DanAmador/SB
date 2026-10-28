@@ -1,15 +1,20 @@
 ### The night-run contract (<date>)
 
-<!-- Written into the map's ## Notes by /sb tonight. Edit in place for later rulings, dated. -->
+<!-- Written into the map's ## Notes by /sb tonight; for a night across repos, into the night's
+     checkpoint, with each map's Notes pointing there. Edit in place for later rulings, dated. -->
 
-- **Where:** repo `<path>`, branch `<branch>` (from `<sha>`), <main tree | worktree on request>.
-  Never push; never merge into `main`.
-- **Lanes:** <one serial agent | lane A owns `<paths>`, lane B owns `<paths>`>. Max 2 agents at once,
-  reviewers counted.
+- **Where:** repo `<path>`, branch `<branch>` (from `<sha>`), <main tree | worktree on request>;
+  across repos, one line per lane. Never push; never merge into `main`.
+- **Lanes:** <one serial agent | lane A owns `<paths>`, lane B owns `<paths>` | one lane session per
+  repo, one implementer each>. Max <2> agents at once across the account, reviewers and the owner's
+  own sessions counted.
+- **Usage:** past 90% of the 5-hour window, finish the ticket in flight and start nothing new until
+  it resets (~<reset times>). <peers that agreed to the same gate>.
 - **Commits:** one per ticket, explicit pathspec. <files never to commit, e.g. editor-dirtied assets>.
 - **Per ticket, verify with:** <the repo's fast loop, exact commands>.
 - **Once, at the end:** <the slow suite, or "none: owner ruling <date>">.
-- **Hard rules:** <the repo's own: e.g. no screen reads while the display sleeps; stop Play before editing>.
+- **Hard rules:** <the repo's own: e.g. no screen reads while the display sleeps; stop Play before
+  editing; the owner's live services (dev server, store, vault) off or read-only>.
 - **Models:** <ticket → tier/model, or "per ticket, recorded on each Answer">.
 - **Blocked:** take the recommendation, write it on the ticket as a ruling, keep going.
 - **Stop when:** the queue is empty, the window (<hours> h, until ~<time>) is over, or the same

@@ -47,7 +47,7 @@ around that vault, each one a verb.
 |---|---|---|
 | *(none)* | "where are we?" Print `sbmap maps`, this repo's frontier and any checkpoint, then name the verb that fits | — |
 | `chart <idea>` | a brain-dump becomes a map: grilling, tickets, architecture tickets, the Route | [verbs/chart.md](verbs/chart.md) |
-| `tonight [hours] [map]` | the owner is leaving: reconcile, size, propose lanes and models, one confirm, then orchestrate unattended | [verbs/tonight.md](verbs/tonight.md) |
+| `tonight [hours] [map]` | the owner is leaving: reconcile, size, propose lanes and models, one confirm, then orchestrate unattended; across repos, as operator over one lane session per repo | [verbs/tonight.md](verbs/tonight.md) |
 | `morning` | the owner is back: a phone-sized digest of what landed and what waits on them | [verbs/morning.md](verbs/morning.md) |
 | `handoff` | context or tokens are running out, or work moves to another session or harness | [verbs/handoff.md](verbs/handoff.md) |
 | `resume` | a session died, hit a limit, or the owner says "continue" / "reorient me" | [verbs/resume.md](verbs/resume.md) |

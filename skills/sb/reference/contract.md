@@ -34,11 +34,21 @@ Each line is a ruling the owner has repeated across sessions; the reason sits be
 - **Tests are per project.** Per ticket, run the repo's *fast* loop (compile, unit, smoke, the
   category the change touches). Run the *slow* suite once, at the end of the run, or not at all where
   the repo says so. A gameplay suite is slow; a web unit suite is usually fast. The repo's
-  instructions name which is which; when they are silent, ask in the proposal.
+  instructions name which is which; when they are silent, ask in the proposal. While lanes run at
+  once on one machine, per ticket runs the ticket's own test files singly plus the touched packages'
+  typecheck: two full suites at once fail on timeouts, not on the code.
 - **Main tree, serial by default.** Worktrees only when the owner asks: changes in another folder are
   invisible to them. **Lanes** (parallel implementers) only on disjoint file sets, as `sbmap lanes`
   splits them from each ticket's `paths`, **max 2 at a time, reviewers and researchers counted**:
-  that is the token budget.
+  that is the token budget. The count spans every session on the account that shares the usage,
+  the owner's own sessions included, so a game session in another repo takes a slot; the owner may
+  raise the cap at "go".
+- **Usage gate: past 90% of the 5-hour usage window, finish the ticket in flight and start nothing
+  new until the window resets.** It spreads the night's tokens across the window and leaves the
+  owner's own sessions room. Every session sharing the budget follows the same gate.
+- **The owner's live services are theirs.** A dev server, store, library or vault the owner runs is
+  never written: a lane that needs one starts its own on throwaway data and stops it after. One the
+  owner leaves running for visual checks is read-only.
 - **Every dispatch carries the git guardrails:** commit only your own paths; tree-wide git
   (`stash`, `checkout`, `reset`, `restore`, `clean`) is off limits because the stash and index are
   repo-global and one call wipes every peer. Write a `git diff > <outside-repo>.patch` snapshot
