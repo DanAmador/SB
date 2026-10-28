@@ -35,18 +35,20 @@ cascade are shared, so compiling never runs in parallel.
    - **Disputed**: the source contradicts an article; combines with New or Update.
    - **No material**: the wiki already holds everything it says. A thin source never forces an
      article.
-3. **Keep the raw**, whatever the disposition: `sbmap wiki raw <project>/<topic> … --from <scratchpad
-   file>` for a fetch or a paste (read from a repo: add `--repo-root <clone> --paths <files the
-   claims rest on>`, and `--symbols` for the identifiers it names, so the note records where), in the topic the triage pointed to (`sbmap wiki index --project
-   <project>` lists them). A
-   vault note is raw already, except in a **shared project** (one a clone syncs, see
-   [Sharing projects](../reference/wiki.md#sharing-projects-through-a-git-clone)): there a ticket or
-   research note is first kept as a raw note in that project (its Question and Answer, or its body,
-   verbatim, with machine paths, personal emails and links into `wayfinder/` turned to plain text),
-   and the article cites that raw note, so every source travels with the wiki. A raw note read
-   from a repo also records where: `sbmap wiki set <raw> repo=<owner/name> commit=<full sha>
-   ref=<branch> paths=<files the claims rest on>`. No material: log it (step 6) and stop.
-4. **Compile**, by [Writing a finding](../reference/wiki.md#writing-a-finding). Locate every
+3. **Keep the raw**, whatever the disposition, in the topic the triage pointed to (`sbmap wiki index
+   --project <project>` lists them): `sbmap wiki raw <project>/<topic> … --from <scratchpad file>`
+   for a fetch or a paste. A vault note is raw already, except in two cases, where it is first kept
+   as a raw note (its Question and Answer, or its body, verbatim, with machine paths, personal
+   emails and links into `wayfinder/` turned to plain text) and the article cites that raw note:
+   - its claims rest on a repo, so the raw note can carry the commit (step 4);
+   - it is in a **shared project** (one a clone syncs, see
+     [Sharing projects](../reference/wiki.md#sharing-projects-through-a-git-clone)), so every source
+     travels with the wiki.
+
+   No material: log it (step 7) and stop.
+4. **Anchor it** by wikibrain's *Anchoring a source* (its `reference/wiki.md`): a raw note whose
+   claims rest on a repo carries `repo`, `commit` and `paths` (or `pr`), never without them.
+5. **Compile**, by [Writing a finding](../reference/wiki.md#writing-a-finding). Locate every
    number, date and quote in the raw before writing it, and write it as found.
    - Update: `sbmap wiki set <article> sources+=<raw> updated=today`, then rewrite the sections it
      changes.
@@ -57,16 +59,18 @@ cascade are shared, so compiling never runs in parallel.
      ("Assemblio part hierarchy"), so the article reads right outside its folder too.
    - Disputed: the Disputed callout under the contested claim, `status=disputed`; on both articles,
      with `disputes`, when the clash spans two.
-5. **Cascade.** For each entity and claim the source touches, run `wiki find` and open every article
-   it returns (the index alone misses body mentions). Update each one the source materially changes,
+6. **Cascade.** For each entity and claim the source touches, run `wiki find` and open every article
+   it returns (the index alone misses body mentions); for a source with `paths`, also `sbmap wiki
+   covers <paths> --repo-root <clone>`, which names the articles resting on the same files. Update each one the source materially changes,
    `updated=today`. A superseded claim keeps its text under an Outdated callout. Synthesis pages are
    snapshots: leave them.
-6. **Log.** `sbmap wiki log learn --subject <primary article> --disposition … --raw … --updated …`;
+7. **Log.** `sbmap wiki log learn --subject <primary article> --disposition … --raw … --updated …`;
    for no material, `--subject "no material: <vault path>"`.
 
 Done when `sbmap wiki check --fix` exits zero, you have judged every grounding suspect against its
-source (a real mismatch is fixed in the article, never in the raw), and every article you touched
-opens with its point and holds one subject.
+source (a real mismatch is fixed in the article, never in the raw), every article you touched
+opens with its point and holds one subject, and `sbmap wiki verify` passes as wikibrain's
+*Anchoring a source* says.
 
 ## Research
 
@@ -106,5 +110,5 @@ Log it: `sbmap wiki log tend --subject "<N> problems, <M> fixed"`.
 
 In the owner's shape ([output.md](../reference/output.md)), one line per source, as `capture`
 reports: 🆕 new article, 💬 merged into, ⚠️ disputed, or "no material", each with the article's
-name as a link. Then the backlog left, and one action under two minutes (often: rule on a ⚠️
+name as a link and where it is anchored (`<repo>@<short sha>`, or ⚠️ unanchored and why). Then the backlog left, and one action under two minutes (often: rule on a ⚠️
 dispute).

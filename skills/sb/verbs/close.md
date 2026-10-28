@@ -34,7 +34,8 @@ holding the depth.
      in the map's Decisions so far.
 
    A map that learned nothing says so in the Outcome and has no Findings sections.
-5. **Check.** `sbmap check <map>` and `sbmap wiki check --fix` exit zero.
+5. **Check.** `sbmap check <map>` and `sbmap wiki check --fix` exit zero, and `sbmap wiki verify`
+   passes for the articles in `findings` as wikibrain's *Anchoring a source* says.
 
 Done when every article in `findings` has its line in the report and every line names an article.
 
