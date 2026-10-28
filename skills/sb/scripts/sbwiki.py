@@ -161,7 +161,7 @@ def resolve_ref(ref):
         p = target_of(ref) or target_of("wiki/" + ref)
     if p is None:
         die(f"'{ref}' names no note")
-    if "/wayfinder/" in "/" + sb.rel(p) and re.match(r"\d+-", p.name) and p.parent.name == "issues":
+    if "/wayfinder/" in "/" + sb.rel(p) and re.match(r"\d+[- ]", p.name) and p.parent.name == "issues":
         t = sb.Ticket(p)
         return p, t.link("#" + t.id)
     return p, Note(p).link()
@@ -214,7 +214,7 @@ def raw_class(path):
         return "clipping"
     if parts[:1] == ("wayfinder",) and "research" in parts[:-1]:
         return "research"
-    if parts[:1] == ("wayfinder",) and len(parts) > 1 and parts[-2] == "issues" and re.match(r"\d+-", parts[-1]):
+    if parts[:1] == ("wayfinder",) and len(parts) > 1 and parts[-2] == "issues" and re.match(r"\d+[- ]", parts[-1]):
         return "ticket"
     return None
 
