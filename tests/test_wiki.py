@@ -1,3 +1,4 @@
+import json
 import subprocess
 import unittest
 from pathlib import Path
@@ -237,6 +238,94 @@ class Provenance(Seeded):
         self.sb("wiki", "check")
         self.sb("wiki", "set", self.article, "commit=" + "b" * 40)
         self.assertIn("belongs on the raw notes", self.sb("wiki", "check", ok=False).stdout)
+
+
+class Verify(Seeded):
+    """wiki verify anchors each article at its sources' commit and checks paths and symbols in git."""
+
+    def git(self, cwd, *a):
+        return subprocess.run(["git", "-C", str(cwd), *a], check=True, capture_output=True, text=True).stdout.strip()
+
+    def setUp(self):
+        super().setUp()
+        tmp = Path(self._tmp.name)
+        self.remote, self.clone = tmp / "remote.git", tmp / "monorepo"
+        self.git(tmp, "init", "-q", "--bare", "-b", "main", str(self.remote))
+        self.git(tmp, "clone", "-q", str(self.remote), str(self.clone))
+        for a in (["config", "user.email", "t@example.invalid"], ["config", "user.name", "t"],
+                  ["remote", "set-url", "origin", "git@github.com:org/monorepo.git"],
+                  ["remote", "set-url", "--push", "origin", str(self.remote)],
+                  ["config", "remote.origin.fetchurl", str(self.remote)]):
+            self.git(self.clone, *a)
+        self.commit("libs/viewport/Render.ts", "export const frameloop = 'demand'\n", "base")
+
+    def commit(self, path, text, msg, branch="main"):
+        f = self.clone / path
+        if text is None:
+            f.unlink()
+        else:
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text(text)
+        self.git(self.clone, "add", "-A")
+        self.git(self.clone, "commit", "-q", "-m", msg)
+        self.git(self.clone, "push", "-q", str(self.remote), f"HEAD:{branch}")
+        self.git(self.clone, "fetch", "-q", "--prune", str(self.remote), "+refs/heads/*:refs/remotes/origin/*")
+        return self.git(self.clone, "rev-parse", "HEAD")
+
+    def add_article(self, slug, sha=None, ref="main", body="", symbols=""):
+        src = self.write("scratch.txt", "Claims.\n")
+        raw = self.sb("wiki", "raw", "monorepo/rendering", "--title", f"src {slug}", "--source", "s",
+                      "--from", str(src)).stdout.strip()[:-3]
+        if sha:
+            self.sb("wiki", "set", raw, "repo=org/monorepo", f"commit={sha}", f"ref={ref}",
+                    "paths=libs/viewport/Render.ts", *([f"symbols={symbols}"] if symbols else []))
+        self.sb("wiki", "new", f"monorepo/rendering/{slug}", "--title", slug, "--type", "concept", "--summary", "S.",
+                "--sources", raw, "--about", "Rendering.")
+        if body:
+            self.append(f"wiki/monorepo/rendering/{slug}.md", body)
+
+    def verdicts(self):
+        rows = json.loads(self.sb("wiki", "verify", "--repo-root", str(self.clone), "--json").stdout)
+        return {Path(r["note"]).stem: r["verdict"] for r in rows}
+
+    def test_anchored_article_is_current_then_drifted_then_broken(self):
+        self.add_article("render-loop", self.git(self.clone, "rev-parse", "HEAD"), symbols="frameloop")
+        self.assertEqual(self.verdicts()["render-loop"], "current")
+        self.commit("libs/viewport/Render.ts", "export const frameloop = 'always'\n", "change")
+        self.assertEqual(self.verdicts()["render-loop"], "drifted")
+        self.commit("libs/viewport/Render.ts", "export const loop = 1\n", "rename symbol")
+        self.assertEqual(self.verdicts()["render-loop"], "broken")
+
+    def test_branch_only_claim_is_checked_against_its_branch_then_orphaned(self):
+        self.git(self.clone, "switch", "-q", "-c", "feature")
+        sha = self.commit("libs/viewport/Clip.ts", "export const clipPrelude = 1\n", "feature", branch="feature")
+        self.add_article("clip-prelude", sha, ref="feature", symbols="clipPrelude")
+        self.assertEqual(self.verdicts()["clip-prelude"], "current")
+        self.git(self.clone, "push", "-q", str(self.remote), ":feature")
+        self.git(self.clone, "fetch", "-q", "--prune", str(self.remote), "+refs/heads/*:refs/remotes/origin/*")
+        self.assertEqual(self.verdicts()["clip-prelude"], "orphaned")
+
+    def test_paths_still_written_as_text_are_read_as_a_list(self):
+        self.add_article("text-paths", self.git(self.clone, "rev-parse", "HEAD"))
+        raw = "wiki/raw/monorepo/rendering/src-text-paths.md"
+        self.write(raw, self.read(raw).replace("paths:\n  - libs/viewport/Render.ts\n",
+                                               "paths: libs/viewport/Render.ts, libs/viewport\n"))
+        self.assertEqual(self.verdicts()["text-paths"], "current")
+
+    def test_unstamped_article_is_guessed_from_its_code_and_verified_overrides_the_anchor(self):
+        self.add_article("guessed", body="\nThe loop lives in `Render.ts` and reads `frameloop`.\n")
+        self.add_article("nothing", body="\nPlain prose only.\n")
+        out = json.loads(self.sb("wiki", "verify", "--repo-root", str(self.clone), "--json").stdout)
+        rows = {Path(r["note"]).stem: r for r in out}
+        self.assertEqual((rows["guessed"]["verdict"], rows["guessed"]["guessed"]), ("current", True))
+        self.assertEqual(rows["guessed"]["paths"], ["libs/viewport/Render.ts"])
+        self.assertEqual(rows["nothing"]["verdict"], "unanchored")
+        old = self.git(self.clone, "rev-parse", "HEAD")
+        self.add_article("re-read", old, symbols="frameloop")
+        new = self.commit("libs/viewport/Render.ts", "export const frameloop = 'x'\n", "edit")
+        self.assertEqual(self.verdicts()["re-read"], "drifted")
+        self.sb("wiki", "set", "wiki/monorepo/rendering/re-read.md", f"verified={new}")
+        self.assertEqual(self.verdicts()["re-read"], "current")
 
 class Set(Seeded):
     def setUp(self):
