@@ -48,6 +48,9 @@ Bases see the whole route. It answers what an agent should never compute or type
                                         from templates/map-report.md and marks the map resolved
   wiki
     sbmap.py wiki <command> ...         the compiled wiki under wiki/: `sbmap.py wiki` lists its commands
+                                        after `wiki import` and `wiki check --fix` each article's vault-only
+                                        `tickets` is set to the resolved tickets its raw sources match (same
+                                        PR, else the ticket's commit in the source's PR, else the same commit)
 
 <map> is a folder name under the vault's wayfinder/ (`sk4te-single-player`) or a path.
 The vault is $SB_VAULT, else ~/Documents/Second Brain, so it runs from any directory.
@@ -1588,8 +1591,74 @@ def cmd_close(args):
     print(f"{m.title}: resolved; {len(findings)} article(s) in findings")
 
 
+def with_tickets(text, links):
+    """The note with its `tickets` property set to `links` (removed when empty); no other line moves."""
+    end = text.find("\n---\n", 4)
+    if end < 0:
+        return text
+    out, at, skipping = [], None, False
+    for line in text[4:end].split("\n"):
+        if line.startswith("tickets:"):
+            at, skipping = len(out), True
+        elif not (skipping and re.match(r"\s+-", line)):
+            out.append(line)
+            skipping = False
+    i = len(out) if at is None else at
+    out[i:i] = dump_fm({"tickets": links}, []).split("\n")[1:-2] if links else []
+    return text[:4] + "\n".join(out) + text[end:]
+
+
+def fill_tickets(sbwiki):
+    """Set every article's vault-only `tickets` to the resolved tickets its raw sources match: the same
+    pull request, else the ticket's commit inside the source's pull request (`gh`), else the same commit."""
+    tickets = [t for m in all_maps() for t in m.tickets.values() if t.status == "resolved" and t.props.get("repo")]
+    in_pr = {}  # a PR's commit ids, one gh call each per run; no gh or a failing one: none
+
+    def commits(url):
+        if url not in in_pr:
+            try:
+                r = subprocess.run(["gh", "pr", "view", url, "--json", "commits"], capture_output=True,
+                                   text=True, timeout=30)
+                in_pr[url] = {c["oid"] for c in json.loads(r.stdout)["commits"]} if r.returncode == 0 else set()
+            except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
+                in_pr[url] = set()
+        return in_pr[url]
+
+    def pr_of(props):
+        m = sbwiki.PR_URL.search(str(props.get("pr") or ""))
+        return m and m.group(0).lower()
+
+    def matches(raw, t):
+        if str(raw.get("repo") or "").lower() != str(t.props["repo"]).lower():
+            return False
+        pr, commit = pr_of(raw), t.props.get("commit")
+        return bool(pr and pr == pr_of(t.props) or commit and (pr and commit in commits(pr) or commit == raw.get("commit")))
+
+    updated = 0
+    for n in sbwiki.articles():
+        paths = (sbwiki.target_of(sbwiki.entry_key(e)) for e in n.refs("sources"))
+        raws = [sbwiki.Note(p).props for p in paths if p and sbwiki.raw_class(p) == "raw"]
+        text = n.path.read_text(encoding="utf-8")
+        new = with_tickets(text, sorted({t.link("#" + t.id) for t in tickets if any(matches(r, t) for r in raws)}))
+        if new != text:
+            write_atomic(n.path, new)
+            updated += 1
+    return updated
+
+
 def cmd_wiki(args):
-    wiki_module().main(args)
+    sbwiki, code = wiki_module(), None
+    fix = args[:1] == ["check"] and "--fix" in args
+    try:
+        sbwiki.main(args)
+    except SystemExit as e:  # a check that still has problems exits 1 after its fixes; an import's failure stays one
+        if not (fix and e.code in (0, 1)):
+            raise
+        code = e.code
+    if fix or args[:1] == ["import"]:
+        print(f"tickets: {fill_tickets(sbwiki)} article(s) updated")
+    if code:
+        sys.exit(code)
 
 
 COMMANDS = {"maps": cmd_maps, "status": cmd_status, "frontier": cmd_frontier, "lanes": cmd_lanes, "show": cmd_show,
