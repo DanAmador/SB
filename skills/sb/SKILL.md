@@ -54,7 +54,7 @@ around that vault, each one a verb.
 | `capture` | "add these as todos": feedback or findings become tickets on a map | [verbs/capture.md](verbs/capture.md) |
 | `land` | lanes and worktrees come home: merge, clean up, list what to playtest | [verbs/land.md](verbs/land.md) |
 | `close <map>` | the Destination is reached or the map is ending: its knowledge into the wiki, a report for the owner to review | [verbs/close.md](verbs/close.md) |
-| `learn [source…\|map\|--research "<topic>"]` | a source, a map's findings or a research topic becomes wiki articles; no argument works the backlog | [verbs/learn.md](verbs/learn.md) |
+| `learn [source…\|map\|--research "<topic>"]` | a source, a map's findings or a research topic becomes wiki articles; no argument works the backlog, and `sbmap wiki verify --repo-root <clone>` lists the articles to re-read | [verbs/learn.md](verbs/learn.md) |
 | `ask <question> [--save]` | answer from the wiki, citing articles; `--save` keeps the answer as a synthesis page | [verbs/ask.md](verbs/ask.md) |
 
 Reference, reached from the verbs: [models](reference/models.md) (which tier runs what),

@@ -269,11 +269,12 @@ read with `sbmap show`, as everywhere.
 | `wiki show <note> [--full]` | digest: properties, Overview, headings, every Outdated/Disputed callout. `--full` prints the body |
 | `wiki link <note>` | the wikilink to paste into prose |
 | `wiki backlog [--project P] [--limit N]` | raw notes on the backlog that no article's `sources` cites and the log has not marked no-material; oldest `created` first (file time when there is none); default 10, and the total |
+| `wiki verify [--repo-root <clone>] [--project P] [--base origin/main] [--json]` | each article of the repo's project (default: the repo's name) checked against its git, worst first: **current**, **drifted** (a path changed since), **broken** (a path deleted or a symbol gone), **orphaned** (read on a branch gone from origin and the clone, never merged), **unanchored** (no source commit: anchored at `updated` with paths and identifiers guessed from backticked code, marked as guessed). Anchor: `verified`, else the newest source commit; target: the base when the anchor is on it, else `origin/<ref>`, else the local `<ref>`. Read-only git, cached |
 | **write** | |
 | `wiki init` | creates whatever of the layout is missing; never overwrites |
-| `wiki raw <project>/<topic> --title "…" --source "…" [--author "…"] [--published YYYY-MM-DD\|Unknown] --from <file\|->` | writes a raw note from a file or stdin; the slug comes from the title (`-2` when taken). A `source` URL another raw note already has prints that note and exits non-zero. Never overwrites |
+| `wiki raw <project>/<topic> --title "…" --source "…" [--author "…"] [--published YYYY-MM-DD\|Unknown] [--repo-root <clone> [--rev <branch\|sha>] [--paths a,b] [--symbols a,b]] --from <file\|->` | writes a raw note from a file or stdin; the slug comes from the title (`-2` when taken). A `source` URL another raw note already has prints that note and exits non-zero. Never overwrites. `--repo-root` stamps provenance: `repo` from origin, `commit` and `ref` of HEAD or of `--rev` (read without checking it out; a sha records no ref), and `paths` (each checked to exist at that commit) and `symbols` |
 | `wiki new <project>/<topic>/<slug> --title "…" --type concept\|entity\|synthesis --summary "…" --sources <refs> [--related <refs>] [--aliases "a, b"] [--about "…"]` | scaffolds the note: properties, `# Title`, `## Overview` opening with the summary. A taken slug is an error. A new topic needs `--about`, which writes its folder note. Given only `<topic>/<slug>`, it refuses and names the project its sources come from |
-| `wiki set <note> key=value … [key+=<refs>] [key-=<refs>]` | `=` replaces (a list key takes `<refs>`), `+=`/`-=` add to or drop from a list; `updated=today` stamps the date. `disputes` and `supersedes`/`superseded_by` are written on both articles; setting `superseded_by` sets `status=outdated` |
+| `wiki set <note> key=value … [key+=<refs>] [key-=<refs>]` | `=` replaces (a list key takes `<refs>`; `aliases`, `tags`, `paths`, `symbols` take comma-separated text), `+=`/`-=` add to or drop from a list; `updated=today` stamps the date. `disputes` and `supersedes`/`superseded_by` are written on both articles; setting `superseded_by` sets `status=outdated` |
 | `wiki log <learn\|ask\|tend> --subject "…" [--disposition "New; Update"] [--raw <refs>] [--updated <refs>]` | appends one dated entry; a note path in the subject (`Archived: <path>`) becomes its wikilink, other text stays as written |
 | `wiki check [--fix]` | the lint below. Exits non-zero on any format or link problem; grounding suspects and the backlog are printed, never counted |
 | `wiki migrate <project> [topic…] [--write]` | moves topics from before projects (`wiki/<topic>/`, `wiki/raw/<topic>/`) under `<project>`, all of them or the named ones; sets `project` on what moved (sources excepted: they are never edited) and repoints every link in `wiki/` and `wayfinder/`. Lists the owner's notes elsewhere that link in, without touching them. A dry run unless `--write` |
@@ -293,6 +294,10 @@ read with `sbmap show`, as everywhere.
   without its folder note; a slug taken twice (folder notes aside), or starting with digits and a
   dash; a note anywhere but `wiki/<project>/<topic>/` or `wiki/raw/<project>/<topic>/`; a topic from
   before projects.
+- **Provenance:** a raw note with any of `repo`, `commit`, `ref`, `paths`, `symbols` needs `repo`
+  (`owner/name`) and a full 40-character `commit`; `paths` and `symbols` are lists (`--fix` turns
+  comma-separated text into a list); provenance on a note that is not raw, or a `verified` that is
+  not a full commit on an article, is an error.
 - **Links:** a markdown link to a vault note, or a wikilink by bare file name, where a full-path
   wikilink belongs; a bare `#NNN`; a `sources` entry of the wrong class for its note; a source ticket
   that is not resolved; broken links, read from the files, so Obsidian need not be running. Links
@@ -316,6 +321,14 @@ request: dump makes the owner's branch, teammates make theirs, and import brings
 Repo-only files (the clone's README, AGENTS.md, CI, `wiki/index.md`, `wiki/log.md`) never enter
 the vault, and the vault's index, log, `wiki.base` and `wayfinder/` never leave it. Sources that
 are tickets do not travel: keep a ticket's finding as a raw note before citing it in a shared project.
+
+Teammates work the shared repo without the vault: its `team-wiki` skill (`skills/team-wiki/` in the
+clone) runs ask, learn, verify and lint through this same `sbwiki.py`, fetched from GitHub at the
+commit pinned in `skills/team-wiki/scripts/SB_VERSION` by a small loader (`scripts/sb`), and the
+repo's CI runs `wiki check` through the same loader. Bump that pin in one pull request when the
+check changes; a teammate never carries a copy of sb. `wiki dump` writes the pull request's
+description to `.git/sb-dump-pr.md` in the clone (new and changed notes in tables, what changed,
+how to review), and team-wiki's learn PRs use the same shape.
 
 ## How Semantra reads it
 

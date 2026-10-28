@@ -93,6 +93,13 @@ these; fix none without the owner:
 - articles nothing links to, and obvious `related` links missing
 - synthesis pages whose source articles changed substantially since `archived`
 
+For each project that has a repo, `sbmap wiki verify --repo-root <clone>`: re-read every drifted or
+broken article against its branch or main, keep the re-read as a raw note (`wiki raw --repo-root
+<clone> --rev <branch> --paths … --symbols …`), put each stale claim under a dated Outdated callout
+grounded in that note, add it to `sources`, and set `updated`. An unanchored article gets the same
+re-read so it is anchored from then on. A re-read that changes nothing can instead set
+`verified=<sha>` on the article.
+
 Log it: `sbmap wiki log tend --subject "<N> problems, <M> fixed"`.
 
 ## Report

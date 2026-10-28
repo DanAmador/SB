@@ -56,8 +56,10 @@ skills/sb/
                       close; stdlib Python, any harness. Auto-syncs Route diagram on every write.
                       With Obsidian running it also asks the app: broken links, and `verify`
                       (every mermaid block parses in Obsidian's own renderer)
-  scripts/sbwiki.py   `sbmap wiki`: the compiled wiki (index, find, show, raw, new, set, log, backlog,
-                      check with grounding suspects)
+  scripts/sbwiki.py   `sbmap wiki`: the compiled wiki (index, find, show, raw with repo provenance,
+                      new, set, log, backlog, check with grounding suspects, verify: claims vs git)
+  scripts/sbsync.py   `sbmap wiki dump/import`: chosen projects synced both ways with a shared git
+                      clone by pull request (loaded only for those two commands)
 mods/obsidian-links/  Claude Code mod: a click on a vault link in chat opens the note in Obsidian
 .claude-plugin/       marketplace.json: makes this repo a folder marketplace for the mod
 tests/                the CLI run against a throwaway vault: `python3 -m unittest discover tests`
@@ -138,4 +140,12 @@ python3 skills/sb/scripts/sbmap.py wiki index --project sk4te
 python3 skills/sb/scripts/sbmap.py wiki find tether spring --raw --project sk4te
 python3 skills/sb/scripts/sbmap.py wiki new sk4te/physics/tether-spring --title "Tether spring" --type concept --summary "..." --sources sk4te/one-tether#624
 python3 skills/sb/scripts/sbmap.py wiki check --fix
+
+# Claims about code: record where a source was read, then check articles against git
+python3 skills/sb/scripts/sbmap.py wiki raw my-repo/rendering --title "Render loop" --source "AGENTS.md" --repo-root ~/code/my-repo --rev main --paths src/render --symbols renderQueue --from notes.md
+python3 skills/sb/scripts/sbmap.py wiki verify --repo-root ~/code/my-repo
+
+# Share a project with a team's git clone (by pull request, both ways)
+python3 skills/sb/scripts/sbmap.py wiki dump ~/code/team-wiki --projects my-repo
+python3 skills/sb/scripts/sbmap.py wiki import ~/code/team-wiki
 ```
