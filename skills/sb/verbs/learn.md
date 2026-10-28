@@ -36,7 +36,8 @@ cascade are shared, so compiling never runs in parallel.
    - **No material**: the wiki already holds everything it says. A thin source never forces an
      article.
 3. **Keep the raw**, whatever the disposition: `sbmap wiki raw <project>/<topic> … --from <scratchpad
-   file>` for a fetch or a paste, in the topic the triage pointed to (`sbmap wiki index --project
+   file>` for a fetch or a paste (read from a repo: add `--repo-root <clone> --paths <files the
+   claims rest on>`, and `--symbols` for the identifiers it names, so the note records where), in the topic the triage pointed to (`sbmap wiki index --project
    <project>` lists them). A
    vault note is raw already, except in a **shared project** (one a clone syncs, see
    [Sharing projects](../reference/wiki.md#sharing-projects-through-a-git-clone)): there a ticket or

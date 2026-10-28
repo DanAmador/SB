@@ -96,6 +96,7 @@ Properties, in this order; sbmap omits an empty list:
 | `summary` | the note's line in the index, written once, here |
 | `updated` | the last change to the knowledge, never a typo fix; articles only |
 | `reviewed` | the date the owner accepted the article; set only on the owner's word. Empty or older than `updated` → it is in *To review* |
+| `verified` | articles: the full commit an agent re-read the code at and found the article still true, with no new source |
 | `archived` | the date a synthesis page was written, in place of `updated` |
 | `sources` | wikilinks to raw notes (articles), or to articles and raw notes (synthesis) |
 | `related` | wikilinks to related articles: a See Also as typed edges |
@@ -103,6 +104,12 @@ Properties, in this order; sbmap omits an empty list:
 | `disputes` | articles that disagree with this one; always both ends |
 | `aliases` | other names the concept goes by: what `wiki find` and Obsidian match |
 | `tags` | `wiki/<type>`, `project/<project>`, `topic/<topic>`, then the concept tags (`wiki new --tags`, `wiki set tags+=`) |
+| `repo`, `commit`, `ref` | raw notes read from a repo: `owner/name`, the full commit and the branch it was read at (`wiki raw --repo-root <clone>` fills them) |
+| `paths`, `symbols` | raw notes read from a repo: the files or folders, and the identifiers, its claims rest on (`--paths`, `--symbols`); checked to exist at that commit |
+
+**Provenance makes claims checkable.** A claim about code is only as good as the commit it was read
+at: a raw note from a repo records where (`repo`, `commit`, `ref`, `paths`), so a later check can
+diff those paths and grep those symbols on main, or on the branch when the code is not merged yet.
 
 **Every reference is a full-path wikilink**, its alias the target's `# ` heading. Semantra and
 Obsidian then resolve it to exactly one note. A bare `#NNN` resolves to the first ticket of that

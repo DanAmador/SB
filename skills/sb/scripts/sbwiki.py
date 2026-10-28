@@ -13,7 +13,9 @@
   write
     sbmap.py wiki init                      creates whatever of the layout is missing; never overwrites
     sbmap.py wiki raw <project>/<topic> --title "…" --source "…" [--author "…"] [--published YYYY-MM-DD|Unknown]
-                          --from <file|->   keeps a source as a raw note
+                          [--repo-root <clone> [--paths a,b] [--symbols a,b]]
+                          --from <file|->   keeps a source as a raw note; --repo-root stamps the repo,
+                                            commit and ref it was read at
     sbmap.py wiki new <project>/<topic>/<slug> --title "…" --type concept|entity|synthesis --summary "…"
                           --sources <refs> [--related <refs>] [--aliases "a, b"] [--tags "a, b"] [--about "…"]
     sbmap.py wiki set <note> key=value … [key+=<refs>] [key-=<refs>]
@@ -33,6 +35,7 @@ holds outside any one repo. <note> is a vault path, `<project>/<topic>/<slug>` o
 wikilinks, or `<map>#<NNN>` for a ticket; each is written as a full-path wikilink.
 """
 import re
+import subprocess
 import sys
 from datetime import date
 from pathlib import Path
@@ -40,8 +43,12 @@ from pathlib import Path
 import sbmap as sb
 
 WIKI_KEYS = ["wiki", "type", "project", "status", "title", "source", "author", "published", "created", "summary",
-             "updated", "reviewed", "archived", "sources", "related", "supersedes", "superseded_by",
-             "disputes", "aliases", "tags"]
+             "updated", "reviewed", "verified", "archived", "sources", "related", "supersedes", "superseded_by",
+             "disputes", "aliases", "tags", "repo", "commit", "ref", "paths", "symbols"]
+PROVENANCE = ("repo", "commit", "ref", "paths", "symbols")
+TEXT_LISTS = ("aliases", "tags", "paths", "symbols")
+SHA = re.compile(r"[0-9a-f]{40}")
+REPO = re.compile(r"[\w.-]+/[\w.-]+")
 KINDS = {"article", "synthesis", "raw", "topic", "index", "log"}
 TYPES = {"article": {"concept", "entity"}, "synthesis": {"synthesis"}, "raw": {"source"},
          "topic": {"topic"}}
@@ -672,10 +679,57 @@ def cmd_raw(args):
     props = {"wiki": "raw", "type": "source", "project": project, "title": title, "source": source,
              "author": sb.opt(args, "--author", ""), "published": sb.opt(args, "--published", "Unknown"),
              "created": today(), "tags": base_tags("wiki/source", project, topic)}
+    root = sb.opt(args, "--repo-root")
+    if root:
+        props.update(provenance(Path(root).expanduser(), split_text(sb.opt(args, "--paths", "")),
+                                split_text(sb.opt(args, "--symbols", ""))))
+    elif sb.opt(args, "--paths") or sb.opt(args, "--symbols"):
+        die("--paths and --symbols need --repo-root <clone>")
     path = wiki_dir() / "raw" / project / topic / f"{slug}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     sb.write_atomic(path, sb.dump_fm(props, WIKI_KEYS) + text)
     print(sb.rel(path))
+
+
+def split_text(value):
+    return [v.strip() for v in str(value or "").split(",") if v.strip()]
+
+
+def provenance(root, paths, symbols):
+    """Where a source was read: the repo (from origin), the commit and branch checked out, and
+    the paths and symbols its claims rest on, each path checked to exist at that commit."""
+    def git(*a):
+        r = subprocess.run(["git", "-C", str(root), *a], capture_output=True, text=True)
+        if r.returncode:
+            die(f"git {' '.join(a)} in {root}: {r.stderr.strip() or 'failed'}")
+        return r.stdout.strip()
+    origin = git("remote", "get-url", "origin")
+    m = re.search(r"[:/]([\w.-]+/[\w.-]+?)(?:\.git)?/?$", origin)
+    commit = git("rev-parse", "HEAD")
+    for path in paths:
+        if subprocess.run(["git", "-C", str(root), "cat-file", "-e", f"{commit}:{path.rstrip('/')}"],
+                          capture_output=True).returncode:
+            die(f"'{path}' does not exist at {commit[:10]} in {root}")
+    return {"repo": m.group(1) if m else origin, "commit": commit,
+            "ref": git("rev-parse", "--abbrev-ref", "HEAD"), "paths": paths, "symbols": symbols}
+
+
+def provenance_problems(n, kind):
+    """A raw note read from a repo names the repo and the full commit; paths and symbols are lists.
+    An article records only `verified`, a full commit."""
+    props, out = n.props, []
+    if kind == "raw" and any(props.get(k) for k in PROVENANCE):
+        if not REPO.fullmatch(str(props.get("repo", ""))):
+            out.append("provenance without a repo (owner/name)")
+        if not SHA.fullmatch(str(props.get("commit", ""))):
+            out.append("provenance without a full 40-character commit")
+        out += [f"{k} is text, not a list: `sbmap wiki check --fix`" for k in ("paths", "symbols")
+                if isinstance(props.get(k), str)]
+    elif kind != "raw":
+        out += [f"{k} belongs on the raw notes it was read from" for k in PROVENANCE if props.get(k)]
+    if props.get("verified") and (kind != "article" or not SHA.fullmatch(str(props["verified"]))):
+        out.append("verified is a full 40-character commit, on articles only")
+    return out
 
 
 # ---- set ------------------------------------------------------------------
@@ -737,7 +791,7 @@ def cmd_set(args):
                     if k in after:
                         lst.append(me)
                     o.props = {**o.props, back: lst}
-        elif key in ("aliases", "tags"):
+        elif key in TEXT_LISTS:
             items = [a.strip() for a in value.split(",") if a.strip()]
             old = list(props.get(key) or [])
             props[key] = (old + [i for i in items if i not in old] if op == "+"
@@ -1043,6 +1097,12 @@ def cmd_check(args):
         for key in REQUIRED[kind]:
             if not n.props.get(key):
                 problems.append(f"{lab(p)}: missing {key}")
+        texts = [k for k in ("paths", "symbols") if isinstance(n.props.get(k), str)]
+        if fix and texts:
+            n.props = {**n.props, **{k: split_text(n.props[k]) for k in texts}}
+            n.save()
+            fixed.append(f"{lab(p)}: {', '.join(texts)} made lists")
+        problems += [f"{lab(p)}: {why}" for why in provenance_problems(n, kind)]
         if kind == "raw":
             continue
         if kind == "article":

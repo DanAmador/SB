@@ -1,4 +1,6 @@
+import subprocess
 import unittest
+from pathlib import Path
 
 from helpers import TODAY, VaultCase
 
@@ -181,6 +183,60 @@ class Raw(Seeded):
                     "--from", str(src), ok=False)
         self.assertIn("wiki/raw/general/obsidian/link-cache", r.stdout + r.stderr)
 
+
+
+class Provenance(Seeded):
+    """A raw note read from a repo records the repo, commit, ref and paths; check holds the shape."""
+
+    def repo(self):
+        root = Path(self._tmp.name) / "monorepo"
+        (root / "libs" / "viewport").mkdir(parents=True)
+        (root / "libs" / "viewport" / "Render.ts").write_text("export const frameloop = 'demand'\n")
+        for a in (["init", "-q", "-b", "main"], ["config", "user.email", "t@example.invalid"],
+                  ["config", "user.name", "t"], ["remote", "add", "origin", "git@github.com:org/monorepo.git"],
+                  ["add", "-A"], ["commit", "-q", "-m", "x"]):
+            subprocess.run(["git", "-C", str(root), *a], check=True, capture_output=True)
+        sha = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+        return root, sha
+
+    def test_raw_with_repo_root_stamps_repo_commit_ref_and_paths(self):
+        root, sha = self.repo()
+        src = self.write("scratch.txt", "Renders on demand.\n")
+        rel = self.sb("wiki", "raw", "monorepo/rendering", "--title", "Render loop", "--source", "AGENTS.md",
+                      "--repo-root", str(root), "--paths", "libs/viewport/Render.ts,libs/viewport/",
+                      "--symbols", "frameloop", "--from", str(src)).stdout.strip()
+        text = self.read(rel)
+        for line in ("repo: org/monorepo", f"commit: {sha}", "ref: main",
+                     "paths:\n  - libs/viewport/Render.ts\n  - libs/viewport/", "symbols:\n  - frameloop"):
+            self.assertIn(line, text)
+        self.assertNotIn("problem", self.sb("wiki", "check").stdout.replace("0 problem", ""))
+
+    def test_raw_refuses_a_path_missing_at_the_commit_and_paths_without_a_repo(self):
+        root, _ = self.repo()
+        src = self.write("scratch.txt", "x\n")
+        r = self.sb("wiki", "raw", "monorepo/rendering", "--title", "T", "--source", "s", "--repo-root", str(root),
+                    "--paths", "libs/nowhere.ts", "--from", str(src), ok=False)
+        self.assertIn("does not exist", r.stdout + r.stderr)
+        self.sb("wiki", "raw", "monorepo/rendering", "--title", "T", "--source", "s", "--paths", "a",
+                "--from", str(src), ok=False)
+
+    def test_check_flags_bad_provenance_and_fix_makes_text_paths_lists(self):
+        raw = "wiki/raw/general/obsidian/link-cache.md"
+        self.write(raw, self.read(raw).replace("created: 2026-01-02\n", "created: 2026-01-02\nrepo: org/monorepo\n"
+                                               f"commit: {'a' * 40}\nref: main\npaths: x/a.ts, x/b.ts\n"))
+        out = self.sb("wiki", "check", ok=False).stdout
+        self.assertIn("paths is text, not a list", out)
+        self.sb("wiki", "check", "--fix", ok=None)
+        self.assertIn("paths:\n  - x/a.ts\n  - x/b.ts", self.read(raw))
+        self.sb("wiki", "check")
+        self.sb("wiki", "set", raw, "commit=abc123")
+        self.assertIn("full 40-character commit", self.sb("wiki", "check", ok=False).stdout)
+
+    def test_verified_is_a_full_commit_on_articles_and_provenance_stays_on_raw_notes(self):
+        self.sb("wiki", "set", self.article, "verified=" + "b" * 40)
+        self.sb("wiki", "check")
+        self.sb("wiki", "set", self.article, "commit=" + "b" * 40)
+        self.assertIn("belongs on the raw notes", self.sb("wiki", "check", ok=False).stdout)
 
 class Set(Seeded):
     def setUp(self):
