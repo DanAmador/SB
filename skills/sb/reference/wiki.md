@@ -112,7 +112,7 @@ at: a raw note from a repo records where (`repo`, `commit`, `ref`, `paths`), so 
 diff those paths and grep those symbols on main, or on the branch when the code is not merged yet.
 `sbmap wiki verify --repo-root <clone>` does exactly that for every article of the repo's project:
 **current**, **drifted** (a path changed since), **broken** (a path deleted or a symbol gone),
-**orphaned** (read on a branch that is gone and never merged) or **unanchored** (no source commit;
+**orphaned** (read on a branch gone from origin and the clone, never merged) or **unanchored** (no source commit;
 it then guesses from the article's backticked code and says so). Re-read a drifted or broken
 article, update it, and set `verified` to the commit you read.
 

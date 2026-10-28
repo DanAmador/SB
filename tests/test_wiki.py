@@ -303,7 +303,26 @@ class Verify(Seeded):
         self.assertEqual(self.verdicts()["clip-prelude"], "current")
         self.git(self.clone, "push", "-q", str(self.remote), ":feature")
         self.git(self.clone, "fetch", "-q", "--prune", str(self.remote), "+refs/heads/*:refs/remotes/origin/*")
+        self.assertEqual(self.verdicts()["clip-prelude"], "current")
+        self.git(self.clone, "switch", "-q", "main")
+        self.git(self.clone, "branch", "-q", "-D", "feature")
         self.assertEqual(self.verdicts()["clip-prelude"], "orphaned")
+
+    def test_raw_rev_stamps_a_branch_without_checking_it_out_and_verify_finds_a_local_branch(self):
+        self.git(self.clone, "switch", "-q", "-c", "local-only")
+        (self.clone / "libs/viewport/Frame.ts").write_text("export const LEGACY = 1\n")
+        self.git(self.clone, "add", "-A")
+        self.git(self.clone, "commit", "-q", "-m", "local")
+        tip = self.git(self.clone, "rev-parse", "HEAD")
+        self.git(self.clone, "switch", "-q", "main")
+        src = self.write("scratch.txt", "Frame.\n")
+        raw = self.sb("wiki", "raw", "monorepo/rendering", "--title", "Frame re-read", "--source", "s",
+                      "--repo-root", str(self.clone), "--rev", "local-only", "--paths", "libs/viewport/Frame.ts",
+                      "--symbols", "LEGACY", "--from", str(src)).stdout.strip()
+        self.assertIn(f"commit: {tip}\nref: local-only", self.read(raw))
+        self.sb("wiki", "new", "monorepo/rendering/frame", "--title", "Frame", "--type", "concept", "--summary", "S.",
+                "--sources", raw[:-3], "--about", "Rendering.")
+        self.assertEqual(self.verdicts()["frame"], "current")
 
     def test_paths_still_written_as_text_are_read_as_a_list(self):
         self.add_article("text-paths", self.git(self.clone, "rev-parse", "HEAD"))

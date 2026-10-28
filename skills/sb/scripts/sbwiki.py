@@ -13,9 +13,9 @@
   write
     sbmap.py wiki init                      creates whatever of the layout is missing; never overwrites
     sbmap.py wiki raw <project>/<topic> --title "…" --source "…" [--author "…"] [--published YYYY-MM-DD|Unknown]
-                          [--repo-root <clone> [--paths a,b] [--symbols a,b]]
+                          [--repo-root <clone> [--rev <branch|sha>] [--paths a,b] [--symbols a,b]]
                           --from <file|->   keeps a source as a raw note; --repo-root stamps the repo,
-                                            commit and ref it was read at
+                                            commit and ref it was read at (HEAD, or --rev)
     sbmap.py wiki new <project>/<topic>/<slug> --title "…" --type concept|entity|synthesis --summary "…"
                           --sources <refs> [--related <refs>] [--aliases "a, b"] [--tags "a, b"] [--about "…"]
     sbmap.py wiki set <note> key=value … [key+=<refs>] [key-=<refs>]
@@ -687,9 +687,9 @@ def cmd_raw(args):
     root = sb.opt(args, "--repo-root")
     if root:
         props.update(provenance(Path(root).expanduser(), split_text(sb.opt(args, "--paths", "")),
-                                split_text(sb.opt(args, "--symbols", ""))))
-    elif sb.opt(args, "--paths") or sb.opt(args, "--symbols"):
-        die("--paths and --symbols need --repo-root <clone>")
+                                split_text(sb.opt(args, "--symbols", "")), sb.opt(args, "--rev", "HEAD")))
+    elif sb.opt(args, "--paths") or sb.opt(args, "--symbols") or sb.opt(args, "--rev"):
+        die("--paths, --symbols and --rev need --repo-root <clone>")
     path = wiki_dir() / "raw" / project / topic / f"{slug}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     sb.write_atomic(path, sb.dump_fm(props, WIKI_KEYS) + text)
@@ -711,22 +711,25 @@ def repo_name(origin):
     return m.group(1) if m else origin
 
 
-def provenance(root, paths, symbols):
-    """Where a source was read: the repo (from origin), the commit and branch checked out, and
-    the paths and symbols its claims rest on, each path checked to exist at that commit."""
+def provenance(root, paths, symbols, rev="HEAD"):
+    """Where a source was read: the repo (from origin), the commit and branch (checked out, or
+    `rev` read without checking it out), and the paths and symbols its claims rest on, each path
+    checked to exist at that commit."""
     def git(*a):
         r = subprocess.run(["git", "-C", str(root), *a], capture_output=True, text=True)
         if r.returncode:
             die(f"git {' '.join(a)} in {root}: {r.stderr.strip() or 'failed'}")
         return r.stdout.strip()
     origin = git("remote", "get-url", "origin")
-    commit = git("rev-parse", "HEAD")
+    commit = git("rev-parse", "--verify", f"{rev}^{{commit}}")
+    ref = (git("rev-parse", "--abbrev-ref", "HEAD") if rev == "HEAD" else
+           "" if re.fullmatch(r"[0-9a-f]{7,40}", rev) else re.sub(r"^(refs/)?(remotes/)?origin/", "", rev))
     for path in paths:
         if subprocess.run(["git", "-C", str(root), "cat-file", "-e", f"{commit}:{path.rstrip('/')}"],
                           capture_output=True).returncode:
             die(f"'{path}' does not exist at {commit[:10]} in {root}")
     return {"repo": repo_name(origin), "commit": commit,
-            "ref": git("rev-parse", "--abbrev-ref", "HEAD"), "paths": paths, "symbols": symbols}
+            "ref": ref, "paths": paths, "symbols": symbols}
 
 
 def provenance_problems(n, kind):
@@ -814,8 +817,9 @@ def cmd_verify(args):
             continue
         if git("merge-base", "--is-ancestor", row["anchor"], base) is not None:
             row["target"] = base
-        elif row["ref"] and git("rev-parse", "--verify", f"origin/{row['ref']}") is not None:
-            row["target"] = f"origin/{row['ref']}"
+        elif row["ref"] and (target := next((t for t in (f"origin/{row['ref']}", row["ref"])
+                                             if git("rev-parse", "--verify", t) is not None), None)):
+            row["target"] = target
         else:
             rows.append({**row, "verdict": "orphaned"})
             continue
