@@ -160,10 +160,60 @@ def cmd_dump(args):
     with log.open("a", encoding="utf-8") as f:
         f.write(f"\n## [{date.today().isoformat()}] dump | {', '.join(s.projects)}\n"
                 f"- {len(changed)} changed, {len(removed)} removed\n")
+    title = f"wiki dump: {', '.join(s.projects)} ({len(changed)} changed, {len(removed)} removed)"
+    body = pr_body(s, start, changed, removed)
     git(s.clone, "add", "-A", "wiki")
-    git(s.clone, "commit", "-q", "-m", f"wiki dump: {', '.join(s.projects)} ({len(changed)} changed, {len(removed)} removed)")
+    git(s.clone, "commit", "-q", "-m", title)
+    body_file = s.clone / ".git" / "sb-dump-pr.md"
+    body_file.write_text(body, encoding="utf-8")
     print(f"dumped {len(changed)} changed and {len(removed)} removed notes onto {branch} in {s.clone}")
-    print(f"next: git -C '{s.clone}' push -u origin {branch}, then open a PR into {s.base}")
+    print(f"next: git -C '{s.clone}' push -u origin {branch}")
+    print(f"      gh pr create -R \"$(git -C '{s.clone}' remote get-url origin)\" --base {s.base} --head {branch} "
+          f"--title '{title}' --body-file '{body_file}'")
+
+
+def describe(raw):
+    """(kind, title, summary or source, props, body) of a note's bytes."""
+    props, body, _ = sb.split_fm(raw.decode("utf-8", errors="replace"))
+    m = re.search(r"^# (.+)$", body, re.M)
+    title = m.group(1).strip() if m else str(props.get("title") or "")
+    return str(props.get("wiki", "")), title, str(props.get("summary") or props.get("source") or ""), props, body
+
+
+def pr_body(s, start, changed, removed):
+    """The pull request's description: what a reviewer reads before the files."""
+    rows = {"article": [], "raw": [], "other": []}
+    for rel in sorted(changed):
+        kind, title, line, props, body = describe((sb.VAULT / rel).read_bytes())
+        old = git_bytes(s.clone, start, rel) if start else None
+        group = "article" if kind in ("article", "synthesis") else "raw" if kind == "raw" else "other"
+        topic = rel.split("/")[-2]
+        if old is None:
+            rows[group].append(f"| 🆕 | **{title}**: {line} | {topic} | new |")
+            continue
+        _, _, _, oprops, obody = describe(old)
+        what = [k for k in sorted(set(props) | set(oprops)) if str(props.get(k)) != str(oprops.get(k))]
+        if body.strip() != obody.strip():
+            what.insert(0, "text")
+        rows[group].append(f"| 💬 | **{title}** | {topic} | {', '.join(what) or 'whitespace'} |")
+    out = [f"Wiki dump of **{', '.join(s.projects)}** from the maintainer's notes: {len(changed)} changed, "
+           f"{len(removed)} removed. Copied byte for byte by `sbmap wiki dump`; nothing was rewritten.", ""]
+    head = "| | note | topic | what changed |\n| --- | --- | --- | --- |"
+    for group, name in (("article", "Articles"), ("raw", "Sources (raw notes)"), ("other", "Topics and other notes")):
+        if not rows[group]:
+            continue
+        table = "\n".join([head, *rows[group]])
+        out.append(f"### {name} ({len(rows[group])})\n")
+        out.append(table if len(rows[group]) <= 12 else f"<details><summary>{len(rows[group])} notes</summary>\n\n{table}\n\n</details>")
+        out.append("")
+    if removed:
+        out.append(f"### Removed ({len(removed)})\n")
+        out += [f"- `{rel}`" for rel in sorted(removed)] + [""]
+    out += ["### Reviewing", "",
+            "- New or rewritten articles: read the Overview; every number and quote must be in a raw note it cites.",
+            "- Raw notes are sources and are never edited; check their provenance (`repo`, `commit`, `ref`, `paths`).",
+            "- CI runs `wiki check` (format and links)."]
+    return "\n".join(out) + "\n"
 
 
 def cmd_import(args):

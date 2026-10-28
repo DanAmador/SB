@@ -85,6 +85,11 @@ class DumpTest(SyncCase):
         self.assertIn("MeshProxy", (self.clone / "wiki/index.md").read_text())
         self.assertIn("dump | monorepo", (self.clone / "wiki/log.md").read_text())
         self.assertEqual(self.git("show", "main:README.md"), "# llm-wiki\n")
+        body = (self.clone / ".git/sb-dump-pr.md").read_text()
+        self.assertIn("### Articles (1)", body)
+        self.assertIn("| 🆕 | **MeshProxy**: Parts are bones. | rendering | new |", body)
+        self.assertIn("### Sources (raw notes) (1)", body)
+        self.assertIn("gh pr create", r.stdout)
 
     def test_projects_are_remembered_and_a_second_dump_has_nothing_new(self):
         self.dump()
@@ -127,6 +132,8 @@ class ImportTest(SyncCase):
         self.write("wiki/monorepo/rendering/meshproxy.md", ARTICLE.format(t="MeshProxy", s="Owner edit."))
         self.dump()
         self.assertIn("Owner edit.", (self.clone / "wiki/monorepo/rendering/meshproxy.md").read_text())
+        body = (self.clone / ".git/sb-dump-pr.md").read_text()
+        self.assertIn("| 💬 | **MeshProxy** | rendering | text, summary |", body)
 
     def test_a_note_changed_on_both_sides_is_reported_and_kept(self):
         self.write("wiki/monorepo/rendering/meshproxy.md", ARTICLE.format(t="MeshProxy", s="Owner edit."))
