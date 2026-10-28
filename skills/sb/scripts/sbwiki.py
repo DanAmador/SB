@@ -38,7 +38,6 @@ from datetime import date
 from pathlib import Path
 
 import sbmap as sb
-import sbsync
 
 WIKI_KEYS = ["wiki", "type", "project", "status", "title", "source", "author", "published", "created", "summary",
              "updated", "reviewed", "archived", "sources", "related", "supersedes", "superseded_by",
@@ -1227,10 +1226,17 @@ def cmd_migrate(args):
     print("written")
 
 
+def cmd_sync(name):
+    def run(args):
+        import sbsync  # dump/import live beside this file; teams that fetch only sbmap.py and sbwiki.py never need it
+        sbsync.COMMANDS[name](args)
+    return run
+
+
 COMMANDS = {"index": cmd_index, "find": cmd_find, "show": cmd_show, "link": cmd_link,
             "backlog": cmd_backlog, "init": cmd_init, "raw": cmd_raw, "new": cmd_new, "set": cmd_set,
             "log": cmd_log, "check": cmd_check,
-            "migrate": cmd_migrate, **sbsync.COMMANDS}
+            "migrate": cmd_migrate, "dump": cmd_sync("dump"), "import": cmd_sync("import")}
 
 
 def main(args):
