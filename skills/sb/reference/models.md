@@ -3,7 +3,7 @@
 **Pick the tier by the work's shape, then the model by the tier.** Recommend one per ticket in every
 proposal; never one model for everything.
 
-| tier | the work | today (2026-10) | effort |
+| tier | the work | today (2026-11) | effort |
 |---|---|---|---|
 | **capable** | charting and grilling a map, a spec or plan, architecture tickets, the orchestrator, the final whole-branch review, and the **hard** tickets below | Opus 5.5; Fable 5.1 when the weekly allotment allows and the work is judgement-heavy (charting, specs, the final review) | high |
 | **mid** | the default for implementation, design-heavy included when the ticket or its architecture ticket holds the design; per-task reviews and re-reviews; research reading; Explore; re-reading a broken wiki article in the code | Sonnet 5.5 | medium |

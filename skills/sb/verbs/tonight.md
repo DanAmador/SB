@@ -14,7 +14,7 @@ changes; a one-repo night skips them.
 
 ## Propose
 
-1. **Read the world**, beyond the shared start. No questions yet.
+1. **Read the world**, after SKILL.md's *Every verb starts here* step 1. No questions yet.
    - `sbmap status` and `sbmap check` on each candidate map.
    - `git status --short`, the branch, `git log --oneline -15`. Dirty files you did not make are a
      peer's: name them.
