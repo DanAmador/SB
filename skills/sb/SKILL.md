@@ -2,7 +2,7 @@
 name: sb
 description: "Second-brain workflow: the owner's maps, tickets, night runs and wiki in the Obsidian vault. /sb <anything>: free text is the default, a verb is a shortcut; no argument shows the board."
 disable-model-invocation: true
-argument-hint: "[what you want, in your own words] or [chart|tonight|morning|resume|close|learn|ask|handoff|capture|land]"
+argument-hint: "[what you want, in your own words] or [chart|tonight|morning|resume|explain|close|learn|ask|handoff|capture|land]"
 ---
 
 # sb: the vault is the hub
@@ -33,6 +33,7 @@ Two intents in one message ("close and learn", "draft and for tonight") run in t
 | "tonight", "overnight", "enqueue", "I'm going to bed" | [tonight](verbs/tonight.md) |
 | "what happened", "I'm back", "what do I test" | [morning](verbs/morning.md) |
 | "continue", "tokens are back", "reorient me", a dead session | [resume](verbs/resume.md) |
+| "wait what", "I don't get it", "explain this", "what does X mean" | [explain](verbs/explain.md) |
 | "write a handoff", "move to a new session" | [handoff](verbs/handoff.md) |
 | "merge the worktrees", "bring the lanes home" | [land](verbs/land.md) |
 | "close this map", "we're done here" | [close](verbs/close.md) |
