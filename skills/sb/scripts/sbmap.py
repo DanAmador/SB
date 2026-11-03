@@ -8,6 +8,10 @@ Reads and writes the local tracker the vault's `wayfinder/README.md` defines: a 
 Bases see the whole route. It answers what an agent should never compute or type by eye.
 
   read
+    sbmap.py info [<map> | --repo <path>]
+                                        a map's bearings: its plain words, counts and open tickets with
+                                        their whys; or each open map of a repo (no argument: the git
+                                        toplevel) with its plain words' first sentence
     sbmap.py maps [--repo <path>]       every map in the vault (or one repo's), with counts
     sbmap.py status   <map>             counts, claimed tickets, the frontier, the map's handoff.md and
                                         checkpoint.md and the wayfinder/runs/ files that name it
@@ -562,6 +566,47 @@ def cmd_status(args):
         print("  (empty)")
     files = trail(m)
     print("handoff/checkpoint: " + (", ".join(rel(p) for p in files) if files else "none"))
+
+
+def plain_words(m):
+    """The map's `## In plain words` section as written ('' when it has none)."""
+    i = m.body.find("## In plain words")
+    if i < 0:
+        return ""
+    nxt = m.body.find("\n## ", i + 4)
+    return m.body[i + len("## In plain words"):nxt if nxt >= 0 else len(m.body)].strip()
+
+
+def short(text, limit):
+    """The first sentence of text, cut to limit characters."""
+    first = re.split(r"(?<=[.!?])\s", str(text).strip(), maxsplit=1)[0]
+    return first if len(first) <= limit else first[:limit - 1].rstrip() + "…"
+
+
+def cmd_info(args):
+    if args and not args[0].startswith("--"):
+        m = load(args[0])
+        print(f"# {m.title}\n")
+        print((plain_words(m) or "(no plain words yet)") + "\n")
+        print("counts: " + counts(m))
+        front = {t.num for t in m.frontier()}
+        waiting = []
+        for t in m.order():
+            if t.status == "open" and t.num not in front:
+                waiting.append(t.id)  # blocked: the number only, `show` has the rest
+            elif t.status in ("open", "claimed"):
+                mark = f"[{t.claimed_by or 'claimed'}]" if t.status == "claimed" else "▸"
+                print(f"{mark} {t.id} {t.title} — {short(t.props.get('why', ''), 90)}")
+        if waiting:
+            print("blocked: " + " ".join(waiting))
+        return
+    repo = opt(args, "--repo") or subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True,
+                                                 text=True).stdout.strip() or sys.exit("sbmap: info needs a map, --repo, or a git repo")
+    for m in all_maps():
+        if m.archived or m.status == "resolved" or not belongs(m, repo):
+            continue
+        words = " ".join(l for l in plain_words(m).splitlines() if not l.startswith(">")).strip()
+        print(f"{m.folder.name} · {m.title}\n  {short(words, 160)}")
 
 
 def cmd_frontier(args):
@@ -1908,7 +1953,7 @@ def cmd_wiki(args):
         sys.exit(code)
 
 
-COMMANDS = {"maps": cmd_maps, "status": cmd_status, "frontier": cmd_frontier, "lanes": cmd_lanes, "show": cmd_show,
+COMMANDS = {"info": cmd_info, "maps": cmd_maps, "status": cmd_status, "frontier": cmd_frontier, "lanes": cmd_lanes, "show": cmd_show,
             "next": cmd_next, "link": cmd_link, "check": cmd_check, "verify": cmd_verify,
             "init": cmd_init, "summary": cmd_summary, "new": cmd_new, "set": cmd_set, "claim": cmd_claim,
             "comment": cmd_comment, "ruling": cmd_comment, "block": cmd_block,
@@ -1916,6 +1961,6 @@ COMMANDS = {"maps": cmd_maps, "status": cmd_status, "frontier": cmd_frontier, "l
             "close": cmd_close, "wiki": cmd_wiki}
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2 or sys.argv[1] not in COMMANDS or (sys.argv[1] not in ("maps", "wiki") and len(sys.argv) < 3):
+    if len(sys.argv) < 2 or sys.argv[1] not in COMMANDS or (sys.argv[1] not in ("maps", "info", "wiki") and len(sys.argv) < 3):
         sys.exit(__doc__)
     COMMANDS[sys.argv[1]](sys.argv[2:])

@@ -27,7 +27,7 @@ Two intents in one message ("close and learn", "draft and for tonight") run in t
 
 | the owner says something like | verb |
 |---|---|
-| "where are we", "what's open", "what were agents doing", *(nothing)* | board: `sbmap maps`, this repo's frontier with each ticket's why, any checkpoint; name the verb that fits |
+| "where are we", "what's open", "what were agents doing", *(nothing)* | board: `sbmap info --repo <repo path>`, this repo's frontier with each ticket's why, any checkpoint; name the verb that fits |
 | "chart / draft / plan / let's think about X", a brain-dump | [chart](verbs/chart.md) |
 | "add these as todos", playtest notes, "I noticed…" | [capture](verbs/capture.md) |
 | "tonight", "overnight", "enqueue", "I'm going to bed" | [tonight](verbs/tonight.md) |
@@ -76,10 +76,10 @@ So intent is written down where both read it:
 
 ## Every verb starts here
 
-1. **Read the vault first.** `sbmap maps --repo <repo path>`, then `sbmap status <map>` (it names
-   the map's `handoff.md` and `checkpoint.md`, and `wayfinder/runs/` files; 🔒 never a file at the
-   `wayfinder/` root). `sbmap wiki index --project <repo>`, and `sbmap wiki find` the effort's
-   nouns. Say in one line what they gave you, "nothing" included.
+1. **Read the vault first.** `sbmap info --repo <repo path>`, then `sbmap info <map>` for the map in
+   play. `sbmap status <map>` only for claims and the map's `handoff.md` and `checkpoint.md`, and
+   `wayfinder/runs/` files (🔒 never a file at the `wayfinder/` root). `sbmap wiki index --project <repo>`,
+   and `sbmap wiki find` the effort's nouns. Say in one line what they gave you, "nothing" included.
 2. **Resolve the contract**: [reference/contract.md](reference/contract.md). `learn` and `ask` skip it.
 3. Run the verb.
 4. **Report in the owner's shape** ([reference/output.md](reference/output.md)): line 1 is what the
