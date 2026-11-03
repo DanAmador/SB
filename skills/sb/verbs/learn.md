@@ -27,7 +27,7 @@ cascade are shared, so compiling never runs in parallel.
 2. **Triage.** First the **project**: a ticket or research note belongs to its map's repo (the
    folder under `wayfinder/`), a fetch or a paste to the repo the owner is working in. Knowledge that
    another repo could use unchanged (a tool, a library, a technique) goes in `general` instead
-   ([Projects](../reference/wiki.md#layout)). Then `sbmap wiki find --project <project>` with the
+   (wikibrain's *Layout*). Then `sbmap wiki find --project <project>` with the
    source's entities, their synonyms and abbreviations; with Obsidian running, also
    `search:context query="path:wiki/ <terms>"`. Say the project and the disposition in one line:
    - **New**: a concept no article covers.
@@ -41,20 +41,20 @@ cascade are shared, so compiling never runs in parallel.
    as a raw note (its Question and Answer, or its body, verbatim, with machine paths, personal
    emails and links into `wayfinder/` turned to plain text) and the article cites that raw note:
    - its claims rest on a repo, so the raw note can carry the commit (step 4);
-   - it is in a **shared project** (one a clone syncs, see
-     [Sharing projects](../reference/wiki.md#sharing-projects-through-a-git-clone)), so every source
+   - it is in a **shared project** (one a clone syncs: wikibrain's
+     *Sharing projects*), so every source
      travels with the wiki.
 
    No material: log it (step 7) and stop.
 4. **Anchor it** by wikibrain's *Anchoring a source* (its `reference/wiki.md`): a raw note whose
    claims rest on a repo carries `repo`, `commit` and `paths` (or `pr`), never without them.
-5. **Compile**, by [Writing a finding](../reference/wiki.md#writing-a-finding). Locate every
+5. **Compile**, by wikibrain's *Writing a finding*. Locate every
    number, date and quote in the raw before writing it, and write it as found.
    - Update: `sbmap wiki set <article> sources+=<raw> updated=today`, then rewrite the sections it
      changes.
    - New: `sbmap wiki new <project>/<topic>/<slug>`, named after the concept rather than the source,
      with a `summary` an agent can triage from, and `--tags` for the concepts it is about (tags are
-     Semantra's edges: [the wiki](../reference/wiki.md)). A source spanning topics lands in the closest one and
+     Semantra's edges). A source spanning topics lands in the closest one and
      links the rest through `related`. The heading names the project's own things in its own words
      ("Assemblio part hierarchy"), so the article reads right outside its folder too.
    - Disputed: the Disputed callout under the contested claim, `status=disputed`; on both articles,
@@ -135,7 +135,7 @@ can do is a command, so tokens go only to judging changed code.
 
 ## Report
 
-In the owner's shape ([output.md](../reference/output.md)), one line per source, as `capture`
+One line per source, as `capture`
 reports: 🆕 new article, 💬 merged into, ⚠️ disputed, or "no material", each with the article's
 name as a link and where it is anchored (`<repo>@<short sha>`, or ⚠️ unanchored and why). Then the backlog left, and one action under two minutes (often: rule on a ⚠️
 dispute).

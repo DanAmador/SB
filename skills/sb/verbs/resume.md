@@ -1,22 +1,21 @@
 # /sb resume [effort]
 
-A run stopped (a usage limit, a crash, a session that ran out of context) or the owner says
-"continue" or "reorient me". Pick up exactly where the work is, never where a summary says it was.
+A run stopped (a usage limit, a crash, a context that ran out) or the owner says "continue" or
+"reorient me". Pick up where the work is, never where a summary says it was.
 
-1. **Find the trail.** In the vault: the files `sbmap status <map>` lists (the map's
-   `checkpoint.md` and `handoff.md`, then `wayfinder/runs/` files naming it, newest first), the maps'
-   claimed tickets. In the repo: `git log --oneline` since the checkpoint's base, the ledger it
-   names, `git status --short`.
+1. **Find the trail.** The files `sbmap status <map>` lists (`checkpoint.md`, `handoff.md`, then
+   `wayfinder/runs/` files naming it, newest first) and the claimed tickets. In the repo:
+   `git log --oneline` since the checkpoint's base, the ledger it names, `git status --short`.
 2. **Reconcile the trail with the tree.** For each ticket the trail calls in flight:
-   - committed and verified → resolve it if the run died before recording it
-   - committed but unrecorded and unverified → verify now, then resolve
+   - committed, verified or verifiable now → resolve it if the run died before recording it
    - uncommitted edits in its paths → read the diff; finish it or say why not
-   - claimed, no commit, its `claimed_by` session not running → the claim is stale;
-     `sbmap set <map> <NNN> status=open`, then claim it as yours
-   - a map, ticket or checkpoint that lost content (a dead session's half-write) → recover it from
-     Obsidian's file history ([reference/obsidian.md](../reference/obsidian.md)); the vault has no git
+   - claimed, no commit, its claimant not running → stale: `sbmap set <map> <NNN> status=open`,
+     then claim it as yours
+   - a map, ticket or checkpoint that lost content → recover it from Obsidian's file history
+     ([reference/obsidian.md](../reference/obsidian.md))
+
    Completed work is never re-dispatched.
-3. **Say where things are** in five lines or fewer: done since the checkpoint, in flight, next, and any
-   ruling the dead session made. If the owner only asked to be reoriented, stop here.
-4. **Continue** under the recorded contract, at the step the trail stopped on: inside a night run that
-   is `tonight` step 6; otherwise the handoff's next step. Update the checkpoint before the first dispatch.
+3. **Say where things are** in five lines or fewer: done since the checkpoint, in flight, next, and
+   any ruling the dead session made. If the owner only asked to be reoriented, stop here.
+4. **Continue** under the recorded contract, at the step the trail stopped on (in a night run,
+   `tonight` step 6; otherwise the handoff's next step). Update the checkpoint before the first dispatch.

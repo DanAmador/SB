@@ -1,7 +1,7 @@
 ### The night-run contract (<date>)
 
-<!-- Written into the map's ## Notes by /sb tonight; for a night across repos, into the night's
-     `wayfinder/runs/<date>-tonight.md`, with each map's Notes pointing there. Edit in place for later rulings, dated. -->
+<!-- Into the map's ## Notes, or the night's `wayfinder/runs/<date>-tonight.md` across repos.
+     Later rulings edit it in place, dated. -->
 
 - **Where:** repo `<path>`, branch `<branch>` (from `<sha>`), <main tree | worktree on request>;
   across repos, one line per lane. Never push; never merge into `main`.
@@ -17,14 +17,12 @@
   editing; the owner's live services (dev server, store, vault) off or read-only>.
 - **Models:** orchestrator <capable model>; implementers <mid model>, except the hard ones: <ticket →
   capable model, reason>. A mid ticket that fails once retries once on <capable model>.
-  Every dispatch names its `model:`.
 - **Context:** hand off at ~150k; one ticket per implementer context.
 - **Blocked:** take the recommendation, write it on the ticket as a ruling, keep going.
 - **Stop when:** the queue is empty, the window (<hours> h, until ~<time>) is over, or the same
   failure repeats twice. Nothing else stops the run.
-- **Claim** with `sbmap claim`. **Resolve** with `## Answer` (commit, what was verified and how,
-  what was **not**, model; tickets named as wikilinks), then `sbmap resolve`, `sbmap diagram --write`,
-  checkpoint updated.
+- **Claim** with `sbmap claim`. **Resolve** with `sbmap resolve --answer` (commit, what was verified
+  and how, what was **not**, model), then the checkpoint.
 
 ### The night's order
 

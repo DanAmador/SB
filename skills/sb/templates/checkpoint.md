@@ -27,4 +27,4 @@ any point. **Read this first, then what it names.** Last updated: <date time>.
 
 ## Morning digest
 
-<!-- /sb tonight writes this at the end of a run; /sb morning reads it -->
+<!-- written at the end of a run; /sb morning reads it -->
