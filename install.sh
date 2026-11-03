@@ -66,9 +66,18 @@ if [ -z "$claude" ]; then
          "will not open. Install Claude Code and rerun." >&2
     exit 0
 fi
+# quiet-tests (opt in): trims agents' test and Unity output to failures and totals. Installed only
+# on --quiet-tests, or a y at the prompt (asked only when run from a terminal).
+extra=""
+case "${1:-}" in --quiet-tests) extra=quiet-tests ;; esac
+if [ -z "$extra" ] && [ -t 0 ]; then
+    read -r -p "Install quiet-tests (agent test output: failures and totals only)? [y/N] " a
+    case "$a" in [Yy]*) extra=quiet-tests ;; esac
+fi
 for dir in "$HOME/.claude" "$HOME"/.claude-*; do
     [ "$dir" = "$HOME/.claude" ] || [ -d "$dir/plugins" ] || continue
     cc() { CLAUDE_CONFIG_DIR="$dir" "$claude" "$@"; }
     cc plugin marketplace list 2>/dev/null | grep -q sb-workflow || cc plugin marketplace add "$here"
     cc plugin install obsidian-links@sb-workflow
+    [ -z "$extra" ] || cc plugin install "$extra@sb-workflow"
 done

@@ -1,5 +1,8 @@
 {
   "name": "sb-workflow",
   "owner": { "name": "Dan Amador" },
-  "plugins": [{ "name": "obsidian-links", "source": "./mods/obsidian-links" }]
+  "plugins": [
+    { "name": "obsidian-links", "source": "./mods/obsidian-links" },
+    { "name": "quiet-tests", "source": "./mods/quiet-tests" }
+  ]
 }
