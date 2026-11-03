@@ -20,7 +20,8 @@ link "../../.agents/skills/sb" "$HOME/.claude/skills/sb"
 link "$here/skills/sb" "$HOME/.gemini/config/skills/sb"
 chmod +x "$here/skills/sb/scripts/sbmap.py"
 
-# Third-party skills: skills-lock.json names each one's GitHub repo, folder and, when pinned, the
+# Third-party skills: an entry with "global": false stays this repo's own (.claude/skills) and is not
+# linked for every project. skills-lock.json names each one's GitHub repo, folder and, when pinned, the
 # commit (`ref`). An unpinned skill already in ~/.agents/skills is left as it is (delete it and rerun
 # to update); a pinned one is reinstalled when its ref changes. A link (a local checkout you develop
 # in, e.g. ~/.agents/skills/wikibrain -> your wikiBrain clone) is never replaced.
@@ -43,7 +44,7 @@ while read -r name repo dir ref; do
     link "../../.agents/skills/$name" "$HOME/.claude/skills/$name"
 done < <(python3 -c 'import json, os, sys
 for k, v in json.load(open(sys.argv[1]))["skills"].items():
-    print(k, v["source"], os.path.dirname(v["skillPath"]) or ".", v.get("ref") or "-")' "$here/skills-lock.json")
+    if v.get("global", True): print(k, v["source"], os.path.dirname(v["skillPath"]) or ".", v.get("ref") or "-")' "$here/skills-lock.json")
 
 # Obsidian reads CSS snippets only from real files in the vault, so the Route's link styling is
 # copied, not linked: rerun after editing it, then enable it in Settings → Appearance → CSS snippets.
@@ -96,7 +97,7 @@ fi
 # quiet-tests (opt in): trims agents' test and Unity output to failures and totals. Installed only
 # on --quiet-tests, or a y at the prompt (asked only when run from a terminal).
 extra=""
-case "${1:-}" in --quiet-tests) extra=quiet-tests ;; esac
+for a in "$@"; do [ "$a" != --quiet-tests ] || extra=quiet-tests; done
 if [ -z "$extra" ] && [ -t 0 ]; then
     read -r -p "Install quiet-tests (agent test output: failures and totals only)? [y/N] " a
     case "$a" in [Yy]*) extra=quiet-tests ;; esac
