@@ -83,8 +83,10 @@ install.sh            links the skill into ~/.agents/skills and ~/.claude/skills
 - The `sb-route-links` CSS snippet, which `install.sh` copies into the vault: a map's Route links
   each ticket node to its note, and the snippet keeps the label in its status colour until hover.
   Enable it once in Settings → Appearance → CSS snippets.
-- Optional, work in progress: the Semantra CLI (`semantra search`). Once it lands, `sb find` and
-  `sb ask` rank vault notes by meaning through it; until then they fall back to keyword scoring.
+- Optional: the Semantra CLI (`semantra search`, built in the semantic-graph repo with
+  `pnpm run build:cli`). With `semantra` on the PATH, or `SEMANTRA` set to its `semantra.mjs`,
+  `wiki find` and `sb ask` rank vault notes by meaning; its first search on a vault indexes every
+  note (a few minutes). Without it they score keywords, as they do with `--words`.
 
 ## Install
 
