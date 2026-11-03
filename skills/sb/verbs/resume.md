@@ -3,7 +3,8 @@
 A run stopped (a usage limit, a crash, a session that ran out of context) or the owner says
 "continue" or "reorient me". Pick up exactly where the work is, never where a summary says it was.
 
-1. **Find the trail.** In the vault: this repo's checkpoint and handoff (newest first), the maps'
+1. **Find the trail.** In the vault: the files `sbmap status <map>` lists (the map's
+   `checkpoint.md` and `handoff.md`, then `wayfinder/runs/` files naming it, newest first), the maps'
    claimed tickets. In the repo: `git log --oneline` since the checkpoint's base, the ledger it
    names, `git status --short`.
 2. **Reconcile the trail with the tree.** For each ticket the trail calls in flight:

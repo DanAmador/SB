@@ -8,7 +8,8 @@ Bases see the whole route. It answers what an agent should never compute or type
 
   read
     sbmap.py maps [--repo <path>]       every map in the vault (or one repo's), with counts
-    sbmap.py status   <map>             counts, claimed tickets, the frontier, handoff/checkpoint files
+    sbmap.py status   <map>             counts, claimed tickets, the frontier, the map's handoff.md and
+                                        checkpoint.md and the wayfinder/runs/ files that name it
     sbmap.py frontier <map>             open tickets whose every blocker is resolved, in map order
     sbmap.py show     <map> <NNN>       succinct digest: status, type, blockers, question, done when
     sbmap.py lanes    <map> [--max 2] [--json]
@@ -45,7 +46,8 @@ Bases see the whole route. It answers what an agent should never compute or type
                                         header lines -> properties, bare numbers -> wikilinks, plus
                                         the board; a dry run unless --write. Idempotent.
     sbmap.py close    <map>             refuses while a ticket is open or claimed; writes report.md
-                                        from templates/map-report.md and marks the map resolved
+                                        from templates/map-report.md, marks the map resolved and
+                                        deletes the map's handoff.md and checkpoint.md
   wiki
     sbmap.py wiki <command> ...         the compiled wiki under wiki/: `sbmap.py wiki` lists its commands
                                         after `wiki import` and `wiki check --fix` each article's vault-only
@@ -464,16 +466,18 @@ def belongs(m, repo):
             or str(m.props.get("repo", "")) == str(repo))
 
 
+RUNS = WAYFINDER / "runs"  # one file per run across several maps: <date>[-<name>].md
+
+
 def trail(m):
-    """Handoff and checkpoint files beside the maps that name this map or its repo prefix."""
-    candidates = list(WAYFINDER.glob("*.md"))
-    if (WAYFINDER / m.repo).is_dir():
-        candidates += list((WAYFINDER / m.repo).glob("*.md"))
-    return sorted(p for p in set(candidates)
-                  if re.search(r"-(handoff|checkpoint)\.md$", p.name)
-                  and (p.name.startswith(m.effort_slug) or p.name.startswith(m.repo + "-")
-                       or m.effort_slug in p.read_text(encoding="utf-8")
-                       or m.folder.name in p.read_text(encoding="utf-8")))
+    """The map's own handoff.md and checkpoint.md, then the run files that name the map, newest first."""
+    own = [m.folder / n for n in TRAIL_NAMES if (m.folder / n).exists()]
+    runs = sorted((p for p in RUNS.glob("*.md") if m.rel_name in p.read_text(encoding="utf-8")),
+                  key=lambda p: p.name, reverse=True) if RUNS.is_dir() else []
+    return own + runs
+
+
+TRAIL_NAMES = ("handoff.md", "checkpoint.md")
 
 
 def counts(m):
@@ -507,7 +511,7 @@ def cmd_status(args):
     if not m.frontier():
         print("  (empty)")
     files = trail(m)
-    print("handoff/checkpoint: " + (", ".join(p.name for p in files) if files else "none"))
+    print("handoff/checkpoint: " + (", ".join(rel(p) for p in files) if files else "none"))
 
 
 def cmd_frontier(args):
@@ -1508,11 +1512,11 @@ def migrate_map(m, write):
 
 
 def migrate_root_docs(repo, write):
-    """Handoffs and checkpoints beside the maps: numbers that name one ticket become links."""
+    """Handoffs, checkpoints and run files: numbers that name one ticket become links."""
     changes = []
-    candidates = list(WAYFINDER.glob(f"{repo}-*.md"))
-    if (WAYFINDER / repo).is_dir():
-        candidates += list((WAYFINDER / repo).glob("*.md"))
+    candidates = [p for n in TRAIL_NAMES for p in (WAYFINDER / repo).glob(f"*/{n}")]
+    if RUNS.is_dir():
+        candidates += [p for p in RUNS.glob("*.md") if f"wayfinder/{repo}/" in p.read_text(encoding="utf-8")]
     for p in sorted(set(candidates)):
         text = p.read_text(encoding="utf-8")
         linked = link_numbers(text, repo)
@@ -1592,8 +1596,12 @@ def cmd_close(args):
     mprops = dict(m.props) if m.has_fm else migrate_map_props(m)
     mprops["status"] = WF_TO_OPERON_STATUS["resolved"]
     m.save(mprops, m.body)
+    gone = [n for n in TRAIL_NAMES if (m.folder / n).exists()]
+    for n in gone:  # a handoff or checkpoint is read once; the report is what stays
+        (m.folder / n).unlink()
     print(rel(report))
-    print(f"{m.title}: resolved; {len(findings)} article(s) in findings")
+    print(f"{m.title}: resolved; {len(findings)} article(s) in findings"
+          + (f"; deleted {', '.join(gone)}" if gone else ""))
 
 
 def with_tickets(text, links):

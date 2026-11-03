@@ -32,7 +32,9 @@ around that vault, each one a verb.
 ## Every verb starts here
 
 1. **Read the vault first.** Find this repo's maps (`sbmap maps --repo <repo path>`) and their
-   handoff/checkpoint files (`sbmap status <map>` names them); read the wiki's index for this repo
+   handoff/checkpoint files (`sbmap status <map>` names them: the map folder's `handoff.md` and
+   `checkpoint.md`, and `wayfinder/runs/` for work across maps; 🔒 never a file at the `wayfinder/`
+   root); read the wiki's index for this repo
    (`sbmap wiki index --project <repo>`: its knowledge plus `general`) and `sbmap wiki find
    --project <repo>` the effort's nouns; search the rest of the vault for
    them (`obsidian search:context`). Say in one line what they gave you, "nothing" included.

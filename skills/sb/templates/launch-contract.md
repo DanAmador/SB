@@ -1,7 +1,7 @@
 ### The night-run contract (<date>)
 
 <!-- Written into the map's ## Notes by /sb tonight; for a night across repos, into the night's
-     checkpoint, with each map's Notes pointing there. Edit in place for later rulings, dated. -->
+     `wayfinder/runs/<date>-tonight.md`, with each map's Notes pointing there. Edit in place for later rulings, dated. -->
 
 - **Where:** repo `<path>`, branch `<branch>` (from `<sha>`), <main tree | worktree on request>;
   across repos, one line per lane. Never push; never merge into `main`.

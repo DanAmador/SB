@@ -3,8 +3,8 @@
 The owner is back, probably reading on a phone. Say what the run did and what waits on them, in
 one screen.
 
-1. Read this repo's checkpoint(s) in the vault, their *Morning digest* if written, the maps
-   (`sbmap status`), and `git log --oneline` since the run's base. Check the claims: a ticket still
+1. Read this repo's checkpoint(s) in the vault (the files `sbmap status` lists), their *Morning
+   digest* if written, the maps (`sbmap status`), and `git log --oneline` since the run's base. Check the claims: a ticket still
    `claimed` with nobody running it is a run that died; say so.
 2. Verify before you report: each ✅ names a commit that exists on the branch. A digest line you
    cannot back with the tree is ⚠️, not ✅.
@@ -13,6 +13,9 @@ one screen.
      that stands if they say nothing.
    - **🎮 Play these**: landed work whose Done-when needs the owner's hands; how to reach it in one line.
    - **✅ Landed**: ticket, commit sha, one line each.
+
+   Then delete the `wayfinder/runs/` files of runs older than the one you just read: a run file is
+   read once, and the tickets keep everything that lasts.
    - **⚠️ Didn't**: failed, skipped, unverified, and why.
    - **🌿 Branch**: name, commits ahead, unpushed/unmerged, dirty files.
    - The map's frontier now, and the Route link (`obsidian open` the map, so it is on screen when they sit down).

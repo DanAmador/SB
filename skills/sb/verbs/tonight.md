@@ -68,11 +68,11 @@ one-repo night skips them.
 5. **Launch.** Write the contract into the map's Notes from
    [templates/launch-contract.md](../templates/launch-contract.md), with the night's order. Create or
    update the vault checkpoint from [templates/checkpoint.md](../templates/checkpoint.md)
-   (`wayfinder/<effort>-checkpoint.md`). Keep the machine awake if the host offers it. Then
-   `sbmap diagram <map> --write`.
-   - *Operator:* one checkpoint for the night, `wayfinder/tonight-<date>-checkpoint.md`, a row per
-     lane, holding the contract with each lane's own Where, checks and hard rules; each map's Notes
-     points at it. Send each lane GO with the checkpoint's path and its order. Each lane keeps the
+   (`<map folder>/checkpoint.md`, overwritten in place). Keep the machine awake if the host offers
+   it. Then `sbmap diagram <map> --write`.
+   - *Operator:* one file for the night, `wayfinder/runs/<date>-tonight.md`, a row per lane, holding
+     the contract with each lane's own Where, checks and hard rules; each map's Notes points at it.
+     A lane's brief is a section of that file, never a file of its own. Send each lane GO with the checkpoint's path and its order. Each lane keeps the
      machine awake too.
    - Tell every peer outside the run the usage gate, in a message, so the budget has one rule.
 6. **Per ticket, in order:**
