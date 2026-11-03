@@ -71,8 +71,9 @@ Bases see the whole route. It answers what an agent should never compute or type
                                         `tickets` is set to the resolved tickets its raw sources match (same
                                         PR, else the ticket's commit in the source's PR, else the same commit)
 
-Moving a file (`set status=...`, `resolve`, `close`) rewrites every full-path wikilink in the vault that
-names it, and the map's relative Decisions links, so no link breaks.
+Moving a file (`set status=...`, `resolve`, `close`) rewrites every link in the vault that names it,
+full-path, short (`issues/<stem>`) or relative, and the moved file's own relative links, so no link
+breaks; each link keeps its own encoding.
 
 <map> is a folder name under the vault's wayfinder/ (`sk4te-single-player`) or a path.
 The vault is $SB_VAULT, else ~/Documents/Second Brain, so it runs from any directory.
@@ -82,6 +83,7 @@ truth; the Obsidian CLI adds checks when the app is running.
 import hashlib
 import json
 import os
+import posixpath
 import re
 import shutil
 import subprocess
@@ -91,6 +93,7 @@ import time
 import zlib
 from datetime import date
 from pathlib import Path, PurePosixPath
+from urllib.parse import unquote as url_decode
 
 VAULT = Path(os.environ.get("SB_VAULT", Path.home() / "Documents" / "Second Brain"))
 WAYFINDER = VAULT / "wayfinder"
@@ -832,9 +835,24 @@ def cmd_verify(args):
 # ---- moving files ---------------------------------------------------------
 # A folder shows what is open only when finished work leaves it: cleared tickets live in issues/done/,
 # closed maps in wayfinder/<repo>/archive/. Obsidian rewrites links only for moves made in the app, so
-# sbmap rewrites them itself: every full-path wikilink in the vault, and the map's relative Decisions links.
+# sbmap rewrites them itself: every full-path wikilink in the vault, the map's relative Decisions links,
+# the short paths Obsidian matches by their unique suffix (`issues/<stem>`), and the moved file's own
+# relative links (`../map`, one `../` more inside done/).
 
 WIKILINK = re.compile(r"\[\[([^\]|#\n]+?)(\\?)(?=[\]|#])")  # the target; a table's `\|` keeps its backslash
+MDLINK = re.compile(r"(\]\()([^)#\s<>]+)")  # a markdown link's target, up to its #heading
+
+
+def link_key(path):
+    """A path as the vault index holds it: a note without `.md`, any other file with its extension."""
+    return path[:-3] if path.endswith(".md") else path
+
+
+def reencoded(new, raw):
+    """`new` spelled with `raw`'s own segments where they are the same, so `%20`, a raw `;` or `+`
+    stay as they were; a segment that is new (`done`) gets spaces encoded only."""
+    own = {url_decode(seg): seg for seg in raw.split("/")}
+    return "/".join(own.get(seg) or md_target(seg) for seg in new.split("/"))
 
 
 def relink(moves, relative, write):
@@ -848,10 +866,53 @@ def relink(moves, relative, write):
             return files[t]
         return next(((n + (t + "/")[len(o):]).rstrip("/") for o, n in folders if (t + "/").startswith(o)), None)
 
+    notes, keys, by_name = [], set(), {}  # one walk: the notes to read, and every file a link can name
+    for root, dirs, names in os.walk(VAULT):
+        dirs[:] = [d for d in dirs if not d.startswith(".")]  # .obsidian, .trash
+        for name in names:
+            key = link_key(os.path.relpath(os.path.join(root, name), VAULT))
+            keys.add(key)
+            by_name.setdefault(key.rsplit("/", 1)[-1], []).append(key)
+            if name.endswith(".md"):
+                notes.append((Path(root) / name, key))
+
+    def resolved(src, d):
+        """The file a link path names from note `src`: its full path, else relative to the note, else
+        the one file whose path ends in it, the way Obsidian matches a short path."""
+        k = link_key(d)
+        if k in keys and not d.startswith("."):
+            return k
+        near = posixpath.normpath(posixpath.join(posixpath.dirname(src), k))
+        if near in keys:
+            return near
+        ends = [x for x in by_name.get(k.rsplit("/", 1)[-1], ()) if x == k or x.endswith("/" + k)]
+        return ends[0] if len(ends) == 1 and not d.startswith(".") else None
+
+    def short(src, raw, md):
+        """A short or relative link, moved with its file or with the note it sits in; None: unchanged."""
+        d = url_decode(raw) if md else raw
+        if "/" not in d or ":" in d or "%2f" in raw.lower() or d.endswith("/"):
+            return None  # a bare name resolves wherever the file goes; a URL is not a vault path
+        was = resolved(src, d)
+        if was is None:
+            return None
+        now, src_now = target(was) or was, target(src) or src
+        if now == was and src_now == src:
+            return None
+        k, ext = link_key(d), d[len(link_key(d)):]
+        if was != k and not was.endswith("/" + k):  # relative to the note: keep it relative
+            new = posixpath.relpath(now, posixpath.dirname(src_now))
+        elif now == k or now.endswith("/" + k):  # a short path still true after the move
+            return None
+        else:  # a short path: as many folders before the moved part as it had, then the new part
+            o, n = was.split("/"), now.split("/")
+            p = len(os.path.commonprefix([o[:-1], n[:-1]]))
+            kept = len(k.split("/")) - (len(o) - p)
+            new = "/".join(n[p - kept:] if kept >= 0 else n[-len(k.split("/")):])
+        return reencoded(new + ext, raw) if md else new + ext
+
     rewrites, changed = 0, set()
-    for f in VAULT.rglob("*.md"):
-        if any(part.startswith(".") for part in f.relative_to(VAULT).parts):
-            continue  # .obsidian, .trash
+    for f, src in notes:
         text = f.read_text(encoding="utf-8")
         hits = [0]
 
@@ -859,13 +920,25 @@ def relink(moves, relative, write):
             t, ext = (mm.group(1)[:-3], ".md") if mm.group(1).endswith(".md") else (mm.group(1), "")
             new = target(t)
             if new is None:
-                return mm.group(0)
+                new = short(src, mm.group(1), False)
+                if new is None:
+                    return mm.group(0)
+                ext = ""
             hits[0] += 1
             return "[[" + new + ext + mm.group(2)
-        new_text = WIKILINK.sub(sub, text) if "[[" in text else text
-        for old, new in relative.get(f, []):
+
+        def msub(mm):
+            new = short(src, mm.group(2), True)
+            if new is None:
+                return mm.group(0)
+            hits[0] += 1
+            return mm.group(1) + new
+        new_text = text
+        for old, new in relative.get(f, []):  # first, so the Decisions links are 012's alone
             hits[0] += new_text.count(f"]({old})")
             new_text = new_text.replace(f"]({old})", f"]({new})")
+        new_text = WIKILINK.sub(sub, new_text) if "[[" in new_text else new_text
+        new_text = MDLINK.sub(msub, new_text) if "](" in new_text else new_text
         if new_text != text:
             rewrites += hits[0]
             changed.add(f)

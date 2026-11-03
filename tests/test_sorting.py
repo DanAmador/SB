@@ -1,4 +1,6 @@
+import re
 import unittest
+from urllib.parse import unquote
 
 from helpers import VaultCase
 
@@ -74,6 +76,54 @@ class Sorting(VaultCase):
         self.assertIn("· archived", listing)
         self.assertIn("0 problem(s)", self.sb("check", B).stdout)
         self.assertEqual("004", self.sb("next", B).stdout.strip())
+
+    def resolves(self, src, link):
+        """Whether a link path from note `src` names a file, the way Obsidian matches it: relative to
+        the note for `../`, else its full path, else the one file whose path ends in it."""
+        path = unquote(link)
+        want = path if "." in path.rsplit("/", 1)[-1] else path + ".md"
+        if path.startswith("."):
+            return (self.vault / src).parent.joinpath(want).resolve().is_file()
+        files = [p.relative_to(self.vault).as_posix() for p in self.vault.rglob("*") if p.is_file()]
+        return sum(f == want or f.endswith("/" + want) for f in files) == 1
+
+    def test_short_and_relative_links_follow_the_move_in_their_own_encoding(self):
+        self.sb("new", A, "--title", "Semi; colon + plus", "--why", "Because.", "--no-sync")
+        sib = f"{ISSUES}/004 Semi; colon + plus.md"
+        self.write("wayfinder/acme/fix/attachments/x.png", "png")
+        out = {"[[issues/004 Semi; colon + plus|s]]": "[[issues/004 Semi; colon + plus|s]]",
+               "[s](issues/004%20Semi;%20colon%20+%20plus.md)": "[s](issues/004%20Semi;%20colon%20+%20plus.md)",
+               "[[../map|m]]": "[[../../map|m]]",
+               "[m](../map.md)": "[m](../../map.md)",
+               "![[../attachments/x.png]]": "![[../../attachments/x.png]]",
+               "![x](../attachments/x.png)": "![x](../../attachments/x.png)"}
+        inbound = {"[[issues/001 First|f]]": "[[issues/done/001 First|f]]",
+                   "[f](issues/001%20First.md)": "[f](issues/done/001%20First.md)",
+                   "[f](fix/issues/001%20First.md#Question)": "[f](fix/issues/done/001%20First.md#Question)"}
+        moved = f"{ISSUES}/001 First.md"
+        self.write(moved, self.read(moved) + "\n" + "\n".join(out) + "\n")
+        self.write(sib, self.read(sib) + "\n" + "\n".join(inbound) + "\n")
+        self.resolve()
+        done, back = self.read(f"{ISSUES}/done/001 First.md"), self.read(sib)
+        for after in out.values():
+            self.assertIn(after, done)
+        for after in inbound.values():
+            self.assertIn(after, back)
+        for src, links in ((f"{ISSUES}/done/001 First.md", out.values()), (sib, inbound.values())):
+            for link in links:
+                path = re.search(r"\[\[([^|\]#]+)|\]\(([^)#]+)", link)
+                self.assertTrue(self.resolves(src, path.group(1) or path.group(2)), f"{src}: {link}")
+        self.assertIn("0 problem(s)", self.sb("check", A).stdout)
+        self.sb("set", A, "1", "status=open")  # reopened: every link as it was
+        again, back = self.read(moved), self.read(sib)
+        for before in out:
+            self.assertIn(before, again)
+        for before in inbound:
+            self.assertIn(before, back)
+        self.resolve("4")  # a link rewritten to a moved name with `;` and `+` keeps them raw
+        again = self.read(moved)
+        self.assertIn("[[issues/done/004 Semi; colon + plus|s]]", again)
+        self.assertIn("[s](issues/done/004%20Semi;%20colon%20+%20plus.md)", again)
 
     def legacy(self):
         """What exists today: a resolved ticket left in issues/, an open one in done/, a map marked closed."""
