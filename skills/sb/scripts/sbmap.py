@@ -23,15 +23,17 @@ Bases see the whole route. It answers what an agent should never compute or type
     sbmap.py verify   <map>             every mermaid block parses in Obsidian's own renderer
   write
     sbmap.py init     <map> --title "<name>" --why "<plain words>" --destination "<goal>" [--done-when "..."]
-                            [--repo <path>]
+                            [--repo <path>] [--said "<the owner's exact words>"]
                                         scaffolds map.md, board.base, issues/ and initial Route
     sbmap.py new      <map> --title "<sentence>" --why "<plain words: the problem and what changes>"
                             [--type task] [--priority S..F|high|normal|low]
                             [--question "..."] [--done-when "..."] [--out "<what this ticket leaves alone>"]
                             [--blocked-by 622,623] [--paths src/a.py,docs/] [--comments "..."] [--no-sync]
+                            [--said "<the owner's exact words, dated and quoted at the top>"]
                                         full ticket creation with properties, wikilinks & auto-sync
     sbmap.py summary  <map> --text "<why, in the owner's words; where it stands; what they decide next>"
-                                        writes the map's ## In plain words (in place, or first)
+                                        writes the map's ## In plain words (in place, or first);
+                                        an owner quote (--said) already there stays
     sbmap.py comment  <map> <NNN> --text "<ruling or comment>"
                                         appends dated entry to ## Comments
     sbmap.py set      <map> <NNN> key=value ... [--no-sync]
@@ -484,6 +486,24 @@ def opt(args, name, default=None):
     return default
 
 
+def owner_quote(args):
+    """`--said` as a dated blockquote ('' when absent): the owner's words, kept beside the why."""
+    said = (opt(args, "--said") or "").replace("\\n", "\n").strip()
+    if not said:
+        return ""
+    return "\n".join(("> " if i else f"> Owner, {date.today().isoformat()}: ") + l
+                     for i, l in enumerate(said.splitlines())) + "\n\n"
+
+
+def leading_quote(text):
+    """The blockquote a body or section opens with, as lines ('' when none)."""
+    lines = text.strip().splitlines()
+    n = 0
+    while n < len(lines) and lines[n].startswith(">"):
+        n += 1
+    return "\n".join(lines[:n])
+
+
 # ---- read commands --------------------------------------------------------
 
 def belongs(m, repo):
@@ -627,6 +647,8 @@ def cmd_show(args):
     t = m.ticket(args[1])
     print(f"#{t.num}: {t.title}")
     print(f"why: {t.props.get('why') or '(missing: ask the owner, then `sbmap set <map> <NNN> why=...`)'}")
+    if leading_quote(t.body):
+        print(leading_quote(t.body))
     blockers = ", ".join(t.blocked_by) if t.blocked_by else "none"
     claimed = f" | claimed: {t.claimed_by}" if t.claimed_by else ""
     print(f"status: {t.status} | type: {t.type} | priority: {t.props.get('priority', 'C')}{claimed}")
@@ -962,7 +984,7 @@ def cmd_init(args):
     body = (
         f"# {title}\n\n"
         f"## In plain words\n\n"
-        f"{why_body}\n\n"
+        f"{owner_quote(args)}{why_body}\n\n"
         f"## Destination\n\n"
         f"{dest_body}"
         f"{dw_section}\n"
@@ -1016,7 +1038,8 @@ def cmd_new(args):
 
     q_text = question.replace("\\n", "\n").strip() if question else ""
     dw_text = done_when.replace("\\n", "\n").strip() if done_when else ""
-    body = f"## Not this ticket\n\n{out.strip()}\n\n" if out.strip() else ""
+    body = owner_quote(args)
+    body += f"## Not this ticket\n\n{out.strip()}\n\n" if out.strip() else ""
     body += f"## Question\n\n{q_text}\n\n## Done when\n\n{dw_text}\n\n## Comments\n"
     if comments:
         c_text = comments.replace("\\n", "\n").strip()
@@ -1099,6 +1122,9 @@ def cmd_summary(args):
     i = body.find("## In plain words")
     if i >= 0:
         nxt = body.find("\n## ", i + 4)
+        old = body[i + len("## In plain words"):nxt if nxt >= 0 else len(body)]
+        quote = leading_quote(old)
+        text = f"{quote}\n\n{text}" if quote else text
         body = body[:i] + f"## In plain words\n\n{text}\n" + (body[nxt:] if nxt >= 0 else "")
     else:
         body = insert_section(body, "In plain words", text, before=("## Destination", "## Route", "## Notes"))

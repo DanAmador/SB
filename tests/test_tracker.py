@@ -1,6 +1,7 @@
 import os
 import subprocess
 import unittest
+from datetime import date
 from pathlib import Path
 
 from helpers import VaultCase
@@ -47,6 +48,27 @@ class NewTicketsAndMaps(VaultCase):
         self.assertIn("why: Rows lie about hidden parts.", shown)
         self.assertIn("## Not this ticket\nThe clip planes.", shown)
         self.assertIn("why: Rows lie about hidden parts.", self.sb("status", "monorepo/overrides").stdout)
+
+    def test_a_ticket_keeps_the_owners_words_dated_beside_the_why(self):
+        path = self.sb("new", "monorepo/overrides", "--title", "First", "--why", "Rows lie.", "--no-sync",
+                       "--said", "Rows lie\\nabout hidden parts.").stdout.strip()
+        text = (self.vault / path).read_text()
+        today = date.today().isoformat()
+        quote = f"> Owner, {today}: Rows lie\n> about hidden parts.\n\n## Question"
+        self.assertIn(quote, text.split("---\n", 2)[2])
+        self.assertTrue(text.split("---\n", 2)[2].startswith("> Owner,"))
+        shown = self.sb("show", "monorepo/overrides", "1").stdout
+        self.assertIn(f"why: Rows lie.\n> Owner, {today}: Rows lie\n> about hidden parts.\n", shown)
+
+    def test_a_map_keeps_the_owners_words_through_a_summary(self):
+        self.sb("init", "monorepo/said", "--why", "Because.", "--title", "Said", "--destination", "There.",
+                "--repo", "/code/monorepo", "--said", "Make it so.")
+        quote = f"> Owner, {date.today().isoformat()}: Make it so."
+        path = "wayfinder/monorepo/said/map.md"
+        self.assertIn(f"## In plain words\n\n{quote}\n\nBecause.\n\n## Destination", self.read(path))
+        self.sb("summary", "monorepo/said", "--text", "Why: rows lie.")
+        self.assertIn(f"## In plain words\n\n{quote}\n\nWhy: rows lie.\n\n## Destination", self.read(path))
+        self.assertNotIn("Because.", self.read(path))
 
     def test_a_map_opens_in_plain_words(self):
         text = self.read("wayfinder/monorepo/overrides/map.md")
