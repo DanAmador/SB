@@ -24,7 +24,7 @@ built in.
 7. **Read it back (plain-reader check).** Print the map's plain-words section and each ticket's title
    + why, nothing else, and run this on that list (Spec Kit's spec gate), fixing what fails before step 8:
    - [ ] The owner's words are quoted (`--said`) wherever they gave a reason.
-   - [ ] Each why says the problem and what the owner will see, in plain words: no class names, internal codes or bare numbers.
+   - [ ] Each why says the problem and what the owner will see, in plain words: no class names, internal codes or bare ticket numbers (a measurement with its unit is fine).
    - [ ] Each Done-when can be checked by running or looking.
    - [ ] No ticket's why is only "part of X".
    - [ ] At most 3 open questions remain (grilling tickets or Not yet specified), each with a ➡️ default.
