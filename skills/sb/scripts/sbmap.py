@@ -1908,6 +1908,8 @@ def wiki_module():
               Path.home() / ".claude/skills/wikibrain/scripts"):
         if d and (Path(d) / "wikibrain.py").exists():
             os.environ.setdefault("SB_VAULT", str(VAULT))
+            sources = [f for f in os.environ.get("WIKIBRAIN_SOURCES", "").split(",") if f.strip()]
+            os.environ["WIKIBRAIN_SOURCES"] = ",".join(dict.fromkeys(sources + ["wayfinder"]))  # tickets are cited
             sys.path.insert(0, str(d))
             import wikibrain
             return wikibrain
@@ -2012,10 +2014,12 @@ def fill_tickets(sbwiki):
 
 
 def cmd_wiki(args):
+    """Every wikibrain command, with sb's part of it (wiki_bridge.py) around it."""
     sbwiki, code = wiki_module(), None
+    import wiki_bridge
     fix = args[:1] == ["check"] and "--fix" in args
     try:
-        sbwiki.main(args)
+        wiki_bridge.run(args, sys.modules[__name__], sbwiki)
     except SystemExit as e:  # a check that still has problems exits 1 after its fixes; an import's failure stays one
         if not (fix and e.code in (0, 1)):
             raise

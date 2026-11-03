@@ -92,9 +92,8 @@ can do is a command, so tokens go only to judging changed code.
 
 1. **Review.** Apply the owner's review in every map report (`wayfinder/**/report.md`), by
    *Applying the review* in [close.md](close.md).
-2. **List.** `sbmap wiki tend --repos <clones> --out <scratchpad>/tend.json`, the clones being the
-   repos the maps name (their `repo` property: sb knows its maps, the wiki does not), with `--import
-   <clone>` for each shared wiki clone. One call imports, runs `check --fix` and verifies those repos; stdout is one
+2. **List.** `sbmap wiki tend --out <scratchpad>/tend.json` (sbmap passes the repos the maps name),
+   with `--import <clone>` for each shared wiki clone. One call imports, runs `check --fix` and verifies those repos; stdout is one
    line per article that is not current, and the file holds each one's item (its paths, symbols and
    the code lines changed under it). Read stdout, never the whole file: each subagent gets its own
    items, cut from the file. `git -C <root> rev-parse <target>` once per repo gives the sha that
