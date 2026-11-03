@@ -117,7 +117,9 @@ edit it, then `/reload-plugins`.
 Tickets are Obsidian notes: fields in properties, every reference a wikilink, a Bases board per map
 (`board.base`, embedded in `map.md`), one per repo (`wayfinder/<repo>/board.base`) plus
 `wayfinder/frontier.base` across all maps, and a mermaid
-Route. The vault's `wayfinder/README.md` is the format's rulebook; `sbmap migrate` converted the old
+Route. A folder shows only open work: resolved and out-of-scope tickets move to `issues/done/`, a closed
+map to `wayfinder/<repo>/archive/<map>/`, and sbmap rewrites every link to what it moves
+(`sbmap migrate --sort` sorts older ones; a dry run unless `--write`). The vault's `wayfinder/README.md` is the format's rulebook; `sbmap migrate` converted the old
 header-line tickets on 2026-10-25 (backup under `backups/`, git-ignored).
 
 ## sbmap

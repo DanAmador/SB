@@ -49,7 +49,7 @@ class TicketNames(VaultCase):
     def test_resolve_links_the_decision_and_check_stays_clean(self):
         self.new("First, then more")
         self.sb("resolve", MAP, "1", "--gist", "done", "--answer", "Yes.", "--no-sync")
-        self.assertIn("- [First, then more](issues/001%20First,%20then%20more.md): done",
+        self.assertIn("- [First, then more](issues/done/001%20First,%20then%20more.md): done",
                       self.read("wayfinder/monorepo/names/map.md"))
         self.assertNotIn("missing from the map's Decisions", self.sb("check", MAP, ok=None).stdout)
 

@@ -2,7 +2,8 @@
 """sbmap: the deterministic half of the vault's wayfinder tracker.
 
 Reads and writes the local tracker the vault's `wayfinder/README.md` defines: a folder per map
-(`map.md`, `issues/<NNN> <Title>.md`, `board.base`), every ticket's fields in Obsidian properties
+(`map.md`, `issues/<NNN> <Title>.md`, `board.base`), resolved and out-of-scope tickets in
+`issues/done/`, closed maps under `wayfinder/<repo>/archive/`, every ticket's fields in Obsidian properties
 (frontmatter) and every reference between tickets a wikilink, so Obsidian's graph, backlinks and
 Bases see the whole route. It answers what an agent should never compute or type by eye.
 
@@ -39,7 +40,8 @@ Bases see the whole route. It answers what an agent should never compute or type
     sbmap.py block    <map> <NNN> <refs, comma separated: numbers, map folder names, or none> [--no-sync]
     sbmap.py resolve  <map> <NNN> --gist "<one line>" [--answer "..."] [--commit <sha>]
                             [--repo-root <clone>] [--paths a,b] [--no-sync]
-                                        records ## Answer, marks resolved, adds Decisions line, syncs Route;
+                                        records ## Answer, marks resolved, moves it to issues/done/,
+                                        adds Decisions line, syncs Route;
                                         --commit also stamps repo, commit, ref, paths and pr (the PR
                                         holding the commit, when gh finds one) on the ticket
     sbmap.py diagram  <map> [--write] [--hide-resolved]
@@ -49,14 +51,22 @@ Bases see the whole route. It answers what an agent should never compute or type
     sbmap.py migrate  <map|--all> [--write]
                                         header lines -> properties, bare numbers -> wikilinks, plus
                                         the board; a dry run unless --write. Idempotent.
+    sbmap.py migrate  --sort <map|--all> [--write]
+                                        moves cleared tickets to issues/done/, the rest back, and
+                                        closed maps to archive/, rewriting every link; a dry run
+                                        unless --write
     sbmap.py close    <map>             refuses while a ticket is open or claimed; writes report.md
                                         from templates/map-report.md, marks the map resolved and
-                                        deletes the map's handoff.md and checkpoint.md
+                                        deletes the map's handoff.md and checkpoint.md, then moves
+                                        the map to wayfinder/<repo>/archive/<map>/
   wiki
     sbmap.py wiki <command> ...         the compiled wiki under wiki/: `sbmap.py wiki` lists its commands
                                         after `wiki import` and `wiki check --fix` each article's vault-only
                                         `tickets` is set to the resolved tickets its raw sources match (same
                                         PR, else the ticket's commit in the source's PR, else the same commit)
+
+Moving a file (`set status=...`, `resolve`, `close`) rewrites every full-path wikilink in the vault that
+names it, and the map's relative Decisions links, so no link breaks.
 
 <map> is a folder name under the vault's wayfinder/ (`sk4te-single-player`) or a path.
 The vault is $SB_VAULT, else ~/Documents/Second Brain, so it runs from any directory.
@@ -293,10 +303,11 @@ class Map:
         self.github = str(fields.get("github") or "")
         issues = folder / "issues"
         self.tickets = {}
-        for p in sorted(issues.glob("*.md")) if issues.exists() else []:
-            if re.match(r"\d+", p.name):
-                t = Ticket(p)
-                self.tickets[t.num] = t
+        for d in (issues, issues / "done"):  # open work, then resolved and out-of-scope
+            for p in sorted(d.glob("*.md")) if d.is_dir() else []:
+                if re.match(r"\d+", p.name):
+                    t = Ticket(p)
+                    self.tickets[t.num] = t
 
     @property
     def rel_folder(self):
@@ -310,8 +321,15 @@ class Map:
         return str(self.rel_folder)
 
     @property
-    def effort_slug(self):
+    def archived(self):
         parts = self.rel_folder.parts
+        return len(parts) == 3 and parts[1] == "archive"
+
+    @property
+    def effort_slug(self):
+        # archive/ is left out, so a closed map keeps its tags and its tickets' operonId
+        parts = self.rel_folder.parts
+        parts = parts[:1] + parts[2:] if self.archived else parts
         return "-".join(parts) if len(parts) > 1 else self.folder.name
 
     @property
@@ -335,7 +353,8 @@ class Map:
         ref = str(ref).strip()
         target = link_target(ref)
         if target is None and ref.endswith(".md"):
-            target = (self.folder / "issues" / ref).resolve()
+            done = self.folder / "issues" / "done" / ref
+            target = (done if done.exists() else self.folder / "issues" / ref).resolve()
         if target is not None:
             if not target.exists():
                 return None
@@ -380,13 +399,15 @@ class Map:
         self.__init__(self.folder)
 
 
+def repo_tickets(repo):
+    """Every ticket file of a repo's maps, done and archived ones too; nested maps before flat ones."""
+    return [f for p in (f"{repo}/**/issues/", f"{repo}-*/issues/") for sub in ("", "done/")
+            for f in WAYFINDER.glob(p + sub + "*.md")]
+
+
 def sibling_ticket(m, num):
     """A number not in this map: shared across repo maps."""
-    hits = [f for f in WAYFINDER.glob(f"{m.repo}/**/issues/*.md")
-            if re.match(rf"0*{num}-", f.name)]
-    if not hits:
-        hits = [f for f in WAYFINDER.glob(f"{m.repo}-*/issues/*.md")
-                if re.match(rf"0*{num}-", f.name)]
+    hits = [f for f in repo_tickets(m.repo) if re.match(rf"0*{num}-", f.name)]
     return Ticket(hits[0]) if len(hits) == 1 else None
 
 
@@ -409,8 +430,10 @@ def load(arg):
         if "backups" in f.parts:
             continue
         rel_str = str(f.parent.relative_to(WAYFINDER))
+        live = rel_str.replace("/archive/", "/", 1)  # a closed map answers to the name it had
         slug = rel_str.replace("/", "-")
-        if f.parent.name == arg or rel_str == arg or slug == arg or f.parent.name.endswith(f"-{arg}"):
+        if (f.parent.name == arg or arg in (rel_str, live, slug, live.replace("/", "-"))
+                or f.parent.name.endswith(f"-{arg}")):
             return Map(f.parent)
     sys.exit(f"sbmap: no map.md in {folder}")
 
@@ -496,7 +519,8 @@ def cmd_maps(args):
     for m in all_maps():
         if repo and not belongs(m, repo):
             continue
-        print(f"{m.rel_name:32} {m.status:9} {len(m.frontier()):2} on frontier · {counts(m)}")
+        print(f"{m.rel_name:32} {m.status:9} {len(m.frontier()):2} on frontier · {counts(m)}"
+              + (" · archived" if m.archived else ""))
         print(f"{'':32} {m.title}")
 
 
@@ -584,8 +608,7 @@ def cmd_lanes(args):
 
 
 def next_number(m):
-    files = list(WAYFINDER.glob(f"{m.repo}/**/issues/*.md")) + list(WAYFINDER.glob(f"{m.repo}-*/issues/*.md"))
-    nums = [int(re.match(r"\d+", f.name).group()) for f in files
+    nums = [int(re.match(r"\d+", f.name).group()) for f in repo_tickets(m.repo)
             if re.match(r"\d+", f.name)]
     return (max(nums) if nums else 0) + 1
 
@@ -737,6 +760,102 @@ def cmd_verify(args):
             print(f"{where}: {r}")
     print(f"{len(blocks) - bad}/{len(blocks)} mermaid blocks parse in Obsidian")
     sys.exit(1 if bad else 0)
+
+
+# ---- moving files ---------------------------------------------------------
+# A folder shows what is open only when finished work leaves it: cleared tickets live in issues/done/,
+# closed maps in wayfinder/<repo>/archive/. Obsidian rewrites links only for moves made in the app, so
+# sbmap rewrites them itself: every full-path wikilink in the vault, and the map's relative Decisions links.
+
+WIKILINK = re.compile(r"\[\[([^\]|#\n]+?)(\\?)(?=[\]|#])")  # the target; a table's `\|` keeps its backslash
+
+
+def relink(moves, relative, write):
+    """Rewrite the links naming each (old, new) path, before the move: it edits files where they are.
+    `relative` is {map.md: [(old target, new target)]}. Returns (rewrites, files changed)."""
+    files = {rel(o)[:-3]: rel(n)[:-3] for o, n in moves if o.suffix == ".md"}
+    folders = [(rel(o) + "/", rel(n) + "/") for o, n in moves if o.is_dir()]
+
+    def target(t):
+        if t in files:
+            return files[t]
+        return next(((n + (t + "/")[len(o):]).rstrip("/") for o, n in folders if (t + "/").startswith(o)), None)
+
+    rewrites, changed = 0, set()
+    for f in VAULT.rglob("*.md"):
+        if any(part.startswith(".") for part in f.relative_to(VAULT).parts):
+            continue  # .obsidian, .trash
+        text = f.read_text(encoding="utf-8")
+        hits = [0]
+
+        def sub(mm):
+            t, ext = (mm.group(1)[:-3], ".md") if mm.group(1).endswith(".md") else (mm.group(1), "")
+            new = target(t)
+            if new is None:
+                return mm.group(0)
+            hits[0] += 1
+            return "[[" + new + ext + mm.group(2)
+        new_text = WIKILINK.sub(sub, text) if "[[" in text else text
+        for old, new in relative.get(f, []):
+            hits[0] += new_text.count(f"]({old})")
+            new_text = new_text.replace(f"]({old})", f"]({new})")
+        if new_text != text:
+            rewrites += hits[0]
+            changed.add(f)
+            if write:
+                write_atomic(f, new_text)
+    return rewrites, changed
+
+
+def move_files(moves, relative=None, write=True):
+    """Move each (old, new) file or folder and rewrite the links to it; (rewrites, files changed)."""
+    for _, new in moves:
+        if new.exists():
+            sys.exit(f"sbmap: {rel(new)} already exists; not moving onto it")
+    if not moves:
+        return 0, set()
+    result = relink(moves, relative or {}, write)
+    if write:
+        for old, new in moves:
+            new.parent.mkdir(parents=True, exist_ok=True)
+            old.rename(new)
+            if old.parent.name == "done" and not any(old.parent.iterdir()):
+                old.parent.rmdir()  # the last ticket reopened: no empty done/ in the tree
+    return result
+
+
+def ticket_moves(m, tickets=None):
+    """(old, new) for each ticket in the wrong folder for its status."""
+    out = []
+    for t in tickets if tickets is not None else m.order():
+        home = m.folder / "issues" / ("done" if t.status in CLEARED else "")
+        if t.path.parent != home:
+            out.append((t.path, home / t.path.name))
+    return out
+
+
+def decision_links(m, moves):
+    """The map's own relative links to the moved tickets (its Decisions lines), old -> new."""
+    def target(p):
+        return md_target(p.relative_to(m.folder).as_posix())
+    return {m.md_path: [(target(o), target(n)) for o, n in moves]} if moves else {}
+
+
+def archive_path(m):
+    """Where a closed map goes, or None: already there, or not a `<repo>/<map>` folder."""
+    parts = m.rel_folder.parts
+    if m.archived or len(parts) != 2 or m.folder.resolve() != (WAYFINDER / m.rel_folder).resolve():
+        return None
+    return WAYFINDER / parts[0] / "archive" / parts[1]
+
+
+def archive(m, write=True):
+    """Move a closed map to its archive_path and repoint its board; (rewrites, files changed)."""
+    dest = archive_path(m)
+    result = move_files([(m.folder, dest)], write=write)
+    if write:
+        write_board(Map(dest))
+    return result
 
 
 # ---- write commands -------------------------------------------------------
@@ -962,6 +1081,12 @@ def cmd_set(args):
         props.pop("claimed_by", None)
     t.save(props)
     print(f"{t.id}: " + ", ".join(kv_args))
+    if any(kv.startswith("status=") for kv in kv_args):
+        m = load(args[0])
+        moves = ticket_moves(m, [m.ticket(args[1])])
+        move_files(moves, decision_links(m, moves))
+        for _, new in moves:
+            print(f"{t.id}: moved to {rel(new.parent)}/")
     if not no_sync:
         cmd_diagram([args[0], "--write"])
 
@@ -1072,10 +1197,11 @@ def cmd_resolve(args):
         sys.exit(f"sbmap: {t.id} has no '## Answer' yet; provide --answer or write it first")
 
     cmd_set([args[0], args[1], "status=resolved", "--no-sync"])
-    line = f"- [{t.title}](issues/{md_target(t.path.name)}): {gist}" + (f", `{commit}`" if commit else "")
     m = load(args[0])
+    t = m.ticket(args[1])  # now in issues/done/
+    line = (f"- [{t.title}]({md_target(t.path.relative_to(m.folder).as_posix())}): {gist}"
+            + (f", `{commit}`" if commit else ""))
     if stamp:
-        t = m.ticket(args[1])
         t.save({**t.props, **stamp})
     body = m.body
     i = body.find("## Decisions so far")
@@ -1118,7 +1244,7 @@ def diagram(m, hide_resolved=False):
         classes[cls].append(f"t{t.id}")
         for ref in t.blocked_by:
             text, cleared, bt = m.blocker(ref)
-            if bt is not None and bt.num in m.tickets and bt.path.parent == t.path.parent:
+            if bt is not None and bt.num in m.tickets and m.tickets[bt.num].path == bt.path:
                 if bt.num in shown:
                     edges.append(f"    t{bt.id} --> t{t.id}")
                 continue
@@ -1389,8 +1515,7 @@ CODE = re.compile(r"```.*?```|`[^`\n]*`|\[\[[^\]]*\]\]|\[[^\]]*\]\([^)]*\)|<[^>\
 def number_index(repo):
     """number -> every ticket of this repo's maps carrying it."""
     idx = {}
-    files = list(WAYFINDER.glob(f"{repo}/**/issues/*.md")) + list(WAYFINDER.glob(f"{repo}-*/issues/*.md"))
-    for f in files:
+    for f in repo_tickets(repo):
         mm = re.match(r"(\d+)-", f.name)
         if mm:
             idx.setdefault(int(mm.group(1)), []).append(f)
@@ -1415,7 +1540,7 @@ def link_numbers(text, repo, here=None, self_path=None):
         if n in maps and maps[n].repo == repo:
             return maps[n].md_path if maps[n].md_path != self_path else None
         hits = idx.get(n, [])
-        local = [h for h in hits if here is not None and h.parent.parent == here]
+        local = [h for h in hits if here is not None and here in h.parents]
         pick = local or hits
         if len(pick) == 1 and pick[0] != self_path:
             return pick[0]
@@ -1580,9 +1705,34 @@ def migrate_root_docs(repo, write):
     return changes
 
 
+def migrate_sort(maps, write):
+    """Sort what predates the moves: tickets into issues/ or issues/done/, closed maps into archive/."""
+    moves, relative = [], {}
+    for m in maps:
+        mine = ticket_moves(m)
+        moves += mine
+        relative.update(decision_links(m, mine))
+        for old, new in mine:
+            print(f"  {m.rel_name}: {old.name} -> {rel(new.parent)}/")
+    n, files = move_files(moves, relative, write)
+    closed = [Map(m.folder) if write else m for m in maps if m.status in CLEARED and archive_path(m)]
+    for m in closed:
+        print(f"  {m.rel_name} -> {rel(archive_path(m))}/")
+        n2, files2 = archive(m, write)
+        n, files = n + n2, files | files2
+    # files are counted on a dry run only: written, one that moved counts at its old and new path
+    print(f"{len(moves)} ticket(s) and {len(closed)} map(s) {'moved' if write else 'would move'}; "
+          f"{n} link rewrite(s)" + ("" if write else f" in {len(files)} file(s)"))
+
+
 def cmd_migrate(args):
     write = "--write" in args
-    maps = all_maps() if args[0] == "--all" else [load(args[0])]
+    target = [a for a in args if a not in ("--write", "--sort")]
+    maps = all_maps() if target[:1] == ["--all"] else [load(target[0])]
+    if "--sort" in args:
+        migrate_sort(maps, write)
+        print("written" if write else "dry run: nothing written (add --write)")
+        return
     repos = []
     for m in maps:
         print(f"## {m.folder.name}")
@@ -1651,6 +1801,12 @@ def cmd_close(args):
     gone = [n for n in TRAIL_NAMES if (m.folder / n).exists()]
     for n in gone:  # a handoff or checkpoint is read once; the report is what stays
         (m.folder / n).unlink()
+    moves = ticket_moves(m)  # tickets cleared before sbmap moved them
+    move_files(moves, decision_links(m, moves))
+    dest = archive_path(m)
+    if dest:
+        archive(m)
+        report = dest / "report.md"
     print(rel(report))
     print(f"{m.title}: resolved; {len(findings)} article(s) in findings"
           + (f"; deleted {', '.join(gone)}" if gone else ""))

@@ -151,7 +151,7 @@ class ResolveStampsTheCommit(VaultCase):
         self.sha = self.git("-C", str(self.clone), "rev-parse", "HEAD").stdout.strip()
         self.sb("init", self.MAP, "--why", "Because.", "--title", "Overrides", "--destination", "Somewhere.", "--repo", str(self.clone))
         self.sb("new", self.MAP, "--why", "Because.", "--title", "First", "--paths", "planned/", "--no-sync")
-        self.ticket_path = "wayfinder/monorepo/overrides/issues/001 First.md"
+        self.ticket_path = "wayfinder/monorepo/overrides/issues/done/001 First.md"  # where resolve puts it
 
     def git(self, *args):
         env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
@@ -233,9 +233,10 @@ class ResolveStampsTheCommit(VaultCase):
         self.assertIn("paths:\n  - planned/\n", text)
 
     def test_an_unknown_sha_writes_nothing(self):
-        before = self.read(self.ticket_path), self.read("wayfinder/monorepo/overrides/map.md")
+        still_open = "wayfinder/monorepo/overrides/issues/001 First.md"
+        before = self.read(still_open), self.read("wayfinder/monorepo/overrides/map.md")
         self.resolve("--commit", "deadbeef", ok=False)
-        self.assertEqual(before, (self.read(self.ticket_path), self.read("wayfinder/monorepo/overrides/map.md")))
+        self.assertEqual(before, (self.read(still_open), self.read("wayfinder/monorepo/overrides/map.md")))
 
     def test_a_resolve_without_a_commit_stamps_nothing(self):
         self.resolve()
