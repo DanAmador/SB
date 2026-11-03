@@ -4,6 +4,9 @@ continue.
 
 ## The ticket
 
+Why: <the ticket's `why`>. Leave alone: <its `Not this ticket`, or the neighbouring tickets'
+paths>. When the work pulls you past either, stop and report it as a ruling instead.
+
 <the ticket file's full body, or its path if the brief would exceed ~4k tokens>
 
 ## Files you own

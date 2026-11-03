@@ -14,12 +14,14 @@ holding the depth.
    measurements, gotchas and the reasons behind decisions are the findings. Log no-material only for
    notes on the backlog (research notes and research tickets); a task ticket with nothing to learn
    needs no log line.
-3. **Close it.** `sbmap close <map>` refuses while any ticket is open or claimed, and never rewrites
+3. **Rewrite `## In plain words` one last time**: what the map set out to do, whether it did, what
+   was left out and where it went.
+4. **Close it.** `sbmap close <map>` refuses while any ticket is open or claimed, and never rewrites
    a report. It writes `report.md` into the map's folder from
    [templates/map-report.md](../templates/map-report.md): properties filled, `findings` listing every
    article whose `sources` cite the map's notes, one *Also learned* line per finding. Then it marks
    the map resolved.
-4. **Write the report** into the scaffold, leaving out any section with nothing in it:
+5. **Write the report** into the scaffold, leaving out any section with nothing in it:
    - **Heading:** the map's title, then its outcome in a few words, so the heading alone says what
      the map found.
    - **Outcome:** one paragraph a stranger could follow: what exists now that did not, whether the
@@ -34,7 +36,7 @@ holding the depth.
      in the map's Decisions so far.
 
    A map that learned nothing says so in the Outcome and has no Findings sections.
-5. **Check.** `sbmap check <map>` and `sbmap wiki check --fix` exit zero, and `sbmap wiki verify`
+6. **Check.** `sbmap check <map>` and `sbmap wiki check --fix` exit zero, and `sbmap wiki verify`
    passes for the articles in `findings` as wikibrain's *Anchoring a source* says.
 
 Done when every article in `findings` has its line in the report and every line names an article.

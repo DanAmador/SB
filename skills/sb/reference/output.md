@@ -18,6 +18,9 @@ scrolling back. The style is the `i-have-adhd` skill's (pinned in `skills-lock.j
   absolute path percent-encoded (`/` → `%2F`, space → `%20`). Claude Code Desktop leaves these
   links dead without the `obsidian-links` mod, which `install.sh` installs. In the vault a
   wikilink (`sbmap link`), so Obsidian's graph sees it.
+- **Plain words.** Titles, whys, questions and buttons in the owner's words, not the code's: no class
+  names, internal codes or bare ticket numbers; a new term gets a five-word gloss or is not used.
+  Options say what the owner will see, so a button approved fast is still readable later.
 - Estimates in hours, from commits (see the contract). Say what the owner will *see* when it is done.
 - Every question carries a ➡️ recommendation. When the owner answers only some, list the rest as accepted
   on recommendation in one line and carry on: silence means the recommendation stands.

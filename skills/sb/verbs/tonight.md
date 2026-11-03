@@ -52,7 +52,7 @@ one-repo night skips them.
    plain text, in this order:
    1. One line: what "go" starts (map, tickets, lanes, until what clock time).
    2. One line: what the vault and reconciliation gave you (🗺️ closed, moved, half-built).
-   3. The queue per lane: ticket name link · tier/model · hours, one line of what it does; ≤5 visible,
+   3. The queue per lane: ticket name link · tier/model · hours, then its `why`; ≤5 visible,
       the rest folded; then what is not queued and why (👤 the owner's, blocked deeper).
    4. What the owner will *see* in the morning, per ticket; say plainly when a ticket is invisible structure.
    5. ⚠️ peers and contract conflicts, with the agent count at once (lanes plus peers) against the cap.
@@ -89,6 +89,7 @@ one-repo night skips them.
       `sbmap resolve <map> <NNN> --gist "<one line>" --answer "<commit, verified, rulings, model>" [--commit <sha>]`
       Automatically stamps `## Answer`, resolves status, appends Decisions line to `map.md`, and syncs Route.
       Run `sbmap check <map>`, update checkpoint. Then the next ticket.
+   5. At the end of a map's batch, rewrite its `## In plain words` (where it stands now).
 
    *Operator:* the lane does 0–2 and reports its commit and checks, with the usage it read; the
    operator does 3 in the lane's checkout and logs it in the checkpoint; then the lane does 4. The

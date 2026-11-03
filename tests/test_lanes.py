@@ -9,10 +9,10 @@ MAP = "monorepo/lanes"
 class Lanes(VaultCase):
     def setUp(self):
         super().setUp()
-        self.sb("init", MAP, "--title", "Lanes", "--destination", "Somewhere.", "--repo", "/code/monorepo")
+        self.sb("init", MAP, "--why", "Because.", "--title", "Lanes", "--destination", "Somewhere.", "--repo", "/code/monorepo")
 
     def new(self, title, paths=None, blocked=None):
-        args = ["new", MAP, "--title", title, "--no-sync"]
+        args = ["new", MAP, "--title", title, "--why", "Because.", "--no-sync"]
         if paths:
             args += ["--paths", paths]
         if blocked:

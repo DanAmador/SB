@@ -9,7 +9,7 @@ from helpers import VaultCase
 class NewTicketsAndMaps(VaultCase):
     def setUp(self):
         super().setUp()
-        self.sb("init", "monorepo/overrides", "--title", "Overrides", "--destination", "Somewhere.",
+        self.sb("init", "monorepo/overrides", "--why", "Because.", "--title", "Overrides", "--destination", "Somewhere.",
                 "--repo", "/code/monorepo")
 
     def test_a_map_carries_its_project_as_a_property_and_a_tag(self):
@@ -18,7 +18,7 @@ class NewTicketsAndMaps(VaultCase):
         self.assertIn("  - project/monorepo", text)
 
     def test_a_ticket_carries_its_project_and_an_operon_priority(self):
-        path = self.sb("new", "monorepo/overrides", "--title", "First", "--no-sync").stdout.strip()
+        path = self.sb("new", "monorepo/overrides", "--why", "Because.", "--title", "First", "--no-sync").stdout.strip()
         text = (self.vault / path).read_text()
         self.assertIn("project: monorepo", text)
         self.assertIn("  - project/monorepo", text)
@@ -26,18 +26,47 @@ class NewTicketsAndMaps(VaultCase):
 
     def test_priority_words_map_to_operon_letters(self):
         for word, letter in (("high", "A"), ("low", "E"), ("urgent", "S"), ("B", "B")):
-            path = self.sb("new", "monorepo/overrides", "--title", f"P {word}", "--priority", word,
+            path = self.sb("new", "monorepo/overrides", "--why", "Because.", "--title", f"P {word}", "--priority", word,
                            "--no-sync").stdout.strip()
             self.assertIn(f"priority: {letter}", (self.vault / path).read_text(), word)
-        self.sb("new", "monorepo/overrides", "--title", "Bad", "--priority", "whenever", ok=False)
+        self.sb("new", "monorepo/overrides", "--why", "Because.", "--title", "Bad", "--priority", "whenever", ok=False)
 
     def test_aliases_are_text_so_obsidian_reads_them_as_aliases(self):
-        path = self.sb("new", "monorepo/overrides", "--title", "First", "--no-sync").stdout.strip()
+        path = self.sb("new", "monorepo/overrides", "--why", "Because.", "--title", "First", "--no-sync").stdout.strip()
         self.assertIn('aliases:\n  - "#001"\n  - "001"\n', (self.vault / path).read_text())
         self.assertIn("number: 1\n", (self.vault / path).read_text())
 
+    def test_a_ticket_says_why_it_exists_and_what_it_leaves_alone(self):
+        self.sb("new", "monorepo/overrides", "--title", "No why", "--no-sync", ok=False)
+        path = self.sb("new", "monorepo/overrides", "--title", "First", "--why", "Rows lie about  hidden parts.",
+                       "--out", "The clip planes.", "--no-sync").stdout.strip()
+        text = (self.vault / path).read_text()
+        self.assertIn("why: Rows lie about hidden parts.\n", text)
+        self.assertLess(text.index("## Not this ticket\n\nThe clip planes."), text.index("## Question"))
+        shown = self.sb("show", "monorepo/overrides", "1").stdout
+        self.assertIn("why: Rows lie about hidden parts.", shown)
+        self.assertIn("## Not this ticket\nThe clip planes.", shown)
+        self.assertIn("why: Rows lie about hidden parts.", self.sb("status", "monorepo/overrides").stdout)
+
+    def test_a_map_opens_in_plain_words(self):
+        text = self.read("wayfinder/monorepo/overrides/map.md")
+        self.assertLess(text.index("## In plain words\n\nBecause."), text.index("## Destination"))
+
+    def test_summary_rewrites_the_plain_words_in_place(self):
+        self.sb("summary", "monorepo/overrides", "--text", "Why: rows lie.\\nLeft: two tickets.")
+        text = self.read("wayfinder/monorepo/overrides/map.md")
+        self.assertIn("## In plain words\n\nWhy: rows lie.\nLeft: two tickets.\n\n## Destination", text)
+        self.assertNotIn("Because.", text)
+        self.assertEqual(text.count("## In plain words"), 1)
+
+    def test_check_notes_a_missing_why_without_failing(self):
+        self.write("wayfinder/monorepo/overrides/issues/001 Old.md", "---\nwayfinder: ticket\nnumber: 1\n"
+                   "status: Project.Planned\ntype: task\n---\n## Question\n\nQ\n")
+        out = self.sb("check", "monorepo/overrides").stdout
+        self.assertIn("note: 001: no `why`", out)
+
     def test_set_maps_priority_too(self):
-        self.sb("new", "monorepo/overrides", "--title", "First", "--no-sync")
+        self.sb("new", "monorepo/overrides", "--why", "Because.", "--title", "First", "--no-sync")
         self.sb("set", "monorepo/overrides", "1", "priority=high", "--no-sync")
         self.assertIn("priority: A", self.read("wayfinder/monorepo/overrides/issues/001 First.md"))
 
@@ -45,7 +74,7 @@ class NewTicketsAndMaps(VaultCase):
 class Boards(VaultCase):
     def setUp(self):
         super().setUp()
-        self.sb("init", "monorepo/overrides", "--title", "Overrides", "--destination", "Somewhere.",
+        self.sb("init", "monorepo/overrides", "--why", "Because.", "--title", "Overrides", "--destination", "Somewhere.",
                 "--repo", "/code/monorepo")
 
     def test_frontier_formulas_read_the_operon_statuses(self):
@@ -120,8 +149,8 @@ class ResolveStampsTheCommit(VaultCase):
         self.git("-C", str(self.clone), "add", ".")
         self.git("-C", str(self.clone), "commit", "-q", "-m", "work")
         self.sha = self.git("-C", str(self.clone), "rev-parse", "HEAD").stdout.strip()
-        self.sb("init", self.MAP, "--title", "Overrides", "--destination", "Somewhere.", "--repo", str(self.clone))
-        self.sb("new", self.MAP, "--title", "First", "--paths", "planned/", "--no-sync")
+        self.sb("init", self.MAP, "--why", "Because.", "--title", "Overrides", "--destination", "Somewhere.", "--repo", str(self.clone))
+        self.sb("new", self.MAP, "--why", "Because.", "--title", "First", "--paths", "planned/", "--no-sync")
         self.ticket_path = "wayfinder/monorepo/overrides/issues/001 First.md"
 
     def git(self, *args):

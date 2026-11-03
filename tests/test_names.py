@@ -12,10 +12,10 @@ class TicketNames(VaultCase):
 
     def setUp(self):
         super().setUp()
-        self.sb("init", MAP, "--title", "Names", "--destination", "Somewhere.", "--repo", "/code/monorepo")
+        self.sb("init", MAP, "--why", "Because.", "--title", "Names", "--destination", "Somewhere.", "--repo", "/code/monorepo")
 
     def new(self, title, *extra):
-        return self.sb("new", MAP, "--title", title, "--no-sync", *extra).stdout.strip()
+        return self.sb("new", MAP, "--title", title, "--why", "Because.", "--no-sync", *extra).stdout.strip()
 
     def test_the_file_is_named_number_then_title_and_the_title_is_a_property(self):
         path = self.new("Build sbmap lanes")

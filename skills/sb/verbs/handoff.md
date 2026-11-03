@@ -6,7 +6,8 @@ vault file that a fresh agent can start from with nothing but one pasted line, i
 1. **Bring the maps up to date first**: every ticket this session resolved has its Answer, Status
    and Decisions line; claims you are leaving are released (`open`) unless the next session is
    expressly taking them over; new findings are tickets (see `capture`); `sbmap diagram --write`.
-   A handoff that says more than the map is a handoff the map will contradict.
+   Rewrite each touched map's `## In plain words` (why, where it stands, what the owner decides
+   next). A handoff that says more than the map is a handoff the map will contradict.
 2. **Write the handoff** at `<map folder>/handoff.md` (`wayfinder/<repo>/<map>/handoff.md`) from
    [templates/handoff.md](../templates/handoff.md); work spanning several maps writes one
    `wayfinder/runs/<date>-<name>.md` instead. Never a file at the `wayfinder/` root or beside the

@@ -1,64 +1,87 @@
 ---
 name: sb
-description: "Second-brain workflow: chart a map in the vault, queue a night run, read the morning, hand off, resume, capture, land, close a map, learn into the wiki, ask it. /sb <verb>; no verb shows the board."
+description: "Second-brain workflow: the owner's maps, tickets, night runs and wiki in the Obsidian vault. /sb <anything>: free text is the default, a verb is a shortcut; no argument shows the board."
 disable-model-invocation: true
-argument-hint: "[chart|tonight|morning|handoff|resume|capture|land|close|learn|ask] [args]"
+argument-hint: "[what you want, in your own words] or [chart|tonight|morning|resume|close|learn|ask|handoff|capture|land]"
 ---
 
 # sb: the vault is the hub
 
 The owner's Obsidian vault is where every agent, session and harness meets. Maps and tickets,
 handoffs and checkpoints live there as plain markdown, so a fresh context in any tool starts from
-one line: *"Read `<vault file>` and do what it says."* This skill is the owner's repeatable rituals
-around that vault, each one a verb.
+one line: *"Read `<vault file>` and do what it says."*
 
 - **Vault:** `$SB_VAULT`, else `~/Documents/Second Brain`. Maps live in `wayfinder/`.
-- **`sbmap` CLI:** `python3 <this skill's dir>/scripts/sbmap.py` (run without args to list all commands).
-  - 🔒 **Token rule: Author and inspect 100% through the CLI.** Never use `read_file`, `write_file`, or `edit_file` on tickets or maps. Use `sbmap show` to read tickets, `sbmap new` with `--question` and `--done-when` to create, `sbmap comment` for rulings, and `sbmap resolve` with `--answer`. Changes auto-sync the Route diagram.
-  - 🔒 **Token rule: Never load external skills or the full vault.** The contract, ticket types, and output rules are self-contained here.
-- 🔒 **Build the least (ponytail):** every design and every implementer climbs the ladder in [reference/architecture.md](reference/architecture.md#build-the-least) before writing code: no new module, dependency or abstraction where an existing tool, the stdlib or one line holds.
-- **Ticket types:** `task` (concrete unit, ~1.5 h), `grilling` (clarification), `research` (subagent spike in `<map>/research/`), `prototype` (throwaway code), `architecture` (structural design with mermaid).
-- **Obsidian CLI:** when the app is running, `obsidian` adds search, backlinks, renderer, and file history: [reference/obsidian.md](reference/obsidian.md).
+- **`sbmap` CLI:** `python3 <this skill's dir>/scripts/sbmap.py` (no args lists every command).
+  🔒 Maps and tickets are authored through it only (`init`, `summary`, `new`, `set`, `comment`,
+  `claim`, `resolve`, `close`); read a ticket with `sbmap show`. It writes the properties, wikilinks and Route.
+- **Ticket types:** `task` (one commit, ~1.5 h), `grilling` (a talk with the owner), `research`
+  (a subagent spike into `<map>/research/`), `prototype` (throwaway code), `architecture` (a
+  structure, drawn in mermaid: [reference/architecture.md](reference/architecture.md)).
 
-## Output contract (succinct, high-information, the i-have-adhd style)
+## The owner talks; you route
 
-- **Line 1 is the action or decision the owner can take now.**
-- Bullets, short. ≤5 visible per group.
-- **Status emojis only:** ✅ landed · 🎮 needs play · 👤 owner's call · ⚠️ problem/unverified · ⏳ running · 🔒 rule · 🗺️ map change · 🆕 created · 💬 added to · ♻️ reopened. Never decorative.
-- Refer to tickets by name with number link: `[<name>](obsidian://open?path=<absolute path, percent-encoded>)`, so a click opens the note in Obsidian (the `obsidian-links` mod makes it clickable in Claude Code Desktop).
-- Every question carries `➡️ recommendation`. Silence = accepted on recommendation.
-- End with one action in under two minutes. Zero conversational filler.
+The owner dictates. `/sb` followed by anything is a request in the owner's words, not a parse error. Read
+the intent, say in one line which verb you are running ("→ chart, on card-grammar"), and run it.
+Two intents in one message ("close and learn", "draft and for tonight") run in that order.
+
+| the owner says something like | verb |
+|---|---|
+| "where are we", "what's open", "what were agents doing", *(nothing)* | board: `sbmap maps`, this repo's frontier with each ticket's why, any checkpoint; name the verb that fits |
+| "chart / draft / plan / let's think about X", a brain-dump | [chart](verbs/chart.md) |
+| "add these as todos", playtest notes, "I noticed…" | [capture](verbs/capture.md) |
+| "tonight", "overnight", "enqueue", "I'm going to bed" | [tonight](verbs/tonight.md) |
+| "what happened", "I'm back", "what do I test" | [morning](verbs/morning.md) |
+| "continue", "tokens are back", "reorient me", a dead session | [resume](verbs/resume.md) |
+| "write a handoff", "move to a new session" | [handoff](verbs/handoff.md) |
+| "merge the worktrees", "bring the lanes home" | [land](verbs/land.md) |
+| "close this map", "we're done here" | [close](verbs/close.md) |
+| "learn from…", a source to keep | [learn](verbs/learn.md) |
+| "what do we know about…" | [ask](verbs/ask.md) |
+
+Nothing fits: do what the owner asked, under the rules below, and say no verb applied.
+
+## Every ticket and map says why, in the owner's words
+
+The owner and their agents disagree when intent lives in one dictation and never reaches the ticket.
+So intent is written down where both read it:
+
+- 🔒 **Every ticket has a `why`** (`sbmap new --why`, required): one line, plain words, the problem
+  and what changes for the player or user once it is done. Quote the owner where they said it.
+  Invisible structure says so: "nothing to see: lets 677 drop the string keys".
+- 🔒 **`--out` when a neighbour is close**: what this ticket leaves alone ("the clip planes stay
+  separate"). An implementer that touches what `Not this ticket` names has drifted.
+- 🔒 **Every map opens with `## In plain words`**: two to five lines, why the map exists (the owner's words)
+  and where it stands now (what is done, what is left, what the owner decides next). Write it with `sbmap summary <map> --text`, and rewrite it
+  whenever a batch of tickets resolves, at every handoff and at close. The Decisions list is the log; this is
+  the summary.
+- 🔒 **The map's scope holds.** A new ticket that does not serve the Destination is a question to
+  the owner: redraw the Destination, or start a new map. Never let a map quietly become a backlog.
+- `sbmap check` lists tickets with no `why` and maps with no plain-words section as notes. Fill
+  them from the ticket's own history, or ask.
+
+## Plain words
+
+- 🔒 **Titles, whys, questions and buttons are in the owner's words, not the code's.** No class
+  names, internal codes ("P2a", "band D", "lanes", "probe pad") or ticket numbers standing alone.
+  A term the owner has not used gets five words of gloss the first time, or is not used.
+- A question's options say what the owner will *see* or *feel* for each, not what the code does. The
+  owner approves buttons fast; a button they cannot read later is a decision they did not make.
+- 🔒 **Build the least:** reuse what exists, delete over deprecate, fewer knobs the player sees. The
+  ladder is in [reference/architecture.md](reference/architecture.md#build-the-least).
 
 ## Every verb starts here
 
-1. **Read the vault first.** Find this repo's maps (`sbmap maps --repo <repo path>`) and their
-   handoff/checkpoint files (`sbmap status <map>` names them: the map folder's `handoff.md` and
-   `checkpoint.md`, and `wayfinder/runs/` for work across maps; 🔒 never a file at the `wayfinder/`
-   root); read the wiki's index for this repo
-   (`sbmap wiki index --project <repo>`: its knowledge plus `general`) and `sbmap wiki find
-   --project <repo>` the effort's nouns; search the rest of the vault for
-   them (`obsidian search:context`). Say in one line what they gave you, "nothing" included.
-2. **Resolve the contract**: the rules this run works under. [reference/contract.md](reference/contract.md).
-   `learn` and `ask` skip this step: they write only the wiki.
+1. **Read the vault first.** `sbmap maps --repo <repo path>`, then `sbmap status <map>` (it names
+   the map's `handoff.md` and `checkpoint.md`, and `wayfinder/runs/` files; 🔒 never a file at the
+   `wayfinder/` root). `sbmap wiki index --project <repo>`, and `sbmap wiki find` the effort's
+   nouns. Say in one line what they gave you, "nothing" included.
+2. **Resolve the contract**: [reference/contract.md](reference/contract.md). `learn` and `ask` skip it.
 3. Run the verb.
-4. Report in the owner's shape: [reference/output.md](reference/output.md).
+4. **Report in the owner's shape** ([reference/output.md](reference/output.md)): line 1 is what the
+   owner can do now; ≤5 short bullets; status emojis only; ticket names as Obsidian links; every
+   question with ➡️ a recommendation (silence accepts it); the detail goes in the vault, not chat.
 
-## Verbs
-
-| verb | when | file |
-|---|---|---|
-| *(none)* | "where are we?" Print `sbmap maps`, this repo's frontier and any checkpoint, then name the verb that fits | — |
-| `chart <idea>` | a brain-dump becomes a map: grilling, tickets, architecture tickets, the Route | [verbs/chart.md](verbs/chart.md) |
-| `tonight [hours] [map]` | the owner is leaving: reconcile, size, propose lanes and models, one confirm, then orchestrate unattended; across repos, as operator over one lane session per repo | [verbs/tonight.md](verbs/tonight.md) |
-| `morning` | the owner is back: a phone-sized digest of what landed and what waits on them | [verbs/morning.md](verbs/morning.md) |
-| `handoff` | context or tokens are running out, or work moves to another session or harness | [verbs/handoff.md](verbs/handoff.md) |
-| `resume` | a session died, hit a limit, or the owner says "continue" / "reorient me" | [verbs/resume.md](verbs/resume.md) |
-| `capture` | "add these as todos": feedback or findings become tickets on a map | [verbs/capture.md](verbs/capture.md) |
-| `land` | lanes and worktrees come home: merge, clean up, list what to playtest | [verbs/land.md](verbs/land.md) |
-| `close <map>` | the Destination is reached or the map is ending: its knowledge into the wiki, a report for the owner to review | [verbs/close.md](verbs/close.md) |
-| `learn [source…\|map\|--research "<topic>"]` | a source, a map's findings or a research topic becomes wiki articles; no argument works the backlog, and `sbmap wiki verify --repo-root <clone>` lists the articles to re-read | [verbs/learn.md](verbs/learn.md) |
-| `ask <question> [--save]` | answer from the wiki, citing articles; `--save` keeps the answer as a synthesis page | [verbs/ask.md](verbs/ask.md) |
-
-Reference, reached from the verbs: [models](reference/models.md) (which tier runs what),
-[architecture tickets](reference/architecture.md) (mermaid decisions), [the wiki](reference/wiki.md)
-(a pointer: the format, `sbmap wiki` and how to write a finding live in the pinned wikibrain skill; `sbmap wiki <command>` is wikibrain's command), and the [templates](templates/) every verb writes from.
+Reference: [models](reference/models.md) (which tier runs what), [architecture](reference/architecture.md),
+[the wiki](reference/wiki.md) (`sbmap wiki` is the pinned wikibrain skill's command),
+[Obsidian CLI](reference/obsidian.md), and the [templates](templates/) every verb writes from.

@@ -10,7 +10,7 @@ Written <date> for a fresh context that <implements X | charts Y | finishes Z>.
 ## Read first, in this order
 
 1. `<vault>/wayfinder/README.md`: the tracker's rules.
-2. `<map.md>` (its Board's *Frontier* view is the live queue) and <which tickets, each a wikilink>:
+2. `<map.md>`: its `## In plain words` first (why and where it stands), then the Board's *Frontier* view (the live queue) and <which tickets, each a wikilink>:
    the resolved ones are the decisions; <which> are your work.
 3. In the repo `<path>`: `AGENTS.md`, `CONTEXT.md`, <spec / plan / ledger>.
 

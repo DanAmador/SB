@@ -21,12 +21,16 @@ Bases see the whole route. It answers what an agent should never compute or type
                                         legacy fields, and (Obsidian running) broken links
     sbmap.py verify   <map>             every mermaid block parses in Obsidian's own renderer
   write
-    sbmap.py init     <map> --title "<name>" --destination "<goal>" [--done-when "..."] [--repo <path>]
+    sbmap.py init     <map> --title "<name>" --why "<plain words>" --destination "<goal>" [--done-when "..."]
+                            [--repo <path>]
                                         scaffolds map.md, board.base, issues/ and initial Route
-    sbmap.py new      <map> --title "<sentence>" [--type task] [--priority S..F|high|normal|low]
-                            [--question "..."] [--done-when "..."]
+    sbmap.py new      <map> --title "<sentence>" --why "<plain words: the problem and what changes>"
+                            [--type task] [--priority S..F|high|normal|low]
+                            [--question "..."] [--done-when "..."] [--out "<what this ticket leaves alone>"]
                             [--blocked-by 622,623] [--paths src/a.py,docs/] [--comments "..."] [--no-sync]
                                         full ticket creation with properties, wikilinks & auto-sync
+    sbmap.py summary  <map> --text "<why, in the owner's words; where it stands; what they decide next>"
+                                        writes the map's ## In plain words (in place, or first)
     sbmap.py comment  <map> <NNN> --text "<ruling or comment>"
                                         appends dated entry to ## Comments
     sbmap.py set      <map> <NNN> key=value ... [--no-sync]
@@ -101,7 +105,7 @@ SHAPES = {  # mermaid node shape per ticket type
     "prototype": ('[["', '"]]'),
     "architecture": ('{{"', '"}}'),
 }
-TICKET_KEYS = ["wayfinder", "operonId", "number", "title", "project", "aliases", "status", "type",
+TICKET_KEYS = ["wayfinder", "operonId", "number", "title", "why", "project", "aliases", "status", "type",
                "priority", "created", "completed", "map", "blocked_by", "claimed_by",
                "paths", "repo", "commit", "ref", "pr", "github", "tags"]
 MAP_KEYS = ["wayfinder", "project", "status", "aliases", "repo", "github", "tags"]
@@ -508,6 +512,8 @@ def cmd_status(args):
     print("frontier:")
     for t in m.frontier():
         print(f"  {t.id} [{t.type}] {t.title}")
+        if t.props.get("why"):
+            print(f"      why: {t.props['why']}")
     if not m.frontier():
         print("  (empty)")
     files = trail(m)
@@ -517,7 +523,7 @@ def cmd_status(args):
 def cmd_frontier(args):
     m = load(args[0])
     for t in m.frontier():
-        print(f"{t.id}\t{t.type}\t{t.title}\t{t.path}")
+        print(f"{t.id}\t{t.type}\t{t.title}\t{t.props.get('why', '')}\t{t.path}")
 
 
 def overlap(a, b):
@@ -597,6 +603,7 @@ def cmd_show(args):
     m = load(args[0])
     t = m.ticket(args[1])
     print(f"#{t.num}: {t.title}")
+    print(f"why: {t.props.get('why') or '(missing: ask the owner, then `sbmap set <map> <NNN> why=...`)'}")
     blockers = ", ".join(t.blocked_by) if t.blocked_by else "none"
     claimed = f" | claimed: {t.claimed_by}" if t.claimed_by else ""
     print(f"status: {t.status} | type: {t.type} | priority: {t.props.get('priority', 'C')}{claimed}")
@@ -615,7 +622,7 @@ def cmd_show(args):
     if curr_sec:
         sections[curr_sec] = "\n".join(curr_lines).strip()
 
-    for sec in ["Question", "Done when", "Answer", "Comments"]:
+    for sec in ["Not this ticket", "Question", "Done when", "Answer", "Comments"]:
         if sec in sections and sections[sec]:
             print(f"\n## {sec}\n{sections[sec]}")
 
@@ -627,7 +634,12 @@ def cmd_check(args):
         problems.append("map.md: legacy header lines; run `sbmap migrate`")
     d = m.body.find("## Decisions so far")
     decisions = m.body[d: (m.body.find("\n## ", d + 4) + 1 or len(m.body))] if d >= 0 else ""
+    notes = []
+    if "## In plain words" not in m.body:
+        notes.append("map.md: no '## In plain words' (why the map exists, where it stands); write it")
     for t in m.order():
+        if t.status in ("open", "claimed") and not t.props.get("why"):
+            notes.append(f"{t.id}: no `why`; `sbmap set {m.rel_folder} {t.num} why=\"...\"`")
         if not t.has_fm:
             problems.append(f"{t.id}: legacy header lines; run `sbmap migrate`")
         for b in t.blocked_by:
@@ -683,7 +695,9 @@ def cmd_check(args):
                     problems.append(f"{s[len(folder):]}: broken link to '{parts[0]}'")
     for p in problems:
         print(p)
-    print(f"{len(problems)} problem(s) in {m.folder.name}")
+    for n in notes:
+        print("note: " + n)
+    print(f"{len(problems)} problem(s) in {m.folder.name}" + (f", {len(notes)} note(s)" if notes else ""))
     sys.exit(1 if problems else 0)
 
 
@@ -791,6 +805,7 @@ def cmd_init(args):
         sys.exit(f"sbmap: {folder / 'map.md'} already exists")
     title = opt(args, "--title") or sys.exit("sbmap: --title is required")
     destination = opt(args, "--destination") or sys.exit("sbmap: --destination is required")
+    why = opt(args, "--why") or sys.exit("sbmap: --why is required: in plain words, why this map exists")
     done_when = opt(args, "--done-when", "")
     repo_arg = opt(args, "--repo")
 
@@ -820,12 +835,15 @@ def cmd_init(args):
         "tags": [f"wayfinder/map/{slug}", f"project/{project}"]
     }
 
+    why_body = why.replace("\\n", "\n").strip()
     dest_body = destination.replace("\\n", "\n").strip()
     dw_body = done_when.replace("\\n", "\n").strip()
     dw_section = f"\n\n### Done when\n\n{dw_body}\n" if dw_body else "\n"
 
     body = (
         f"# {title}\n\n"
+        f"## In plain words\n\n"
+        f"{why_body}\n\n"
         f"## Destination\n\n"
         f"{dest_body}"
         f"{dw_section}\n"
@@ -863,6 +881,9 @@ def cmd_new(args):
     if type_ not in SHAPES:
         sys.exit(f"sbmap: type must be one of {', '.join(SHAPES)}")
     refs = [r for r in (opt(args, "--blocked-by", "") or "").split(",") if r.strip()]
+    why = opt(args, "--why") or sys.exit("sbmap: --why is required: one line in plain words, the problem "
+                                         "and what changes once it is done")
+    out = opt(args, "--out", "")
     question = opt(args, "--question", "")
     done_when = opt(args, "--done-when", "")
     comments = opt(args, "--comments", "") or opt(args, "--ruling", "")
@@ -870,13 +891,14 @@ def cmd_new(args):
     path = m.folder / "issues" / f"{n:03d} {file_title(title)}.md"
     path.parent.mkdir(exist_ok=True)
     props = ticket_props(m, n, status="open", type_=type_, priority=priority, blocked=blocked_links(m, refs),
-                         extra={"title": title})
+                         extra={"title": title, "why": " ".join(why.split())})
     if opt(args, "--paths"):
         props["paths"] = split_list(opt(args, "--paths"))
 
     q_text = question.replace("\\n", "\n").strip() if question else ""
     dw_text = done_when.replace("\\n", "\n").strip() if done_when else ""
-    body = f"## Question\n\n{q_text}\n\n## Done when\n\n{dw_text}\n\n## Comments\n"
+    body = f"## Not this ticket\n\n{out.strip()}\n\n" if out.strip() else ""
+    body += f"## Question\n\n{q_text}\n\n## Done when\n\n{dw_text}\n\n## Comments\n"
     if comments:
         c_text = comments.replace("\\n", "\n").strip()
         body += f"\n- **{date.today().isoformat()}**: {c_text}\n"
@@ -942,6 +964,21 @@ def cmd_set(args):
     print(f"{t.id}: " + ", ".join(kv_args))
     if not no_sync:
         cmd_diagram([args[0], "--write"])
+
+
+def cmd_summary(args):
+    """Write the map's `## In plain words`: replace it in place, or put it first, before Destination."""
+    m = load(args[0])
+    text = (opt(args, "--text") or sys.exit("sbmap: --text is required")).replace("\\n", "\n").strip()
+    body = m.body
+    i = body.find("## In plain words")
+    if i >= 0:
+        nxt = body.find("\n## ", i + 4)
+        body = body[:i] + f"## In plain words\n\n{text}\n" + (body[nxt:] if nxt >= 0 else "")
+    else:
+        body = insert_section(body, "In plain words", text, before=("## Destination", "## Route", "## Notes"))
+    m.save(m.props if m.has_fm else migrate_map_props(m), body)
+    print(f"wrote {m.folder.name}: In plain words")
 
 
 def cmd_claim(args):
@@ -1157,6 +1194,8 @@ formulas:
 properties:
   file.name:
     displayName: Ticket
+  why:
+    displayName: Why
   formula.open_blockers:
     displayName: Open blockers
   blocked_by:
@@ -1171,6 +1210,7 @@ views:
         - formula.ready
     order:
       - file.name
+      - why
       - type
       - blocked_by
     sort:
@@ -1183,6 +1223,7 @@ views:
       direction: ASC
     order:
       - file.name
+      - why
       - type
       - blocked_by
       - formula.open_blockers
@@ -1197,6 +1238,7 @@ views:
       direction: ASC
     order:
       - file.name
+      - why
       - type
       - formula.open_blockers
 """
@@ -1211,6 +1253,8 @@ formulas:
 properties:
   file.name:
     displayName: Ticket
+  why:
+    displayName: Why
   formula.open_blockers:
     displayName: Open blockers
 views:
@@ -1224,6 +1268,7 @@ views:
       direction: ASC
     order:
       - file.name
+      - why
       - type
     sort:
       - property: file.name
@@ -1235,6 +1280,7 @@ views:
         - status == "Project.InProgress"
     order:
       - file.name
+      - why
       - map
       - claimed_by
   - type: table
@@ -1247,6 +1293,7 @@ views:
       direction: ASC
     order:
       - file.name
+      - why
       - map
       - type
       - priority
@@ -1262,6 +1309,8 @@ formulas:
 properties:
   file.name:
     displayName: Ticket
+  why:
+    displayName: Why
   formula.open_blockers:
     displayName: Open blockers
   claimed_by:
@@ -1277,6 +1326,7 @@ views:
       direction: ASC
     order:
       - file.name
+      - why
       - type
       - priority
     sort:
@@ -1289,6 +1339,7 @@ views:
         - status == "Project.InProgress"
     order:
       - file.name
+      - why
       - map
       - claimed_by
   - type: cards
@@ -1298,6 +1349,7 @@ views:
       direction: ASC
     order:
       - file.name
+      - why
       - map
       - type
       - formula.open_blockers
@@ -1676,7 +1728,7 @@ def cmd_wiki(args):
 
 COMMANDS = {"maps": cmd_maps, "status": cmd_status, "frontier": cmd_frontier, "lanes": cmd_lanes, "show": cmd_show,
             "next": cmd_next, "link": cmd_link, "check": cmd_check, "verify": cmd_verify,
-            "init": cmd_init, "new": cmd_new, "set": cmd_set, "claim": cmd_claim,
+            "init": cmd_init, "summary": cmd_summary, "new": cmd_new, "set": cmd_set, "claim": cmd_claim,
             "comment": cmd_comment, "ruling": cmd_comment, "block": cmd_block,
             "resolve": cmd_resolve, "diagram": cmd_diagram, "board": cmd_board, "migrate": cmd_migrate,
             "close": cmd_close, "wiki": cmd_wiki}

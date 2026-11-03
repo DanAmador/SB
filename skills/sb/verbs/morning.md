@@ -12,7 +12,8 @@ one screen.
    - **👤 Your calls**: rulings made without the owner (`R: …`), forks waiting. Each carries ➡️ the default
      that stands if they say nothing.
    - **🎮 Play these**: landed work whose Done-when needs the owner's hands; how to reach it in one line.
-   - **✅ Landed**: ticket, commit sha, one line each.
+   - **✅ Landed**: ticket, commit sha, one line each, in plain words: what changed for the player or
+     user, not what the code does.
 
    Then delete the `wayfinder/runs/` files of runs older than the one you just read: a run file is
    read once, and the tickets keep everything that lasts.

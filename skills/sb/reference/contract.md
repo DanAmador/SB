@@ -58,6 +58,9 @@ Each line is a ruling the owner has repeated across sessions; the reason sits be
 - **Blocked on a decision:** take the recommendation, write it on the ticket as a ruling ("R: …,
   cost if wrong: …"), keep going. Blocked on the world (Editor dead, service down): finish the
   tickets that need no live check, and list the unverified ones.
+- **Stay inside the ticket.** Its `why` is the goal and its `Not this ticket` the edge. Neighbouring
+  work found on the way becomes a ticket (`capture`), never part of this commit; the owner has
+  reverted whole lanes that pulled a neighbour in.
 - **Findings go on the ticket** (`## Answer`), not into new markdown files in the repo.
 - **Delete, don't rewrite,** a test that fails only because a tuned number moved. Feel and the
   owner's playtest outrank a green suite.

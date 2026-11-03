@@ -127,8 +127,8 @@ python3 skills/sb/scripts/sbmap.py status sk4te/one-tether
 python3 skills/sb/scripts/sbmap.py show sk4te/one-tether 624
 
 # Write (author 100% through CLI with auto-sync diagram)
-python3 skills/sb/scripts/sbmap.py init my-repo/my-effort --title "Title" --destination "Goal" --done-when "Passes"
-python3 skills/sb/scripts/sbmap.py new sk4te/one-tether --title "Tether spring" --type task --priority high --question "..." --done-when "..."
+python3 skills/sb/scripts/sbmap.py init my-repo/my-effort --title "Title" --why "Why, in plain words" --destination "Goal" --done-when "Passes"
+python3 skills/sb/scripts/sbmap.py new sk4te/one-tether --title "Tether spring" --why "Two tethers read as one rope" --type task --priority high --question "..." --done-when "..."
 python3 skills/sb/scripts/sbmap.py comment sk4te/one-tether 624 --text "R1: ruling"
 python3 skills/sb/scripts/sbmap.py resolve sk4te/one-tether 624 --gist "..." --answer "..." --commit "sha"
 python3 skills/sb/scripts/sbmap.py close sk4te/one-tether
