@@ -8,7 +8,7 @@ Read each argument as the first of these that fits:
 
 | argument | sources |
 |---|---|
-| none | `sbmap wiki backlog`, then **tend** (below) |
+| none | **tend** (below), which ends with the backlog |
 | `--research "<topic>"` | **research** (below) |
 | starts with `http://` or `https://` | the page, fetched with the harness's web tool; a page too long or paywalled → ask the owner to clip it into `Clippings/` |
 | a map folder `sbmap maps` lists, optionally with `<NNN>` | the map's backlog notes (its research notes and resolved research tickets), or the one ticket |
@@ -86,25 +86,52 @@ The owner asked to gather sources on a topic (a question alone is `ask`).
 
 ## Tend
 
-`/sb learn` with no argument. First apply the owner's review in every map report
-(`wayfinder/**/report.md`), by *Applying the review* in [close.md](close.md). Then work the backlog through
-*Learn a source*, ten at a time (say the total), then `sbmap wiki check --fix`, then read for what the check cannot see. Report each of
-these; fix none without the owner:
+`/sb learn` with no argument. Upkeep is the AI's (owner, 2026-11-03: "the maintenance should be
+entirely done by the AI"): tend fixes what it finds and asks the owner nothing. Every step a command
+can do is a command, so tokens go only to judging changed code.
 
-- contradictions between articles with no Disputed callout
-- claims a newer source superseded, still standing without an Outdated callout
-- a concept many articles mention that has no article of its own
-- articles nothing links to, and obvious `related` links missing
-- synthesis pages whose source articles changed substantially since `archived`
-
-For each project that has a repo, `sbmap wiki verify --repo-root <clone>`: re-read every drifted or
-broken article against its branch or main, keep the re-read as a raw note (`wiki raw --repo-root
-<clone> --rev <branch> --paths … --symbols …`), put each stale claim under a dated Outdated callout
-grounded in that note, add it to `sources`, and set `updated`. An unanchored article gets the same
-re-read so it is anchored from then on. A re-read that changes nothing can instead set
-`verified=<sha>` on the article.
-
-Log it: `sbmap wiki log tend --subject "<N> problems, <M> fixed"`.
+1. **Review.** Apply the owner's review in every map report (`wayfinder/**/report.md`), by
+   *Applying the review* in [close.md](close.md).
+2. **List.** `sbmap wiki tend --out <scratchpad>/tend.json`, with `--import <clone>` for each shared
+   wiki clone. One call imports, runs `check --fix` and verifies every repo a map names; stdout is one
+   line per article that is not current, and the file holds each one's item (its paths, symbols and
+   the code lines changed under it). Read stdout, never the whole file: each subagent gets its own
+   items, cut from the file. `git -C <root> rev-parse <target>` once per repo gives the sha that
+   `verified` takes.
+3. **Judge, cheapest first.** Subagents only read and answer; the writes in step 4 stay serial,
+   since the index and the log are shared. At most two at a time ([the contract](../reference/contract.md)).
+   - **drifted**: the cheap tier ([models](../reference/models.md)), up to five articles per agent,
+     each as `sbmap wiki show <note> --full` plus its item's `diff`. Per article it answers in under
+     150 words: `STILL TRUE`, or `CHANGED: "<words from one line of the claim>" → <what is true now>`
+     quoting the changed lines that show it, or `UNSURE: <why>`.
+   - **broken**, **orphaned** and every `UNSURE`: the mid tier, one article per agent, with its item
+     and `removed_in`; it may read the code at the target (CodeGraph first where the repo is
+     indexed, then `git show <target>:<path>`, `git grep`) and answers the same way, or `GONE: <what
+     replaced it, or nothing>`.
+   - **unanchored**: skipped; tying old articles to code is wiki-provenance's backfill.
+4. **Write**, one article at a time:
+   - `STILL TRUE`: `sbmap wiki set <note> verified=<sha>`.
+   - `CHANGED`: keep the answer as the re-read (`sbmap wiki raw <project>/<topic> --title "Re-read of
+     <article title>" --source "re-read of <paths> in <repo>" --repo-root <root> --rev <target>
+     --paths … --symbols … --from <file holding the answer>`), then `sbmap wiki supersede <note>
+     --claim "…" --now "…" --source <that raw>` and `set verified=<sha>`.
+   - `GONE`: the same re-read, then `supersede --by <article>` when another article now holds it,
+     else `supersede` on the Overview's first line, saying what was removed and when.
+   - A note the import listed as changed on both sides: the vault copy stands. Fold in what the
+     shared version adds; a claim it contradicts is kept as a raw note (`--source "<clone>
+     <base>:<path>"`) and becomes `supersede --dispute`. Then `sbmap wiki import <clone> --keep-mine`.
+   - Each grounding suspect `check --fix` printed: the cheap tier judges it against its raw note; a
+     real mismatch is fixed in the article, never in the raw.
+5. **Cascade, bounded.** For each article step 4 changed, `sbmap wiki find` its changed claim among
+   its `related` and `covers` neighbours only: a contradiction becomes `supersede --dispute` on
+   both, a claim it supersedes gets `supersede`. A concept with no article, an orphan or a stale
+   synthesis page goes in the run note for the next learn, not written tonight.
+6. **Backlog**, while the usage gate allows: work it through *Learn a source*, ten at a time (say the
+   total). Past the gate, stop after the article in flight: tomorrow's list starts from what is left.
+7. **Log and note.** `sbmap wiki log tend --subject "<N> stale: <V> verified, <S> superseded, <D>
+   disputed, <K> skipped; ~<T>k tokens"`, the tokens being the subagents' reported totals plus your
+   own. Write `wayfinder/runs/<date>-wiki-tend.md`: one line per article with what changed and the
+   sha, then what step 5 left for later. The morning report reads it.
 
 ## Report
 

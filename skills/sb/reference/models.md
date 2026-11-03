@@ -7,8 +7,8 @@ never one model for everything.
 | tier | the work | today (2026-10) | effort |
 |---|---|---|---|
 | **capable** | charting and grilling a map, a spec or plan, architecture tickets, the orchestrator, the final whole-branch review, and the **hard** tickets below | Opus 5.5; Fable 5.1 when the weekly allotment allows and the work is judgement-heavy (charting, specs, the final review) | high |
-| **mid** | the default for implementation, design-heavy included when the ticket or its architecture ticket holds the design; per-task reviews and re-reviews; research reading; Explore | Sonnet 5.5 | medium |
-| **cheap** | the brief already holds the full code or an exact recipe; mechanical sweeps; cold-reading a handoff | Haiku 5.5 | low |
+| **mid** | the default for implementation, design-heavy included when the ticket or its architecture ticket holds the design; per-task reviews and re-reviews; research reading; Explore; re-reading a broken wiki article in the code | Sonnet 5.5 | medium |
+| **cheap** | the brief already holds the full code or an exact recipe; mechanical sweeps; cold-reading a handoff; judging a drifted wiki article against its diff | Haiku 5.5 | low |
 
 - **Hard tickets earn Opus; the rest never do.** The tier is chosen when a ticket is queued, with a
   reason in a few words, and the proposal shows it. A ticket is hard when it has **two or more** of:
