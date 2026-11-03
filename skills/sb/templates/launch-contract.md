@@ -15,7 +15,10 @@
 - **Once, at the end:** <the slow suite, or "none: owner ruling <date>">.
 - **Hard rules:** <the repo's own: e.g. no screen reads while the display sleeps; stop Play before
   editing; the owner's live services (dev server, store, vault) off or read-only>.
-- **Models:** <ticket → tier/model, or "per ticket, recorded on each Answer">.
+- **Models:** orchestrator <capable model>; implementers <mid model>, except the hard ones: <ticket →
+  capable model, reason>. A mid ticket that fails once retries once on <capable model>.
+  Every dispatch names its `model:`.
+- **Context:** hand off at ~150k; one ticket per implementer context.
 - **Blocked:** take the recommendation, write it on the ticket as a ruling, keep going.
 - **Stop when:** the queue is empty, the window (<hours> h, until ~<time>) is over, or the same
   failure repeats twice. Nothing else stops the run.

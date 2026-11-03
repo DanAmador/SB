@@ -67,6 +67,9 @@ So intent is written down where both read it:
   A term the owner has not used gets five words of gloss the first time, or is not used.
 - A question's options say what the owner will *see* or *feel* for each, not what the code does. The
   owner approves buttons fast; a button they cannot read later is a decision they did not make.
+- 🔒 **Spend tokens where they count:** Opus plans, orchestrates and builds only the hard tickets;
+  Sonnet builds the rest (every dispatch names its `model:`, chosen at enqueue); hand off at ~150k context; CodeGraph before grep or `cat`. Details in the
+  [contract](reference/contract.md).
 - 🔒 **Build the least:** reuse what exists, delete over deprecate, fewer knobs the player sees. The
   ladder is in [reference/architecture.md](reference/architecture.md#build-the-least).
 

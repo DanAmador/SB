@@ -37,6 +37,17 @@ Each line is a ruling the owner has repeated across sessions; the reason sits be
   instructions name which is which; when they are silent, ask in the proposal. While lanes run at
   once on one machine, per ticket runs the ticket's own test files singly plus the touched packages'
   typecheck: two full suites at once fail on timeouts, not on the code.
+- **Opus plans, Sonnet builds.** The capable tier charts, grills, orchestrates, decides architecture
+  and runs the final review. It implements only a ticket queued as **hard** (the test is in
+  [models.md](models.md)), and a mid-tier ticket that failed once. Every implementer, reviewer and
+  explorer is dispatched with an explicit `model:` (mid tier by default, cheap for an exact recipe). In
+  October 84% of the owner's tokens ran on Opus, subagents included, against this rule's intent.
+- **Hand off at ~150k context.** Past it, finish the step in flight, `/sb handoff`, and continue in a
+  fresh session: three quarters of October's input tokens were spent past 200k. One ticket per
+  implementer context, always.
+- **CodeGraph first.** In a repo with `.codegraph/`, find code with `codegraph_explore` before grep,
+  `cat` or Read, and read files by line range, never whole. October: 172 CodeGraph calls against
+  ~34,000 grep/cat/Read.
 - **Main tree, serial by default.** Worktrees only when the owner asks: changes in another folder are
   invisible to them. **Lanes** (parallel implementers) only on disjoint file sets, as `sbmap lanes`
   splits them from each ticket's `paths`, **max 2 at a time, reviewers and researchers counted**:

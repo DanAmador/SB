@@ -38,7 +38,10 @@ one-repo night skips them.
      each, never under the per-ticket floor from the contract.
    - Fill about 80% of the window, in map order. Blocked tickets count once their blockers are queued
      ahead of them. Tickets only the owner can close (a playtest, a call) never queue: list them as 👤.
-   - A tier and model per ticket, and one for the orchestrator ([reference/models.md](../reference/models.md)).
+   - A tier and model per ticket, and one for the orchestrator ([reference/models.md](../reference/models.md)):
+     mid by default; capable only for a ticket that passes the *hard* test there, with its reason
+     ("hard: migrates serialized assets + changes 9 callers"). Count the hard ones; past a quarter of
+     the queue, propose an architecture ticket instead.
    - Lanes: every queued ticket needs `paths` (the files or folders it will change). Set any missing
      ones from the code the ticket names (`sbmap set <map> <NNN> paths=a,b`), then take the split
      from `sbmap lanes <map> --max <the contract's agent cap> --json`; never pick lanes by eye.
@@ -79,7 +82,8 @@ one-repo night skips them.
    0. Read the usage windows. Past the contract's usage gate, start nothing: wait for the reset
       (step 7).
    1. Claim before any work: `sbmap claim <map> <NNN> --by "<session title or harness/model>"`.
-   2. Dispatch a fresh implementer on the ticket's model, from
+   2. Dispatch a fresh implementer on the ticket's model, passing `model:` explicitly (mid tier unless
+      the ticket was queued hard), from
       [templates/implementer-brief.md](../templates/implementer-brief.md). The
       `subagent-driven-development` skill is the per-task engine when present: its review and fix
       rounds run on the mid tier.
@@ -97,6 +101,8 @@ one-repo night skips them.
 7. **Hold the line while unattended.**
    - A question is a ruling: take the recommendation, write `R: …, cost if wrong: …` on the ticket and in
      the checkpoint, continue. No question cards.
+   - A mid-tier ticket that fails its checks: retry it once on the capable tier, the failed report in
+     the brief, and record the escalation in the checkpoint.
    - A ticket that fails twice the same way: write what was tried on the ticket, leave it `open` with
      a `## Comments` note, move to the next.
    - The usage gate is a pause, not a stop: finish the ticket in flight, then wait for the reset time

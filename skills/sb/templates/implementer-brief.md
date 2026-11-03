@@ -9,6 +9,12 @@ paths>. When the work pulls you past either, stop and report it as a ruling inst
 
 <the ticket file's full body, or its path if the brief would exceed ~4k tokens>
 
+## Find code cheaply
+
+`codegraph_explore "<symbols or question>"` first (the repo has `.codegraph/`), then Read only the
+line ranges it points at. No whole-file `cat`, no repo-wide grep when the graph answers it. Test and
+Unity output: keep only the failures (`| tail`, the runner's quiet flag).
+
 ## Files you own
 
 <paths>. Other dirty files belong to peers: leave them as they are.
