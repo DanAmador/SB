@@ -82,9 +82,9 @@ one-repo night skips them.
    0. Read the usage windows. Past the contract's usage gate, start nothing: wait for the reset
       (step 7).
    1. Claim before any work: `sbmap claim <map> <NNN> --by "<session title or harness/model>"`.
-   2. Dispatch a fresh implementer on the ticket's model, passing `model:` explicitly (mid tier unless
-      the ticket was queued hard), from
-      [templates/implementer-brief.md](../templates/implementer-brief.md). The
+   2. Dispatch a fresh `implementer` (`subagent_type: implementer`, which runs on Sonnet) with the
+      brief from [templates/implementer-brief.md](../templates/implementer-brief.md). Add
+      `model: opus` only for a ticket queued hard. Point lookups at `scout` (Haiku, read-only). The
       `subagent-driven-development` skill is the per-task engine when present: its review and fix
       rounds run on the mid tier.
    3. Verify the report against the tree yourself: the commit exists, touches only the ticket's

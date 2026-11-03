@@ -14,7 +14,7 @@ vault file that a fresh agent can start from with nothing but one pasted line, i
    maps. A handoff is read once: overwrite the previous one, never keep a second. It points at tickets and the contract; it does not restate them. It
    *does* carry what lives nowhere else: this session's state of the world, gotchas learned, the
    rulings the owner gave in chat (quoted), and the one question to ask first.
-3. **Cold-read it.** Dispatch a cheap-tier subagent with only the kickoff line and ask: what will you
+3. **Cold-read it.** Dispatch the `scout` agent with only the kickoff line and ask: what will you
    do first, and what would you have to ask? Fix every gap it names, then re-run until its first
    action is right and it has only the listed question.
 4. **Print the kickoff line** in its own block, ready to paste:

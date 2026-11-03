@@ -1,48 +1,25 @@
-You are implementing one ticket in `<repo path>`, branch `<branch>`, unattended. Nobody will answer
-a question: when you would ask, take the recommendation, write it in your report as a ruling, and
-continue.
+You are implementing one ticket in `<repo path>`, branch `<branch>`. The standing rules (rulings,
+cheap code search, build the least, git, the report) live in the `implementer` agent.
 
 ## The ticket
 
 Why: <the ticket's `why`>. Leave alone: <its `Not this ticket`, or the neighbouring tickets'
-paths>. When the work pulls you past either, stop and report it as a ruling instead.
+paths>.
 
 <the ticket file's full body, or its path if the brief would exceed ~4k tokens>
 
-## Find code cheaply
-
-`codegraph_explore "<symbols or question>"` first (the repo has `.codegraph/`), then Read only the
-line ranges it points at. No whole-file `cat`, no repo-wide grep when the graph answers it. Test and
-Unity output: keep only the failures (`| tail`, the runner's quiet flag).
-
 ## Files you own
 
-<paths>. Other dirty files belong to peers: leave them as they are.
+<paths>
 
 ## The contract
 
 <the map's contract block, verbatim>
 
-## Build the least
-
-Before any new file, module or dependency: does it need to exist; does a tool the repo already has
-do it; does the stdlib; can it be one line? Take the first that holds. No abstraction with one
-user, no scaffolding for later; the shortest working diff wins. A deliberate shortcut gets a
-`ponytail:` comment naming its ceiling. Never cut validation, data-loss handling or security.
-
-## Git
-
-Commit only your own paths, by explicit pathspec, when the ticket's checks pass:
-`git commit -m "<type>: <imperative>" -m "Ticket: <map folder>/<NNN>" -- <paths>`. Read-only git (`status`, `diff -- <file>`, `log`)
-is yours; tree-wide git (`stash`, `checkout`, `reset`, `restore`, `clean`) and `push` are not.
-No subagents of your own.
-
 ## Done when
 
 <the ticket's Done-when, plus the per-ticket verify commands from the contract, with their output>
 
-## Report (required)
+## Report path
 
-Write `<report path>`: the commit sha, each check run with its result and counts, what you could
-**not** verify and why, every ruling you made, files touched. Then reply with its path and a
-three-line summary.
+<report path>

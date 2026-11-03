@@ -68,6 +68,19 @@ if [ -n "$want_style" ]; then
     echo "To turn it on, add this to ~/.claude/settings.json: \"outputStyle\": \"Plain\""
 fi
 
+# Agents (opt in): links agents/implementer.md (Sonnet) and agents/scout.md (Haiku) into
+# ~/.claude/agents, so sb dispatches them by name. Only on --agents, or a y at the prompt.
+want_agents=""
+for a in "$@"; do [ "$a" != --agents ] || want_agents=1; done
+if [ -z "$want_agents" ] && [ -t 0 ]; then
+    read -r -p "Link the implementer (Sonnet) and scout (Haiku) agents? [y/N] " a
+    case "$a" in [Yy]*) want_agents=1 ;; esac
+fi
+if [ -n "$want_agents" ]; then
+    mkdir -p "$HOME/.claude/agents"
+    for f in implementer scout; do link "$here/agents/$f.md" "$HOME/.claude/agents/$f.md"; done
+fi
+
 # The repo is a folder marketplace, so Claude Code reads the mod from mods/ itself: an edit lands
 # with /reload-plugins, no reinstall. One install per config: ~/.claude, and any ~/.claude-*
 # config that has plugins.
