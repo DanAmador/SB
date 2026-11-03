@@ -33,9 +33,9 @@ changes; a one-repo night skips them.
      the contract's per-ticket floor.
    - Fill about 80% of the window, in map order. A blocked ticket counts once its blockers queue
      ahead of it. Tickets only the owner can close (a playtest, a call) never queue: list them as 👤.
-   - A tier per ticket and for the orchestrator by [models.md](../reference/models.md): mid by
-     default, capable only past its *hard* test, with the reason ("hard: migrates serialized assets
-     + changes 9 callers").
+   - A tier per ticket and for the orchestrator by [models.md](../reference/models.md): Sonnet
+     preferred, Opus for a ticket judged complex, with the reason ("Opus: migrates serialized assets
+     and changes 9 callers").
    - Lanes: every queued ticket needs `paths`; set missing ones from the code it names
      (`sbmap set <map> <NNN> paths=a,b`), then take the split from
      `sbmap lanes <map> --max <the contract's agent cap> --json`, never by eye.
@@ -71,8 +71,8 @@ changes; a one-repo night skips them.
    0. Past the contract's usage gate, start nothing: wait for the reset (step 7).
    1. `sbmap claim <map> <NNN> --by "<session title or harness/model>"`, before any work.
    2. Dispatch a fresh `implementer` agent with the brief from
-      [templates/implementer-brief.md](../templates/implementer-brief.md); add `model: opus` only
-      for a ticket queued hard. Lookups go to the `scout` agent. The `subagent-driven-development` skill is
+      [templates/implementer-brief.md](../templates/implementer-brief.md); add `model: opus` for a
+      ticket queued as complex. Lookups go to the `scout` agent. The `subagent-driven-development` skill is
       the per-task engine when present; its review and fix rounds run on the mid tier.
    3. Verify the report against the tree yourself: the commit exists, touches only the ticket's
       paths, and the contract's per-ticket checks ran with results.

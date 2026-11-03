@@ -15,7 +15,7 @@
 - **Once, at the end:** <the slow suite, or "none: owner ruling <date>">.
 - **Hard rules:** <the repo's own: e.g. no screen reads while the display sleeps; stop Play before
   editing; the owner's live services (dev server, store, vault) off or read-only>.
-- **Models:** orchestrator <capable model>; implementers <mid model>, except the hard ones: <ticket →
+- **Models:** orchestrator <capable model>; implementers <mid model>, except the complex ones: <ticket →
   capable model, reason>. A mid ticket that fails once retries once on <capable model>.
 - **Context:** hand off at ~150k; one ticket per implementer context.
 - **Blocked:** take the recommendation, write it on the ticket as a ruling, keep going.

@@ -67,7 +67,7 @@ then disagree. So:
 - A question's options say what the owner will *see* or *feel*, not what the code does: a button
   they approve fast and cannot read later is a decision they did not make.
 
-Token spending (Opus for planning and hard tickets only, hand off at ~150k, CodeGraph first) is in
+Token spending (Sonnet preferred, Opus for planning and complex work, hand off at ~150k, CodeGraph first) is in
 the [contract](reference/contract.md); building the least is the ladder in
 [architecture.md](reference/architecture.md#build-the-least).
 

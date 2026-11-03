@@ -32,9 +32,9 @@ Each is a ruling the owner has repeated; the reason sits beside it.
   is which; when silent, ask in the proposal. While lanes share a machine, per ticket runs only the
   ticket's own test files plus the touched packages' typecheck: two full suites at once fail on
   timeouts, not on the code.
-- **Opus plans, Sonnet builds.** Opus charts, grills, orchestrates, decides architecture and runs the
-  final review; it implements only a ticket queued **hard** ([models.md](models.md)) or one that failed
-  once on Sonnet. Dispatch the `implementer` (Sonnet) and `scout` (Haiku) agents; any other dispatch
+- **Prefer Sonnet; Opus for complex work.** Opus charts, grills, orchestrates, decides architecture and
+  runs the final review, and implements the tickets the orchestrator judges complex
+  ([models.md](models.md)) or that failed once on Sonnet; Sonnet builds the rest. Dispatch the `implementer` (Sonnet) and `scout` (Haiku) agents; any other dispatch
   names its `model:`. In October 84% of the owner's tokens ran on Opus, subagents included.
 - **Hand off at ~150k context**: finish the step in flight, `/sb handoff`, continue fresh. Three
   quarters of October's input tokens were spent past 200k. One ticket per implementer context.

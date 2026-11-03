@@ -1,6 +1,6 @@
 ---
 name: implementer
-description: Implements one sb ticket unattended, in the main tree, from a brief that names the ticket, paths, contract, done-when and report path. Runs on Sonnet; dispatch with model "opus" only for a hard ticket.
+description: Implements one sb ticket unattended, in the main tree, from a brief that names the ticket, paths, contract, done-when and report path. Runs on Sonnet by default; dispatch with model "opus" for a ticket judged complex.
 model: sonnet
 ---
 
