@@ -54,6 +54,20 @@ if [ -d "$vault/.obsidian" ]; then
     echo "copied sb-route-links.css into $vault/.obsidian/snippets"
 fi
 
+# Plain output style (opt in): links output-styles/plain.md into ~/.claude/output-styles. Only on
+# --output-style, or a y at the prompt; it prints the setting to add and never edits settings.json.
+want_style=""
+for a in "$@"; do [ "$a" != --output-style ] || want_style=1; done
+if [ -z "$want_style" ] && [ -t 0 ]; then
+    read -r -p "Link the Plain output style (short, plain-words replies, always on)? [y/N] " a
+    case "$a" in [Yy]*) want_style=1 ;; esac
+fi
+if [ -n "$want_style" ]; then
+    mkdir -p "$HOME/.claude/output-styles"
+    link "$here/output-styles/plain.md" "$HOME/.claude/output-styles/plain.md"
+    echo "To turn it on, add this to ~/.claude/settings.json: \"outputStyle\": \"Plain\""
+fi
+
 # The repo is a folder marketplace, so Claude Code reads the mod from mods/ itself: an edit lands
 # with /reload-plugins, no reinstall. One install per config: ~/.claude, and any ~/.claude-*
 # config that has plugins.
