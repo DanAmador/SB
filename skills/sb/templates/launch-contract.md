@@ -5,7 +5,7 @@
 
 - **Where:** repo `<path>`, branch `<branch>` (from `<sha>`), <main tree | worktree on request>;
   across repos, one line per lane. Never push; never merge into `main`.
-- **Lanes:** <one serial agent | lane A owns `<paths>`, lane B owns `<paths>` | one lane session per
+- **Lanes:** <one session per ticket, serial | one serial agent | lane A owns `<paths>`, lane B owns `<paths>` | one lane session per
   repo, one implementer each>. Max <2> agents at once across the account, reviewers and the owner's
   own sessions counted.
 - **Usage:** past 90% of the 5-hour window, finish the ticket in flight and start nothing new until
@@ -17,7 +17,8 @@
   editing; the owner's live services (dev server, store, vault) off or read-only>.
 - **Models:** orchestrator <capable model>; implementers <mid model>, except the complex ones: <ticket →
   capable model, reason>. A mid ticket that fails once retries once on <capable model>.
-- **Context:** hand off at ~150k; one ticket per implementer context.
+- **Context:** hand off at ~150k; one ticket per session or implementer context; the operator starts
+  from the run board `<board path>`.
 - **Blocked:** take the recommendation, write it on the ticket as a ruling, keep going.
 - **Stop when:** the queue is empty, the window (<hours> h, until ~<time>) is over, or the same
   failure repeats twice. Nothing else stops the run.

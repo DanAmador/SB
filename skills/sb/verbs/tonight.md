@@ -61,8 +61,13 @@ changes; a one-repo night skips them.
 
 5. **Launch.** Write the contract into the map's Notes from
    [templates/launch-contract.md](../templates/launch-contract.md), with the night's order. Write
-   `<map folder>/checkpoint.md` from [templates/checkpoint.md](../templates/checkpoint.md),
-   overwritten in place. Keep the machine awake if the host offers it.
+   the **run board** `wayfinder/runs/<date>-<map name>.md` from
+   [templates/checkpoint.md](../templates/checkpoint.md): the contract, a row per ticket (model,
+   paths or ports, session, state) and a log, with the map's wikilink so `sbmap status` finds it.
+   Keep the machine awake if the host offers it.
+   - **Start the run clean.** Past ~60k of context, this session does not operate: it says
+     "`/clear`, then `/sb resume <board path>`" and stops. Every operator turn re-reads the planning
+     context; one night carried 185k into the run, two thirds of the operator's cost.
    - *Operator:* one file for the night, `wayfinder/runs/<date>-tonight.md`, a row per lane, holding
      the contract with each lane's Where, checks and hard rules; each map's Notes points at it. A
      lane's brief is a section of that file. Send each lane GO with the file's path and its order.
@@ -70,31 +75,45 @@ changes; a one-repo night skips them.
 6. **Per ticket, in order:**
    0. Past the contract's usage gate, start nothing: wait for the reset (step 7).
    1. `sbmap claim <map> <NNN> --by "<session title or harness/model>"`, before any work.
-   2. Dispatch a fresh `implementer` agent with the brief from
-      [templates/implementer-brief.md](../templates/implementer-brief.md); add `model: opus` for a
-      ticket queued as complex. Lookups go to the `scout` agent. The `subagent-driven-development` skill is
-      the per-task engine when present; its review and fix rounds run on the mid tier.
-   3. Verify the report against the tree yourself: the commit exists, touches only the ticket's
-      paths, and the contract's per-ticket checks ran with results.
+   2. **One session per ticket** when the host can start sessions: each ticket is a row the owner
+      can open and steer, and the operator gets a short note instead of the whole report. Start it
+      with `initiation: user_asked`, `context: fresh`, `model` by tier, `effort: medium` for Sonnet,
+      `permission_mode: auto`, `wake_when_done: true`, `name: ticket-<NNN>`, title
+      `<ticket name> (<map name> <NNN>)`, `use_worktree: false` in the main tree, and the brief from
+      [templates/session-brief.md](../templates/session-brief.md). Log the session's link on the
+      board. Then **wait idle**: no polling; the host wakes you when it ends a turn. Usage is read
+      once per ticket boundary, never in a loop.
+      - No session tool, or a start refused (a turn woken by a timer cannot start one): dispatch a
+        fresh `implementer` agent with [templates/implementer-brief.md](../templates/implementer-brief.md),
+        `model: opus` for a complex ticket, and log the fallback on the board. Lookups go to the
+        `scout` agent. The `subagent-driven-development` skill is the per-task engine when present;
+        its review and fix rounds run on the mid tier.
+   3. Verify against the tree yourself, from git, the per-ticket checks and the report file: the
+      commit exists, touches only the ticket's paths, and the checks pass with counts. Open the
+      session's transcript only when those disagree.
    4. `sbmap resolve <map> <NNN> --gist "<one line>" --answer "<commit, verified, rulings, model>" [--commit <sha>]`,
-      then `sbmap check <map>` and the checkpoint.
+      then `sbmap check <map>` and a log line on the board.
    5. At the end of a map's batch, rewrite its `## In plain words`.
 
    *Operator:* the lane does 0–2 and reports its commit, checks and the usage it read; the operator
-   does 3 in the lane's checkout and logs it in the checkpoint; then the lane does 4, claiming its
+   does 3 in the lane's checkout and logs it on the board; then the lane does 4, claiming its
    next ticket without waiting for that check.
 7. **Hold the line while unattended**, by the contract's *Unattended* and *Blocked* rules.
-   - Rulings go on the ticket and in the checkpoint. A failed mid-tier ticket escalates once
-     ([models.md](../reference/models.md)), recorded in the checkpoint.
+   - Rulings go on the ticket and on the board. A failed mid-tier ticket escalates once
+     ([models.md](../reference/models.md)), recorded on the board.
    - A ticket that fails twice the same way: write what was tried on it, leave it `open` with a
      `## Comments` note, move on.
    - The usage gate is a pause: finish the ticket in flight, then wait for the reset time with a
-     scheduled wake-up (not a poll) and carry on.
+     scheduled wake-up (not a poll) and carry on. That woken turn cannot start a session, nor can
+     the agent wake-ups after it: until the owner's next message, tickets run as `implementer` agents.
+   - Wake-ups from finished sessions can stop arriving after a long chain with no word from the
+     owner. Arm one hourly heartbeat (the host's scheduled task or cron): a heartbeat turn that
+     finds nothing in flight and the queue not empty dispatches the next ticket as an agent.
    - A lane whose queue empties early pings the owner's phone once (the host's push
      notification), then stops; the others carry on.
    - The run stops only on the contract's stop conditions. Reporting midway is not one.
 8. **Close the night.**
    - The slow suite, if the contract says so.
    - The final whole-run review on the capable tier, with **one** fix wave; *operator:* one per lane.
-   - The checkpoint's *Morning digest*, the shape `/sb morning` prints; *operator:* once, every lane in it.
+   - The board's *Morning digest*, the shape `/sb morning` prints; *operator:* once, every lane in it.
    - Power off only if the owner said so tonight.

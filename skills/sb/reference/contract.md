@@ -36,8 +36,14 @@ Each is a ruling the owner has repeated; the reason sits beside it.
   runs the final review, and implements the tickets the orchestrator judges complex
   ([models.md](models.md)) or that failed once on Sonnet; Sonnet builds the rest. Dispatch the `implementer` (Sonnet) and `scout` (Haiku) agents; any other dispatch
   names its `model:`. In October 84% of the owner's tokens ran on Opus, subagents included.
+- **One session per ticket** in an unattended run, where the host can start sessions: the owner
+  sees and can steer each ticket, and the operator reads a short note instead of a whole report, so
+  its context stays flat (+53k over four tickets on 2026-11-08, where subagent orchestrators reached
+  360k). The `implementer` agent is the fallback ([tonight](../verbs/tonight.md) step 6).
 - **Hand off at ~150k context**: finish the step in flight, `/sb handoff`, continue fresh. Three
-  quarters of October's input tokens were spent past 200k. One ticket per implementer context.
+  quarters of October's input tokens were spent past 200k; in the first week of November, 60 of 74
+  sessions passed 150k and held 99% of the tokens. One ticket per implementer context. A run's
+  operator starts from its board, not from the planning conversation.
 - **CodeGraph first.** In a repo with `.codegraph/`, `codegraph_explore` before grep, `cat` or Read,
   and read by line range. October: 172 CodeGraph calls against ~34,000 grep/cat/Read.
 - **Main tree, serial by default.** Worktrees only when the owner asks: changes in another folder are

@@ -17,6 +17,6 @@ The owner is back, probably on a phone. Say what the run did and what waits on t
    - The map's frontier now, and the Route link (`obsidian open` the map).
    - When `sbmap wiki backlog` counts any: "<N> sources wait to be learned (`/sb learn`)". A map
      the run finished: offer `/sb close <map>`.
-4. Delete the `wayfinder/runs/` files of runs older than the one you just read: a run file is read
-   once, and the tickets keep what lasts.
+4. Delete the `wayfinder/runs/` files, and their report folders, of runs older than the one you
+   just read: a run file is read once, and the tickets keep what lasts.
 5. End with one question: queue more now (→ `/sb tonight`), or rule on the calls first?
