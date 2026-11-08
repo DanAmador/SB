@@ -54,20 +54,23 @@ changes; a one-repo night skips them.
    6. Questions the evidence raised, each with ➡️ its default, applied on a bare "go". None is fine.
    7. Tests: what runs per ticket, what runs once, or nothing, and the ruling behind it.
 
-   "go" accepts everything; edits ("drop X", "no lane B") apply, then go without a second round.
-   This is the run's only stop for the owner.
+   Write the **run board** before presenting it: `wayfinder/runs/<date>-<map name>.md` from
+   [templates/checkpoint.md](../templates/checkpoint.md), holding the contract, a row per ticket
+   (model, paths or ports, session, state) and a log, with the map's wikilink so `sbmap status`
+   finds it. The proposal ends with the two ways to start:
+   - **"go"**: the run starts here at once. Use it when leaving the machine.
+   - **"`/clear`, then `/sb resume <board path>`"**: the same run from a cleared session, about 15%
+     cheaper, since every operator turn here re-reads the planning conversation. Shown only past
+     ~60k of context.
+
+   Either accepts everything; edits ("drop X", "no lane B") apply, then the run starts without a
+   second round. This is the run's only stop for the owner: after either, nothing waits on them.
 
 ## Run
 
 5. **Launch.** Write the contract into the map's Notes from
-   [templates/launch-contract.md](../templates/launch-contract.md), with the night's order. Write
-   the **run board** `wayfinder/runs/<date>-<map name>.md` from
-   [templates/checkpoint.md](../templates/checkpoint.md): the contract, a row per ticket (model,
-   paths or ports, session, state) and a log, with the map's wikilink so `sbmap status` finds it.
-   Keep the machine awake if the host offers it.
-   - **Start the run clean.** Past ~60k of context, this session does not operate: it says
-     "`/clear`, then `/sb resume <board path>`" and stops. Every operator turn re-reads the planning
-     context; one night carried 185k into the run, two thirds of the operator's cost.
+   [templates/launch-contract.md](../templates/launch-contract.md), with the night's order, and
+   apply the owner's edits to the run board. Keep the machine awake if the host offers it.
    - *Operator:* one file for the night, `wayfinder/runs/<date>-tonight.md`, a row per lane, holding
      the contract with each lane's Where, checks and hard rules; each map's Notes points at it. A
      lane's brief is a section of that file. Send each lane GO with the file's path and its order.
