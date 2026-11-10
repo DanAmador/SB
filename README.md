@@ -76,8 +76,9 @@ install.sh            links the skill into ~/.agents/skills and ~/.claude/skills
   verbs still work from the files and say what they skipped.
 - The Operon plugin in that vault. Ticket and map statuses (`Project.Planned` … `Project.Finished`)
   and `priority` letters are Operon's, and its boards filter on them.
-- Claude Code, so `install.sh` can install the `obsidian-links` mod. sb's reports link tickets as
-  `obsidian://` links, and without the mod Claude Code Desktop won't open them in Obsidian.
+- Claude Code, so `install.sh` can install the `obsidian-links` and `vault-link-check` mods. Chat
+  links to vault notes are the lines `sbmap uri` prints, the one format Claude Code Desktop opens in
+  Obsidian; `obsidian-links` makes them clickable in terminal `claude` too.
   `install.sh` looks for `claude` on the PATH, then in `~/.local/bin`, and says so when it skips
   the mod.
 - The `sb-route-links` CSS snippet, which `install.sh` copies into the vault: a map's Route links
@@ -106,11 +107,14 @@ It fetches each skill in `skills-lock.json` from GitHub into `~/.agents/skills/<
 there is kept; delete it and rerun to update) and links it into `~/.claude/skills`. To add one,
 add its repo and `skillPath` to the lock and rerun.
 
-It also installs the `obsidian-links` mod into each Claude Code config it finds (`~/.claude`, and
-any `~/.claude-*` config that has plugins), when `claude` is on the PATH. Reports link tickets as
-`obsidian://open?path=…`, which Claude Code Desktop does not open on its own; the mod redraws a
-reply holding vault links so a click runs `open obsidian://…`. It is read from `mods/` in place:
-edit it, then `/reload-plugins`.
+It also installs the `obsidian-links` and `vault-link-check` mods into each Claude Code config it
+finds (`~/.claude`, and any `~/.claude-*` config that has plugins), when `claude` is on the PATH.
+Chat links to vault notes are `obsidian://open?path=…`, which Claude Code Desktop opens in Obsidian
+(tested 2026-11-10) but terminal `claude` does not draw as a link; `obsidian-links` redraws a
+reply holding vault links so a click runs `open obsidian://…`. `vault-link-check` is a Stop hook:
+when a reply ends with a vault link that won't open (another `obsidian://` form, a plain vault path,
+a `[[wikilink]]`, or a path that doesn't exist), it sends the reply back once, and a corrected link
+follows the bad one. Both are read from `mods/` in place: edit them, then `/reload-plugins`.
 
 ## The tracker is Obsidian-native
 
@@ -129,6 +133,7 @@ header-line tickets on 2026-10-25 (backup under `backups/`, git-ignored).
 python3 skills/sb/scripts/sbmap.py maps
 python3 skills/sb/scripts/sbmap.py status sk4te/one-tether
 python3 skills/sb/scripts/sbmap.py show sk4te/one-tether 624
+python3 skills/sb/scripts/sbmap.py uri wayfinder/sk4te/one-tether/map.md "One tether"   # a chat link
 
 # Write (author 100% through CLI with auto-sync diagram)
 python3 skills/sb/scripts/sbmap.py init my-repo/my-effort --title "Title" --why "Why, in plain words" --destination "Goal" --done-when "Passes"

@@ -14,6 +14,9 @@ fresh context in any tool starts from one line: *"Read `<vault file>` and do wha
 - **`sbmap`:** `python3 <this skill's dir>/scripts/sbmap.py` (no args lists every command).
   🔒 Maps and tickets are written through it only; it writes the properties, wikilinks and the
   Route (redrawn on every write). Read a ticket with `sbmap show`.
+- **Kepano's Obsidian skills:** load `obsidian-markdown` before writing a vault note by hand
+  (handoffs, reports, research notes), `obsidian-bases` before editing a `.base`, and use
+  `obsidian-cli` for vault reads sbmap doesn't cover.
 - **Ticket types:** `task` (one commit, ~1.5 h), `grilling` (a talk with the owner), `research`
   (a subagent spike into `<map>/research/`), `prototype` (throwaway code), `architecture` (a
   structure, drawn in mermaid: [reference/architecture.md](reference/architecture.md)).

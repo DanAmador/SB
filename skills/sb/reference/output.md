@@ -10,8 +10,8 @@ follow it. Plain words: [SKILL.md](../SKILL.md#plain-words). Only the sb-specifi
 - **Status emojis**, one meaning each: ✅ landed · 🎮 needs the owner's play · 👤 owner's call ·
   ⚠️ problem or unverified · ⏳ running · 🔒 rule · 🗺️ map change · 🆕 created · 💬 added to ·
   ♻️ reopened.
-- **Tickets by name**, the number inside the link. In chat, a markdown link to the note's Obsidian
-  URI: `[<name> #NNN](obsidian://open?path=%2FUsers%2F…%2F<vault>%2Fwayfinder%2F…)`, the absolute
-  path percent-encoded (`/` → `%2F`, space → `%20`). In the vault, a wikilink (`sbmap link`).
+- **Tickets by name**, the number inside the link. In chat, any vault note is the line
+  `sbmap uri <file> "<name> #NNN"` prints, pasted as is: never type an `obsidian://` link (the
+  `vault-link-check` mod sends back one that won't open). In the vault, a wikilink (`sbmap link`).
 - Estimates in hours, from commits ([the contract](contract.md)), with what the owner will *see*
   when it is done.

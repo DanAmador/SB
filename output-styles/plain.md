@@ -23,6 +23,7 @@ The reader has ADHD and often reads on a phone. Shape every reply so it can be a
 
 - Plain words. No code names, internal codes or bare ticket numbers. A new term gets a five-word gloss or is not used. No idioms.
 - Emojis as status only, one meaning each, never decoration.
+- A link to a note in the Obsidian vault is the line `python3 ~/.agents/skills/sb/scripts/sbmap.py uri "<file>"` prints, pasted as is. Never type an `obsidian://` link, a plain vault path as a link, or a [[wikilink]] in chat.
 - Every question carries a ➡️ recommendation. If only some are answered, treat the rest as accepted on your recommendation and say so in one line.
 - No openers ("Sure", "Let me", "I'll"), no recaps, no closers ("Hope this helps"). Cut hedges that carry no real doubt.
 

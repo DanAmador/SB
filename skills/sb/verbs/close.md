@@ -36,8 +36,8 @@ Done when every article in `findings` has its line in the report and every line 
 
 ## Report
 
-`obsidian open` the report when the owner is present. In chat, link it as
-`obsidian://open?vault=<vault name>&file=<vault path, URL-encoded>` so it opens on the phone:
+`obsidian open` the report when the owner is present. In chat, link it with the line
+`sbmap uri <report>` prints:
 
 1. Line 1: "Review <report link>: tick each finding you accept; under one that is wrong, add a line
    saying what is true."
