@@ -22,6 +22,8 @@ Bases see the whole route. It answers what an agent should never compute or type
                                         blockers, the rest serial (ticket 009's rule)
     sbmap.py next     <map>             the next free ticket number for this map's repo
     sbmap.py link     <map> <NNN>       the wikilink to a ticket, to paste into prose
+    sbmap.py uri      <file> [label]    the markdown link that opens a vault file in Obsidian from chat:
+                                        paste it, never type one (the file: absolute, or vault-relative)
     sbmap.py check    <map>             lint: unknown blockers, cycles, missing Answers or Decisions,
                                         legacy fields, and (Obsidian running) broken links
     sbmap.py verify   <map>             every mermaid block parses in Obsidian's own renderer
@@ -93,7 +95,7 @@ import time
 import zlib
 from datetime import date
 from pathlib import Path, PurePosixPath
-from urllib.parse import unquote as url_decode
+from urllib.parse import quote as url_encode, unquote as url_decode
 
 VAULT = Path(os.environ.get("SB_VAULT", Path.home() / "Documents" / "Second Brain"))
 WAYFINDER = VAULT / "wayfinder"
@@ -685,6 +687,26 @@ def cmd_next(args):
     print(f"{next_number(load(args[0])):03d}")
 
 
+def obsidian_uri(path):
+    """The one link format Claude Code Desktop opens in Obsidian: the absolute path, fully encoded."""
+    return "obsidian://open?path=" + url_encode(str(Path(path).resolve()), safe="")
+
+
+def note_label(path):
+    props, _, _ = split_fm(Path(path).read_text(encoding="utf-8"))
+    return str(props.get("title") or "").strip() or Path(path).stem
+
+
+def cmd_uri(args):
+    want = Path(args[0]).expanduser()
+    tries = [want] if want.is_absolute() else [VAULT / want, Path.cwd() / want]
+    found = next((c for t in tries for c in (t, t.with_name(t.name + ".md")) if c.is_file()), None)
+    if found is None:
+        sys.exit(f"sbmap: no such vault file: {args[0]}")
+    label = args[1] if len(args) > 1 else note_label(found)
+    print(f"[{label}]({obsidian_uri(found)})")
+
+
 def cmd_link(args):
     m = load(args[0])
     print(m.ticket(args[1]).link("#" + m.ticket(args[1]).id))
@@ -694,6 +716,7 @@ def cmd_show(args):
     m = load(args[0])
     t = m.ticket(args[1])
     print(f"#{t.num}: {t.title}")
+    print(f"link: [{t.id} {t.title}]({obsidian_uri(t.path)})")
     print(f"why: {t.props.get('why') or '(missing: ask the owner, then `sbmap set <map> <NNN> why=...`)'}")
     if leading_quote(t.body):
         print(leading_quote(t.body))
@@ -2031,7 +2054,7 @@ def cmd_wiki(args):
 
 
 COMMANDS = {"info": cmd_info, "maps": cmd_maps, "status": cmd_status, "frontier": cmd_frontier, "lanes": cmd_lanes, "show": cmd_show,
-            "next": cmd_next, "link": cmd_link, "check": cmd_check, "verify": cmd_verify,
+            "next": cmd_next, "link": cmd_link, "uri": cmd_uri, "check": cmd_check, "verify": cmd_verify,
             "init": cmd_init, "summary": cmd_summary, "new": cmd_new, "set": cmd_set, "claim": cmd_claim,
             "comment": cmd_comment, "ruling": cmd_comment, "block": cmd_block,
             "resolve": cmd_resolve, "diagram": cmd_diagram, "board": cmd_board, "migrate": cmd_migrate,
