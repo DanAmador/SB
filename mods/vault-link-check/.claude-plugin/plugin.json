@@ -1,0 +1,1 @@
+{ "name": "vault-link-check", "version": "0.1.0", "description": "Sends back a reply whose vault links won't open in Obsidian" }

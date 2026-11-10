@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Links skills/sb into the shared skills folder and into Claude Code's, the way the other shared
 # skills are linked (~/.claude/skills/<name> -> ../../.agents/skills/<name>), installs the
-# third-party skills pinned in skills-lock.json the same way, and installs the obsidian-links mod
-# into every Claude Code config, so obsidian:// links in chat open the note.
+# third-party skills pinned in skills-lock.json the same way, and installs the obsidian-links and
+# vault-link-check mods into every Claude Code config, so vault links in chat open the note and a
+# reply whose vault links won't open is sent back.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 
@@ -90,8 +91,8 @@ fi
 claude="$(command -v claude || true)"
 [ -n "$claude" ] || [ ! -x "$HOME/.local/bin/claude" ] || claude="$HOME/.local/bin/claude"
 if [ -z "$claude" ]; then
-    echo "install: claude not found; skipped the obsidian-links mod, so obsidian:// links in chat" \
-         "will not open. Install Claude Code and rerun." >&2
+    echo "install: claude not found; skipped the obsidian-links and vault-link-check mods, so" \
+         "vault links in chat will not open or be checked. Install Claude Code and rerun." >&2
     exit 0
 fi
 # quiet-tests (opt in): trims agents' test and Unity output to failures and totals. Installed only
@@ -107,5 +108,6 @@ for dir in "$HOME/.claude" "$HOME"/.claude-*; do
     cc() { CLAUDE_CONFIG_DIR="$dir" "$claude" "$@"; }
     cc plugin marketplace list 2>/dev/null | grep -q sb-workflow || cc plugin marketplace add "$here"
     cc plugin install obsidian-links@sb-workflow
+    cc plugin install vault-link-check@sb-workflow
     [ -z "$extra" ] || cc plugin install "$extra@sb-workflow"
 done
