@@ -78,6 +78,24 @@ class BadLinks(Base):
         self.assertEqual(1, len(found))
         self.assertIn("wikilink", found[0][1])
 
+    def test_code_brackets_pass(self):
+        for text in ("use [[ -n $x ]] in bash", 'df[["a","b"]]', "a [[tool.uv.index]] header"):
+            self.assertEqual([], self.bad(text), text)
+
+    def test_wikilink_by_name_flagged(self):
+        self.assertEqual(1, len(self.bad("see [[README|the rules]]")))
+        self.assertEqual(1, len(self.bad("see [[README#Heading]]")))
+
+    def test_raw_spaces_flagged(self):
+        spaced = os.path.join(self.vault, "two words.md")
+        write(spaced, "x")
+        found = self.bad(f"[n](obsidian://open?path={spaced})")
+        self.assertEqual(1, len(found))
+        self.assertIn("space", found[0][1])
+
+    def test_anchor_in_vault_session_passes(self):
+        self.assertEqual([], check.bad_links("[r](#section)", self.vault, self.vault))
+
     def test_code_ignored(self):
         bad = "[r](obsidian://open?vault=Vault&file=x) [[wayfinder/README]]"
         self.assertEqual([], self.bad(f"run `{bad}` now"))

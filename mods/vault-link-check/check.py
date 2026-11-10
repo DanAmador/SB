@@ -19,11 +19,12 @@ SBMAP = "python3 ~/.agents/skills/sb/scripts/sbmap.py uri"
 _FENCE = re.compile(r"^ {0,3}(```|~~~).*?^ {0,3}\1[^\n]*$", re.M | re.S)
 _INLINE = re.compile(r"(`+)(?!`).*?(?<!`)\1(?!`)", re.S)
 _MDLINK = re.compile(r"\]\(\s*<?([^)>]+?)>?(?:\s+\"[^\"]*\")?\s*\)")
-_WIKI = re.compile(r"!?\[\[[^\]\n]+\]\]")
+_WIKI = re.compile(r"!?\[\[([^\]\n]+)\]\]")
 _SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 _SUFFIX = re.compile(r"(#[^/]*|:\d+(?:-\d+)?)$")  # a #heading or :line after a file path
 
 FIREFOX = "opens the browser, not Obsidian"
+SPACES = "has raw spaces, so it shows as text, not a link"
 MISSING = "no such file (encoding mistake?)"
 PLAIN = "a plain path: Claude Code Desktop can't open vault files"
 WIKI = "a wikilink only works inside Obsidian"
@@ -38,13 +39,33 @@ def _inside(path, vault):
     return p == vault or p.startswith(vault + os.sep)
 
 
+def _is_note(target, vault):
+    """Whether a [[target]] names a note in the vault, by path or, as Obsidian does, by file name."""
+    name = target.split("|")[0].split("#")[0].strip()
+    if not name or name.startswith(("/", ".")):
+        return False
+    if any(os.path.isfile(os.path.join(vault, n)) for n in (name, name + ".md")):
+        return True
+    wanted = {os.path.basename(name), os.path.basename(name) + ".md"}
+    for root, dirs, files in os.walk(vault):
+        dirs[:] = [d for d in dirs if not d.startswith(".")]
+        if wanted.intersection(files):
+            return True
+    return False
+
+
 def bad_links(text, vault, cwd):
     """[(the link as written, why it won't open)] for each vault link outside code."""
     vault = os.path.realpath(os.path.expanduser(vault)).rstrip(os.sep)
     prose, found = _prose(text), []
     for m in _MDLINK.finditer(prose):
         target = m.group(1).strip()
+        if target.startswith("#"):
+            continue
         if target.lower().startswith("obsidian:"):
+            if re.search(r"\s", target):
+                found.append((target, SPACES))
+                continue
             parts = urlsplit(target)
             paths = parse_qs(parts.query).get("path") if parts.netloc == "open" else None
             if not paths:
@@ -55,7 +76,7 @@ def bad_links(text, vault, cwd):
             path = unquote(_SUFFIX.sub("", target))
             if _inside(os.path.join(cwd, os.path.expanduser(path)), vault):
                 found.append((target, PLAIN))
-    found += [(m.group(0), WIKI) for m in _WIKI.finditer(prose)]
+    found += [(m.group(0), WIKI) for m in _WIKI.finditer(prose) if _is_note(m.group(1), vault)]
     return found
 
 
