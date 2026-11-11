@@ -35,7 +35,7 @@ Ask: **"<the one decision only the owner can make>"** ➡️ <recommendation>. A
 ## Protocol
 
 - The contract: <map>'s Notes, or inline here if there is no map.
-- Claim before work, resolve on the ticket, keep `<map folder>/checkpoint.md` (or the run's `wayfinder/runs/` file) current after every ticket.
+- Claim before work, resolve on the ticket, keep `<map folder>/checkpoint.md` (or the run's board, in its run folder) current after every ticket.
 - Models: <per the tiers, or specific>.
 
 ## Hard rules and gotchas

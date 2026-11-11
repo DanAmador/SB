@@ -4,7 +4,7 @@ A run stopped (a usage limit, a crash, a context that ran out) or the owner says
 "reorient me". Pick up where the work is, never where a summary says it was.
 
 1. **Find the trail.** The files `sbmap status <map>` lists (`checkpoint.md`, `handoff.md`, then
-   `wayfinder/runs/` files naming it, newest first) and the claimed tickets. In the repo:
+   the run boards naming it, newest first) and the claimed tickets. In the repo:
    `git log --oneline` since the checkpoint's base, the ledger it names, `git status --short`.
 2. **Reconcile the trail with the tree.** For each ticket the trail calls in flight:
    - committed, verified or verifiable now → resolve it if the run died before recording it

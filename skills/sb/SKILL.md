@@ -77,7 +77,7 @@ the [contract](reference/contract.md); building the least is the ladder in
 ## Every verb starts here
 
 1. **Read the vault first.** `sbmap info --repo <repo path>`, then `sbmap info <map>` for the map in
-   play; `sbmap status <map>` for claims and the handoff, checkpoint and `wayfinder/runs/` files it
+   play; `sbmap status <map>` for claims and the handoff, checkpoint and run boards it
    names. `sbmap wiki index --project <repo>`, and `sbmap wiki find` the effort's nouns. Say in one
    line what they gave you, "nothing" included.
 2. **Resolve the contract**: [reference/contract.md](reference/contract.md). `learn`, `ask` and

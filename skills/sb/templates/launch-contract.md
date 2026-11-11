@@ -1,6 +1,6 @@
 ### The night-run contract (<date>)
 
-<!-- Into the map's ## Notes, or the night's `wayfinder/runs/<date>-tonight.md` across repos.
+<!-- Into the map's ## Notes, or the night's board (`sbmap run --shared tonight`) across repos.
      Later rulings edit it in place, dated. -->
 
 - **Where:** repo `<path>`, branch `<branch>` (from `<sha>`), <main tree | worktree on request>;

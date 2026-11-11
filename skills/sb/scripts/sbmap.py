@@ -14,13 +14,18 @@ Bases see the whole route. It answers what an agent should never compute or type
                                         toplevel) with its plain words' first sentence
     sbmap.py maps [--repo <path>]       every map in the vault (or one repo's), with counts
     sbmap.py status   <map>             counts, claimed tickets, the frontier, the map's handoff.md and
-                                        checkpoint.md and the wayfinder/runs/ files that name it
+                                        checkpoint.md and the run boards that name it
     sbmap.py frontier <map>             open tickets whose every blocker is resolved, in map order
     sbmap.py show     <map> <NNN>       succinct digest: status, type, blockers, question, done when
     sbmap.py lanes    <map> [--max 2] [--json]
                                         open tickets split into parallel lanes by their paths and
                                         blockers, the rest serial (ticket 009's rule)
     sbmap.py next     <map>             the next free ticket number for this map's repo
+    sbmap.py run      <map | project> [<name>] [--date YYYY-MM-DD] | --shared <name>
+                                        makes the run's folder and prints its board's path:
+                                        wayfinder/<project>/runs/<date>-<name>/<date>-<name>.md, the
+                                        name the map's by default; --shared: wayfinder/runs/, for a run
+                                        across projects. The run's briefs and reports go in its folder
     sbmap.py link     <map> <NNN>       the wikilink to a ticket, to paste into prose
     sbmap.py uri      <file> [label]    the markdown link that opens a vault file in Obsidian from chat:
                                         paste it, never type one (the file: absolute, or vault-relative)
@@ -63,6 +68,10 @@ Bases see the whole route. It answers what an agent should never compute or type
                                         moves cleared tickets to issues/done/, the rest back, and
                                         closed maps to archive/, rewriting every link; a dry run
                                         unless --write
+    sbmap.py migrate  --runs [--write]  sorts loose wayfinder/runs/ files into run folders, each in
+                                        its project's runs/ (a run across projects stays in runs/),
+                                        a report into its run's folder; links and backticked paths
+                                        follow; a dry run unless --write
     sbmap.py close    <map>             refuses while a ticket is open or claimed; writes report.md
                                         from templates/map-report.md, marks the map resolved and
                                         deletes the map's handoff.md and checkpoint.md, then moves
@@ -522,14 +531,29 @@ def belongs(m, repo):
             or str(m.props.get("repo", "")) == str(repo))
 
 
-RUNS = WAYFINDER / "runs"  # one file per run across several maps: <date>[-<name>].md
+RUNS = WAYFINDER / "runs"  # runs across several projects; a project's own are under <project>/runs/
+RUN_DATE = re.compile(r"\d{4}-\d{2}-\d{2}-")
+
+
+def run_homes():
+    """Every runs/ folder: the shared one, then each project's."""
+    return [h for h in [RUNS, *sorted(WAYFINDER.glob("*/runs"))] if h.is_dir()]
+
+
+def run_boards():
+    """Every run's board: `<home>/<run>/<run>.md`, and a loose `<home>/*.md` from before run folders."""
+    out = []
+    for home in run_homes():
+        out += [d / f"{d.name}.md" for d in sorted(home.iterdir()) if (d / f"{d.name}.md").is_file()]
+        out += sorted(home.glob("*.md"))
+    return out
 
 
 def trail(m):
-    """The map's own handoff.md and checkpoint.md, then the run files that name the map, newest first."""
+    """The map's own handoff.md and checkpoint.md, then the run boards that name the map, newest first."""
     own = [m.folder / n for n in TRAIL_NAMES if (m.folder / n).exists()]
-    runs = sorted((p for p in RUNS.glob("*.md") if m.rel_name in p.read_text(encoding="utf-8")),
-                  key=lambda p: p.name, reverse=True) if RUNS.is_dir() else []
+    runs = sorted((p for p in run_boards() if m.rel_name in p.read_text(encoding="utf-8")),
+                  key=lambda p: p.stem, reverse=True)
     return own + runs
 
 
@@ -1859,8 +1883,7 @@ def migrate_root_docs(repo, write):
     """Handoffs, checkpoints and run files: numbers that name one ticket become links."""
     changes = []
     candidates = [p for n in TRAIL_NAMES for p in (WAYFINDER / repo).glob(f"*/{n}")]
-    if RUNS.is_dir():
-        candidates += [p for p in RUNS.glob("*.md") if f"wayfinder/{repo}/" in p.read_text(encoding="utf-8")]
+    candidates += [p for p in run_boards() if f"wayfinder/{repo}/" in p.read_text(encoding="utf-8")]
     for p in sorted(set(candidates)):
         text = p.read_text(encoding="utf-8")
         linked = link_numbers(text, repo)
@@ -1892,8 +1915,163 @@ def migrate_sort(maps, write):
           f"{n} link rewrite(s)" + ("" if write else f" in {len(files)} file(s)"))
 
 
+def run_project(texts, frontmatter, maps):
+    """The project folder a run belongs to, or None for a run across several: its `project` property
+    when that names one, else the project that holds at least 3/4 of what its notes name."""
+    projects = sorted(p.name for p in WAYFINDER.iterdir() if p.is_dir() and p != RUNS and not p.name.startswith("."))
+    named = str(frontmatter.get("project", "")).strip()
+    if named in projects:
+        return named
+    score = dict.fromkeys(projects, 0)
+    for text in texts:
+        for p in projects:
+            score[p] += 3 * text.count(f"wayfinder/{p}/") + 2 * len(re.findall(rf"(?<![\w-]){re.escape(p)}(?![\w-])", text))
+        for name, owners in maps.items():
+            n = len(re.findall(rf"(?<![\w-]){re.escape(name)}(?![\w-])", text))
+            for p in owners & score.keys():
+                score[p] += n
+    total = sum(score.values())
+    best = max(score, key=score.get) if total else None
+    return best if best and score[best] * 4 >= total * 3 else None
+
+
+def migrate_runs(write):
+    """Sort the loose run files under wayfinder/runs/ into run folders: a project's run into
+    <project>/runs/<run>/, a run across projects into runs/<run>/; a run's board keeps its name inside
+    its folder, and a loose report goes into the folder of the run that wrote it. Links follow."""
+    if not RUNS.is_dir():
+        print("no wayfinder/runs/: nothing to sort")
+        return
+    loose = {p.stem: p for p in RUNS.glob("*.md")}
+    maps = {}  # map folder name -> its projects; one-word names ("ships") are too common to count
+    for m in all_maps():
+        if "-" in m.folder.name:
+            maps.setdefault(m.folder.name, set()).add(m.repo)
+    texts = {s: p.read_text(encoding="utf-8") for s, p in loose.items()}
+    elsewhere = []  # (path, text) of every note outside runs/: who links to a run says whose it is
+    for root, dirs, names in os.walk(VAULT):
+        dirs[:] = [d for d in dirs if not d.startswith(".") and Path(root, d) != RUNS]
+        elsewhere += [(rel(Path(root, n)), Path(root, n).read_text(encoding="utf-8", errors="replace"))
+                      for n in names if n.endswith(".md")]
+
+    def parent(s):
+        """The run a loose report belongs to: the board its name extends (the longest), else the one
+        board of its day that names its number."""
+        day = RUN_DATE.match(s)
+        if not day:
+            return None
+        ext = [b for b in loose if b != s and s.startswith(b + "-") and RUN_DATE.match(b)]
+        if ext:
+            return max(ext, key=len)
+        num = re.fullmatch(r"\d+", s[day.end():])
+        hits = [b for b in loose if b != s and b.startswith(day.group(0)) and num
+                and not re.fullmatch(r"\d+", b[day.end():]) and re.search(rf"(?<![\w-]){num.group(0)}(?![\w-])", texts[b])]
+        return hits[0] if len(hits) == 1 else None
+
+    def root(s):
+        seen = set()
+        while (up := parent(s)) and up not in seen:
+            seen.add(s)
+            s = up
+        return s
+
+    groups = {}
+    for s in loose:
+        groups.setdefault(root(s), []).append(s)
+    for d in RUNS.iterdir():  # a folder with no board beside it is a run of its own; a run folder stays
+        if d.is_dir() and d.name not in groups and not (d / f"{d.name}.md").exists():
+            groups[d.name] = []
+
+    moves, renames = [], []
+    for run, members in sorted(groups.items()):
+        notes = [loose[s] for s in members] + sorted((RUNS / run).rglob("*.md") if (RUNS / run).is_dir() else [])
+        props = split_fm(loose[run].read_text(encoding="utf-8"))[0] if run in loose else {}
+        linked_from = [path for path, text in elsewhere if any(m in text for m in members or [run])]
+        project = run_project([p.read_text(encoding="utf-8", errors="replace") for p in notes] + [run] + linked_from,
+                              props, maps)
+        home = WAYFINDER / project / "runs" if project else RUNS
+        folder = home / run
+        print(f"  {run} -> {rel(folder)}/" + (f"  (+ {len(members) - 1} report(s))" if len(members) > 1 else ""))
+        if (RUNS / run).is_dir() and folder != RUNS / run:
+            moves.append((RUNS / run, folder))
+        for s in members:
+            moves.append((loose[s], folder / f"{s}.md"))
+            renames.append((s, f"{rel(folder)}/{s}"))
+            if s != run and (RUNS / s).is_dir():
+                moves.append((RUNS / s, folder / s))
+        renames.append((run + "/", rel(folder) + "/"))
+    n, files = move_files(moves, write=write)
+    n2, files2 = rewrite_run_paths(renames, write)
+    print(f"{len(groups)} run(s) into run folders; {n + n2} link and path rewrite(s)"
+          + ("" if write else f" in {len(files | files2)} file(s)"))
+
+
+def rewrite_run_paths(renames, write):
+    """Plain-text paths (`wayfinder/runs/<run>.md`, `wayfinder/runs/<run>/<report>`) to their new homes:
+    briefs and boards name their files in backticks, which no link rewrite sees."""
+    board = {s: new for s, new in renames if not s.endswith("/")}  # stem -> new path of <stem>.md, less .md
+    folder = {s[:-1]: new[:-1] for s, new in renames if s.endswith("/")}
+    for s, new in board.items():
+        folder.setdefault(s, new)  # a report's own folder, if any, sits beside it
+    stems = sorted(set(board) | set(folder), key=len, reverse=True)
+    if not stems:
+        return 0, set()
+    pattern = re.compile(r"wayfinder/runs/(" + "|".join(map(re.escape, stems)) + r")(\.md|/)?(?![\w-])")
+
+    def sub(mm):
+        s, tail = mm.group(1), mm.group(2) or ""
+        if tail == ".md" and s in board:
+            return board[s] + ".md"
+        return folder.get(s, board.get(s)) + tail
+
+    count, changed = 0, set()
+    for root, dirs, names in os.walk(VAULT):
+        dirs[:] = [d for d in dirs if not d.startswith(".")]
+        for name in names:
+            if not name.endswith(".md"):
+                continue
+            f = Path(root) / name
+            text = f.read_text(encoding="utf-8", errors="replace")
+            new, k = pattern.subn(sub, text)
+            if new != text:
+                count += k
+                changed.add(f)
+                if write:
+                    write_atomic(f, new)
+    return count, changed
+
+
+def cmd_run(args):
+    """Make a run's folder and print its board's path, `<project>/runs/<date>-<name>/<date>-<name>.md`:
+    for a map, its project's runs; for a project folder, that one; with --shared, wayfinder/runs/."""
+    day = opt(args, "--date") or date.today().isoformat()
+    words = [a for i, a in enumerate(args) if not a.startswith("--") and (i == 0 or args[i - 1] != "--date")]
+    if "--shared" in args:
+        if not words:
+            sys.exit("sbmap: run --shared needs a name")
+        home, name = RUNS, words[0]
+    else:
+        if not words:
+            sys.exit("sbmap: run needs a map or project folder")
+        project = WAYFINDER / words[0]
+        if project.is_dir() and project != RUNS and not (project / "map.md").exists() and "/" not in words[0]:
+            home, name = project / "runs", words[1] if len(words) > 1 else None
+            if not name:
+                sys.exit("sbmap: run <project> needs a name")
+        else:
+            m = load(words[0])
+            home, name = WAYFINDER / m.repo / "runs", words[1] if len(words) > 1 else m.folder.name
+    run = name if RUN_DATE.match(name) else f"{day}-{name}"
+    (home / run).mkdir(parents=True, exist_ok=True)
+    print(rel(home / run / f"{run}.md"))
+
+
 def cmd_migrate(args):
     write = "--write" in args
+    if "--runs" in args:
+        migrate_runs(write)
+        print("written" if write else "dry run: nothing written (add --write)")
+        return
     target = [a for a in args if a not in ("--write", "--sort")]
     maps = all_maps() if target[:1] == ["--all"] else [load(target[0])]
     if "--sort" in args:
@@ -2058,7 +2236,7 @@ COMMANDS = {"info": cmd_info, "maps": cmd_maps, "status": cmd_status, "frontier"
             "init": cmd_init, "summary": cmd_summary, "new": cmd_new, "set": cmd_set, "claim": cmd_claim,
             "comment": cmd_comment, "ruling": cmd_comment, "block": cmd_block,
             "resolve": cmd_resolve, "diagram": cmd_diagram, "board": cmd_board, "migrate": cmd_migrate,
-            "close": cmd_close, "wiki": cmd_wiki}
+            "close": cmd_close, "run": cmd_run, "wiki": cmd_wiki}
 
 if __name__ == "__main__":
     if len(sys.argv) < 2 or sys.argv[1] not in COMMANDS or (sys.argv[1] not in ("maps", "info", "wiki") and len(sys.argv) < 3):

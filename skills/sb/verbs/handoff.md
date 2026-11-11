@@ -9,7 +9,8 @@ vault file a fresh agent can start from with one pasted line, in any tool.
    than the map is one the map will contradict.
 2. **Write the handoff** at `wayfinder/<repo>/<map>/handoff.md` from
    [templates/handoff.md](../templates/handoff.md), overwriting the last one; work spanning several
-   maps writes one `wayfinder/runs/<date>-<name>.md` instead. 🔒 Never a file at the `wayfinder/`
+   maps writes the run board `sbmap run <map> <name>` prints instead (`--shared` across
+   projects). 🔒 Never a file at the `wayfinder/`
    root or beside the maps. It points at tickets and the contract without restating them, and
    carries what lives nowhere else: the state of the world, gotchas learned, the owner's rulings
    from chat (quoted), and the one question to ask first.

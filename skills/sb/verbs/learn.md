@@ -130,7 +130,8 @@ can do is a command, so tokens go only to judging changed code.
    total). Past the gate, stop after the article in flight: tomorrow's list starts from what is left.
 7. **Log and note.** `sbmap wiki log tend --subject "<N> stale: <V> verified, <S> superseded, <D>
    disputed, <K> skipped; ~<T>k tokens"`, the tokens being the subagents' reported totals plus your
-   own. Write `wayfinder/runs/<date>-wiki-tend.md`: one line per article with what changed and the
+   own. Write the board `sbmap run --shared wiki-tend` prints (`sbmap run <project> wiki-tend` for one
+   project's wiki): one line per article with what changed and the
    sha, then what step 5 left for later. The morning report reads it.
 
 ## Report

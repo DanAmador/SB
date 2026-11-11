@@ -54,7 +54,9 @@ changes; a one-repo night skips them.
    6. Questions the evidence raised, each with ➡️ its default, applied on a bare "go". None is fine.
    7. Tests: what runs per ticket, what runs once, or nothing, and the ruling behind it.
 
-   Write the **run board** before presenting it: `wayfinder/runs/<date>-<map name>.md` from
+   Write the **run board** before presenting it, at the path `sbmap run <map>` prints
+   (`wayfinder/<project>/runs/<date>-<map name>/<date>-<map name>.md`; the run's briefs and reports go
+   in that folder beside it), from
    [templates/checkpoint.md](../templates/checkpoint.md), holding the contract, a row per ticket
    (model, paths or ports, session, state) and a log, with the map's wikilink so `sbmap status`
    finds it. The proposal ends with the two ways to start:
@@ -71,7 +73,8 @@ changes; a one-repo night skips them.
 5. **Launch.** Write the contract into the map's Notes from
    [templates/launch-contract.md](../templates/launch-contract.md), with the night's order, and
    apply the owner's edits to the run board. Keep the machine awake if the host offers it.
-   - *Operator:* one file for the night, `wayfinder/runs/<date>-tonight.md`, a row per lane, holding
+   - *Operator:* one board for the night, `sbmap run --shared tonight` (one project's lanes:
+     `sbmap run <project> tonight`), a row per lane, holding
      the contract with each lane's Where, checks and hard rules; each map's Notes points at it. A
      lane's brief is a section of that file. Send each lane GO with the file's path and its order.
    - Tell every peer outside the run the usage gate, in a message, so the budget has one rule.
