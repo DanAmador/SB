@@ -1,4 +1,3 @@
-import fcntl
 import os
 import subprocess
 import sys
@@ -8,6 +7,11 @@ from datetime import date
 from pathlib import Path
 
 from helpers import SBMAP, VaultCase
+
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
 
 
 class NewTicketsAndMaps(VaultCase):
@@ -272,6 +276,7 @@ class ResolveStampsTheCommit(VaultCase):
         self.assertIn("status: Project.Finished", text)
 
 
+@unittest.skipUnless(fcntl, "these tests lock with fcntl")
 class ClaimsDoNotCollide(VaultCase):
     def setUp(self):
         super().setUp()
