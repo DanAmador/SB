@@ -29,9 +29,13 @@ Top level: `type` "result", `subtype` str, `is_error` bool, `api_error_status` n
 `subagent_stats`: counts, all 0.
 `usage.iterations` held one entry (the last API call: 45566 cache-read, 557 cache-creation, 2 input tokens), not one per turn.
 
-## First turn's context size
+## First turn's context size: not observed
 
-The JSON does not give the first call alone. Usage sums four calls; 22516 tokens were written to cache once, and the last call read 45.6k. Inference: the first call's context was about 22.5k tokens (all new), so a cold headless start in this config carries about 22k tokens before the brief's own work.
+The first turn's size was NOT observed: `usage.iterations` holds only the last call, and the totals sum four calls. About 22.5k tokens is a low-confidence estimate taken from `cache_creation_input_tokens` (22516). The context grew across the 4 calls (the last read 45.6k), and the cache writes may be split across calls, so the first call may have been smaller or larger. The spec's 28.7k figure is a different measurement: it was Haiku on the personal config, and this run was Sonnet on the personal config. Do not treat the two as comparable.
+
+## Skill load (not observed)
+
+sb skill load in a headless session: not observed. The worker reached `sbmap` through the spelled-out script path in the brief and never loaded the skill. Bare `sbmap` was not tested.
 
 ## Auto mode (observed)
 
@@ -42,6 +46,7 @@ Nothing refused: `permission_denials` empty, `safety_stops` 0, every Bash call r
 - Plugins load headless under `CLAUDE_CONFIG_DIR=~/.claude-personal`: the transcript lists the `plugin:hub-report:sbhub` MCP tools, and the tokeneconomizer hooks ran (SessionStart, PostToolUse, PostToolUseFailure, Stop, exit 0).
 - The hub's `/api/state` after the run had `agents` empty: no `spike-worker`, no session row. Its `providers` held the temp repo's path, so something reported that project to the hub. Inference: the hub-report SessionStart hook reached it, and SessionEnd then removed the session (SessionEnd maps to state "gone"). The transcript has no `hook_success` entry for the hub-report hooks (`sbhub.py hook` prints nothing), so their firing is not directly confirmed.
 - The worker's two `sbhub.py report --agent spike-worker` calls exited with no error output but left no agent on my hub. The same command run by me afterwards with `SB_HUB_PORT=55936` from the repo dir registered an agent at once. So the worker's calls did not reach port 55936. Cause not determined: the Bash tool env may drop `SB_HUB_PORT`, or its sandbox may block localhost; `report` exits 0 silently when the hub is unreachable. No second run was made to find out.
+- Inference: `SB_VAULT` in the same env did reach the worker's `sbmap`, but the `SB_HUB_PORT` report did not reach the hub. That points to the sandbox or network, not to dropped env.
 - For Task 5: do not count on a worker's `sbhub report` reaching the hub, and do not judge the run from agent rows after exit. Put `SB_HUB_PORT=<port>` inline in the brief's report command, or have the launcher record start and end itself. The launcher can check the commit and trailer in code; both were there.
 
 ## Limits
