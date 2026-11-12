@@ -1,11 +1,13 @@
+import fcntl
 import os
 import subprocess
+import sys
 import time
 import unittest
 from datetime import date
 from pathlib import Path
 
-from helpers import VaultCase
+from helpers import SBMAP, VaultCase
 
 
 class NewTicketsAndMaps(VaultCase):
@@ -281,6 +283,13 @@ class ClaimsDoNotCollide(VaultCase):
     def ticket_text(self):
         return "".join(f.read_text() for f in self.map_dir.glob("**/001*.md"))
 
+    def assertLockFree(self):
+        fd = os.open(self.map_dir / ".claim.lock", os.O_CREAT | os.O_RDWR)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        finally:
+            os.close(fd)
+
     def test_two_claims_at_once_give_one_winner(self):
         procs = [self.popen_sb("claim", "monorepo/overrides", "1", "--by", f"agent-{i}") for i in range(8)]
         codes = [p.wait() for p in procs]
@@ -289,16 +298,31 @@ class ClaimsDoNotCollide(VaultCase):
             p.stderr.close()
         self.assertEqual(codes.count(0), 1)
         self.assertRegex(self.ticket_text(), r'claimed_by: "?agent-\d')
-        self.assertFalse((self.map_dir / ".claim.lock").exists())
+        self.assertLockFree()
 
-    def test_a_stale_claim_lock_is_broken(self):
-        lock = self.map_dir / ".claim.lock"
-        lock.write_text("")
-        os.utime(lock, (time.time() - 60,) * 2)
+    def test_a_leftover_lock_file_from_a_dead_process_does_not_block(self):
+        (self.map_dir / ".claim.lock").write_text("")
         self.sb("claim", "monorepo/overrides", "1", "--by", "a")
-        self.assertFalse(lock.exists())
+        self.assertRegex(self.ticket_text(), r'claimed_by: "?a,')
+
+    def test_a_claim_gives_up_with_exit_3_while_another_process_holds_the_lock(self):
+        holder = subprocess.Popen([sys.executable, "-c",
+            "import fcntl,os,sys,time\nfd=os.open(sys.argv[1],os.O_CREAT|os.O_RDWR)\n"
+            "fcntl.flock(fd,fcntl.LOCK_EX)\nprint('held',flush=True)\ntime.sleep(30)",
+            str(self.map_dir / ".claim.lock")], stdout=subprocess.PIPE, text=True)
+        try:
+            self.assertEqual(holder.stdout.readline().strip(), "held")
+            r = subprocess.run([sys.executable, str(SBMAP), "claim", "monorepo/overrides", "1", "--by", "a"],
+                               capture_output=True, text=True, env=self.env(SB_CLAIM_WAIT="0.3"), cwd=self.vault)
+            self.assertEqual(r.returncode, 3, r.stderr)
+            self.assertIn("could not take", r.stderr)
+            self.assertNotIn("claimed_by", self.ticket_text())
+        finally:
+            holder.kill()
+            holder.wait()
+            holder.stdout.close()
 
     def test_a_refused_claim_still_releases_the_lock(self):
         self.sb("claim", "monorepo/overrides", "1", "--by", "a", "--no-sync")
         self.sb("claim", "monorepo/overrides", "1", "--by", "b", "--no-sync", ok=False)
-        self.assertFalse((self.map_dir / ".claim.lock").exists())
+        self.assertLockFree()

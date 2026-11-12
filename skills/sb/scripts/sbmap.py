@@ -101,6 +101,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
 import zlib
 from datetime import date
 from pathlib import Path, PurePosixPath
@@ -1297,25 +1298,62 @@ def cmd_summary(args):
     print(f"wrote {m.folder.name}: In plain words")
 
 
-def take_claim_lock(folder):
-    """A lock file in the map folder, taken with O_EXCL: retry every 50 ms for 5 s, break one older than 30 s.
-    The leading dot keeps it out of Obsidian's views."""
-    lock = Path(folder) / ".claim.lock"
-    deadline = time.time() + 5
-    while True:
+try:
+    import fcntl
+except ImportError:  # Windows: no flock, fall back to a token file
+    fcntl = None
+
+
+class ClaimLock:
+    """Held while one claim reads, checks and writes. release() lets go; it never touches another holder's lock."""
+
+    def __init__(self, path, fd=None, token=None):
+        self.path, self.fd, self.token = path, fd, token
+
+    def release(self):
+        if self.fd is not None:  # kernel lock: closing frees it, and a dead process frees it too
+            os.close(self.fd)
+            return
         try:
-            os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
-            return lock
-        except FileExistsError:
+            if Path(self.path).read_text() == self.token:
+                os.unlink(self.path)
+        except OSError:
+            pass
+
+
+def take_claim_lock(folder):
+    """Lock `<folder>/.claim.lock` (the leading dot keeps it out of Obsidian's views); retry every 50 ms for
+    SB_CLAIM_WAIT seconds (default 5), then exit 3."""
+    path = str(Path(folder) / ".claim.lock")
+    deadline = time.monotonic() + float(os.environ.get("SB_CLAIM_WAIT", "5"))
+    token = f"{os.getpid()}-{uuid.uuid4().hex}"
+    while True:
+        if fcntl:
+            fd = os.open(path, os.O_CREAT | os.O_RDWR)
             try:
-                if time.time() - lock.stat().st_mtime > 30:
-                    lock.unlink()
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return ClaimLock(path, fd=fd)
+            except OSError:
+                os.close(fd)
+        else:  # untested here: no Windows machine
+            try:
+                fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                with os.fdopen(fd, "w") as f:
+                    f.write(token)
+                return ClaimLock(path, token=token)
+            except FileExistsError:
+                try:  # break a stale lock by moving it aside, never by a bare unlink
+                    if time.time() - os.stat(path).st_mtime > 30:
+                        aside = f"{path}.stale-{token}"
+                        os.replace(path, aside)
+                        os.unlink(aside)
+                        continue
+                except OSError:
                     continue
-            except FileNotFoundError:
-                continue
-            if time.time() > deadline:
-                sys.exit(f"sbmap: could not take {lock} within 5s; another claim holds it")
-            time.sleep(0.05)
+        if time.monotonic() > deadline:
+            sys.stderr.write(f"sbmap: could not take {path}; another claim holds it\n")
+            sys.exit(3)
+        time.sleep(0.05)
 
 
 def cmd_claim(args):
@@ -1330,7 +1368,7 @@ def cmd_claim(args):
         no_sync = ["--no-sync"] if "--no-sync" in args else []
         cmd_set([args[0], args[1], "status=claimed", f"claimed_by={by}, {stamp}"] + no_sync)
     finally:
-        lock.unlink(missing_ok=True)
+        lock.release()
 
 
 def cmd_block(args):

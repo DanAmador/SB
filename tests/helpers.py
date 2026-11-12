@@ -25,10 +25,13 @@ class VaultCase(unittest.TestCase):
     def tearDown(self):
         self._tmp.cleanup()
 
+    def env(self, path="/usr/bin:/bin", **extra):
+        # PATH without /usr/local/bin keeps the real Obsidian CLI out of the tests
+        return {**os.environ, "SB_VAULT": str(self.vault), "PATH": path, **extra}
+
     def sb(self, *args, stdin=None, ok=True, path="/usr/bin:/bin"):
         """Run sbmap; ok=True asserts exit 0, ok=False asserts non-zero, ok=None asserts nothing."""
-        # PATH without /usr/local/bin keeps the real Obsidian CLI out of the tests
-        env = {**os.environ, "SB_VAULT": str(self.vault), "PATH": path}
+        env = self.env(path)
         r = subprocess.run([sys.executable, str(SBMAP), *args], capture_output=True, text=True,
                            env=env, input=stdin, cwd=self.vault)
         if ok is True:
@@ -39,9 +42,8 @@ class VaultCase(unittest.TestCase):
 
     def popen_sb(self, *args):
         """Start sbmap without waiting; the caller waits on the Popen."""
-        env = {**os.environ, "SB_VAULT": str(self.vault), "PATH": "/usr/bin:/bin"}
         return subprocess.Popen([sys.executable, str(SBMAP), *args], stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE, text=True, env=env, cwd=self.vault)
+                                stderr=subprocess.PIPE, text=True, env=self.env(), cwd=self.vault)
 
     def write(self, rel, text):
         p = self.vault / rel
