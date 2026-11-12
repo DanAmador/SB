@@ -104,9 +104,10 @@ changes; a one-repo night skips them.
    5. At the end of a map's batch, rewrite its `## In plain words`.
 
    At each ticket boundary, `sbhub report --agent <run name> --role orchestrator --done <n> --total
-   <N> --note "<next ticket name>"`. A resource only one agent may use at a time (the Unity editor,
-   a port) is taken with `sbhub lock <name> --by <agent>` and released with `sbhub unlock` after
-   ([hub.md](../reference/hub.md)).
+   <N> --note "<next ticket name>"`. Workers report as `ticket-<NNN>`; when one night runs maps that
+   reuse a number, as `<map name>-<NNN>`. A resource only one agent may use at a time (the Unity
+   editor, a port) is taken with `sbhub lock <name> --by <agent>` and released with `sbhub unlock`
+   after ([hub.md](../reference/hub.md)).
 
    *Operator:* the lane does 0–2 and reports its commit, checks and the usage it read; the operator
    does 3 in the lane's checkout and logs it on the board; then the lane does 4, claiming its

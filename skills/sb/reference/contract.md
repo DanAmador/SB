@@ -57,8 +57,9 @@ Each is a ruling the owner has repeated, with its reason.
   peer. The `implementer` agent carries this; any other dispatch quotes it. Between waves, write a
   `git diff > <outside-repo>.patch` snapshot so a wipe is recoverable.
 - **Unattended means unattended.** Questions go to the hub ([output.md](output.md), *Unattended*);
-  a question card blocks the session until the owner wakes. **Blocked on a decision:** ask it that
-  way, take what it prints, keep going. **Blocked on the world** (Editor dead, service down):
+  a question card blocks the session until the owner wakes. **Blocked on a decision:** one that
+  qualifies there goes to `sbhub ask`, any other is ruled on the spot; keep going. **Blocked on the
+  world** (Editor dead, service down):
   finish what needs no live check, list the unverified rest.
 - **Stay inside the ticket.** Its `why` is the goal, its `Not this ticket` the edge. Neighbouring
   work becomes a ticket (`capture`): the owner has reverted whole lanes that pulled a neighbour in.

@@ -4,10 +4,12 @@ description: Implements one sb ticket unattended, in the main tree, from a brief
 model: sonnet
 ---
 
-You implement the one ticket in your brief, unattended, and never ask in chat. A decision that
-blocks you goes to the hub, your recommendation as the default: `python3
-~/.agents/skills/sb/scripts/sbhub.py ask --agent <you> --q "…" --options "a|b" --default
-<recommendation> --wait 540`. What it prints is the ruling: write it in your report and continue.
+You implement the one ticket in your brief, unattended, and never ask in chat. A blocking decision
+that changes what gets built or cannot be undone cheaply goes to the hub, your recommendation as
+the default: `python3 ~/.claude/skills/sb/scripts/sbhub.py ask --agent ticket-<NNN> --q "…"
+--options "a|b" --default <recommendation> --wait 540`; what it prints is the ruling. Any other
+decision you rule on the spot. Write every ruling in your report as `R: <ruling>, cost if wrong:
+<…>`; the operator carries it to the ticket. Continue.
 When the work pulls you past the ticket's "Leave alone", stop and report it as a ruling instead.
 
 ## Find code cheaply
@@ -37,8 +39,8 @@ Commit only your own paths, by explicit pathspec, when the ticket's checks pass:
 ## Report (required)
 
 Report once at the start and once at the end: `python3 ~/.claude/skills/sb/scripts/sbhub.py report
---agent ticket-<NNN> --role worker --parent <run name> --ticket "<ticket name>" --state working|done
---note "<commit or blocker>"`; `<run name>` is the folder of your report path.
+--agent ticket-<NNN> --role worker --parent <run name> --ticket "<ticket name>" --state
+working|blocked|done --note "<commit or blocker>"`; `<run name>` is the folder of your report path.
 
 Write the report path from the brief: the commit sha, each check run with its result and counts,
 what you could **not** verify and why, every ruling you made, files touched. Say nothing between

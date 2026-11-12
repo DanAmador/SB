@@ -7,18 +7,20 @@ this file is providers.
 ## Report, ask, lock
 
 The hub is optional, and a run reads the same without it: with the hub down, `report` does
-nothing, `ask` prints its default, and `lock` exits 2 (`sbhub: not running`): go on unlocked.
+nothing, `ask` prints its default, and `lock` and `unlock` exit 2 (`sbhub: not running`): go on
+unlocked.
 
 - **`report`**: with the `hub-report` mod (`./install.sh --hub`) a session's state reaches the hub
   on its own. `report` adds what hooks cannot know: a run's progress (`--done`, `--total`), the
   ticket a worker is on (`--ticket`), a ticket session's run (`--parent`). The operator runs it at
   each ticket boundary ([tonight](../verbs/tonight.md) step 6); a ticket session at its start and
   end ([session brief](../templates/session-brief.md)).
-- **`ask`**: every question in an unattended run ([output.md](output.md), *Unattended*).
+- **`ask`**: see [output.md](output.md), *Unattended*.
 - **`lock <name> --by <agent>`**, then **`unlock`** with the same arguments: a resource one agent
   may use at a time (the Unity editor, a port). Prints `ok`, or exits 1 `held by <who>`: do the
-  work that needs no lock, then try again. Tickets are never locked here: `sbmap claim` holds its
-  own lock and exits 3 when it cannot get it in 5 s.
+  work that needs no lock, then try again while the holder is still listed in `sbhub state`; after
+  ~5 minutes, report yourself `--state blocked`. Tickets are never locked here: `sbmap claim` holds
+  its own lock and exits 3 when it cannot get it in 5 s.
 
 ## Providers
 
