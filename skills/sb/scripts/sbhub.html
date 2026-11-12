@@ -1,0 +1,80 @@
+<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>sb hub</title>
+<style>
+:root{--bg:#f6f5f1;--card:#fff;--ink:#1c1c1a;--mute:#6f6e69;--line:#e4e2da;--ok:#2e7d4f;--warn:#b7791f;--bad:#c0392b;--acc:#3b5bdb}
+@media(prefers-color-scheme:dark){:root{--bg:#161615;--card:#1f1f1d;--ink:#ecebe6;--mute:#98968e;--line:#2e2e2b;--ok:#5fbf85;--warn:#e0b050;--bad:#ef7a6b;--acc:#8ea2ff}}
+*{box-sizing:border-box}body{margin:0;overflow-wrap:anywhere;background:var(--bg);color:var(--ink);font:14px/1.35 -apple-system,system-ui,sans-serif;padding:12px 16px;max-width:900px}
+h1{font-size:15px;margin:0 0 8px;display:flex;gap:10px;align-items:center}h1 span{font-weight:400;color:var(--mute)}
+h2{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--mute);margin:14px 0 4px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.line{display:flex;gap:8px;align-items:center;padding:6px 10px;border-top:1px solid var(--line);min-height:32px}.line:first-child{border-top:0}
+.grow{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.mute{color:var(--mute);font-size:12px}
+.ic{width:18px;text-align:center;flex:none}.old{opacity:.4}
+.pips{display:flex;gap:2px;flex:none}.pips i{width:7px;height:12px;border-radius:2px;background:var(--line)}.pips i.on{background:var(--ok)}.pips i.now{background:var(--acc)}
+.chip{flex:none;font-size:12px;padding:1px 6px;border-radius:99px;border:1px solid var(--line);white-space:nowrap;cursor:default}
+.chip.bad{border-color:var(--bad);color:var(--bad)}.chip.warn{border-color:var(--warn);color:var(--warn)}.chip.ok{color:var(--ok)}
+button{font:inherit;font-size:13px;padding:3px 10px;border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer;flex:none}
+button.def{background:var(--acc);border-color:var(--acc);color:#fff}
+.q{border-color:var(--acc)}.q .line{flex-wrap:wrap}.q .grow{white-space:normal;flex-basis:240px}
+.bar{width:48px;height:6px;border-radius:3px;background:var(--line);overflow:hidden;flex:none}.bar i{display:block;height:100%;background:var(--ok)}
+details{padding:0 10px 6px}summary{cursor:pointer;color:var(--mute);font-size:12px}pre{margin:4px 0 0;font:11px/1.4 ui-monospace,monospace;color:var(--mute);white-space:pre-wrap}
+</style>
+<h1>sb hub <span class="mute" id="sum"></span></h1>
+<div id="app"></div>
+<script>
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const num=n=>Number.isFinite(+n)?+n:0;
+const ago=(now,t)=>{const s=Math.max(0,Math.round(now-t));return s<60?s+'s ago':s<3600?Math.round(s/60)+'m ago':Math.round(s/3600)+'h ago'};
+const ST={working:'\u23f3',done:'\u2705',blocked:'\u26d4','needs you':'\ud83d\udc64','your turn':'\ud83d\udcac',waiting:'\u23f8',idle:'\ud83d\udca4'};
+const TOOL={Bash:'\u2328\ufe0f',Read:'\ud83d\udcc4',Edit:'\u270f\ufe0f',Write:'\u270f\ufe0f',Grep:'\ud83d\udd0e',Glob:'\ud83d\udd0e',Agent:'\ud83e\udd16',WebFetch:'\ud83c\udf10',WebSearch:'\ud83c\udf10'};
+const LV={ok:'\ud83d\udfe2',warn:'\ud83d\udfe1',bad:'\ud83d\udd34'};
+const PICON={git:'\ud83c\udf3f',tests:'\ud83e\uddea',unity:'\ud83c\udfae',build:'\ud83d\udd28',server:'\ud83d\udda5\ufe0f'},WRENCH='\ud83d\udd27';
+const own=(o,k)=>typeof k=='string'&&Object.prototype.hasOwnProperty.call(o,k)?o[k]:undefined;
+const name=a=>esc(a.name||a.agent), old=(s,a)=>s.now-a.at>600?' old':'';
+const act=a=>{const m=/^(\w+): ?(.*)/.exec(a.note||'');return m&&own(TOOL,m[1])?[TOOL[m[1]],m[2]]:['',a.note||'']};
+const tk=a=>{const t=a.ticket||a.name||a.agent;return /^\d+$/.test(String(t))?'ticket '+t:t};
+let S=null;
+function pips(d,t){t=Math.min(t,40);let h='';for(let i=0;i<t;i++)h+=`<i class="${i<d?'on':i==d?'now':''}"></i>`;return `<span class="pips" title="${esc(d)} of ${esc(t)} tickets done">${h}</span>`}
+function chip(s,a){const [ic,txt]=act(a),c=a.state=='blocked'||a.state=='needs you'?'bad':a.state=='done'?'ok':'';
+  return `<span class="chip ${c}${old(s,a)}" title="${name(a)} \u00b7 ${esc(a.state)} \u00b7 ${esc(txt)} \u00b7 ${ago(s.now,a.at)}">${own(ST,a.state)||'\u2022'} ${esc(tk(a))}${ic?' '+ic:''}</span>`}
+function row(s,a,kids){const [ic,txt]=act(a),t=num(a.total);
+  return `<div class="line${old(s,a)}"><span class="ic" title="${esc(a.state)}">${own(ST,a.state)||'\u2022'}</span><b>${name(a)}</b>${t>0?pips(num(a.done),t):''}<span class="grow mute">${ic} ${esc(txt)}</span>${kids.map(k=>chip(s,k)).join('')}<span class="mute">${ago(s.now,a.at)}</span></div>`}
+function widget(w){
+  const label=esc(w.label);
+  if(w.kind=='status')return `<span class="chip" title="${label}">${own(LV,w.level)||''} ${esc(String(w.value).slice(0,40))}</span>`;
+  if(w.kind=='progress'){const v=num(w.value),m=num(w.max),pc=Math.max(0,Math.min(100,100*v/(m||1)));
+    return `<span class="bar" title="${label} ${v}/${m}"><i style="width:${pc}%"></i></span><span class="mute">${v}/${m}</span>`}
+  if(w.kind=='counts'&&w.items&&typeof w.items=='object')return Object.entries(w.items).map(([k,v])=>`<span class="chip ${k=='fail'&&num(v)?'bad':''}" title="${label}">${k=='pass'?'\u2705':k=='fail'?'\u274c':esc(k)} ${esc(v)}</span>`).join('');
+  return '';
+}
+function provider(p,proj){const ws=Array.isArray(p.widgets)?p.widgets.filter(w=>w&&typeof w=='object'):[],logs=ws.filter(w=>w.kind=='log'&&Array.isArray(w.lines));
+  return `<div class="line"><span class="ic" title="${esc(p.title)}">${own(PICON,p.icon)||WRENCH}</span>${ws.map(widget).join('')}<span class="grow"></span></div>`
+    +logs.map(l=>`<details data-k="${esc(proj+'|'+p.title+'|'+l.label)}"><summary>${esc(l.label)}</summary><pre>${l.lines.map(esc).join('\n')}</pre></details>`).join('')}
+async function answer(qid,i){const q=S&&S.questions[qid];if(!q||!q.options||i>=q.options.length)return;
+  await fetch('/api/answer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({qid,answer:q.options[i]})});tick()}
+document.addEventListener('click',e=>{const b=e.target.closest('button[data-q]');if(b)answer(b.dataset.q,+b.dataset.i)});
+function render(s){
+  const agents=Object.values(s.agents), qs=Object.entries(s.questions);
+  const open=qs.filter(([,q])=>!q.answer), need=agents.filter(a=>a.state=='needs you'||a.state=='blocked');
+  const tops=agents.filter(a=>a.role!='worker'||!s.agents[a.parent]), kids=p=>agents.filter(a=>a.role=='worker'&&a.parent==p.agent);
+  const n=open.length+need.length;
+  document.getElementById('sum').textContent=`\ud83d\udda5 ${tops.length}  \ud83e\udd16 ${agents.length-tops.length}  \ud83d\udc64 ${n}  \ud83d\udd12 ${Object.keys(s.locks).length}`;
+  document.title=(n?`(${n}) `:'')+'sb hub';
+  let h='';
+  if(n)h+='<div class="box q">'+open.map(([id,q])=>`<div class="line"><span class="ic">\u2753</span><span class="grow"><b>${esc(q.agent)}</b> ${esc(q.q)}</span>${(q.options||[]).map((o,i)=>`<button data-q="${esc(id)}" data-i="${i}" class="${o==q.default?'def':''}">${esc(o)}</button>`).join('')}${q.deadline>s.now?`<span class="mute" title="the default applies then">\u23f1 ${Math.ceil((q.deadline-s.now)/60)}m</span>`:''}</div>`).join('')
+    +need.map(a=>`<div class="line"><span class="ic">${own(ST,a.state)}</span><span class="grow"><b>${name(a)}</b> ${esc(a.note)}</span><span class="mute">${ago(s.now,a.at)}</span></div>`).join('')+'</div>';
+  h+='<h2>Sessions</h2><div class="box">'+(tops.map(a=>row(s,a,kids(a))).join('')||'<div class="line mute">none</div>')+'</div>';
+  for(const [p,list] of Object.entries(s.providers||{}))h+=`<h2>${esc(p.split('/').pop())}</h2><div class="box">`+(Array.isArray(list)?list:[]).map(x=>provider(x,p)).join('')+'</div>';
+  const dec=qs.filter(([,q])=>q.answer).sort((x,y)=>y[1].answered-x[1].answered).slice(0,5), locks=Object.entries(s.locks);
+  if(dec.length||locks.length)h+='<h2>Log</h2><div class="box">'+locks.map(([k,l])=>`<div class="line"><span class="ic">\ud83d\udd12</span><span class="grow">${esc(k)}</span><span class="mute">${esc(l.by)} \u00b7 ${ago(s.now,l.at)}</span></div>`).join('')
+    +dec.map(([,q])=>`<div class="line"><span class="ic" title="${q.by=='default'?'decided by default':'decided by you'}">${q.by=='default'?'\u23f1':'\ud83d\udc64'}</span><span class="grow">${esc(q.q)}</span><span class="chip">${esc(q.answer)}</span></div>`).join('')+'</div>';
+  const app=document.getElementById('app'),kept=new Set([...app.querySelectorAll('details[open]')].map(d=>d.dataset.k));
+  app.innerHTML=h;
+  app.querySelectorAll('details').forEach(d=>{if(kept.has(d.dataset.k))d.open=true});
+}
+async function tick(){
+  try{S=await (await fetch('/api/state')).json();render(S)}
+  catch(e){document.getElementById('sum').textContent='hub not reachable'}
+}
+tick();setInterval(tick,2000);
+</script>

@@ -15,6 +15,8 @@ and never fail a session when it is down.
                                       ask the owner; prints the chosen option, or the
                                       default at the deadline or with the hub down
   sbhub.py state                      the hub's state as JSON ({} when it is down)
+  sbhub.py trust  <project path>      let the hub run that project's own .sb/providers scripts
+  sbhub.py untrust <project path>     stop doing so (both work with the hub stopped)
   sbhub.py hook                       read one Claude Code hook event on stdin and report it;
                                       always exits 0 (the hub-report mod runs this)
 
@@ -44,6 +46,7 @@ class Hub:
         self.now = now
         self._lock = threading.Lock()
         self.providers = {}
+        self.queued = set()
         self.changed = threading.Event()
         self._data = {"agents": {}, "locks": {}, "questions": {}}
         path = self.home / "state.json"
@@ -89,7 +92,8 @@ class Hub:
                 return {"ok": True, "needs_you": False}
             a = self._data["agents"].setdefault(d["agent"], {})
             before = a.get("state")
-            if d.get("project") and d["project"] not in self.providers:
+            if d.get("project") and d["project"] not in self.providers and d["project"] not in self.queued:
+                self.queued.add(d["project"])
                 self.changed.set()
             for f in AGENT_FIELDS:
                 if d.get(f) not in (None, ""):
@@ -153,6 +157,9 @@ class Hub:
             self._settle()
             return {**json.loads(json.dumps(self._data)), "now": self.now(), "providers": dict(self.providers)}
 
+    def trusted(self):
+        return read_trusted(self.home)
+
 
 SBMAP = Path(__file__).resolve().parent / "sbmap.py"
 REFRESH_EVERY = 15
@@ -173,7 +180,7 @@ def generic_provider(project):
     dirty = len(_run(git + ["status", "--porcelain"]).splitlines())
     last = _run(git + ["log", "-1", "--format=%s (%cr)"]) or "none"
     maps = _run([sys.executable, str(SBMAP), "maps", "--repo", project]).splitlines()[:8]
-    return {"title": "Repo and maps", "widgets": [
+    return {"title": "Repo and maps", "icon": "git", "widgets": [
         {"kind": "status", "label": "Branch", "value": branch, "level": "ok"},
         {"kind": "status", "label": "Uncommitted files", "value": str(dirty), "level": "warn" if dirty else "ok"},
         {"kind": "status", "label": "Last commit", "value": last, "level": "ok"},
@@ -185,14 +192,41 @@ def _provider_error(name, reason):
         {"kind": "status", "label": "provider", "value": str(reason)[:120], "level": "bad"}]}
 
 
-def run_providers(project, timeout=120):
-    """The generic provider, then each executable in <project>/.sb/providers/ by name."""
-    out = [generic_provider(project)]
-    folder = Path(project) / ".sb" / "providers"
+def usable_project(p):
+    """Only an absolute path to a directory that exists is a project."""
+    return isinstance(p, str) and os.path.isabs(p) and os.path.isdir(p)
+
+
+def read_trusted(home):
     try:
-        files = sorted(f for f in folder.iterdir() if f.is_file() and os.access(f, os.X_OK))
+        return set((Path(home) / "trusted").read_text(encoding="utf-8").split("\n")) - {""}
     except OSError:
-        files = []
+        return set()
+
+
+def set_trusted(home, project, yes):
+    paths = sorted(read_trusted(home) - {project} | ({project} if yes else set()))
+    Path(home).mkdir(parents=True, exist_ok=True)
+    (Path(home) / "trusted").write_text("".join(p + "\n" for p in paths), encoding="utf-8")
+
+
+def _scripts(project):
+    """Executable regular files in <project>/.sb/providers/, by name; symlinks are skipped."""
+    try:
+        return sorted(f for f in (Path(project) / ".sb" / "providers").iterdir()
+                      if f.is_file() and not f.is_symlink() and os.access(f, os.X_OK))
+    except OSError:
+        return []
+
+
+def run_providers(project, timeout=120, trusted=True):
+    """The generic provider, then each script in <project>/.sb/providers/ by name (if trusted)."""
+    out = [generic_provider(project)]
+    files = _scripts(project)
+    if files and not trusted:
+        out.append({"title": "Project providers", "widgets": [
+            {"kind": "status", "label": "Not trusted yet", "value": "run: sbhub trust <project>", "level": "warn"}]})
+        return out
     for f in files:
         try:
             r = subprocess.run([str(f)], capture_output=True, text=True, timeout=timeout, cwd=project)
@@ -202,6 +236,10 @@ def run_providers(project, timeout=120):
             d = json.loads(r.stdout)
             if not isinstance(d, dict) or not isinstance(d.get("widgets"), list):
                 raise ValueError("output is not an object with a widgets list")
+            if not all(isinstance(w, dict) for w in d["widgets"]):
+                raise ValueError("every widget must be an object")
+            if not isinstance(d.get("title", ""), str) or not isinstance(d.get("icon", ""), str):
+                raise ValueError("title and icon must be text")
             out.append({**d, "title": d.get("title") or f.name})
         except subprocess.TimeoutExpired:
             out.append(_provider_error(f.name, "timed out after {:g} s".format(timeout)))
@@ -214,20 +252,22 @@ def refresh_loop(hub, every=REFRESH_EVERY):
     """Run the providers for each project with an agent, one project at a time, forever."""
     while True:
         with hub._lock:
-            projects = sorted({a["project"] for a in hub._data["agents"].values() if a.get("project")})
+            projects = sorted({a["project"] for a in hub._data["agents"].values() if usable_project(a.get("project"))})
+        trusted = hub.trusted()
         for p in projects:
-            result = run_providers(p)
+            result = run_providers(p, trusted=p in trusted)
             with hub._lock:
                 hub.providers[p] = result
         with hub._lock:
             for p in [p for p in hub.providers if p not in projects]:
                 del hub.providers[p]
+            hub.queued &= set(projects)
         hub.changed.wait(every)
         hub.changed.clear()
 
 
 DEFAULT_PORT = 8765
-PLACEHOLDER = b"<!doctype html><title>sb hub</title><p>sb hub: the page comes later.</p>"
+PAGE = Path(__file__).resolve().parent / "sbhub.html"
 
 
 def notify(title, text):
@@ -266,7 +306,7 @@ def make_handler(hub):
         def do_GET(self):
             path = self.path.split("?", 1)[0]
             if path == "/":
-                self.send(200, PLACEHOLDER, "text/html; charset=utf-8")
+                self.send(200, PAGE.read_bytes(), "text/html; charset=utf-8")
             elif path == "/api/state":
                 self.send(200, hub.state())
             elif path.startswith("/api/question/"):
@@ -444,6 +484,13 @@ def cmd_hook(port):
     return 0
 
 
+def cmd_trust(a, yes):
+    project = os.path.abspath(a.project)
+    set_trusted(os.environ.get("SB_HUB_HOME") or Path.home() / ".sb-hub", project, yes)
+    print(("trusted " if yes else "untrusted ") + project)
+    return 0
+
+
 def cmd_state(a):
     print(json.dumps(call(a.port, "/api/state")[1]))
     return 0
@@ -473,6 +520,8 @@ def main(argv=None):
         ("--options", {"required": True}), ("--default", {"required": True}),
         ("--wait", {"type": float, "default": 600}))
     add("state")
+    add("trust", ("project", {}))
+    add("untrust", ("project", {}))
     add("hook")
     a = p.parse_args(argv)
     if a.cmd == "serve":
@@ -484,6 +533,8 @@ def main(argv=None):
         return cmd_report(a)
     if a.cmd in ("lock", "unlock"):
         return cmd_lock(a, a.cmd)
+    if a.cmd in ("trust", "untrust"):
+        return cmd_trust(a, a.cmd == "trust")
     if a.cmd == "ask":
         return cmd_ask(a)
     return cmd_state(a)

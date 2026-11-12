@@ -60,6 +60,17 @@ class HubCliTest(HubCase):
         with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/", timeout=5) as r:
             self.assertEqual(r.status, 200)
 
+    def test_the_page_is_served_and_names_its_endpoints(self):
+        html = urllib.request.urlopen(f"http://127.0.0.1:{self.port}/").read().decode()
+        for needle in ("<title>sb hub</title>", "/api/state", "/api/answer", "prefers-color-scheme", "application/json"):
+            self.assertIn(needle, html)
+
+    def test_the_page_has_no_inline_handlers_and_no_outside_resource(self):
+        html = urllib.request.urlopen(f"http://127.0.0.1:{self.port}/").read().decode()
+        self.assertNotIn("onclick", html.lower())
+        for outside in ("http://", "https://", "//cdn", "@import", "url("):
+            self.assertNotIn(outside, html)
+
     def test_state_command_prints_state(self):
         self.hub("report", "--agent", "a", "--state", "idle")
         self.assertIn("a", json.loads(self.hub("state").stdout)["agents"])

@@ -5,7 +5,7 @@ r = subprocess.run(["python3", "-m", "unittest", "discover", "-s", "tests", "-q"
 out = r.stderr
 ran = int((re.search(r"Ran (\d+) tests", out) or [0, 0])[1])
 bad = sum(int(n) for n in re.findall(r"(?:failures|errors)=(\d+)", out))
-print(json.dumps({"title": "Test suite", "widgets": [
+print(json.dumps({"title": "Test suite", "icon": "tests", "widgets": [
     {"kind": "status", "label": "Suite", "value": "green" if r.returncode == 0 else "red", "level": "ok" if r.returncode == 0 else "bad"},
     {"kind": "progress", "label": "Passing", "value": ran - bad, "max": ran},
     {"kind": "counts", "label": "Tests", "items": {"pass": ran - bad, "fail": bad}},
