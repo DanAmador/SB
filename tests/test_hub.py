@@ -68,6 +68,24 @@ class HubTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             h.answer(h.ask("a", "q2?", ["x", "y"], "y", 60)["id"], "z")
 
+    def test_a_late_answer_does_not_replace_the_default(self):
+        h = self.h
+        qid = h.ask("a", "q?", ["x", "y"], "y", 60)["id"]
+        self.t += 61
+        h.answer(qid, "x")
+        q = h.question(qid)
+        self.assertEqual((q["answer"], q["by"]), ("y", "default"))
+
+    def test_ask_wait_must_be_a_number_of_zero_or_more(self):
+        for wait in (-1, "5", None, True):
+            with self.assertRaises(ValueError):
+                self.h.ask("a", "q?", ["x", "y"], "y", wait)
+
+    def test_a_corrupt_or_empty_state_file_starts_empty(self):
+        for text in ("", "{not json", "[]"):
+            (self.home / "state.json").write_text(text, encoding="utf-8")
+            self.assertEqual(Hub(self.home).state()["agents"], {})
+
     def test_state_survives_a_restart(self):
         self.h.lock("k", "a")
         self.assertEqual(Hub(self.home).state()["locks"]["k"]["by"], "a")
