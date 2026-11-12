@@ -24,7 +24,9 @@ Every command but `serve` also takes --port N.
 """
 import argparse
 import json
+import math
 import os
+import shlex
 import subprocess
 import sys
 import threading
@@ -38,6 +40,8 @@ from pathlib import Path
 AGENT_FIELDS = ("name", "project", "role", "parent", "ticket", "state", "note", "done", "total")
 ALERT_STATES = ("needs you", "blocked")
 SILENT_LIMIT = 86400
+ORPHAN_LOCK_LIMIT = 600
+DECIDED_KEPT = 50
 
 
 class Hub:
@@ -48,7 +52,8 @@ class Hub:
         self.providers = {}
         self.queued = set()
         self.changed = threading.Event()
-        self._data = {"agents": {}, "locks": {}, "questions": {}}
+        # aliases: session id -> the agent id that session reports as (`report --agent X`)
+        self._data = {"agents": {}, "locks": {}, "questions": {}, "aliases": {}}
         path = self.home / "state.json"
         try:
             saved = json.loads(path.read_text(encoding="utf-8"))
@@ -63,45 +68,82 @@ class Hub:
         tmp.write_text(json.dumps(self._data), encoding="utf-8")
         os.replace(tmp, self.home / "state.json")
 
+    def _resolve(self, agent):
+        return self._data["aliases"].get(agent, agent)
+
     def _remove(self, agent):
-        agents = self._data["agents"]
+        """Drop an agent, its workers and every alias to or from it."""
+        agents, aliases = self._data["agents"], self._data["aliases"]
         agents.pop(agent, None)
         for k in [k for k, v in agents.items() if v.get("parent") == agent]:
             del agents[k]
+        for k in [k for k, v in aliases.items() if agent in (k, v)]:
+            del aliases[k]
+
+    def _alias(self, sid, target):
+        """From now on session `sid` is `target`: fold its row and its workers into target's."""
+        agents = self._data["agents"]
+        self._data["aliases"][sid] = target
+        mine = agents.pop(sid, None) or {}
+        row = agents.setdefault(target, {})
+        for f in ("project", "at"):
+            if f in mine and f not in row:
+                row[f] = mine[f]
+        for v in agents.values():
+            if v.get("parent") == sid:
+                v["parent"] = target
 
     def _settle(self):
-        """Apply defaults whose deadline passed; drop agents silent for a day."""
+        """Apply defaults whose deadline passed and keep the latest decided questions; drop agents
+        silent for a day and locks whose holder is no longer listed after ten minutes."""
         now = self.now()
         changed = False
-        for q in self._data["questions"].values():
+        questions = self._data["questions"]
+        for q in questions.values():
             if q["answer"] is None and now >= q["deadline"]:
-                q["answer"], q["by"] = q["default"], "default"
+                q["answer"], q["by"], q["answered"] = q["default"], "default", now
                 changed = True
+        decided = sorted((k for k, q in questions.items() if q["answer"] is not None),
+                         key=lambda k: questions[k].get("answered", questions[k]["asked"]))
+        for k in decided[:-DECIDED_KEPT]:
+            del questions[k]
+            changed = True
         for k, v in list(self._data["agents"].items()):
-            if now - v.get("at", now) > SILENT_LIMIT:
+            if k in self._data["agents"] and now - v.get("at", now) > SILENT_LIMIT:
                 self._remove(k)
+                changed = True
+        for k, held in list(self._data["locks"].items()):
+            if self._resolve(held["by"]) not in self._data["agents"] and now - held["at"] > ORPHAN_LOCK_LIMIT:
+                del self._data["locks"][k]
                 changed = True
         if changed:
             self._save()
 
     def report(self, d):
         with self._lock:
+            sid, alias = d["agent"], d.get("alias")
+            if isinstance(alias, str) and alias and alias != sid:
+                self._alias(sid, alias)
+            agent = self._resolve(sid)
             if d.get("state") == "gone":
-                self._remove(d["agent"])
+                self._remove(agent)
                 self._save()
-                return {"ok": True, "needs_you": False}
-            a = self._data["agents"].setdefault(d["agent"], {})
+                return {"ok": True, "needs_you": False, "agent": agent}
+            a = self._data["agents"].setdefault(agent, {})
             before = a.get("state")
             if usable_project(d.get("project")) and d["project"] not in self.providers and d["project"] not in self.queued:
                 self.queued.add(d["project"])
                 self.changed.set()
             for f in AGENT_FIELDS:
-                if d.get(f) not in (None, ""):
-                    a[f] = d[f]
+                if d.get(f) in (None, ""):
+                    continue
+                if agent != sid and (f in ("name", "role") or f == "project" and f in a):
+                    continue  # a session's hook events never rename the agent it reports as
+                a[f] = self._resolve(d[f]) if f == "parent" else d[f]
             a["at"] = self.now()
             self._save()
             after = a.get("state")
-            return {"ok": True, "needs_you": after in ALERT_STATES and after != before}
+            return {"ok": True, "needs_you": after in ALERT_STATES and after != before, "agent": agent}
 
     def lock(self, key, by):
         with self._lock:
@@ -121,10 +163,14 @@ class Hub:
             return {"ok": True}
 
     def ask(self, agent, q, options, default, wait):
-        if isinstance(wait, bool) or not isinstance(wait, (int, float)) or wait < 0:
+        if isinstance(wait, bool) or not isinstance(wait, (int, float)) or not math.isfinite(wait) or wait < 0:
             raise ValueError("wait must be a number of seconds, 0 or more")
-        if not 2 <= len(options) <= 4:
+        if not isinstance(q, str) or not q:
+            raise ValueError("the question must be text")
+        if not isinstance(options, list) or not 2 <= len(options) <= 4:
             raise ValueError("a question takes two to four options")
+        if not all(isinstance(o, str) and o for o in options) or len(set(options)) != len(options):
+            raise ValueError("the options must be distinct, non-empty text")
         if default not in options:
             raise ValueError("the default must be one of the options")
         qid = uuid.uuid4().hex[:8]
@@ -143,7 +189,7 @@ class Hub:
             if answer not in q["options"]:
                 raise ValueError("the answer must be one of the options")
             if q["answer"] is None:
-                q["answer"], q["by"] = answer, by
+                q["answer"], q["by"], q["answered"] = answer, by, self.now()
                 self._save()
             return {"ok": True}
 
@@ -170,7 +216,7 @@ REFRESH_EVERY = 15
 
 def _run(cmd, **kw):
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=20, **kw)
+        r = subprocess.run(cmd, capture_output=True, text=True, errors="replace", timeout=20, **kw)
     except (OSError, subprocess.SubprocessError):
         return ""
     return r.stdout.strip() if r.returncode == 0 else ""
@@ -235,7 +281,8 @@ def run_providers(project, timeout=120, trusted=True):
         return out
     for f in files:
         try:
-            r = subprocess.run([str(f)], capture_output=True, text=True, timeout=timeout, cwd=project)
+            r = subprocess.run([str(f)], capture_output=True, text=True, errors="replace", timeout=timeout,
+                               cwd=project)
             if r.returncode != 0:
                 out.append(_provider_error(f.name, "exit {}: {}".format(r.returncode, r.stderr.strip() or r.stdout.strip())))
                 continue
@@ -261,7 +308,10 @@ def refresh_loop(hub, every=REFRESH_EVERY):
             projects = sorted({a["project"] for a in hub._data["agents"].values() if usable_project(a.get("project"))})
         trusted = hub.trusted()
         for p in projects:
-            result = run_providers(p, trusted=p in trusted)
+            try:
+                result = run_providers(p, trusted=p in trusted)
+            except Exception as e:  # one project's failure never stops the others' refresh
+                result = [_provider_error("providers", "{}: {}".format(type(e).__name__, e))]
             with hub._lock:
                 hub.providers[p] = result
         with hub._lock:
@@ -305,11 +355,23 @@ def make_handler(hub):
                 body = json.dumps(body).encode("utf-8")
             self.send_response(code)
             self.send_header("Content-Type", ctype)
+            self.send_header("X-Frame-Options", "DENY")
+            self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
 
+        def for_this_hub(self):
+            """The Host must name the hub itself: a page that rebinds its own name to 127.0.0.1 gets nothing."""
+            port = self.server.server_address[1]
+            if self.headers.get("Host") in ("127.0.0.1:{}".format(port), "localhost:{}".format(port)):
+                return True
+            self.send(403, {"ok": False, "error": "forbidden"})
+            return False
+
         def do_GET(self):
+            if not self.for_this_hub():
+                return
             path = self.path.split("?", 1)[0]
             if path == "/":
                 self.send(200, PAGE.read_bytes(), "text/html; charset=utf-8")
@@ -332,6 +394,8 @@ def make_handler(hub):
             return origin is None or origin in ("http://127.0.0.1:{}".format(port), "http://localhost:{}".format(port))
 
         def do_POST(self):
+            if not self.for_this_hub():
+                return
             path = self.path.split("?", 1)[0]
             if not self.from_the_page_or_a_program():
                 self.send(403, {"ok": False, "error": "forbidden"})
@@ -341,11 +405,11 @@ def make_handler(hub):
                 d = json.loads(self.rfile.read(n) or b"{}")
                 if not isinstance(d, dict):
                     raise ValueError("the body must be a JSON object")
-                code, out = 200, None
+                code, out, alert = 200, None, None
                 if path == "/api/report":
                     out = hub.report(d)
                     if out["needs_you"]:
-                        notify("sb hub: needs you", "{}: {}".format(d["agent"], d.get("note") or d.get("state")))
+                        alert = ("sb hub: needs you", "{}: {}".format(out["agent"], d.get("note") or d.get("state")))
                 elif path == "/api/lock":
                     out = hub.lock(d["key"], d["by"])
                     code = 200 if out["ok"] else 409
@@ -353,12 +417,14 @@ def make_handler(hub):
                     out = hub.unlock(d["key"], d["by"])
                 elif path == "/api/ask":
                     out = hub.ask(d["agent"], d["q"], d["options"], d["default"], d["wait"])
-                    notify("sb hub: question", "{}: {}".format(d["agent"], d["q"]))
+                    alert = ("sb hub: question", "{}: {}".format(d["agent"], d["q"]))
                 elif path == "/api/answer":
                     out = hub.answer(d["qid"], d["answer"], d.get("by", "you"))
                 else:
                     code, out = 404, {"ok": False, "error": "not found"}
                 self.send(code, out)
+                if alert:  # after the answer: a slow osascript must not time the caller out
+                    threading.Thread(target=notify, args=alert, daemon=True).start()
             except KeyError as e:
                 missing = e.args[0] if e.args else ""
                 if path == "/api/answer" and missing == d.get("qid"):
@@ -447,6 +513,22 @@ def cmd_ask(a):
     return 0
 
 
+def reported_agent(command):
+    """X in a shell command that runs `sbhub.py report --agent X`, else None."""
+    try:
+        words = shlex.split(command)
+    except (ValueError, AttributeError):
+        return None
+    for i, w in enumerate(words):
+        if w.endswith("sbhub.py") and words[i + 1:i + 2] == ["report"]:
+            for j, a in enumerate(words[i + 2:], i + 2):
+                if a == "--agent" and j + 1 < len(words):
+                    return words[j + 1] or None
+                if a.startswith("--agent="):
+                    return a[len("--agent="):] or None
+    return None
+
+
 def event_report(e):
     """The report body for one Claude Code hook event, or None for an event the hub ignores."""
     name, sid, cwd = e.get("hook_event_name"), e.get("session_id"), e.get("cwd")
@@ -463,9 +545,12 @@ def event_report(e):
         r = {"state": "working", "note": "{}: {}".format(e["tool_name"], detail)[:90]}
         if e.get("agent_id"):
             return {**r, "agent": e["agent_id"], "role": "worker", "parent": sid}
-        return {**session, **r}
+        alias = reported_agent(tin.get("command")) if e["tool_name"] == "Bash" else None
+        return {**session, **r, **({"alias": alias} if alias else {})}
     if name == "Notification":
-        return {**session, "state": "needs you", "note": e["message"]}
+        idle = (e["notification_type"] == "idle_prompt" if "notification_type" in e
+                else "waiting for your input" in e["message"])
+        return {**session, "state": "your turn" if idle else "needs you", "note": e["message"]}
     if name == "Stop":
         return {**session, "state": "your turn", "note": "finished its turn"}
     if name == "SubagentStart":

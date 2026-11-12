@@ -49,6 +49,29 @@ class EventReportTest(unittest.TestCase):
         r = sbhub.event_report(ev("Notification", message="needs permission"))
         self.assertEqual((r["agent"], r["state"], r["note"]), ("abcdef123", "needs you", "needs permission"))
 
+    def test_an_idle_prompt_is_your_turn_not_needs_you(self):
+        for kw in ({"notification_type": "idle_prompt", "message": "Claude is idle"},
+                   {"message": "Claude is waiting for your input"}):
+            r = sbhub.event_report(ev("Notification", **kw))
+            self.assertEqual((r["state"], r["note"]), ("your turn", kw["message"]), kw)
+        r = sbhub.event_report(ev("Notification", notification_type="permission_prompt",
+                                  message="Claude is waiting for your input"))
+        self.assertEqual(r["state"], "needs you")
+
+    def test_a_bash_call_of_sbhub_report_names_the_session_alias(self):
+        def bash(cmd, **kw):
+            return sbhub.event_report(ev("PreToolUse", tool_name="Bash", tool_input={"command": cmd}, **kw))
+        cmd = 'cd /x && python3 ~/.claude/skills/sb/scripts/sbhub.py report --agent night-run --note "a b"'
+        self.assertEqual(bash(cmd)["alias"], "night-run")
+        self.assertEqual(bash(cmd.replace("--agent night-run", "--agent=night-run"))["alias"], "night-run")
+        for other in ("python3 sbhub.py report --note x", "python3 sbhub.py ask --agent a --q q",
+                      'python3 sbhub.py report --agent "unclosed', "echo report --agent x",
+                      "python3 sbhub.py report --agent"):
+            r = bash(other)
+            self.assertNotIn("alias", r, other)
+            self.assertEqual(r["agent"], "abcdef123")
+        self.assertNotIn("alias", bash(cmd, agent_id="w"))
+
     def test_stop(self):
         r = sbhub.event_report(ev("Stop"))
         self.assertEqual((r["agent"], r["state"], r["note"]), ("abcdef123", "your turn", "finished its turn"))

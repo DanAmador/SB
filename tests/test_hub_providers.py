@@ -5,12 +5,14 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
 from helpers import HubCase, free_port, wait_for
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills" / "sb" / "scripts"))
+import sbhub  # noqa: E402
 from sbhub import Hub, generic_provider, run_providers, usable_project  # noqa: E402
 
 
@@ -131,6 +133,32 @@ class ProviderCase(unittest.TestCase):
         hub.report({"agent": "b", "project": self.repo})
         hub.report({"agent": "a", "project": self.repo, "state": "working"})
         self.assertFalse(hub.changed.is_set())
+
+    def test_output_that_is_not_utf8_is_shown_not_fatal(self):
+        script(self.repo, "a-bytes", 'import sys; sys.stdout.buffer.write(b"bad \\xff"); sys.exit(1)')
+        got = run_providers(self.repo)[1]["widgets"][0]["value"]
+        self.assertEqual(got, "exit 1: bad \ufffd")
+
+    def test_one_failing_project_does_not_stop_the_refresh(self):
+        other = Path(self._tmp.name, "zz-after-the-failing-one")
+        other.mkdir()
+        real = sbhub.run_providers
+
+        def flaky(project, **kw):
+            if project == self.repo:
+                raise RuntimeError("boom")
+            return real(project, **kw)
+        sbhub.run_providers = flaky
+        self.addCleanup(setattr, sbhub, "run_providers", real)
+        hub = Hub(self._tmp.name)
+        hub.report({"agent": "a", "project": self.repo})
+        hub.report({"agent": "b", "project": str(other)})
+        t = threading.Thread(target=sbhub.refresh_loop, args=(hub, 3600), daemon=True)
+        t.start()
+        wait_for(lambda: str(other) in hub.providers)
+        self.assertTrue(t.is_alive())
+        self.assertEqual(hub.providers[self.repo][0]["widgets"][0]["level"], "bad")
+        self.assertIn("boom", hub.providers[self.repo][0]["widgets"][0]["value"])
 
 
 class RefreshTest(HubCase):

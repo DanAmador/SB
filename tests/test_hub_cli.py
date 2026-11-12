@@ -124,6 +124,52 @@ class HubCliTest(HubCase):
         r = subprocess.run([sys.executable, SCRIPT, "state"], capture_output=True, text=True, env=env, timeout=30)
         self.assertEqual(r.returncode, 0)
 
+    def raw_get(self, headers, path="/api/state"):
+        req = urllib.request.Request(f"http://127.0.0.1:{self.port}{path}", headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return r.status, r.headers
+        except urllib.error.HTTPError as e:
+            e.close()
+            return e.code, e.headers
+
+    def test_a_request_for_another_host_is_refused(self):
+        self.assertEqual(self.raw_get({"Host": f"evil.example:{self.port}"})[0], 403)
+        self.assertEqual(self.raw_get({"Host": f"localhost:{self.port}"})[0], 200)
+        self.assertEqual(self.raw_post({"Content-Type": "application/json", "Host": f"evil.example:{self.port}"}), 403)
+        self.assertNotIn("a", self.get("/api/state")["agents"])
+
+    def test_every_response_refuses_framing_and_sniffing(self):
+        for path in ("/", "/api/state", "/nope"):
+            headers = self.raw_get({}, path)[1]
+            self.assertEqual((headers["X-Frame-Options"], headers["X-Content-Type-Options"]), ("DENY", "nosniff"))
+
+    def test_the_page_heads_the_needs_you_box_and_wraps_a_long_session_row(self):
+        html = urllib.request.urlopen(f"http://127.0.0.1:{self.port}/").read().decode()
+        self.assertIn("<h2>Needs you</h2>", html)
+        self.assertIn(".row{flex-wrap:wrap}", html)
+
+    def test_a_slow_notification_does_not_delay_the_answer(self):
+        slow = []
+        real = sbhub.notify
+        sbhub.notify = lambda *a: (slow.append(a), time.sleep(3))
+        self.addCleanup(setattr, sbhub, "notify", real)
+        hub = sbhub.Hub(self._tmp.name)
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), sbhub.make_handler(hub))
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        port = server.server_address[1]
+        p = subprocess.Popen([sys.executable, SCRIPT, "ask", "--agent", "a", "--q", "q?", "--options", "x|y",
+                              "--default", "y", "--wait", "6", "--port", str(port)],
+                             stdout=subprocess.PIPE, text=True, env=self.env)
+        self.procs.append(p)
+        qid = wait_for(lambda: next(iter(hub.state()["questions"]), None))
+        time.sleep(1)
+        hub.answer(qid, "x")
+        self.assertEqual(p.communicate(timeout=10)[0].strip(), "x")
+        self.assertEqual(len(slow), 1)
+
     def test_an_unexpected_error_is_a_500_not_a_dropped_connection(self):
         class Broken(sbhub.Hub):
             def report(self, d):

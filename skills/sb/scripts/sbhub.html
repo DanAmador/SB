@@ -15,6 +15,7 @@ h2{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--mute
 .chip.bad{border-color:var(--bad);color:var(--bad)}.chip.warn{border-color:var(--warn);color:var(--warn)}.chip.ok{color:var(--ok)}
 button{font:inherit;font-size:13px;padding:3px 10px;border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer;flex:none}
 button.def{background:var(--acc);border-color:var(--acc);color:#fff}
+.row{flex-wrap:wrap}.row .grow{flex-basis:120px}.who{display:flex;gap:8px;align-items:center;min-width:0}
 .q{border-color:var(--acc)}.q .line{flex-wrap:wrap}.q .grow{white-space:normal;flex-basis:240px}
 .bar{width:48px;height:6px;border-radius:3px;background:var(--line);overflow:hidden;flex:none}.bar i{display:block;height:100%;background:var(--ok)}
 details{padding:0 10px 6px}summary{cursor:pointer;color:var(--mute);font-size:12px}pre{margin:4px 0 0;font:11px/1.4 ui-monospace,monospace;color:var(--mute);white-space:pre-wrap}
@@ -38,7 +39,7 @@ function pips(d,t){t=Math.min(t,40);let h='';for(let i=0;i<t;i++)h+=`<i class="$
 function chip(s,a){const [ic,txt]=act(a),c=a.state=='blocked'||a.state=='needs you'?'bad':a.state=='done'?'ok':'';
   return `<span class="chip ${c}${old(s,a)}" title="${name(a)} \u00b7 ${esc(a.state)} \u00b7 ${esc(txt)} \u00b7 ${ago(s.now,a.at)}">${own(ST,a.state)||'\u2022'} ${esc(tk(a))}${ic?' '+ic:''}</span>`}
 function row(s,a,kids){const [ic,txt]=act(a),t=num(a.total);
-  return `<div class="line${old(s,a)}"><span class="ic" title="${esc(a.state)}">${own(ST,a.state)||'\u2022'}</span><b>${name(a)}</b>${t>0?pips(num(a.done),t):''}<span class="grow mute">${ic} ${esc(txt)}</span>${kids.map(k=>chip(s,k)).join('')}<span class="mute">${ago(s.now,a.at)}</span></div>`}
+  return `<div class="line row${old(s,a)}"><span class="who"><span class="ic" title="${esc(a.state)}">${own(ST,a.state)||'\u2022'}</span><b>${name(a)}</b>${t>0?pips(num(a.done),t):''}</span><span class="grow mute">${ic} ${esc(txt)}</span>${kids.map(k=>chip(s,k)).join('')}<span class="mute">${ago(s.now,a.at)}</span></div>`}
 function widget(w){
   const label=esc(w.label);
   if(w.kind=='status')return `<span class="chip" title="${label}">${own(LV,w.level)||''} ${esc(String(w.value).slice(0,40))}</span>`;
@@ -63,7 +64,7 @@ function render(s){
   document.getElementById('sum').textContent=`\ud83d\udda5 ${tops.length}  \ud83e\udd16 ${agents.length-tops.length}  \ud83d\udc64 ${n}  \ud83d\udd12 ${Object.keys(s.locks).length}`;
   document.title=(n?`(${n}) `:'')+'sb hub';
   let h='';
-  if(n)h+='<div class="box q">'+open.map(([id,q])=>`<div class="line"><span class="ic">\u2753</span><span class="grow"><b>${esc(q.agent)}</b> ${esc(q.q)}</span>${(q.options||[]).map((o,i)=>`<button data-q="${esc(id)}" data-i="${i}" class="${o==q.default?'def':''}">${esc(o)}</button>`).join('')}${q.deadline>s.now?`<span class="mute" title="the default applies then">\u23f1 ${Math.ceil((q.deadline-s.now)/60)}m</span>`:''}</div>`).join('')
+  if(n)h+='<h2>Needs you</h2><div class="box q">'+open.map(([id,q])=>`<div class="line"><span class="ic">\u2753</span><span class="grow"><b>${esc(q.agent)}</b> ${esc(q.q)}</span>${(q.options||[]).map((o,i)=>`<button data-q="${esc(id)}" data-i="${i}" class="${o==q.default?'def':''}">${esc(o)}</button>`).join('')}${q.deadline>s.now?`<span class="mute" title="the default applies then">\u23f1 ${Math.ceil((q.deadline-s.now)/60)}m</span>`:''}</div>`).join('')
     +need.map(a=>`<div class="line"><span class="ic">${own(ST,a.state)}</span><span class="grow"><b>${name(a)}</b> ${esc(a.note)}</span><span class="mute">${ago(s.now,a.at)}</span></div>`).join('')+'</div>';
   h+='<h2>Sessions</h2><div class="box">'+(tops.map(a=>row(s,a,kids(a))).join('')||'<div class="line mute">none</div>')+'</div>';
   for(const [p,list] of Object.entries(s.providers||{}))h+=`<h2>${esc(p.split('/').pop())}</h2><div class="box">`+(Array.isArray(list)?list:[]).map(x=>provider(x,p)).join('')+'</div>';
