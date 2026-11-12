@@ -19,8 +19,10 @@ unlocked.
 - **`lock <name> --by <agent>`**, then **`unlock`** with the same arguments: a resource one agent
   may use at a time (the Unity editor, a port). Prints `ok`, or exits 1 `held by <who>`: do the
   work that needs no lock, then try again while the holder is still listed in `sbhub state`; after
-  ~5 minutes, report yourself `--state blocked`. Tickets are never locked here: `sbmap claim` holds
-  its own lock and exits 3 when it cannot get it in 5 s.
+  ~5 minutes, report yourself `--state blocked`. A holder no longer listed loses the lock 10 minutes
+  after taking it: wait for the hub to drop it, or the owner clears it with `sbhub unlock <name> --by
+  <holder>`. Tickets are never locked here: `sbmap claim` holds its own lock and exits 3 when it
+  cannot get it in 5 s.
 
 ## Providers
 
@@ -52,11 +54,12 @@ files there (a README) are ignored.
 A script prints one JSON object on stdout and exits 0:
 
 ```json
-{"title": "Test suite", "icon": "flask", "widgets": [
+{"title": "Test suite", "icon": "tests", "widgets": [
   {"kind": "status", "label": "Suite", "value": "green", "level": "ok"}]}
 ```
 
-- `title`: shown as the section heading; defaults to the file name.
+- `title`: the tooltip on the provider's row (its icon); defaults to the file name. The heading
+  above the rows is the project's folder name.
 - `icon`: optional short name the page maps to a pictogram: `git`, `tests`, `unity`, `build`,
   `server`; anything else shows a wrench.
 - `widgets`: a list; required.
@@ -78,7 +81,9 @@ Labels and values are shown to the owner as written: plain words, no internal co
 
 ### Example
 
-`.sb/providers/tests` in this repo runs the unittest suite and prints a `status`, a `progress`, a
-`counts` and a `log` widget. Copy it as a starting point; make it executable (`chmod +x`).
+`.sb/providers/tests` in this repo is an example: it runs the unittest suite and prints a `status`,
+a `progress`, a `counts` and a `log` widget. It reruns only when `HEAD` or `git status` changed
+since its last run, and otherwise reprints the cached result. Copy it as a starting point; make it
+executable (`chmod +x`).
 
 The hub serves the latest results in `GET /api/state` as `"providers": {project: [result, ...]}`.

@@ -1,12 +1,37 @@
 #!/usr/bin/env python3
-"""Example project provider: this repo's test suite, as widgets."""
-import json, re, subprocess
-r = subprocess.run(["python3", "-m", "unittest", "discover", "-s", "tests", "-q"], capture_output=True, text=True)
+"""Example project provider: this repo's test suite, as widgets.
+
+It reruns the suite only when HEAD or the working tree changed since its last run, and otherwise
+prints the cached result (kept in the system temp dir, never in the repo). It never runs from
+inside its own run, so the suite cannot recurse."""
+import hashlib, json, os, re, subprocess, sys, tempfile
+GUARD = "SB_PROVIDER_TESTS_RUNNING"
+if os.environ.get(GUARD):
+    print(json.dumps({"title": "Test suite", "icon": "tests", "widgets": [
+        {"kind": "status", "label": "Suite", "value": "not run inside its own run", "level": "warn"}]}))
+    sys.exit(0)
+repo = os.getcwd()
+git = lambda *a: subprocess.run(["git", "-C", repo, *a], capture_output=True, text=True, errors="replace").stdout
+key = git("rev-parse", "HEAD") + git("status", "--porcelain")
+cache = os.path.join(tempfile.gettempdir(), "sb-provider-tests-" + hashlib.sha1(repo.encode()).hexdigest()[:12] + ".json")
+try:
+    with open(cache, encoding="utf-8") as f:
+        saved = json.load(f)
+    if saved["key"] == key:
+        print(saved["out"])
+        sys.exit(0)
+except (OSError, ValueError, KeyError, TypeError):
+    pass
+r = subprocess.run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-q"], capture_output=True,
+                   text=True, errors="replace", env={**os.environ, GUARD: "1"})
 out = r.stderr
-ran = int((re.search(r"Ran (\d+) tests", out) or [0, 0])[1])
+ran = int((re.search(r"Ran (\d+) tests?", out) or [0, 0])[1])
 bad = sum(int(n) for n in re.findall(r"(?:failures|errors)=(\d+)", out))
-print(json.dumps({"title": "Test suite", "icon": "tests", "widgets": [
+result = json.dumps({"title": "Test suite", "icon": "tests", "widgets": [
     {"kind": "status", "label": "Suite", "value": "green" if r.returncode == 0 else "red", "level": "ok" if r.returncode == 0 else "bad"},
     {"kind": "progress", "label": "Passing", "value": ran - bad, "max": ran},
     {"kind": "counts", "label": "Tests", "items": {"pass": ran - bad, "fail": bad}},
-    {"kind": "log", "label": "Last lines", "lines": out.strip().splitlines()[-2:]}]}))
+    {"kind": "log", "label": "Last lines", "lines": out.strip().splitlines()[-2:]}]})
+with open(cache, "w", encoding="utf-8") as f:
+    json.dump({"key": key, "out": result}, f)
+print(result)

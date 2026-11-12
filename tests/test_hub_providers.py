@@ -161,6 +161,48 @@ class ProviderCase(unittest.TestCase):
         self.assertIn("boom", hub.providers[self.repo][0]["widgets"][0]["value"])
 
 
+class ExampleProviderTest(unittest.TestCase):
+    """This repo's .sb/providers/tests reruns the suite only when the repo changed."""
+    SCRIPT = Path(__file__).resolve().parents[1] / ".sb" / "providers" / "tests"
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.repo = Path(make_repo(self._tmp.name))
+        self.count = Path(self._tmp.name, "runs")
+        (self.repo / "tests").mkdir()
+        (self.repo / "tests" / "test_one.py").write_text(
+            "import unittest\nopen({!r}, 'a').write('x')\n\n\nclass T(unittest.TestCase):\n"
+            "    def test_it(self):\n        pass\n".format(str(self.count)))
+        cache = Path(self._tmp.name, "tmp")
+        cache.mkdir()
+        self.env = {**os.environ, "TMPDIR": str(cache)}
+        self.env.pop("SB_PROVIDER_TESTS_RUNNING", None)
+
+    def run_it(self, **env):
+        r = subprocess.run([str(self.SCRIPT)], cwd=self.repo, capture_output=True, text=True,
+                           env={**self.env, **env}, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)
+
+    def runs(self):
+        return len(self.count.read_text()) if self.count.exists() else 0
+
+    def test_it_reruns_only_when_head_or_the_tree_changed(self):
+        first = self.run_it()
+        self.assertEqual((first["widgets"][2]["items"], self.runs()), ({"pass": 1, "fail": 0}, 1))
+        self.assertEqual(self.run_it(), first)
+        self.assertEqual(self.runs(), 1)
+        (self.repo / "new.txt").write_text("x")
+        self.run_it()
+        self.assertEqual(self.runs(), 2)
+        self.assertEqual(sorted(f.name for f in self.repo.iterdir()), [".git", "new.txt", "tests"])
+
+    def test_it_never_runs_the_suite_from_inside_its_own_run(self):
+        out = self.run_it(SB_PROVIDER_TESTS_RUNNING="1")
+        self.assertEqual((out["title"], self.runs()), ("Test suite", 0))
+
+
 class RefreshTest(HubCase):
     def setUp(self):
         self._vault = tempfile.TemporaryDirectory()
