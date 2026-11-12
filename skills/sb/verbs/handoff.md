@@ -18,5 +18,5 @@ vault file a fresh agent can start from with one pasted line, in any tool.
    and what would you have to ask? Fix every gap it names, and re-run until its first action is
    right and it has only the listed question.
 4. **Print the kickoff line** in its own block, ready to paste:
-   `Read <absolute path> and do what it says.` plus the role sentence. Then one line on what the
-   next session does first and which tier should run it, and `obsidian open` the handoff.
+   `Read <absolute path> and do what it says.` plus the role sentence. Then one line: what the
+   next session does first and which tier runs it. `obsidian open` the handoff.

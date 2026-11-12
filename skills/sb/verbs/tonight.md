@@ -44,26 +44,27 @@ changes; a one-repo night skips them.
    - *Operator:* each lane session drafts its queue, `paths` and briefs in its repo (no code, no new
      tickets yet) and messages the operator, who merges them into one proposal and splits the agent
      cap, one implementer per lane by default. A scope the owner gives a lane directly replaces its queue.
-4. **Present one proposal**, in plain text, in this order:
-   1. What "go" starts (map, tickets, lanes, until what clock time).
-   2. What the vault and reconciliation gave you (🗺️ closed, moved, half-built).
-   3. The queue per lane: ticket name link · tier/model · hours, then its `why`; ≤5 visible, the
-      rest folded; then what is not queued and why.
-   4. What the owner will *see* in the morning, per ticket; say so when it is invisible structure.
-   5. ⚠️ peers and contract conflicts, with the agents at once (lanes plus peers) against the cap.
-   6. Questions the evidence raised, each with ➡️ its default, applied on a bare "go". None is fine.
-   7. Tests: what runs per ticket, what runs once, or nothing, and the ruling behind it.
+4. **Write the proposal on the run board, then ask for "go".** The board is at the path
+   `sbmap run <map>` prints (`wayfinder/<project>/runs/<date>-<map name>/<date>-<map name>.md`; the
+   run's briefs and reports go in that folder), from
+   [templates/checkpoint.md](../templates/checkpoint.md), with the map's wikilink so `sbmap status`
+   finds it. It holds the contract, a row per ticket (model, paths or ports, session, state), a log,
+   and under `## Proposal`:
+   1. What the vault and reconciliation gave you (🗺️ closed, moved, half-built).
+   2. The queue per lane: ticket name link · tier/model · hours · its `why` · what the owner will
+      *see* in the morning (or "invisible structure"); then what is not queued and why.
+   3. ⚠️ Peers and contract conflicts, with the agents at once (lanes plus peers) against the cap.
+   4. Tests: what runs per ticket, what runs once, or nothing, and the ruling behind it.
 
-   Write the **run board** before presenting it, at the path `sbmap run <map>` prints
-   (`wayfinder/<project>/runs/<date>-<map name>/<date>-<map name>.md`; the run's briefs and reports go
-   in that folder beside it), from
-   [templates/checkpoint.md](../templates/checkpoint.md), holding the contract, a row per ticket
-   (model, paths or ports, session, state) and a log, with the map's wikilink so `sbmap status`
-   finds it. The proposal ends with the two ways to start:
-   - **"go"**: the run starts here at once. Use it when leaving the machine.
-   - **"`/clear`, then `/sb resume <board path>`"**: the same run from a cleared session, about 15%
-     cheaper, since every operator turn here re-reads the planning conversation. Shown only past
-     ~60k of context.
+   Chat, nothing else:
+   1. What "go" starts: map, ticket count, lanes, until what clock time.
+   2. The board's link.
+   3. Questions the evidence raised, each with ➡️ its default, applied on a bare "go". None is fine.
+   4. The two ways to start:
+      - **"go"**: the run starts here at once. Use it when leaving the machine.
+      - **"`/clear`, then `/sb resume <board path>`"**: the same run from a cleared session, about
+        15% cheaper, since every operator turn here re-reads the planning conversation. Shown only
+        past ~60k of context.
 
    Either accepts everything; edits ("drop X", "no lane B") apply, then the run starts without a
    second round. This is the run's only stop for the owner: after either, nothing waits on them.
@@ -121,5 +122,6 @@ changes; a one-repo night skips them.
 8. **Close the night.**
    - The slow suite, if the contract says so.
    - The final whole-run review on the capable tier, with **one** fix wave; *operator:* one per lane.
-   - The board's *Morning digest*, the shape `/sb morning` prints; *operator:* once, every lane in it.
+   - The board's *Morning digest*, in the sections [morning](morning.md) step 3 names; *operator:*
+     once, every lane in it. Chat: one line and the board's link.
    - Power off only if the owner said so tonight.

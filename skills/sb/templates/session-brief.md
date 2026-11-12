@@ -23,5 +23,5 @@ throwaway data and ports (<ports>), never the owner's.
 - Never ask the owner. Take the recommendation and write it on the ticket before you finish:
   `sbmap comment <map> <NNN> --text "R: <ruling>, cost if wrong: <…>"`.
 - Write your report to `<board folder>/<board name>/<NNN>.md`: commit, each check with its counts,
-  what you could **not** verify, rulings, files. Your last message: line 1 what works now and how to
-  see it, then the report's path.
+  what you could **not** verify, rulings, files. Say nothing along the way. Your last message, two
+  lines: what works now and how to see it; the report's path.

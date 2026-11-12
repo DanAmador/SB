@@ -36,14 +36,12 @@ Done when every article in `findings` has its line in the report and every line 
 
 ## Report
 
-`obsidian open` the report when the owner is present. In chat, link it with the line
-`sbmap uri <report>` prints:
+`obsidian open` the report when the owner is present. Chat:
 
-1. Line 1: "Review <report link>: tick each finding you accept; under one that is wrong, add a line
-   saying what is true."
+1. "Review <report link, the line `sbmap uri <report>` prints>: tick each finding you accept; under
+   one that is wrong, add a line saying what is true."
 2. The outcome in one line.
 3. 👤 Your calls, each with ➡️.
-4. The five findings, 🆕 new article or 💬 merged into, with ⚠️ on any dispute.
 
 ## Applying the review
 

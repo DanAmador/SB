@@ -15,8 +15,9 @@ A run stopped (a usage limit, a crash, a context that ran out) or the owner says
      ([reference/obsidian.md](../reference/obsidian.md))
 
    Completed work is never re-dispatched.
-3. **Say where things are** in five lines or fewer: done since the checkpoint, in flight, next, and
-   any ruling the dead session made. If the owner only asked to be reoriented, stop here.
+3. **Say where things are** in three lines or fewer: done since the checkpoint, in flight, next;
+   rulings the dead session made go on the checkpoint, linked. If the owner only asked to be
+   reoriented, stop here.
 4. **Continue** under the recorded contract, at the step the trail stopped on (in a night run,
    `tonight` step 6, or step 5 for a run board with nothing logged yet: the owner chose the cleared
    start; otherwise the handoff's next step). Update the checkpoint before the first dispatch.

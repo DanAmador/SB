@@ -18,8 +18,8 @@ later run alone. This replaces the wayfinder skill's *Chart the map*: load no ot
    - Structural decisions are `architecture` tickets.
 5. **Verify:** `sbmap check <map>` clean, `sbmap verify <map>`. With Obsidian running,
    `obsidian open path="wayfinder/<repo>/<effort>/map.md"`.
-6. **Read it back (plain-reader check).** Print the map's plain-words section and each ticket's
-   title + why, nothing else, and fix what fails before step 7:
+6. **Read it back (plain-reader check).** Read the map's plain-words section and each ticket's
+   title + why (`sbmap info <map>`), nothing else, and fix what fails before step 7:
    - [ ] The owner's words are quoted (`--said`) wherever they gave a reason.
    - [ ] Each why says the problem and what the owner will see, in plain words: no class names, internal codes or bare ticket numbers (a measurement with its unit is fine).
    - [ ] Each Done-when can be checked by running or looking.
@@ -29,7 +29,8 @@ later run alone. This replaces the wayfinder skill's *Chart the map*: load no ot
 
    Report one line: `✅ plain-reader check passed`, or `⚠️ fixed: <what>`. Only then ask the owner.
 7. **Readiness check.** For each frontier ticket: could an agent start it tonight with no question?
-   Say which are ready, which need a grilling session, and offer `/sb tonight` for the ready ones.
+   Chat: "<N> tickets, <R> ready for `/sb tonight`, <G> need a talk first", the map's link, and
+   the open questions with their ➡️ defaults.
 
 Research tickets resolve at once in parallel subagents (the research skill); their findings go to
 `<map>/research/<topic>.md` in the vault, linked from the ticket. Charting resolves nothing else.

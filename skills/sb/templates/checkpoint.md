@@ -15,6 +15,11 @@ any point. **Read this first, then what it names.** Last updated: <date time>.
      then a ## Log, one line per ticket as the operator checks it. -->
 
 
+## Proposal
+
+<!-- tonight step 4: reconciliation, the queue per lane with whys and what the owner will see,
+     what is not queued, peers and conflicts, tests. -->
+
 ## How to resume
 
 1. `git log --oneline <base>..` on the branch, then the ledger. Completed work is never re-dispatched.

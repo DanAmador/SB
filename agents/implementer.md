@@ -35,5 +35,5 @@ Commit only your own paths, by explicit pathspec, when the ticket's checks pass:
 ## Report (required)
 
 Write the report path from the brief: the commit sha, each check run with its result and counts,
-what you could **not** verify and why, every ruling you made, files touched. Then reply with its
-path and a three-line summary.
+what you could **not** verify and why, every ruling you made, files touched. Say nothing between
+tool calls. Then reply in two lines: what works now, and the report's path.

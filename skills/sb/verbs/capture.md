@@ -15,5 +15,5 @@ ticket an agent can later run from the ticket alone.
    `sbmap new <map> --title "<sentence stating the behaviour>" --why "<the problem in one plain line>" --said "<the owner's words, verbatim>" --type task --question "<question>" --done-when "<done-when>" [--blocked-by 624,625]`
    (`--type architecture` for a structural question; the flags as in [SKILL.md](../SKILL.md#every-ticket-and-map-says-why-in-the-owners-words)).
 5. `sbmap check <map>` clean, `sbmap verify <map>`.
-6. Report one line per item: 🆕 created, 💬 added to, ♻️ reopened, each with its name link; a
-   learned item as `learn` reports it.
+6. Chat: one line of counts ("🆕 3 · 💬 1 · ♻️ 1 · 1 learned") and the map's link; the tickets say
+   the rest.

@@ -12,5 +12,5 @@ Lanes and worktrees come home ("have you merged all the worktrees?", "merge ever
    Conflicts: resolve them, then run the contract's fast loop.
 4. **Clean up** only what merged: its worktree (the host's cleanup tool when there is one), then the
    branch. List orphaned agents and batch processes; stop the ones this run started.
-5. Update the checkpoint and resolve the tickets each merge finished, and end with the 🎮 list of
-   what the owner should play now.
+5. Update the checkpoint and resolve the tickets each merge finished; the checkpoint gets the 🎮
+   list of what the owner should play now. Chat: what merged in one line, and its link.

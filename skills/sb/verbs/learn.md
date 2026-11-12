@@ -136,7 +136,6 @@ can do is a command, so tokens go only to judging changed code.
 
 ## Report
 
-One line per source, as `capture`
-reports: 🆕 new article, 💬 merged into, ⚠️ disputed, or "no material", each with the article's
-name as a link and where it is anchored (`<repo>@<short sha>`, or ⚠️ unanchored and why). Then the backlog left, and one action under two minutes (often: rule on a ⚠️
-dispute).
+The wiki log and the run note hold one line per source. Chat: one line of counts ("🆕 2 · 💬 3 ·
+⚠️ 1 disputed · 4 no material · 12 left in the backlog"), then each ⚠️ dispute or unanchored
+article as a link with ➡️ a ruling.
