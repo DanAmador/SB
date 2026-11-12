@@ -1,5 +1,6 @@
 import os
 import subprocess
+import time
 import unittest
 from datetime import date
 from pathlib import Path
@@ -267,3 +268,37 @@ class ResolveStampsTheCommit(VaultCase):
             self.assertNotIn(key, text)
         self.assertIn("planned/", text)
         self.assertIn("status: Project.Finished", text)
+
+
+class ClaimsDoNotCollide(VaultCase):
+    def setUp(self):
+        super().setUp()
+        self.sb("init", "monorepo/overrides", "--why", "Because.", "--title", "Overrides", "--destination", "Somewhere.",
+                "--repo", "/code/monorepo")
+        self.sb("new", "monorepo/overrides", "--why", "Because.", "--title", "First", "--no-sync")
+        self.map_dir = self.vault / "wayfinder/monorepo/overrides"
+
+    def ticket_text(self):
+        return "".join(f.read_text() for f in self.map_dir.glob("**/001*.md"))
+
+    def test_two_claims_at_once_give_one_winner(self):
+        procs = [self.popen_sb("claim", "monorepo/overrides", "1", "--by", f"agent-{i}") for i in range(8)]
+        codes = [p.wait() for p in procs]
+        for p in procs:
+            p.stdout.close()
+            p.stderr.close()
+        self.assertEqual(codes.count(0), 1)
+        self.assertRegex(self.ticket_text(), r'claimed_by: "?agent-\d')
+        self.assertFalse((self.map_dir / ".claim.lock").exists())
+
+    def test_a_stale_claim_lock_is_broken(self):
+        lock = self.map_dir / ".claim.lock"
+        lock.write_text("")
+        os.utime(lock, (time.time() - 60,) * 2)
+        self.sb("claim", "monorepo/overrides", "1", "--by", "a")
+        self.assertFalse(lock.exists())
+
+    def test_a_refused_claim_still_releases_the_lock(self):
+        self.sb("claim", "monorepo/overrides", "1", "--by", "a", "--no-sync")
+        self.sb("claim", "monorepo/overrides", "1", "--by", "b", "--no-sync", ok=False)
+        self.assertFalse((self.map_dir / ".claim.lock").exists())

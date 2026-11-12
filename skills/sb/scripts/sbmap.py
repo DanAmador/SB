@@ -1297,15 +1297,40 @@ def cmd_summary(args):
     print(f"wrote {m.folder.name}: In plain words")
 
 
+def take_claim_lock(folder):
+    """A lock file in the map folder, taken with O_EXCL: retry every 50 ms for 5 s, break one older than 30 s.
+    The leading dot keeps it out of Obsidian's views."""
+    lock = Path(folder) / ".claim.lock"
+    deadline = time.time() + 5
+    while True:
+        try:
+            os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+            return lock
+        except FileExistsError:
+            try:
+                if time.time() - lock.stat().st_mtime > 30:
+                    lock.unlink()
+                    continue
+            except FileNotFoundError:
+                continue
+            if time.time() > deadline:
+                sys.exit(f"sbmap: could not take {lock} within 5s; another claim holds it")
+            time.sleep(0.05)
+
+
 def cmd_claim(args):
     by = opt(args, "--by") or sys.exit("sbmap: --by is required")
-    m = load(args[0])
-    t = m.ticket(args[1])
-    if t.status == "claimed":
-        sys.exit(f"sbmap: {t.id} is already claimed by {t.claimed_by or 'someone'}")
-    stamp = date.today().isoformat() + " " + time.strftime("%H:%M")
-    no_sync = ["--no-sync"] if "--no-sync" in args else []
-    cmd_set([args[0], args[1], "status=claimed", f"claimed_by={by}, {stamp}"] + no_sync)
+    lock = take_claim_lock(load(args[0]).folder)
+    try:
+        m = load(args[0])  # read again, now that no other claim can write
+        t = m.ticket(args[1])
+        if t.status == "claimed":
+            sys.exit(f"sbmap: {t.id} is already claimed by {t.claimed_by or 'someone'}")
+        stamp = date.today().isoformat() + " " + time.strftime("%H:%M")
+        no_sync = ["--no-sync"] if "--no-sync" in args else []
+        cmd_set([args[0], args[1], "status=claimed", f"claimed_by={by}, {stamp}"] + no_sync)
+    finally:
+        lock.unlink(missing_ok=True)
 
 
 def cmd_block(args):

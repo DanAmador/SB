@@ -37,6 +37,12 @@ class VaultCase(unittest.TestCase):
             self.assertNotEqual(r.returncode, 0, f"sbmap {' '.join(args)} should fail\n{r.stdout}")
         return r
 
+    def popen_sb(self, *args):
+        """Start sbmap without waiting; the caller waits on the Popen."""
+        env = {**os.environ, "SB_VAULT": str(self.vault), "PATH": "/usr/bin:/bin"}
+        return subprocess.Popen([sys.executable, str(SBMAP), *args], stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, text=True, env=env, cwd=self.vault)
+
     def write(self, rel, text):
         p = self.vault / rel
         p.parent.mkdir(parents=True, exist_ok=True)
