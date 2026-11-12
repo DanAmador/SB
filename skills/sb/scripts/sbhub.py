@@ -15,6 +15,14 @@ and never fail a session when it is down.
                                       ask the owner; prints the chosen option, or the
                                       default at the deadline or with the hub down
   sbhub.py state                      the hub's state as JSON ({} when it is down)
+  sbhub.py send   --to A "text"       queue a message for a session or worker; its own hook
+                                      delivers it (mid-turn, at the end of its turn, or with
+                                      the next prompt)
+  sbhub.py queue                      tonight's ticket queue in run order, with each ticket's state
+  sbhub.py queue add|rm <map> <NNN>...   tick or untick tickets (running and finished items stay)
+  sbhub.py queue pause|resume         hold or release the queue
+  sbhub.py queue agent <name>         the agent that runs the night's items (an installed one)
+  sbhub.py agents [--scan]            the installed agents; --scan finds ~/.claude* configs and agy
   sbhub.py trust  <project path>      let the hub run that project's own .sb/providers scripts
   sbhub.py untrust <project path>     stop doing so (both work with the hub stopped)
   sbhub.py hook                       read one Claude Code hook event on stdin and report it;
@@ -27,6 +35,7 @@ import json
 import math
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 import threading
@@ -37,24 +46,32 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+import sbqueue
+
 AGENT_FIELDS = ("name", "title", "asked", "project", "role", "parent", "ticket", "state", "note", "done", "total")
 ALERT_STATES = ("needs you", "blocked")
 SILENT_LIMIT = 86400
 ORPHAN_LOCK_LIMIT = 600
 DONE_WORKER_LIMIT = 600  # a finished worker stays on its session's row this long
 DECIDED_KEPT = 50
+SENT_KEPT = 30  # finished messages kept for the page's log
+MESSAGE_MAX = 4000
 
 
 class Hub:
-    def __init__(self, home, now=time.time):
+    def __init__(self, home, now=time.time, run=None):
         self.home = Path(home)
+        self._run = run  # () -> the open tickets (list or JSON); sbmap when None
+        self._tcache = (0.0, None)
         self.now = now
         self._lock = threading.Lock()
         self.providers = {}
         self.queued = set()
         self.changed = threading.Event()
         # aliases: session id -> the agent id that session reports as (`report --agent X`)
-        self._data = {"agents": {}, "locks": {}, "questions": {}, "aliases": {}}
+        self._data = {"agents": {}, "locks": {}, "questions": {}, "aliases": {}, "messages": {},
+                      "queue": {"version": 0, "seeded": False, "paused": False, "agent": None, "items": []},
+                      "installed": {}}
         path = self.home / "state.json"
         try:
             saved = json.loads(path.read_text(encoding="utf-8"))
@@ -119,6 +136,16 @@ class Hub:
             if self._resolve(held["by"]) not in self._data["agents"] and now - held["at"] > ORPHAN_LOCK_LIMIT:
                 del self._data["locks"][k]
                 changed = True
+        messages = self._data["messages"]
+        for m in messages.values():
+            if m["delivered"] is None and not m.get("lost") and m["to"] not in self._data["agents"]:
+                m["lost"] = now  # its session ended before its hook could deliver it
+                changed = True
+        finished = sorted((k for k, m in messages.items() if m["delivered"] is not None or m.get("lost")),
+                          key=lambda k: messages[k]["at"])
+        for k in finished[:-SENT_KEPT]:
+            del messages[k]
+            changed = True
         if changed:
             self._save()
 
@@ -206,12 +233,54 @@ class Hub:
                 self._save()
             return {"ok": True}
 
+    def send(self, to, text):
+        """Queue a message from the owner for one session or worker; its hook delivers it."""
+        if not isinstance(to, str) or not to:
+            raise ValueError("say which session the message is for")
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError("the message is empty")
+        if len(text) > MESSAGE_MAX:
+            raise ValueError("a message is at most {} characters".format(MESSAGE_MAX))
+        with self._lock:
+            agent = self._resolve(to)
+            if agent not in self._data["agents"]:
+                raise ValueError("no such session")
+            mid = uuid.uuid4().hex[:8]
+            self._data["messages"][mid] = {"to": agent, "text": text.strip(), "at": self.now(),
+                                           "delivered": None, "how": None}
+            self._save()
+        return {"ok": True, "id": mid}
+
+    def unsend(self, mid):
+        """Take back a message its session has not picked up yet."""
+        with self._lock:
+            m = self._data["messages"][mid]
+            if m["delivered"] is not None:
+                raise ValueError("already delivered")
+            del self._data["messages"][mid]
+            self._save()
+            return {"ok": True}
+
+    def take(self, agent, how):
+        """The queued messages for an agent, oldest first, marked delivered (by `how`: the hook event)."""
+        with self._lock:
+            me = self._resolve(agent)
+            mine = sorted((m for m in self._data["messages"].values()
+                           if m["to"] == me and m["delivered"] is None and not m.get("lost")),
+                          key=lambda m: m["at"])
+            for m in mine:
+                m["delivered"], m["how"] = self.now(), how if isinstance(how, str) else None
+            if mine:
+                self._save()
+            return {"ok": True, "messages": [m["text"] for m in mine]}
+
     def question(self, qid):
         with self._lock:
             self._settle()
             return dict(self._data["questions"][qid])
 
     def state(self):
+        self._seed_queue()
         with self._lock:
             self._settle()
             out = json.loads(json.dumps(self._data))
@@ -219,12 +288,179 @@ class Hub:
                 v["agent"] = k
             return {**out, "now": self.now(), "providers": dict(self.providers)}
 
+    # ---- tonight's queue and the installed agents ----
+
+    def _fetch(self, run=None):
+        """Open tickets from sbmap (or `run`, which returns the list or its JSON); None when that failed."""
+        try:
+            if run is None:
+                run = self._run or (lambda: subprocess.run(
+                    [sys.executable, str(SBMAP), "tickets", "--json"], capture_output=True, text=True,
+                    timeout=60, check=True).stdout)
+            rows = run()
+            rows = json.loads(rows) if isinstance(rows, (str, bytes)) else rows
+            return rows if isinstance(rows, list) else None
+        except (OSError, ValueError, subprocess.SubprocessError):
+            return None
+
+    def _open_tickets(self, run=None, fresh=False):
+        """The cached sbmap list (15 s), or None when sbmap failed and nothing is cached. An explicit
+        `run` or `fresh` skips the cache. Runs outside the lock: sbmap is slow."""
+        with self._lock:
+            at, rows = self._tcache
+        if run is None and not fresh and rows is not None and self.now() - at < TICKETS_CACHED_FOR:
+            return rows
+        got = self._fetch(run)
+        with self._lock:
+            if got is not None:
+                self._tcache = (self.now(), got)
+            return got if got is not None else self._tcache[1]
+
+    def tickets(self, run=None, fresh=False):
+        """Open tickets with `state`/`reason` (sbqueue.classify) and `queued`."""
+        self._seed_queue(run)
+        rows = self._open_tickets(run, fresh) or []
+        with self._lock:
+            live = self._live_keys()
+        queued = {sbqueue.key(t) for t in rows} & live
+        return [{**t, "queued": sbqueue.key(t) in queued,
+                 **dict(zip(("state", "reason"), sbqueue.classify(t, live, rows)))} for t in rows]
+
+    def _live_keys(self):
+        return {i["key"] for i in self._data["queue"]["items"]
+                if i["kind"] == "ticket" and i["state"] in ("queued", "running")}
+
+    @staticmethod
+    def _item(key):
+        return {"key": key, "kind": "ticket", "agent": None, "state": "queued", "note": "", "commit": None,
+                "tries": 0, "started": None, "ended": None}
+
+    def _seed_queue(self, run=None):
+        """The first time the tickets can be read, tick every ready one; the owner unticks."""
+        if self._data["queue"]["seeded"]:
+            return
+        rows = self._open_tickets(run)
+        if not rows:
+            return
+        with self._lock:
+            q = self._data["queue"]
+            if q["seeded"]:
+                return
+            ready = [sbqueue.key(t) for t in rows if sbqueue.classify(t, set(), rows)[0] == "ready"]
+            self._apply_selection(q, ready, rows)
+            q["seeded"] = True
+            q["version"] += 1
+            self._save()
+
+    def _apply_selection(self, q, keys, rows):
+        """Queued tickets become `keys`, in run order; every other item stays where it was, in front."""
+        have = {i["key"]: i for i in q["items"] if i["kind"] == "ticket"}
+        keep = [i for i in q["items"] if not (i["kind"] == "ticket" and i["state"] == "queued")]
+        taken = {i["key"] for i in keep if i["kind"] == "ticket"}
+        keys = [k for k in dict.fromkeys(keys) if k not in taken]
+        running = taken & self._live_keys()
+        ordered = [k for k in sbqueue.order(rows, keys + sorted(running)) if k in keys]
+        q["items"] = keep + [have.get(k) or self._item(k) for k in ordered]
+
+    def _queue_write(self, version, change):
+        """One accepted queue write: stale versions are refused, the rest bump the version once."""
+        rows = self._open_tickets() or []
+        with self._lock:
+            q = self._data["queue"]
+            if version is not None and version != q["version"]:
+                return {"ok": False, "stale": True, "queue": json.loads(json.dumps(q))}
+            change(q, rows)
+            q["version"] += 1
+            q["seeded"] = True
+            self._save()
+            return {"ok": True, "queue": json.loads(json.dumps(q))}
+
+    def queue_set(self, keys, version):
+        """Replace the ticket selection (jobs, running and finished items untouched)."""
+        return self._queue_write(version, lambda q, rows: self._apply_selection(q, list(keys), rows))
+
+    def queue_move(self, key, to_index, version):
+        """Move a queued ticket among the queued tickets, clamped by its blockers and dependents."""
+        def change(q, rows):
+            queued = [i for i in q["items"] if i["kind"] == "ticket" and i["state"] == "queued"]
+            by = {i["key"]: i for i in queued}
+            if key not in by:
+                raise ValueError("not a queued ticket: {}".format(key))
+            moved = sbqueue.move([i["key"] for i in queued], key, int(to_index), rows)
+            others = [i for i in q["items"] if i not in queued]
+            q["items"] = others + [by[k] for k in moved]
+        return self._queue_write(version, change)
+
+    def queue_pause(self, paused):
+        def change(q, rows):
+            q["paused"] = bool(paused)
+        return self._queue_write(None, change)
+
+    def queue_agent(self, name):
+        """The agent that runs tonight's items unless an item names its own."""
+        def change(q, rows):
+            if name not in self._data["installed"]:
+                raise ValueError("unknown agent: {}".format(name))
+            q["agent"] = name
+        return self._queue_write(None, change)
+
+    def queue_item_agent(self, key, name):
+        def change(q, rows):
+            item = next((i for i in q["items"] if i["key"] == key and i["state"] == "queued"), None)
+            if item is None:
+                raise ValueError("not a queued item: {}".format(key))
+            if name is not None and name not in self._data["installed"]:
+                raise ValueError("unknown agent: {}".format(name))
+            item["agent"] = name
+        return self._queue_write(None, change)
+
+    def agents_scan(self, home=None, which=shutil.which):
+        """Find the installed agents and merge them into `installed`; hand-edited entries are kept.
+
+        A Claude config is `~/.claude` or `~/.claude-<name>` (named `main`, or <name>) that holds a
+        sign-in: a `.credentials.json`, or a `.claude.json` with an `oauthAccount`. On this machine
+        `~/.claude`, `~/.claude-personal` and `~/.claude-assembio` have no `.credentials.json` (the
+        login is in the keychain) and each has `.claude.json` with `oauthAccount`, so that is the
+        marker; a folder without either is not an agent. `agy` counts when `which("agy")` finds it.
+        The queue's default agent is set to `main` (else the first by name) if none is chosen yet,
+        and is never `agy`."""
+        home = Path(home) if home else Path.home()
+        found = {}
+        for d in sorted(home.glob(".claude*")):
+            if d.name != ".claude" and not d.name.startswith(".claude-") or not d.is_dir():
+                continue
+            if not ((d / ".credentials.json").is_file() or _signed_in(d / ".claude.json")):
+                continue
+            found["main" if d.name == ".claude" else d.name[len(".claude-"):]] = {
+                "kind": "claude", "dir": str(d), "model": None, "limited_until": None}
+        if which("agy"):
+            found["agy"] = {"kind": "agy", "dir": None, "model": None, "limited_until": None}
+        with self._lock:
+            inst = self._data["installed"]
+            for name, entry in found.items():
+                inst.setdefault(name, entry)
+            q = self._data["queue"]
+            claudes = sorted(n for n, e in inst.items() if e.get("kind") == "claude")
+            if q["agent"] is None and claudes:
+                q["agent"] = "main" if "main" in claudes else claudes[0]
+                q["version"] += 1
+            self._save()
+            return json.loads(json.dumps(inst))
+
     def trusted(self):
         return read_trusted(self.home)
 
 
 SBMAP = Path(__file__).resolve().parent / "sbmap.py"
 REFRESH_EVERY = 15
+TICKETS_CACHED_FOR = 15
+
+
+def _signed_in(path):
+    try:
+        return bool(json.loads(path.read_text(encoding="utf-8")).get("oauthAccount"))
+    except (OSError, ValueError, AttributeError):
+        return False
 
 
 def _run(cmd, **kw):
@@ -337,6 +573,7 @@ def refresh_loop(hub, every=REFRESH_EVERY):
 
 DEFAULT_PORT = 8765
 PAGE = Path(__file__).resolve().parent / "sbhub.html"
+BOARD_JS = Path(__file__).resolve().parent / "sbhub_board.js"  # the page's renderer, shared with the chat widget
 
 
 def notify(title, text):
@@ -388,8 +625,12 @@ def make_handler(hub):
             path = self.path.split("?", 1)[0]
             if path == "/":
                 self.send(200, PAGE.read_bytes(), "text/html; charset=utf-8")
+            elif path == "/board.js":
+                self.send(200, BOARD_JS.read_bytes(), "text/javascript; charset=utf-8")
             elif path == "/api/state":
                 self.send(200, hub.state())
+            elif path == "/api/tickets":
+                self.send(200, hub.tickets())
             elif path.startswith("/api/question/"):
                 try:
                     self.send(200, hub.question(path[len("/api/question/"):]))
@@ -433,8 +674,28 @@ def make_handler(hub):
                     alert = ("sb hub: question", "{}: {}".format(d["agent"], d["q"]))
                 elif path == "/api/answer":
                     out = hub.answer(d["qid"], d["answer"], d.get("by", "you"))
+                elif path == "/api/send":
+                    out = hub.send(d["to"], d["text"])
+                elif path == "/api/unsend":
+                    out = hub.unsend(d["id"])
+                elif path == "/api/take":
+                    out = hub.take(d["agent"], d.get("how"))
+                elif path == "/api/queue/set":
+                    out = hub.queue_set(d["keys"], d["version"])
+                elif path == "/api/queue/move":
+                    out = hub.queue_move(d["key"], d["to"], d["version"])
+                elif path == "/api/queue/pause":
+                    out = hub.queue_pause(d["paused"])
+                elif path == "/api/queue/agent":
+                    out = hub.queue_agent(d["name"])
+                elif path == "/api/queue/item_agent":
+                    out = hub.queue_item_agent(d["key"], d.get("name"))
+                elif path == "/api/agents/scan":
+                    out = {"ok": True, "installed": hub.agents_scan()}
                 else:
                     code, out = 404, {"ok": False, "error": "not found"}
+                if out.get("stale"):
+                    code = 409
                 self.send(code, out)
                 if alert:  # after the answer: a slow osascript must not time the caller out
                     threading.Thread(target=notify, args=alert, daemon=True).start()
@@ -442,6 +703,8 @@ def make_handler(hub):
                 missing = e.args[0] if e.args else ""
                 if path == "/api/answer" and missing == d.get("qid"):
                     self.send(404, {"ok": False, "error": "no such question"})
+                elif path == "/api/unsend" and missing == d.get("id"):
+                    self.send(404, {"ok": False, "error": "no such message"})
                 else:
                     self.send(400, {"ok": False, "error": "missing field {}".format(missing)})
             except (ValueError, TypeError) as e:
@@ -673,8 +936,25 @@ def event_report(e, event=None):
     return None
 
 
+# Claude Code events whose hook output can hand the session text, and how it does so
+DELIVERS = {"UserPromptSubmit": "context", "PostToolUse": "context", "Stop": "block", "SubagentStop": "block"}
+
+
+def delivery(e, messages):
+    """The hook output that hands queued owner messages to the session or worker, or None."""
+    name = e.get("hook_event_name")
+    if not messages or name not in DELIVERS:
+        return None
+    text = "\n\n".join("Message from the owner, sent from the sb hub page:\n" + m for m in messages)
+    if DELIVERS[name] == "block":
+        return {"decision": "block", "reason": text}
+    return {"hookSpecificOutput": {"hookEventName": name, "additionalContext": text}}
+
+
 def cmd_hook(port, event=None):
-    """Read one hook event on stdin and report it. Whatever goes wrong, exit 0: a hook never fails a session."""
+    """Read one hook event on stdin, report it, and hand the session any messages queued for it.
+    Whatever goes wrong, exit 0: a hook never fails a session."""
+    out = None
     try:
         e = json.load(sys.stdin)
         r = event_report(e, event=event) if isinstance(e, dict) else None
@@ -684,17 +964,90 @@ def cmd_hook(port, event=None):
                 r["title"] = title
         if r:
             call(port, "/api/report", r)
+        who = e.get("agent_id") or e.get("session_id") if isinstance(e, dict) and not event else None
+        if isinstance(who, str) and who and e.get("hook_event_name") in DELIVERS:
+            code, got = call(port, "/api/take", {"agent": who, "how": e["hook_event_name"]}, timeout=1)
+            msgs = got.get("messages") if code == 200 else None
+            out = delivery(e, [m for m in msgs if isinstance(m, str)] if isinstance(msgs, list) else [])
     except Exception:
         pass
-    if event:
+    if out:
+        print(json.dumps(out))
+    elif event:
         print("{}")
     return 0
+
+
+def cmd_send(a):
+    code, out = call(a.port, "/api/send", {"to": a.to, "text": a.text})
+    if code == 0:
+        print("sbhub: not running", file=sys.stderr)
+        return 2
+    if out.get("ok"):
+        print(out["id"])
+        return 0
+    print(out.get("error", "not sent"), file=sys.stderr)
+    return 1
 
 
 def cmd_trust(a, yes):
     project = os.path.abspath(a.project)
     set_trusted(os.environ.get("SB_HUB_HOME") or Path.home() / ".sb-hub", project, yes)
     print(("trusted " if yes else "untrusted ") + project)
+    return 0
+
+
+def cmd_queue(a):
+    port, act, rest = a.port, a.action, a.rest
+    code, st = call(port, "/api/state")
+    if code == 0:
+        print("sbhub: not running", file=sys.stderr)
+        return 2
+    q = st["queue"]
+    if act == "show":
+        titles = {sbqueue.key(t): t for t in call(port, "/api/tickets")[1] or []}
+        print("{}{}".format("paused, " if q["paused"] else "", "agent " + (q["agent"] or "none")))
+        for n, i in enumerate(q["items"], 1):
+            t = titles.get(i["key"], {})
+            print("{:>2}. {}  {}  {}{}".format(n, i["key"], i["state"], t.get("title", ""),
+                                               "  [" + i["agent"] + "]" if i["agent"] else ""))
+        for k, t in titles.items():
+            if not t["queued"]:
+                print("    {}  {}: {}  {}".format(k, t["state"], t["reason"], t["title"]))
+        return 0
+    if act in ("add", "rm"):
+        if len(rest) < 2:
+            print("usage: queue {} <map> <NNN>...".format(act), file=sys.stderr)
+            return 1
+        keys = {"{}#{}".format(rest[0], int(n)) for n in rest[1:]}
+        have = [i["key"] for i in q["items"] if i["kind"] == "ticket" and i["state"] == "queued"]
+        want = have + [k for k in sorted(keys) if k not in have] if act == "add" else [k for k in have if k not in keys]
+        code, out = call(port, "/api/queue/set", {"keys": want, "version": q["version"]})
+    elif act in ("pause", "resume"):
+        code, out = call(port, "/api/queue/pause", {"paused": act == "pause"})
+    elif act == "agent" and rest:
+        code, out = call(port, "/api/queue/agent", {"name": rest[0]})
+    else:
+        print("usage: queue [add|rm <map> <NNN>...|pause|resume|agent <name>]", file=sys.stderr)
+        return 1
+    if out.get("ok"):
+        return 0
+    print("the queue changed meanwhile, try again" if out.get("stale") else out.get("error", "not done"), file=sys.stderr)
+    return 1
+
+
+def cmd_agents(a):
+    if a.scan:
+        code, out = call(a.port, "/api/agents/scan", {}, timeout=30)
+        found = out.get("installed", {})
+    else:
+        code, out = call(a.port, "/api/state")
+        found = out.get("installed", {})
+    if code == 0:
+        print("sbhub: not running", file=sys.stderr)
+        return 2
+    for name, e in sorted(found.items()):
+        print("{}  {}  {}  {}".format(name, e["kind"], e.get("dir") or "-", e.get("model") or "-"))
     return 0
 
 
@@ -727,6 +1080,9 @@ def main(argv=None):
         ("--options", {"required": True}), ("--default", {"required": True}),
         ("--wait", {"type": float, "default": 600}))
     add("state")
+    add("send", ("--to", {"required": True}), ("text", {}))
+    add("queue", ("action", {"nargs": "?", "default": "show"}), ("rest", {"nargs": "*"}))
+    add("agents", ("--scan", {"action": "store_true"}))
     add("trust", ("project", {}))
     add("untrust", ("project", {}))
     add("hook", ("--event", {}))
@@ -744,6 +1100,12 @@ def main(argv=None):
         return cmd_trust(a, a.cmd == "trust")
     if a.cmd == "ask":
         return cmd_ask(a)
+    if a.cmd == "send":
+        return cmd_send(a)
+    if a.cmd == "queue":
+        return cmd_queue(a)
+    if a.cmd == "agents":
+        return cmd_agents(a)
     return cmd_state(a)
 
 
