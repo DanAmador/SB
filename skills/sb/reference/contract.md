@@ -56,10 +56,10 @@ Each is a ruling the owner has repeated, with its reason.
   `restore`, `clean`) is off limits: the stash and index are repo-global, and one call wipes every
   peer. The `implementer` agent carries this; any other dispatch quotes it. Between waves, write a
   `git diff > <outside-repo>.patch` snapshot so a wipe is recoverable.
-- **Unattended means unattended.** Questions go in plain text with their default, applied at once;
-  a question card blocks the session until the owner wakes. **Blocked on a decision:** take the
-  recommendation, write it on the ticket as `R: …, cost if wrong: …`, keep going. **Blocked on the
-  world** (Editor dead, service down): finish what needs no live check, list the unverified rest.
+- **Unattended means unattended.** Questions go to the hub ([output.md](output.md), *Unattended*);
+  a question card blocks the session until the owner wakes. **Blocked on a decision:** ask it that
+  way, take what it prints, keep going. **Blocked on the world** (Editor dead, service down):
+  finish what needs no live check, list the unverified rest.
 - **Stay inside the ticket.** Its `why` is the goal, its `Not this ticket` the edge. Neighbouring
   work becomes a ticket (`capture`): the owner has reverted whole lanes that pulled a neighbour in.
 - **Findings go on the ticket** (`## Answer`), not into new markdown files in the repo.

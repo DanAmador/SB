@@ -34,6 +34,10 @@ Commit only your own paths, by explicit pathspec, when the ticket's checks pass:
 
 ## Report (required)
 
+Report once at the start and once at the end: `python3 ~/.claude/skills/sb/scripts/sbhub.py report
+--agent ticket-<NNN> --role worker --parent <run name> --ticket "<ticket name>" --state working|done
+--note "<commit or blocker>"`; `<run name>` is the folder of your report path.
+
 Write the report path from the brief: the commit sha, each check run with its result and counts,
 what you could **not** verify and why, every ruling you made, files touched. Say nothing between
 tool calls. Then reply in two lines: what works now, and the report's path.

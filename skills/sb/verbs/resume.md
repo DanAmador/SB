@@ -6,6 +6,7 @@ A run stopped (a usage limit, a crash, a context that ran out) or the owner says
 1. **Find the trail.** The files `sbmap status <map>` lists (`checkpoint.md`, `handoff.md`, then
    the run boards naming it, newest first) and the claimed tickets. In the repo:
    `git log --oneline` since the checkpoint's base, the ledger it names, `git status --short`.
+   `sbhub state`: what each session last reported, beside the board.
 2. **Reconcile the trail with the tree.** For each ticket the trail calls in flight:
    - committed, verified or verifiable now → resolve it if the run died before recording it
    - uncommitted edits in its paths → read the diff; finish it or say why not

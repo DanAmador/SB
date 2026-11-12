@@ -87,7 +87,8 @@ changes; a one-repo night skips them.
       with `initiation: user_asked`, `context: fresh`, `model` by tier, `effort: medium` for Sonnet,
       `permission_mode: auto`, `wake_when_done: true`, `name: ticket-<NNN>`, title
       `<ticket name> (<map name> <NNN>)`, `use_worktree: false` in the main tree, and the brief from
-      [templates/session-brief.md](../templates/session-brief.md). Log the session's link on the
+      [templates/session-brief.md](../templates/session-brief.md), naming `<run name>` (the
+      board's, `<date>-<map name>`) as its `--parent`. Log the session's link on the
       board. Then **wait idle**: no polling; the host wakes you when it ends a turn. Usage is read
       once per ticket boundary, never in a loop.
       - No session tool, or a start refused (a turn woken by a timer cannot start one): dispatch a
@@ -101,6 +102,11 @@ changes; a one-repo night skips them.
    4. `sbmap resolve <map> <NNN> --gist "<one line>" --answer "<commit, verified, rulings, model>" [--commit <sha>]`,
       then `sbmap check <map>` and a log line on the board.
    5. At the end of a map's batch, rewrite its `## In plain words`.
+
+   At each ticket boundary, `sbhub report --agent <run name> --role orchestrator --done <n> --total
+   <N> --note "<next ticket name>"`. A resource only one agent may use at a time (the Unity editor,
+   a port) is taken with `sbhub lock <name> --by <agent>` and released with `sbhub unlock` after
+   ([hub.md](../reference/hub.md)).
 
    *Operator:* the lane does 0–2 and reports its commit, checks and the usage it read; the operator
    does 3 in the lane's checkout and logs it on the board; then the lane does 4, claiming its

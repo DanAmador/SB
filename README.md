@@ -116,6 +116,20 @@ when a reply ends with a vault link that won't open (another `obsidian://` form,
 a `[[wikilink]]`, or a path that doesn't exist), it sends the reply back once, and a corrected link
 follows the bad one. Both are read from `mods/` in place: edit them, then `/reload-plugins`.
 
+## The hub
+
+`sbhub` is an optional local page showing every sb session, its workers, the run's progress, and
+the questions waiting on you. Install its hooks with `./install.sh --hub` (the `hub-report` mod:
+each Claude Code session reports with no command), then start it:
+
+```bash
+python3 skills/sb/scripts/sbhub.py serve
+```
+
+and open http://127.0.0.1:8765. A project's own `.sb/providers/` scripts run only after
+`python3 skills/sb/scripts/sbhub.py trust <project path>`
+([hub.md](skills/sb/reference/hub.md)).
+
 ## The tracker is Obsidian-native
 
 Tickets are Obsidian notes: fields in properties, every reference a wikilink, a Bases board per map

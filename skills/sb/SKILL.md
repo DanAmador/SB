@@ -16,6 +16,8 @@ reads the vault, not the chat: results are written there, and chat only points a
 - **`sbmap`:** `python3 <this skill's dir>/scripts/sbmap.py` (no args lists every command).
   🔒 Maps and tickets are written through it only: it writes the properties, wikilinks and the
   Route. Read a ticket with `sbmap show`.
+- **`sbhub`:** `python3 <this skill's dir>/scripts/sbhub.py`: the owner's one page for every
+  session; what to report, ask and lock there: [hub.md](reference/hub.md).
 - **Notes written by hand** (handoffs, reports, research): load `obsidian-markdown` first;
   `obsidian-bases` before editing a `.base`; `obsidian-cli` for vault reads sbmap lacks.
 - **Ticket types:** `task` (one commit, ~1.5 h), `grilling` (a talk with the owner), `research`

@@ -14,8 +14,10 @@ lines**:
   reasoning stay there. A result with no note yet gets one (`sbmap comment`, or the run board).
 - **Between tool calls, silence**, except the one-liners the steps ask for (the verb, what the
   vault gave, the contract applied).
-- **Unattended:** nothing is said to the owner at all; rulings and progress go on the ticket and
-  the board.
+- **Unattended:** nothing is said in chat; rulings and progress go on the ticket and the board.
+  A question goes to the hub: `sbhub ask --agent <you> --q "<question>" --options "a|b" --default a
+  --wait 540`, two to four choices in the owner's words, the recommendation as `--default`.
+  Whatever it prints is the ruling, written on the ticket as `R: …, cost if wrong: …`.
 - **Chat is the product** only for `explain`, `ask`, and questions the owner must answer now (a
   grilling round, tonight's proposal questions). Those follow the **Plain** output style
   ([`output-styles/plain.md`](../../../output-styles/plain.md); read it when the style is off).

@@ -22,6 +22,9 @@ throwaway data and ports (<ports>), never the owner's.
   operator does.
 - Never ask the owner. Take the recommendation and write it on the ticket before you finish:
   `sbmap comment <map> <NNN> --text "R: <ruling>, cost if wrong: <…>"`.
+- Report once at the start and once at the end: `python3 ~/.claude/skills/sb/scripts/sbhub.py
+  report --agent ticket-<NNN> --role worker --parent <run name> --ticket "<ticket name>" --state
+  working|done --note "<commit or blocker>"`.
 - Write your report to `<board folder>/<board name>/<NNN>.md`: commit, each check with its counts,
   what you could **not** verify, rulings, files. Say nothing along the way. Your last message, two
   lines: what works now and how to see it; the report's path.
