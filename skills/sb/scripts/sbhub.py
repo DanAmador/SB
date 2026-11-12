@@ -92,7 +92,7 @@ class Hub:
                 return {"ok": True, "needs_you": False}
             a = self._data["agents"].setdefault(d["agent"], {})
             before = a.get("state")
-            if d.get("project") and d["project"] not in self.providers and d["project"] not in self.queued:
+            if usable_project(d.get("project")) and d["project"] not in self.providers and d["project"] not in self.queued:
                 self.queued.add(d["project"])
                 self.changed.set()
             for f in AGENT_FIELDS:
@@ -155,7 +155,10 @@ class Hub:
     def state(self):
         with self._lock:
             self._settle()
-            return {**json.loads(json.dumps(self._data)), "now": self.now(), "providers": dict(self.providers)}
+            out = json.loads(json.dumps(self._data))
+            for k, v in out["agents"].items():
+                v["agent"] = k
+            return {**out, "now": self.now(), "providers": dict(self.providers)}
 
     def trusted(self):
         return read_trusted(self.home)
@@ -175,7 +178,7 @@ def _run(cmd, **kw):
 
 def generic_provider(project):
     """Branch, uncommitted files, last commit and the vault's maps for a project."""
-    git = ["git", "-C", project]
+    git = ["git", "-c", "core.fsmonitor=false", "-C", project]
     branch = _run(git + ["rev-parse", "--abbrev-ref", "HEAD"]) or "unknown"
     dirty = len(_run(git + ["status", "--porcelain"]).splitlines())
     last = _run(git + ["log", "-1", "--format=%s (%cr)"]) or "none"
@@ -212,8 +215,11 @@ def set_trusted(home, project, yes):
 
 def _scripts(project):
     """Executable regular files in <project>/.sb/providers/, by name; symlinks are skipped."""
+    folder = Path(project) / ".sb" / "providers"
+    if folder.is_symlink():
+        return []
     try:
-        return sorted(f for f in (Path(project) / ".sb" / "providers").iterdir()
+        return sorted(f for f in folder.iterdir()
                       if f.is_file() and not f.is_symlink() and os.access(f, os.X_OK))
     except OSError:
         return []

@@ -25,6 +25,13 @@ class HubTest(unittest.TestCase):
         a = h.state()["agents"]["a"]
         self.assertEqual((a["state"], a["total"], a["project"]), ("idle", 5, "/p"))
 
+    def test_state_carries_each_agents_id_for_the_page(self):
+        h = self.h
+        h.report({"agent": "night-run", "state": "working"})
+        h.report({"agent": "w1", "role": "worker", "parent": "night-run"})
+        got = h.state()["agents"]
+        self.assertEqual((got["night-run"]["agent"], got["w1"]["agent"], got["w1"]["parent"]), ("night-run", "w1", "night-run"))
+
     def test_needs_you_fires_once_per_transition(self):
         h = self.h
         self.assertTrue(h.report({"agent": "a", "state": "needs you"})["needs_you"])

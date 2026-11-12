@@ -101,6 +101,23 @@ class ProviderCase(unittest.TestCase):
         for bad in ("relative/dir", "/no/such/dir", "", None, 5, str(Path(self.repo, "..", "nope"))):
             self.assertFalse(usable_project(bad), bad)
 
+    def test_a_symlinked_providers_folder_is_skipped(self):
+        real = Path(self._tmp.name, "elsewhere")
+        real.mkdir()
+        p = Path(real, "x")
+        p.write_text("#!/bin/sh\necho '{\"widgets\": []}'\n")
+        p.chmod(0o755)
+        Path(self.repo, ".sb").mkdir()
+        os.symlink(real, Path(self.repo, ".sb", "providers"))
+        self.assertEqual(len(run_providers(self.repo)), 1)
+
+    def test_a_bad_project_path_queues_no_run(self):
+        hub = Hub(self._tmp.name)
+        for bad in ("/no/such/dir", "relative"):
+            hub.report({"agent": "a", "project": bad})
+            self.assertFalse(hub.changed.is_set())
+            self.assertEqual(hub.queued, set())
+
     def test_the_providers_name_their_icons(self):
         self.assertEqual(generic_provider(self.repo)["icon"], "git")
         mine = Path(__file__).resolve().parents[1] / ".sb" / "providers" / "tests"

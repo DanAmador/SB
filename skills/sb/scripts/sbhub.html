@@ -51,12 +51,14 @@ function provider(p,proj){const ws=Array.isArray(p.widgets)?p.widgets.filter(w=>
   return `<div class="line"><span class="ic" title="${esc(p.title)}">${own(PICON,p.icon)||WRENCH}</span>${ws.map(widget).join('')}<span class="grow"></span></div>`
     +logs.map(l=>`<details data-k="${esc(proj+'|'+p.title+'|'+l.label)}"><summary>${esc(l.label)}</summary><pre>${l.lines.map(esc).join('\n')}</pre></details>`).join('')}
 async function answer(qid,i){const q=S&&S.questions[qid];if(!q||!q.options||i>=q.options.length)return;
-  await fetch('/api/answer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({qid,answer:q.options[i]})});tick()}
+  try{await fetch('/api/answer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({qid,answer:q.options[i]})})}catch(e){}
+  tick(true)}
 document.addEventListener('click',e=>{const b=e.target.closest('button[data-q]');if(b)answer(b.dataset.q,+b.dataset.i)});
 function render(s){
   const agents=Object.values(s.agents), qs=Object.entries(s.questions);
   const open=qs.filter(([,q])=>!q.answer), need=agents.filter(a=>a.state=='needs you'||a.state=='blocked');
-  const tops=agents.filter(a=>a.role!='worker'||!s.agents[a.parent]), kids=p=>agents.filter(a=>a.role=='worker'&&a.parent==p.agent);
+  const par=a=>{const p=own(s.agents,a.parent);return p&&p.role!='worker'?p:null};
+  const tops=agents.filter(a=>a.role!='worker'||!par(a)), kids=p=>agents.filter(a=>a.role=='worker'&&par(a)===p);
   const n=open.length+need.length;
   document.getElementById('sum').textContent=`\ud83d\udda5 ${tops.length}  \ud83e\udd16 ${agents.length-tops.length}  \ud83d\udc64 ${n}  \ud83d\udd12 ${Object.keys(s.locks).length}`;
   document.title=(n?`(${n}) `:'')+'sb hub';
@@ -72,9 +74,14 @@ function render(s){
   app.innerHTML=h;
   app.querySelectorAll('details').forEach(d=>{if(kept.has(d.dataset.k))d.open=true});
 }
-async function tick(){
-  try{S=await (await fetch('/api/state')).json();render(S)}
-  catch(e){document.getElementById('sum').textContent='hub not reachable'}
+let last='',lastAt=0;
+async function tick(force){
+  let s;
+  try{s=await (await fetch('/api/state')).json()}
+  catch(e){document.getElementById('sum').textContent='hub not reachable';return}
+  S=s;const {now,...rest}=s,key=JSON.stringify(rest);
+  if(force!==true&&key===last&&Date.now()-lastAt<10000)return;
+  last=key;lastAt=Date.now();render(s);
 }
 tick();setInterval(tick,2000);
 </script>
