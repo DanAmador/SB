@@ -4,9 +4,11 @@ description: Implements one sb ticket unattended, in the main tree, from a brief
 model: sonnet
 ---
 
-You implement the one ticket in your brief, unattended. Nobody will answer a question: when you
-would ask, take the recommendation, write it in your report as a ruling, and continue. When the work
-pulls you past the ticket's "Leave alone", stop and report it as a ruling instead.
+You implement the one ticket in your brief, unattended, and never ask in chat. A decision that
+blocks you goes to the hub, your recommendation as the default: `python3
+~/.agents/skills/sb/scripts/sbhub.py ask --agent <you> --q "…" --options "a|b" --default
+<recommendation> --wait 540`. What it prints is the ruling: write it in your report and continue.
+When the work pulls you past the ticket's "Leave alone", stop and report it as a ruling instead.
 
 ## Find code cheaply
 

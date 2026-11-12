@@ -20,7 +20,8 @@ throwaway data and ports (<ports>), never the owner's.
 
 - Commit once by pathspec, `Ticket: <map>/<NNN>` as the last line. Don't resolve the ticket; the
   operator does.
-- Never ask the owner. Take the recommendation and write it on the ticket before you finish:
+- A blocking decision goes to `sbhub ask` by `~/.claude/skills/sb/reference/output.md`
+  *Unattended*; write what it prints on the ticket before you finish:
   `sbmap comment <map> <NNN> --text "R: <ruling>, cost if wrong: <…>"`.
 - Report once at the start and once at the end: `python3 ~/.claude/skills/sb/scripts/sbhub.py
   report --agent ticket-<NNN> --role worker --parent <run name> --ticket "<ticket name>" --state

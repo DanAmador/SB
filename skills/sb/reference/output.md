@@ -15,7 +15,8 @@ lines**:
 - **Between tool calls, silence**, except the one-liners the steps ask for (the verb, what the
   vault gave, the contract applied).
 - **Unattended:** nothing is said in chat; rulings and progress go on the ticket and the board.
-  A question goes to the hub: `sbhub ask --agent <you> --q "<question>" --options "a|b" --default a
+  A decision that changes what gets built or cannot be undone cheaply goes to the hub (anything
+  else is ruled on the spot): `sbhub ask --agent <you> --q "<question>" --options "a|b" --default a
   --wait 540`, two to four choices in the owner's words, the recommendation as `--default`.
   Whatever it prints is the ruling, written on the ticket as `R: …, cost if wrong: …`.
 - **Chat is the product** only for `explain`, `ask`, and questions the owner must answer now (a
