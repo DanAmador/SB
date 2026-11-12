@@ -37,10 +37,11 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-AGENT_FIELDS = ("name", "project", "role", "parent", "ticket", "state", "note", "done", "total")
+AGENT_FIELDS = ("name", "title", "asked", "project", "role", "parent", "ticket", "state", "note", "done", "total")
 ALERT_STATES = ("needs you", "blocked")
 SILENT_LIMIT = 86400
 ORPHAN_LOCK_LIMIT = 600
+DONE_WORKER_LIMIT = 600  # a finished worker stays on its session's row this long
 DECIDED_KEPT = 50
 
 
@@ -109,7 +110,9 @@ class Hub:
             del questions[k]
             changed = True
         for k, v in list(self._data["agents"].items()):
-            if k in self._data["agents"] and now - v.get("at", now) > SILENT_LIMIT:
+            age = now - v.get("at", now)
+            if k in self._data["agents"] and (age > SILENT_LIMIT or age > DONE_WORKER_LIMIT
+                                              and v.get("role") == "worker" and v.get("state") == "done"):
                 self._remove(k)
                 changed = True
         for k, held in list(self._data["locks"].items()):
@@ -129,8 +132,16 @@ class Hub:
                 self._remove(agent)
                 self._save()
                 return {"ok": True, "needs_you": False, "agent": agent}
+            new = agent not in self._data["agents"]
             a = self._data["agents"].setdefault(agent, {})
             before = a.get("state")
+            if isinstance(d.get("spawn"), str) and d["spawn"]:
+                # what this session just sent a subagent to do: the next worker it starts is named by it
+                a["spawns"] = (a.get("spawns", []) + [d["spawn"][:60]])[-10:]
+            if new and d.get("role") == "worker" and not d.get("ticket"):
+                boss = self._data["agents"].get(self._resolve(d.get("parent")), {})
+                if boss.get("spawns"):
+                    d = {**d, "ticket": boss["spawns"].pop(0)}
             if usable_project(d.get("project")) and d["project"] not in self.providers and d["project"] not in self.queued:
                 self.queued.add(d["project"])
                 self.changed.set()
@@ -141,8 +152,10 @@ class Hub:
                     continue  # a session's hook events never rename the agent it reports as
                 a[f] = self._resolve(d[f]) if f == "parent" else d[f]
             a["at"] = self.now()
-            self._save()
             after = a.get("state")
+            if after is not None and (after != before or "since" not in a):
+                a["since"] = a["at"]  # when the agent entered its current state, for "working 14m"
+            self._save()
             return {"ok": True, "needs_you": after in ALERT_STATES and after != before, "agent": agent}
 
     def lock(self, key, by):
@@ -515,6 +528,8 @@ def cmd_ask(a):
 
 def reported_agent(command):
     """X in a shell command that runs `sbhub.py report --agent X`, else None."""
+    if not isinstance(command, str) or not command:
+        return None
     try:
         words = shlex.split(command)
     except (ValueError, AttributeError):
@@ -529,8 +544,95 @@ def reported_agent(command):
     return None
 
 
-def event_report(e):
-    """The report body for one Claude Code hook event, or None for an event the hub ignores."""
+def session_title(transcript):
+    """The title the Claude app gave a session: the last `custom-title` line near the end of its transcript."""
+    try:
+        with open(transcript, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            f.seek(max(0, f.tell() - 262144))
+            tail = f.read().decode("utf-8", "replace")
+    except (OSError, TypeError):
+        return None
+    for line in reversed(tail.splitlines()):
+        if '"custom-title"' in line:
+            try:
+                title = json.loads(line).get("customTitle")
+            except ValueError:
+                continue
+            if isinstance(title, str) and title.strip():
+                return title.strip()[:80]
+    return None
+
+
+def claimed_ticket(command, vault=None):
+    """The ticket a shell command claims with `sbmap.py claim <map> <NNN>`, by its title in the vault."""
+    try:
+        words = shlex.split(command) if isinstance(command, str) else []
+    except ValueError:
+        return None
+    for i, w in enumerate(words):
+        if w.endswith("sbmap.py") and words[i + 1:i + 2] == ["claim"] and len(words) > i + 3:
+            where, num = words[i + 2], words[i + 3]
+            root = Path(vault or os.environ.get("SB_VAULT") or Path.home() / "Documents" / "Second Brain")
+            try:
+                for f in sorted((root / "wayfinder" / where / "issues").glob(num + "*.md")):
+                    title = f.stem[len(num):].strip(" -")
+                    if title:
+                        return title[:80]
+            except OSError:
+                pass
+            return "{} {}".format(where, num)
+    return None
+
+
+def _mcp_alias(tname, tin):
+    """Agent name when an MCP sb_report call reports an orchestrator (not a worker)."""
+    if not (tname == "sb_report" or (tname.startswith("mcp__") and tname.endswith("__sb_report"))):
+        return None
+    if not isinstance(tin, dict) or tin.get("parent") or tin.get("role") == "worker":
+        return None
+    agent = tin.get("agent")
+    return agent if isinstance(agent, str) and agent else None
+
+
+def _agy_event_report(e, event):
+    """The report body for one Antigravity hook event, or None if ignored."""
+    cid = e.get("conversationId")
+    if not isinstance(cid, str) or not cid:
+        return None
+    ws = e.get("workspacePaths")
+    cwd = ws[0] if isinstance(ws, list) and ws and isinstance(ws[0], str) else ""
+    session = {"agent": cid, "name": "{} {}".format(os.path.basename(cwd.rstrip("/")), cid[:6]),
+               "project": cwd, "role": "orchestrator"} if cwd else {"agent": cid, "role": "orchestrator"}
+    if event == "SessionStart":
+        return {**session, "state": "idle", "note": "session started"}
+    if event == "PreInvocation":
+        return {**session, "state": "working", "note": "thinking"}
+    if event == "PostToolUse":
+        tc = e.get("toolCall") or {}
+        tname = tc.get("name") or ""
+        args = tc.get("args") or {}
+        detail = next((args[k] for k in ("toolSummary", "CommandLine", "Path", "TargetFile", "Query",
+                                         "question", "note", "Role") if args.get(k)), "")
+        r = {"state": "working", "note": "{}: {}".format(tname, detail)[:90]}
+        if tname == "run_command":
+            alias = reported_agent(args.get("CommandLine"))
+        elif tname == "call_mcp_tool" and args.get("ToolName") == "sb_report":
+            alias = _mcp_alias("sb_report", args.get("Arguments"))
+        else:
+            alias = _mcp_alias(tname, args)
+        return {**session, **r, **({"alias": alias} if alias else {})}
+    if event == "Stop":
+        if e.get("terminationReason") == "ERROR" or e.get("error"):
+            return {**session, "state": "blocked", "note": str(e.get("error") or "error")[:90]}
+        return {**session, "state": "your turn", "note": "finished its turn"}
+    return None
+
+
+def event_report(e, event=None):
+    """The report body for one Claude Code or Antigravity hook event, or None if ignored."""
+    if event or ("conversationId" in e and "hook_event_name" not in e):
+        return _agy_event_report(e, event)
     name, sid, cwd = e.get("hook_event_name"), e.get("session_id"), e.get("cwd")
     # every event of the session's own carries who it is: the hub often starts after the session did
     session = {"agent": sid, "name": "{} {}".format(os.path.basename(cwd.rstrip("/")), sid[:6]),
@@ -538,15 +640,23 @@ def event_report(e):
     if name == "SessionStart":
         return {**session, "state": "idle", "note": "session started"}
     if name == "UserPromptSubmit":
-        return {**session, "state": "working", "note": "reading your message"}
+        asked = " ".join(e["prompt"].split())[:140] if isinstance(e.get("prompt"), str) else ""
+        if asked.startswith(("<", "[SYSTEM", "Another Claude session")):
+            asked = ""  # a subagent's hand-back or a system notice, not the owner's words
+        return {**session, "state": "working", "note": "reading your message", **({"asked": asked} if asked else {})}
     if name == "PreToolUse":
         tin = e.get("tool_input") or {}
-        detail = next((tin[k] for k in ("description", "file_path", "pattern") if tin.get(k)), "")
-        r = {"state": "working", "note": "{}: {}".format(e["tool_name"], detail)[:90]}
+        detail = next((tin[k] for k in ("description", "file_path", "pattern", "question", "note") if tin.get(k)), "")
+        tool = e["tool_name"].rsplit("__", 1)[-1]  # mcp__Server__navigate -> navigate
+        r = {"state": "working", "note": ("{}: {}".format(tool, detail) if detail else tool)[:90]}
         if e.get("agent_id"):
             return {**r, "agent": e["agent_id"], "role": "worker", "parent": sid}
-        alias = reported_agent(tin.get("command")) if e["tool_name"] == "Bash" else None
-        return {**session, **r, **({"alias": alias} if alias else {})}
+        tname = e["tool_name"]
+        alias = reported_agent(tin.get("command")) if tname == "Bash" else _mcp_alias(tname, tin)
+        ticket = claimed_ticket(tin.get("command")) if tname == "Bash" else None
+        spawn = tin.get("description") if tname in ("Agent", "Task") else None
+        return {**session, **r, **({"alias": alias} if alias else {}), **({"ticket": ticket} if ticket else {}),
+                **({"spawn": spawn} if isinstance(spawn, str) and spawn else {})}
     if name == "Notification":
         idle = (e["notification_type"] == "idle_prompt" if "notification_type" in e
                 else "waiting for your input" in e["message"])
@@ -563,15 +673,21 @@ def event_report(e):
     return None
 
 
-def cmd_hook(port):
+def cmd_hook(port, event=None):
     """Read one hook event on stdin and report it. Whatever goes wrong, exit 0: a hook never fails a session."""
     try:
         e = json.load(sys.stdin)
-        r = event_report(e) if isinstance(e, dict) else None
+        r = event_report(e, event=event) if isinstance(e, dict) else None
+        if r and r.get("role") != "worker" and not e.get("agent_id"):
+            title = session_title(e.get("transcript_path"))
+            if title:
+                r["title"] = title
         if r:
             call(port, "/api/report", r)
     except Exception:
         pass
+    if event:
+        print("{}")
     return 0
 
 
@@ -613,13 +729,13 @@ def main(argv=None):
     add("state")
     add("trust", ("project", {}))
     add("untrust", ("project", {}))
-    add("hook")
+    add("hook", ("--event", {}))
     a = p.parse_args(argv)
     if a.cmd == "serve":
         serve(a.port)
         return 0
     if a.cmd == "hook":
-        return cmd_hook(a.port)
+        return cmd_hook(a.port, event=a.event)
     if a.cmd == "report":
         return cmd_report(a)
     if a.cmd in ("lock", "unlock"):

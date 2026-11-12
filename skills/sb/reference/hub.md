@@ -1,8 +1,22 @@
 # sb hub
 
-The hub (`scripts/sbhub.py`) is a local web page and API that shows what sb sessions are doing. The
-vault stays the record; the hub never writes into it. Agents use three of its commands; the rest of
-this file is providers.
+The hub (`scripts/sbhub.py`) is a local web page and API that shows what sb sessions are doing,
+plus an MCP face (`scripts/sbhub_mcp.py`, bundled in `mods/hub-report/.mcp.json` for Claude Code
+and `mods/hub-report-agy/mcp_config.json` for Antigravity) that renders the same live board and
+question buttons directly in chat. The vault stays the record; the hub never writes into it. Agents
+use three actions (`report`, `ask`, `lock`); the rest of this file is providers.
+
+## Chat widgets (MCP)
+
+When the `sbhub` MCP server is connected (`./install.sh --hub`):
+
+- **`sb_board`**: call once to show the owner the live board widget in chat; do not repeat its
+  contents in prose.
+- **`sb_ask`**: multiple-choice buttons in chat and on the hub page. In an interactive chat, leave
+  `block_seconds=0` and end your turn so the owner's click arrives as their next message. In a
+  subagent or unattended run, pass `block_seconds=600` (or use `sbhub.py ask`).
+- **`sb_report`**, **`sb_lock`**, **`sb_unlock`**: same semantics as the CLI below; calling
+  `sb_report` as an orchestrator aliases the session just like `sbhub.py report`.
 
 ## Report, ask, lock
 

@@ -25,6 +25,24 @@ class HubTest(unittest.TestCase):
         a = h.state()["agents"]["a"]
         self.assertEqual((a["state"], a["total"], a["project"]), ("idle", 5, "/p"))
 
+    def test_since_marks_when_the_state_last_changed(self):
+        h = self.h
+        h.report({"agent": "a", "state": "working", "note": "Read: x"})
+        self.t += 30
+        h.report({"agent": "a", "state": "working", "note": "Edit: y"})
+        h.report({"agent": "a", "note": "no state given"})
+        self.assertEqual(h.state()["agents"]["a"]["since"], 1000.0)
+        self.t += 30
+        h.report({"agent": "a", "state": "your turn"})
+        self.assertEqual(h.state()["agents"]["a"]["since"], 1060.0)
+        self.t += 5
+        h.report({"agent": "a", "state": "working"})
+        self.assertEqual(h.state()["agents"]["a"]["since"], 1065.0)
+
+    def test_an_agent_reported_without_a_state_has_no_since(self):
+        self.h.report({"agent": "a", "note": "hello"})
+        self.assertNotIn("since", self.h.state()["agents"]["a"])
+
     def test_state_carries_each_agents_id_for_the_page(self):
         h = self.h
         h.report({"agent": "night-run", "state": "working"})
@@ -92,6 +110,15 @@ class HubTest(unittest.TestCase):
         for text in ("", "{not json", "[]"):
             (self.home / "state.json").write_text(text, encoding="utf-8")
             self.assertEqual(Hub(self.home).state()["agents"], {})
+
+    def test_a_finished_worker_leaves_after_ten_minutes(self):
+        h = self.h
+        h.report({"agent": "a", "state": "working"})
+        h.report({"agent": "w", "role": "worker", "parent": "a", "state": "done"})
+        h.report({"agent": "v", "role": "worker", "parent": "a", "state": "working"})
+        self.t += 601
+        h.report({"agent": "a", "state": "working"})
+        self.assertEqual(sorted(h.state()["agents"]), ["a", "v"])
 
     def test_state_survives_a_restart(self):
         self.h.lock("k", "a")

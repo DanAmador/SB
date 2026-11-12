@@ -1,0 +1,208 @@
+<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>sb board</title>
+<style>
+:root{color-scheme:light dark;
+  --bg:var(--color-background-primary,light-dark(#fff,#1f1f1d));--card:var(--color-background-secondary,light-dark(#f6f5f1,#262624));
+  --ink:var(--color-text-primary,light-dark(#1c1c1a,#ecebe6));--mute:var(--color-text-secondary,light-dark(#6f6e69,#98968e));
+  --line:var(--color-border-tertiary,light-dark(#e4e2da,#33332f));--ok:var(--color-text-success,light-dark(#2e7d4f,#5fbf85));
+  --warn:var(--color-text-warning,light-dark(#b7791f,#e0b050));--bad:var(--color-text-danger,light-dark(#c0392b,#ef7a6b));
+  --acc:var(--color-text-info,light-dark(#3b5bdb,#8ea2ff));--r:var(--border-radius-md,8px)}
+*{box-sizing:border-box}html,body{margin:0;background:transparent}
+body{color:var(--ink);font:13px/1.35 var(--font-sans,-apple-system,system-ui,sans-serif);padding:2px;overflow-wrap:anywhere}
+.top{display:flex;gap:10px;align-items:center;font-size:12px;color:var(--mute);margin:0 2px 6px}.top b{color:var(--ink);font-size:13px}
+.top .live{margin-left:auto;display:flex;gap:6px;align-items:center}.dot{width:7px;height:7px;border-radius:50%;background:var(--ok)}.dot.off{background:var(--mute)}
+.box{background:var(--card);border:1px solid var(--line);border-radius:var(--r);overflow:hidden;margin-bottom:6px}
+.line{display:flex;gap:8px;align-items:center;padding:5px 9px;border-top:1px solid var(--line);min-height:30px}.line:first-child{border-top:0}
+.grow{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.mute{color:var(--mute);font-size:12px}
+.ic{width:20px;text-align:center;flex:none;font-size:14px;line-height:20px;font-family:"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif}
+.pips{display:inline-flex;gap:2px;align-items:center;vertical-align:middle}.pips i{width:6px;height:11px;border-radius:2px;border:1.5px solid var(--mute)}
+.pips i.on{background:var(--ok);border-color:var(--ok)}.pips i.now{height:14px;border:2.5px solid var(--acc)}
+.ses{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:1px 8px;padding:5px 9px;border-top:1px solid var(--line);align-items:start}.ses:first-child{border-top:0}
+.ses>.ic{grid-row:1/span 6}.ses .l1{grid-column:2}.ses .age{grid-column:3;grid-row:1;font-size:12px;color:var(--mute);white-space:nowrap}
+.ses>.x{grid-column:2/4;min-width:0}
+.t{font-weight:600;overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;overflow:hidden}
+.one{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.ses .ask,.ses .l3{font-size:12px;color:var(--mute)}.calm .t{color:var(--mute);font-weight:500}
+.l2{display:flex;flex-wrap:wrap;gap:1px 5px;align-items:center;font-size:12px;color:var(--mute)}.l2>*{max-width:100%;min-width:0}.tk{max-width:24ch}
+.kids{display:flex;flex-wrap:wrap;gap:3px;margin-top:2px}.kids .chip{max-width:16ch;overflow:hidden;text-overflow:ellipsis}
+.chip.warn{border-color:var(--warn);color:var(--warn);font-weight:600}
+.dec{display:flex;gap:8px;align-items:flex-start;padding:5px 9px}.dec .grow{white-space:normal}.note{font-size:12px;color:var(--mute);margin-top:2px}
+.err{color:var(--bad);font-size:12px;font-weight:600}.qx{flex-basis:100%;display:flex;gap:10px;font-size:12px;color:var(--mute)}
+.chip{flex:none;font-size:11px;padding:1px 6px;border-radius:99px;border:1px solid var(--line);white-space:nowrap}
+.chip.bad{border-color:var(--bad);color:var(--bad)}.chip.ok{color:var(--ok)}
+button{font:inherit;font-size:12px;padding:3px 10px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--ink);cursor:pointer;flex:none}
+button.def{border-color:var(--acc);color:var(--acc);font-weight:600}button:disabled{opacity:.5;cursor:default}button.sending{opacity:1}
+button{max-width:100%;white-space:normal;text-align:left;overflow-wrap:anywhere}
+.q{border-color:var(--acc)}.q .line{flex-wrap:wrap}.q .grow{white-space:normal;flex-basis:220px}
+.focus{border:1.5px solid var(--acc)}.focus .ask{padding:10px 12px}.focus .ask p{margin:0 0 8px;font-size:14px}
+.focus .opts{display:flex;gap:6px;flex-wrap:wrap}.focus button{font-size:13px;padding:5px 14px}
+.focus .done{padding:9px 12px;display:flex;gap:8px;align-items:center}
+.who{display:flex;gap:7px;align-items:center;min-width:0;flex:none;max-width:45%}.who b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar{width:44px;height:6px;border-radius:3px;background:var(--line);overflow:hidden;flex:none}.bar i{display:block;height:100%;background:var(--ok)}
+details{border-top:1px solid var(--line)}summary{cursor:pointer;padding:5px 9px;color:var(--mute);font-size:12px;list-style:none}
+summary::-webkit-details-marker{display:none}pre{margin:0;padding:0 9px 6px;font:11px/1.4 var(--font-mono,ui-monospace,monospace);color:var(--mute);white-space:pre-wrap}
+.empty{padding:10px;color:var(--mute);text-align:center}
+</style>
+<div class="top"><b>sb hub</b><span id="sum"></span><span class="live" id="live"><i class="dot off"></i><span>connecting</span></span></div>
+<div id="app"><div class="box"><div class="empty">loading…</div></div></div>
+<script>
+// MCP Apps view (SEP-1865, protocol 2026-01-26), hand-rolled so it needs no bundler or CDN.
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const num=n=>Number.isFinite(+n)?+n:0, own=(o,k)=>o&&typeof k=='string'&&Object.prototype.hasOwnProperty.call(o,k)?o[k]:undefined;
+const dur=s=>{s=Math.max(0,Math.floor(s));return s<60?s+'s':s<3600?Math.floor(s/60)+'m':s<86400?Math.floor(s/3600)+'h':Math.floor(s/86400)+'d'};
+const ago=(now,t)=>dur(now-num(t))+' ago';
+const ST={working:'⏳',done:'✅',blocked:'⛔','needs you':'🔔','your turn':'💬',waiting:'⏸️',idle:'💤'};
+const RANK={'needs you':0,blocked:0,'your turn':1,working:2,waiting:2,idle:3,done:4}, rank=a=>own(RANK,a.state)??2;
+const TOOL={Bash:'⌨️',run_command:'⌨️',Read:'📄',read_file:'📄',view_file:'📄',Edit:'✏️',edit_file:'✏️',Write:'✏️',write_file:'✏️',Grep:'🔎',grep_search:'🔎',Glob:'🔎',Agent:'🤖',Task:'🤖',invoke_subagent:'🤖',WebFetch:'🌐',WebSearch:'🌐',search_web:'🌐'};
+const LV={ok:'🟢',warn:'🟡',bad:'🔴'}, PICON={git:'🌿',tests:'🧪',unity:'🎮',build:'🔨',server:'🖥️'};
+const short=id=>String(id??'').slice(0,6), proj=p=>String(p||'').split('/').filter(Boolean).pop()||'';
+const tnum=t=>/^\d+$/.test(String(t))?'ticket '+t:String(t);
+// the same label as the hub page: title, else ticket, else name, else a short id (raw text: esc it where used)
+const lbl=a=>String(a.title||(a.ticket?tnum(a.ticket):'')||a.name||short(a.agent));
+const who=id=>{const a=S&&typeof id=='string'?own(S.agents,id):null;return a?lbl(a):short(id)};
+const stIc=st=>`<span class="ic" role="img" aria-label="${esc(st||'unknown')}" title="${esc(st||'unknown')}">${own(ST,st)||'•'}</span>`;
+const act=a=>{const m=/^(\w+)(?:: ?(.*))?$/.exec(a.note||'');return m&&own(TOOL,m[1])?[TOOL[m[1]],m[2]||m[1]]:['',a.note||'']};
+
+// ---- bridge to the host ----
+let nextId=1, hostCaps={}, canCall=false;const pending=new Map();
+function send(msg){window.parent.postMessage({jsonrpc:'2.0',...msg},'*')}
+function request(method,params){const id=nextId++;send({id,method,params});
+  return new Promise((res,rej)=>{pending.set(id,{res,rej});setTimeout(()=>{if(pending.delete(id))rej(new Error('timeout'))},15000)})}
+const notify=(method,params)=>send({method,params});
+function applyHost(ctx){if(!ctx)return;const r=document.documentElement;
+  if(ctx.theme)r.style.colorScheme=ctx.theme;
+  for(const [k,v] of Object.entries(ctx.styles?.variables||{}))if(v)r.style.setProperty(k,v);
+  if(ctx.styles?.css?.fonts&&!document.getElementById('hf')){const st=document.createElement('style');st.id='hf';st.textContent=ctx.styles.css.fonts;document.head.appendChild(st)}}
+window.addEventListener('message',e=>{
+  if(e.source!==window.parent)return;const m=e.data;if(!m||m.jsonrpc!=='2.0')return;
+  if(m.id!=null&&!m.method){const p=pending.get(m.id);if(!p)return;pending.delete(m.id);m.error?p.rej(m.error):p.res(m.result);return}
+  if(m.method==='ui/notifications/tool-result'){const s=m.params?.structuredContent;
+    if(s&&s.agents){take(s,true);return}
+    if(m.params?.isError&&!S){const msg=m.params?.content?.[0]?.text||'Error';
+      document.getElementById('app').innerHTML=`<div class="box"><div class="line"><span class="ic">⛔</span><span class="grow">${esc(msg)}</span></div></div>`}
+    return}
+  if(m.method==='ui/notifications/tool-input'){const a=m.params?.arguments;if(a&&a.question&&!S)askPreview(a);return}
+  if(m.method==='ui/notifications/host-context-changed'){applyHost(m.params);return}
+  if(m.method==='ui/resource-teardown'){stop();if(m.id!=null)send({id:m.id,result:{}});return}
+  if(m.method==='ping'&&m.id!=null)send({id:m.id,result:{}});
+});
+new ResizeObserver(()=>{const h=Math.ceil(document.documentElement.getBoundingClientRect().height);
+  if(h!==lastH){lastH=h;notify('ui/notifications/size-changed',{height:h})}}).observe(document.body);
+let lastH=0;
+
+// ---- state ----
+let S=null, focus=null, answered={}, timer=null, lastKey='', quietSince=Date.now();
+// per widget: questions seen open here (so their decision stays visible), answers sent from here,
+// clicks in flight, failures to show, and what happened to the chat message
+const seenOpen=new Set(), here={}, sending={}, fails={}, chatNote={};
+function take(s,fromResult){
+  if(fromResult&&s.focus)focus=s.focus;
+  if(fromResult&&s.answer!=null&&focus)answered[focus]=s.answer;
+  for(const [id,q] of Object.entries(s.questions||{}))if(q&&q.answer==null)seenOpen.add(id);
+  const {now,...rest}=s,key=JSON.stringify(rest);
+  if(key!==lastKey){lastKey=key;quietSince=Date.now()}
+  S=s;render();
+}
+async function poll(){
+  if(!canCall)return;
+  try{const r=await request('tools/call',{name:'sb_state',arguments:{}});
+    const s=r?.structuredContent;setLive(!!(s&&s.agents));if(s&&s.agents)take(s,false)}
+  catch(e){setLive(false)}
+  // slow down when nothing changes for a while: 3 s, then 15 s after 5 quiet minutes
+  timer=setTimeout(poll,Date.now()-quietSince>300000?15000:3000);
+}
+function stop(){clearTimeout(timer);canCall=false}
+function setLive(ok){document.getElementById('live').innerHTML=`<i class="dot${ok?'':' off'}"></i><span>${ok?'live':canCall?'hub not reachable':'snapshot'}</span>`}
+const why=e=>String(e?.content?.[0]?.text||e?.message||e?.error?.message||e||'unknown error').slice(0,200);
+// ui/message support: skip only when the host says outright that it has none
+const chatUnsupported=()=>Object.prototype.hasOwnProperty.call(hostCaps,'message')&&!hostCaps.message;
+
+async function answer(qid,i){
+  const q=S&&own(S.questions,qid);if(!q||!Array.isArray(q.options)||i>=q.options.length||q.answer!=null||own(sending,qid)!=null)return;
+  const choice=q.options[i];delete fails[qid];sending[qid]=i;render();
+  try{const r=await request('tools/call',{name:'sb_answer',arguments:{qid,answer:choice}});if(!r||r.isError)throw r||new Error('no reply from the host')}
+  catch(e){delete sending[qid];fails[qid]=why(e);render();return}
+  delete sending[qid];answered[qid]=choice;here[qid]={q:q.q,choice};q.answer=choice;q.by='you';
+  quietSince=Date.now();
+  // the question was asked from this chat: its agent is waiting for the owner's next message
+  if(qid===focus){
+    const fallback=reason=>{chatNote[qid]={text:'Recorded on the hub. The agent will see it on its next turn.',title:reason};render()};
+    if(chatUnsupported())fallback('this host does not take messages from widgets (hostCapabilities.message is off)');
+    else request('ui/message',{role:'user',content:[{type:'text',text:`My answer to "${q.q}": ${choice}`}]})
+      .then(r=>{if(r&&r.isError)fallback(why(r))},e=>fallback(why(e)));
+  }
+  render();
+}
+document.addEventListener('click',e=>{const b=e.target.closest('button[data-q]');if(b&&!b.disabled)answer(b.dataset.q,+b.dataset.i)});
+
+// ---- render ----
+function prog(d,t){const label=`${d} of ${t} done`;
+  if(t>20)return `<span title="${esc(label)}"><span class="bar"><i style="width:${Math.max(0,Math.min(100,100*d/t))}%"></i></span> ${d}/${t}</span>`;
+  let h='';for(let i=0;i<t;i++)h+=`<i class="${i<d?'on':i==d?'now':''}"></i>`;return `<span title="${esc(label)}"><span class="pips" role="img" aria-label="${esc(label)}">${h}</span> ${d}/${t}</span>`}
+function chip(s,a){const [ic]=act(a),c=rank(a)==0?'bad':a.state=='done'?'ok':'';
+  return `<span class="chip ${c}" dir="auto" title="${esc(lbl(a))} · ${esc(a.state)} · ${esc(a.note)}"><span role="img" aria-label="${esc(a.state)}">${own(ST,a.state)||'•'}</span> ${esc(lbl(a))}${ic?' '+ic:''}</span>`}
+// a session as on the hub page: icon, title and age; then what the owner asked, project · ticket · progress, the note, workers
+function row(s,a,kids){const [ic,txt]=act(a),t=num(a.total),silent=s.now-num(a.at),nm=lbl(a),meta=[];
+  if(proj(a.project))meta.push(`<span class="one" title="${esc(a.project)}">${esc(proj(a.project))}</span>`);
+  if(a.ticket&&a.role!='worker'&&tnum(a.ticket)!==nm)meta.push(`<span class="tk one" dir="auto">🎫 ${esc(tnum(a.ticket))}</span>`);
+  if(t>0)meta.push(prog(num(a.done),t));
+  if(a.state=='working'&&num(a.since))meta.push(`<span>working ${esc(dur(s.now-num(a.since)))}</span>`);
+  if(a.state=='working'&&silent>=600)meta.push(`<span class="chip warn">⚠ quiet for ${esc(dur(silent))}</span>`);
+  return `<div class="ses${a.state=='idle'||a.state=='done'?' calm':''}">${stIc(a.state)}<span class="l1 t" dir="auto" title="${esc(nm)}">${esc(nm)}</span><span class="age">active ${esc(ago(s.now,a.at))}</span>`
+    +(a.asked?`<div class="x ask one" dir="auto" title="${esc(a.asked)}">You asked: “${esc(a.asked)}”</div>`:'')
+    +(meta.length?`<div class="x l2">${meta.join('<span aria-hidden="true">·</span>')}</div>`:'')
+    +(txt?`<div class="x l3 one" dir="auto" title="${esc(txt)}">${ic} ${esc(txt)}</div>`:'')
+    +(kids.length?`<div class="x kids">${kids.map(k=>chip(s,k)).join('')}</div>`:'')+'</div>'}
+function widget(w){const label=esc(w.label);
+  if(w.kind=='status')return `<span class="chip" title="${label}">${own(LV,w.level)||''} ${esc(String(w.value).slice(0,36))}</span>`;
+  if(w.kind=='progress'){const v=num(w.value),m=num(w.max),pc=Math.max(0,Math.min(100,100*v/(m||1)));return `<span class="bar" title="${label} ${v}/${m}"><i style="width:${pc}%"></i></span>`}
+  if(w.kind=='counts'&&w.items&&typeof w.items=='object')return Object.entries(w.items).map(([k,v])=>`<span class="chip ${k=='fail'&&num(v)?'bad':''}" title="${label}">${k=='pass'?'✅':k=='fail'?'❌':esc(k)} ${esc(v)}</span>`).join('');
+  return ''}
+function opts(id,q){const busy=own(sending,id);
+  return (q.options||[]).map((o,i)=>`<button data-q="${esc(id)}" data-i="${i}" class="${o==q.default?'def':''}${busy===i?' sending':''}" title="${o==q.default?'default':''}"${busy!=null?' disabled':''}>${busy===i?'Sending…':esc(o)}</button>`).join('')}
+const left=(s,q)=>{const l=num(q.deadline)-s.now;return l>0?`⏱ ${dur(l)} left`:'deciding…'};
+const failLine=id=>own(fails,id)?`<span class="err" role="alert">Not recorded: ${esc(fails[id])}</span>`:'';
+const noteLine=id=>own(chatNote,id)?`<div class="note" title="${esc(chatNote[id].title)}">${esc(chatNote[id].text)}</div>`:'';
+function decidedLine(id,q,choice,by){return `<div class="dec"><span class="ic">${by=='default'?'⏱':'✅'}</span><div class="grow"><span dir="auto">${esc(q)}</span> → <b dir="auto">${esc(choice)}</b>${by=='default'?' <span class="mute">(by default)</span>':''}${noteLine(id)}</div></div>`}
+function askPreview(a){document.getElementById('app').innerHTML=`<div class="box focus"><div class="ask"><p>❓ ${esc(a.question)}</p><div class="opts">${(a.options||[]).map(o=>`<button disabled class="${o===a.default?'def':''}">${esc(o)}</button>`).join('')}</div></div></div>`}
+function render(){
+  const s=S, agents=Object.values(s.agents||{}), qs=Object.entries(s.questions||{});
+  const order=(x,y)=>rank(x)-rank(y)||num(y.at)-num(x.at);
+  const open=qs.filter(([id,q])=>q.answer==null&&id!==focus).sort((x,y)=>num(x[1].deadline)-num(y[1].deadline)), need=agents.filter(a=>rank(a)==0);
+  const par=a=>{const p=own(s.agents,a.parent);return p&&p.role!='worker'?p:null};
+  const tops=agents.filter(a=>a.role!='worker'||!par(a)).sort(order), kids=p=>agents.filter(a=>a.role=='worker'&&par(a)===p).sort(order);
+  const wait=tops.filter(a=>a.state=='your turn').length;
+  document.getElementById('sum').textContent=`${tops.length} session${tops.length==1?'':'s'} · ${need.length+open.length} need you · ${wait} waiting for you · ${Object.keys(s.locks||{}).length} lock${Object.keys(s.locks||{}).length==1?'':'s'}`;
+  let h='';
+  const fq=focus&&own(s.questions,focus);
+  if(fq){const a=fq.answer??answered[focus];
+    h+=`<div class="box focus">`+(a==null
+      ?`<div class="ask"><p>❓ ${esc(fq.q)}</p><div class="opts">${opts(focus,fq)}<span class="mute" style="align-self:center" title="then the default applies">${esc(left(s,fq))}</span></div>${failLine(focus)}</div>`
+      :decidedLine(focus,fq.q,a,fq.by))+`</div>`}
+  // decided here, or decided elsewhere after this widget saw it open: it stays, marked, instead of vanishing
+  const dec=[];
+  for(const [id,q] of qs)if(id!==focus&&q.answer!=null&&(own(here,id)||seenOpen.has(id)))dec.push(decidedLine(id,q.q,q.answer,q.by));
+  for(const [id,x] of Object.entries(here))if(id!==focus&&!own(s.questions,id))dec.push(decidedLine(id,x.q,x.choice,'you'));
+  if(open.length||need.length||dec.length)h+='<div class="box q">'+open.map(([id,q])=>`<div class="line"><span class="ic">❓</span><span class="grow"><b dir="auto">${esc(who(q.agent))}</b> ${esc(q.q)}</span>${opts(id,q)}<span class="mute">${esc(left(s,q))}</span>${own(fails,id)?`<span class="qx">${failLine(id)}</span>`:''}</div>`).join('')
+    +dec.join('')+need.map(a=>row(s,a,kids(a))).join('')+'</div>';
+  h+='<div class="box">'+(tops.filter(a=>rank(a)>0).map(a=>row(s,a,kids(a))).join('')||(tops.length?'':'<div class="empty">no sessions reporting</div>'));
+  const locks=Object.entries(s.locks||{});
+  h+=locks.map(([k,l])=>`<div class="line"><span class="ic">🔒</span><span class="grow">${esc(k)}</span><span class="mute">held by ${esc(who(l.by))} · ${esc(ago(s.now,l.at))}</span></div>`).join('');
+  const provs=Object.entries(s.providers||{});
+  if(provs.length)h+=`<details data-k="providers"><summary>▸ projects (${provs.length})</summary>`+provs.map(([p,list])=>(Array.isArray(list)?list:[]).map(x=>{
+      const ws=Array.isArray(x.widgets)?x.widgets.filter(w=>w&&typeof w=='object'):[];
+      const logs=ws.filter(w=>w.kind==='log'&&Array.isArray(w.lines)&&w.lines.length);
+      return `<div class="line"><span class="ic" title="${esc(x.title)}">${own(PICON,x.icon)||'🔧'}</span><span class="mute">${esc(p.split('/').pop())}</span>${ws.map(widget).join('')}<span class="grow"></span></div>`
+        +logs.map(l=>`<details data-k="${esc(p+'|'+x.title+'|'+l.label)}"><summary>▸ ${esc(l.label)}</summary><pre>${l.lines.map(esc).join('\n')}</pre></details>`).join('')}).join('')).join('')+'</details>';
+  h+='</div>';
+  const app=document.getElementById('app'),kept=new Set([...app.querySelectorAll('details[open]')].map(d=>d.dataset.k));
+  app.innerHTML=h;app.querySelectorAll('details').forEach(d=>{if(kept.has(d.dataset.k))d.open=true});
+}
+
+// ---- handshake ----
+request('ui/initialize',{appInfo:{name:'sb-board',version:'1.0.0'},appCapabilities:{availableDisplayModes:['inline']},protocolVersion:'2026-01-26'})
+  .then(r=>{hostCaps=r?.hostCapabilities||{};applyHost(r?.hostContext);notify('ui/notifications/initialized',{});
+    const caps=JSON.stringify(hostCaps).slice(0,2000),live=document.getElementById('live');live.dataset.hostCaps=caps;live.title='host capabilities: '+caps;
+    canCall=!!hostCaps.serverTools;setLive(false);if(canCall)poll()})
+  .catch(()=>setLive(false));
+</script>

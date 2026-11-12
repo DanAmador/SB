@@ -122,3 +122,13 @@ for dir in "$HOME/.claude" "$HOME"/.claude-*; do
     cc plugin install vault-link-check@sb-workflow
     for m in $extra; do cc plugin install "$m@sb-workflow"; done
 done
+case "$extra" in *hub-report*)
+    agy_bin="$(command -v agy || true)"
+    [ -n "$agy_bin" ] || [ ! -x "$HOME/.local/bin/agy" ] || agy_bin="$HOME/.local/bin/agy"
+    if [ -n "$agy_bin" ]; then
+        "$agy_bin" plugin install "$here/mods/hub-report-agy"
+    elif [ -d "$HOME/.gemini/config" ]; then
+        mkdir -p "$HOME/.gemini/config/plugins"
+        cp -R "$here/mods/hub-report-agy" "$HOME/.gemini/config/plugins/hub-report"
+    fi ;;
+esac

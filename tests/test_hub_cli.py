@@ -144,10 +144,17 @@ class HubCliTest(HubCase):
             headers = self.raw_get({}, path)[1]
             self.assertEqual((headers["X-Frame-Options"], headers["X-Content-Type-Options"]), ("DENY", "nosniff"))
 
-    def test_the_page_heads_the_needs_you_box_and_wraps_a_long_session_row(self):
+    def test_the_page_heads_the_needs_you_box_and_caps_a_long_title(self):
         html = urllib.request.urlopen(f"http://127.0.0.1:{self.port}/").read().decode()
         self.assertIn("<h2>Needs you</h2>", html)
-        self.assertIn(".row{flex-wrap:wrap}", html)
+        self.assertIn("-webkit-line-clamp:2", html)
+        self.assertNotIn("body{margin:0;overflow-wrap:anywhere", html)  # it shrank titles to one letter wide
+
+    def test_the_page_says_its_language_and_its_calm_and_offline_states(self):
+        html = urllib.request.urlopen(f"http://127.0.0.1:{self.port}/").read().decode()
+        self.assertTrue(html.startswith('<!doctype html><html lang="en">'))
+        for words in ("Nothing needs you", "Waiting for you", "Hub not reachable", "quiet for", "You asked"):
+            self.assertIn(words, html)
 
     def test_a_slow_notification_does_not_delay_the_answer(self):
         slow = []

@@ -1,0 +1,37 @@
+{
+  "hub-report": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "python3 \"$HOME/.agents/skills/sb/scripts/sbhub.py\" hook --event SessionStart",
+        "timeout": 3
+      }
+    ],
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "python3 \"$HOME/.agents/skills/sb/scripts/sbhub.py\" hook --event PreInvocation",
+        "timeout": 3
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$HOME/.agents/skills/sb/scripts/sbhub.py\" hook --event PostToolUse",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "python3 \"$HOME/.agents/skills/sb/scripts/sbhub.py\" hook --event Stop",
+        "timeout": 3
+      }
+    ]
+  }
+}
