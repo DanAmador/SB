@@ -20,6 +20,9 @@ Bases see the whole route. It answers what an agent should never compute or type
     sbmap.py lanes    <map> [--max 2] [--json]
                                         open tickets split into parallel lanes by their paths and
                                         blockers, the rest serial (ticket 009's rule)
+    sbmap.py tickets  [--repo <path>] --json
+                                        every open or claimed ticket of every open map as one JSON list:
+                                        tier, checks (the ticket's, else the map's), open blockers, map order
     sbmap.py next     <map>             the next free ticket number for this map's repo
     sbmap.py run      <map | project> [<name>] [--date YYYY-MM-DD] | --shared <name>
                                         makes the run's folder and prints its board's path:
@@ -49,6 +52,9 @@ Bases see the whole route. It answers what an agent should never compute or type
                                         appends dated entry to ## Comments
     sbmap.py set      <map> <NNN> key=value ... [--no-sync]
                                         ticket properties (status, type, claimed_by, ...)
+    sbmap.py mapset   <map> key=value ...
+                                        map properties (checks="cmd one; cmd two"); `set` also takes
+                                        tier=sonnet|opus and checks="..." on a ticket
     sbmap.py claim    <map> <NNN> --by "<session or harness/model>" [--no-sync]
     sbmap.py block    <map> <NNN> <refs, comma separated: numbers, map folder names, or none> [--no-sync]
     sbmap.py resolve  <map> <NNN> --gist "<one line>" [--answer "..."] [--commit <sha>]
@@ -143,6 +149,7 @@ MAP_KEYS = ["wayfinder", "project", "status", "aliases", "repo", "github", "tags
 OPERON_PRIORITIES = ("S", "A", "B", "C", "D", "E", "F")
 PRIORITY_WORDS = {"urgent": "S", "critical": "S", "high": "A", "normal": "C", "medium": "C", "low": "E",
                   "someday": "F"}
+TIERS = ("sonnet", "opus")  # the model tier a queue runs a ticket on; sonnet when absent
 FINISHED = '["Project.Finished", "Project.Dropped"]'  # the statuses that clear a blocker, as Operon writes them
 LEGACY = {"Status": "status", "Type": "type", "Blocked by": "blocked_by", "GitHub": "github",
           "Claimed by": "claimed_by"}
@@ -496,6 +503,10 @@ def split_list(value):
     return [x.strip() for x in str(value).split(",") if x.strip()]
 
 
+def split_checks(value):
+    return [x.strip() for x in str(value).split(";") if x.strip()]
+
+
 def opt(args, name, default=None):
     if name in args:
         idx = args.index(name)
@@ -618,6 +629,8 @@ def cmd_info(args):
         print(f"# {m.title}\n")
         print((plain_words(m) or "(no plain words yet)") + "\n")
         print("counts: " + counts(m))
+        if m.props.get("checks"):
+            print("checks: " + "; ".join(m.props["checks"]))
         front = {t.num for t in m.frontier()}
         waiting = []
         for t in m.order():
@@ -1263,6 +1276,10 @@ def cmd_set(args):
             v = operon_priority(v)
         if k == "paths":
             v = split_list(v)
+        if k == "tier" and v not in TIERS:
+            sys.exit(f"sbmap: tier must be one of {', '.join(TIERS)}")
+        if k == "checks":
+            v = split_checks(v)
         props[k] = v
     curr_wf = OPERON_TO_WF_STATUS.get(str(props.get("status", "")).lower(), str(props.get("status", "")).lower())
     if curr_wf != "claimed":
@@ -2278,14 +2295,69 @@ def cmd_wiki(args):
         sys.exit(code)
 
 
+def cmd_mapset(args):
+    m = load(args[0])
+    if not m.has_fm:
+        sys.exit("sbmap: legacy map; run `sbmap migrate` first")
+    props = dict(m.props)
+    for kv in args[1:]:
+        k, _, v = kv.partition("=")
+        props[k] = split_checks(v) if k == "checks" else v
+    m.save(props, m.body)
+    print(f"{m.folder.name}: " + ", ".join(args[1:]))
+
+
+def sections(body):
+    """{heading: text} for every ## or ### section of a ticket body."""
+    out, key = {}, None
+    for line in body.splitlines():
+        h = re.match(r"#{2,3} (.+?)\s*$", line)
+        if h:
+            key = h.group(1)
+            out[key] = []
+        elif key:
+            out[key].append(line)
+    return {k: "\n".join(v).strip() for k, v in out.items()}
+
+
+def cmd_tickets(args):
+    """Every open or claimed ticket of every open map, as the facts a queue decides on."""
+    if "--json" not in args:
+        sys.exit("sbmap: tickets needs --json")
+    repo = opt(args, "--repo")
+    rows = []
+    for m in all_maps():
+        if m.archived or m.status == "resolved" or (repo and not belongs(m, repo)):
+            continue
+        for i, t in enumerate(m.order()):
+            if t.status not in ("open", "claimed"):
+                continue
+            blockers = [(t_b.num if t_b else str(ref), cleared)
+                        for ref in t.blocked_by for _, cleared, t_b in [m.blocker(ref)]]
+            sec = sections(t.body)
+            own = t.props.get("checks") or []
+            checks = own if isinstance(own, list) and own else m.props.get("checks") or []
+            rows.append({
+                "map": m.rel_name, "num": t.num, "title": t.title, "why": t.props.get("why", ""),
+                "type": t.type, "status": t.status, "priority": t.props.get("priority") or None,
+                "blocked_by": [b for b, _ in blockers],
+                "blocked_by_open": [b for b, cleared in blockers if not cleared],
+                "paths": t.paths, "tier": str(t.props.get("tier") or "sonnet"),
+                "has_done_when": bool(sec.get("Done when")), "done_when": sec.get("Done when", ""),
+                "question": sec.get("Question", ""), "out": sec.get("Not this ticket", ""),
+                "checks": checks, "repo": str(m.props.get("repo", "")), "file": str(t.path),
+                "map_title": m.title, "map_order": i, "claimed_by": t.claimed_by or None})
+    print(json.dumps(rows, indent=1))
+
+
 COMMANDS = {"info": cmd_info, "maps": cmd_maps, "status": cmd_status, "frontier": cmd_frontier, "lanes": cmd_lanes, "show": cmd_show,
-            "next": cmd_next, "link": cmd_link, "uri": cmd_uri, "check": cmd_check, "verify": cmd_verify,
+            "next": cmd_next, "mapset": cmd_mapset, "tickets": cmd_tickets, "link": cmd_link, "uri": cmd_uri, "check": cmd_check, "verify": cmd_verify,
             "init": cmd_init, "summary": cmd_summary, "new": cmd_new, "set": cmd_set, "claim": cmd_claim,
             "comment": cmd_comment, "ruling": cmd_comment, "block": cmd_block,
             "resolve": cmd_resolve, "diagram": cmd_diagram, "board": cmd_board, "migrate": cmd_migrate,
             "close": cmd_close, "run": cmd_run, "wiki": cmd_wiki}
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2 or sys.argv[1] not in COMMANDS or (sys.argv[1] not in ("maps", "info", "wiki") and len(sys.argv) < 3):
+    if len(sys.argv) < 2 or sys.argv[1] not in COMMANDS or (sys.argv[1] not in ("maps", "info", "wiki", "tickets") and len(sys.argv) < 3):
         sys.exit(__doc__)
     COMMANDS[sys.argv[1]](sys.argv[2:])
