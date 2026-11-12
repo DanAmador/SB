@@ -63,6 +63,7 @@ class Hub:
         self.home = Path(home)
         self._run = run  # () -> the open tickets (list or JSON); sbmap when None
         self._tcache = (0.0, None)
+        self._tfailed = None  # when sbmap last failed
         self.now = now
         self._lock = threading.Lock()
         self.providers = {}
@@ -280,7 +281,7 @@ class Hub:
             return dict(self._data["questions"][qid])
 
     def state(self):
-        self._seed_queue()
+        self._seed_queue(fetch=False)  # never waits on sbmap: it reads the cache
         with self._lock:
             self._settle()
             out = json.loads(json.dumps(self._data))
@@ -308,12 +309,17 @@ class Hub:
         `run` or `fresh` skips the cache. Runs outside the lock: sbmap is slow."""
         with self._lock:
             at, rows = self._tcache
-        if run is None and not fresh and rows is not None and self.now() - at < TICKETS_CACHED_FOR:
-            return rows
+            failed = self._tfailed
+        if run is None and not fresh:
+            if rows is not None and self.now() - at < TICKETS_CACHED_FOR:
+                return rows
+            if failed is not None and self.now() - failed < TICKETS_FAILED_FOR:
+                return rows
         got = self._fetch(run)
         with self._lock:
             if got is not None:
                 self._tcache = (self.now(), got)
+            self._tfailed = None if got is not None else self.now()
             return got if got is not None else self._tcache[1]
 
     def tickets(self, run=None, fresh=False):
@@ -335,11 +341,15 @@ class Hub:
         return {"key": key, "kind": "ticket", "agent": None, "state": "queued", "note": "", "commit": None,
                 "tries": 0, "started": None, "ended": None}
 
-    def _seed_queue(self, run=None):
+    def _seed_queue(self, run=None, fetch=True):
         """The first time the tickets can be read, tick every ready one; the owner unticks."""
         if self._data["queue"]["seeded"]:
             return
-        rows = self._open_tickets(run)
+        if fetch:
+            rows = self._open_tickets(run)
+        else:
+            with self._lock:
+                rows = self._tcache[1]
         if not rows:
             return
         with self._lock:
@@ -360,24 +370,32 @@ class Hub:
         keys = [k for k in dict.fromkeys(keys) if k not in taken]
         running = taken & self._live_keys()
         ordered = [k for k in sbqueue.order(rows, keys + sorted(running)) if k in keys]
+        known = {sbqueue.key(t) for t in rows}
+        ordered += [k for k in keys if k not in known and k in have]  # no longer listed: kept, not dropped
         q["items"] = keep + [have.get(k) or self._item(k) for k in ordered]
 
-    def _queue_write(self, version, change):
+    def _queue_write(self, version, change, needs_tickets=False):
         """One accepted queue write: stale versions are refused, the rest bump the version once."""
-        rows = self._open_tickets() or []
+        rows = []
+        if needs_tickets:
+            rows = self._open_tickets()
+            if rows is None:
+                raise ValueError("tickets unavailable")
         with self._lock:
             q = self._data["queue"]
             if version is not None and version != q["version"]:
                 return {"ok": False, "stale": True, "queue": json.loads(json.dumps(q))}
             change(q, rows)
             q["version"] += 1
-            q["seeded"] = True
             self._save()
             return {"ok": True, "queue": json.loads(json.dumps(q))}
 
     def queue_set(self, keys, version):
         """Replace the ticket selection (jobs, running and finished items untouched)."""
-        return self._queue_write(version, lambda q, rows: self._apply_selection(q, list(keys), rows))
+        def change(q, rows):
+            self._apply_selection(q, list(keys), rows)
+            q["seeded"] = True
+        return self._queue_write(version, change, needs_tickets=True)
 
     def queue_move(self, key, to_index, version):
         """Move a queued ticket among the queued tickets, clamped by its blockers and dependents."""
@@ -389,7 +407,7 @@ class Hub:
             moved = sbqueue.move([i["key"] for i in queued], key, int(to_index), rows)
             others = [i for i in q["items"] if i not in queued]
             q["items"] = others + [by[k] for k in moved]
-        return self._queue_write(version, change)
+        return self._queue_write(version, change, needs_tickets=True)
 
     def queue_pause(self, paused):
         def change(q, rows):
@@ -454,6 +472,7 @@ class Hub:
 SBMAP = Path(__file__).resolve().parent / "sbmap.py"
 REFRESH_EVERY = 15
 TICKETS_CACHED_FOR = 15
+TICKETS_FAILED_FOR = 5  # after a failed sbmap, no new try for this long
 
 
 def _signed_in(path):
@@ -999,13 +1018,13 @@ def cmd_trust(a, yes):
 
 def cmd_queue(a):
     port, act, rest = a.port, a.action, a.rest
-    code, st = call(port, "/api/state")
+    code, rows = call(port, "/api/tickets", timeout=70)  # first: it also seeds the queue
     if code == 0:
         print("sbhub: not running", file=sys.stderr)
         return 2
-    q = st["queue"]
+    q = call(port, "/api/state")[1]["queue"]
     if act == "show":
-        titles = {sbqueue.key(t): t for t in call(port, "/api/tickets")[1] or []}
+        titles = {sbqueue.key(t): t for t in rows if isinstance(rows, list) and isinstance(t, dict)}
         print("{}{}".format("paused, " if q["paused"] else "", "agent " + (q["agent"] or "none")))
         for n, i in enumerate(q["items"], 1):
             t = titles.get(i["key"], {})

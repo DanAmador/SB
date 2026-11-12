@@ -32,6 +32,7 @@ class QueueTest(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.home = Path(self._tmp.name)
         self.h = Hub(self.home, run=lambda: json.dumps(TICKETS))
+        self.h.tickets()  # state() only reads the cache; this fills it and seeds the queue
 
     def tearDown(self):
         self._tmp.cleanup()
@@ -115,7 +116,7 @@ class QueueTest(unittest.TestCase):
         v = self.h.state()["queue"]["version"]
         self.h.queue_set(["repo/one#1"], v)
         self.h.queue_pause(True)
-        again = Hub(self.home, run=lambda: json.dumps(TICKETS))
+        again = Hub(self.home, run=lambda: "not json")
         q = again.state()["queue"]
         self.assertEqual(([i["key"] for i in q["items"]], q["paused"], q["version"]), (["repo/one#1"], True, v + 2))
 
@@ -144,6 +145,58 @@ class QueueTest(unittest.TestCase):
         now[0] += 16
         h.tickets()
         self.assertEqual(len(calls), 2)
+
+    def test_state_never_runs_sbmap(self):
+        calls = []
+        h = Hub(self.home / "z", run=lambda: calls.append(1) or json.dumps(TICKETS))
+        self.assertEqual(h.state()["queue"]["items"], [])
+        self.assertEqual(calls, [])
+        h.tickets()
+        self.assertEqual(len(h.state()["queue"]["items"]), 2)
+
+    def test_a_failed_sbmap_is_not_retried_at_once(self):
+        calls = []
+        now = [100.0]
+
+        def run():
+            calls.append(1)
+            raise OSError("down")
+        h = Hub(self.home / "f", now=lambda: now[0], run=None)
+        h._run = run
+        h.tickets()
+        h.tickets()
+        self.assertEqual(len(calls), 1)
+        now[0] += 6
+        h.tickets()
+        self.assertEqual(len(calls), 2)
+
+    def test_queue_set_with_sbmap_down_is_refused_and_changes_nothing(self):
+        def run():
+            raise OSError("down")
+        h = Hub(self.home / "d", run=run)
+        with self.assertRaises(ValueError) as e:
+            h.queue_set(["repo/one#1"], 0)
+        self.assertIn("tickets unavailable", str(e.exception))
+        q = h.state()["queue"]
+        self.assertEqual((q["version"], q["items"], q["seeded"]), (0, [], False))
+        with self.assertRaises(ValueError):
+            h.queue_move("repo/one#1", 0, 0)
+
+    def test_queued_tickets_missing_from_a_fresh_list_are_kept(self):
+        rows = [list(TICKETS)]
+        now = [100.0]
+        h = Hub(self.home / "k", now=lambda: now[0], run=lambda: json.dumps(rows[0]))
+        h.tickets()
+        rows[0] = [t for t in TICKETS if t["num"] != 4]
+        now[0] += 20
+        h.queue_set(["repo/one#4", "repo/one#1"], h.state()["queue"]["version"])
+        self.assertEqual([i["key"] for i in h.state()["queue"]["items"]], ["repo/one#1", "repo/one#4"])
+
+    def test_pause_does_not_stop_the_default_selection(self):
+        h = Hub(self.home / "p", run=lambda: json.dumps(TICKETS))
+        h.queue_pause(True)
+        h.tickets()
+        self.assertEqual(len(h.state()["queue"]["items"]), 2)
 
     def test_a_broken_sbmap_leaves_the_queue_unset(self):
         h = Hub(self.home / "y", run=lambda: "not json")
