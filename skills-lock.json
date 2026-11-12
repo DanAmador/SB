@@ -17,7 +17,7 @@
     "json-canvas": {
       "source": "kepano/obsidian-skills",
       "sourceType": "github",
-      "skillPath": "skills/json-canvas/SKILL.md",
+      "skillPath": "plugins/obsidian/skills/json-canvas/SKILL.md",
       "computedHash": "50bb31eb1cb11bd29a2a9906b8986c02dc871af6af1bb6a201960e38fb62c22a"
     },
     "karpathy-llm-wiki": {
@@ -30,25 +30,25 @@
     "knap": {
       "source": "kepano/obsidian-skills",
       "sourceType": "github",
-      "skillPath": "skills/knap/SKILL.md",
+      "skillPath": "plugins/obsidian/skills/knap/SKILL.md",
       "computedHash": "e6d5e420f81036552d30ea6f0216f11c957a4839587038d2ac60386020ffb364"
     },
     "obsidian-bases": {
       "source": "kepano/obsidian-skills",
       "sourceType": "github",
-      "skillPath": "skills/obsidian-bases/SKILL.md",
+      "skillPath": "plugins/obsidian/skills/obsidian-bases/SKILL.md",
       "computedHash": "a2e4c2d8be71b4d01d3952f3339a917f6a78142968256cde99543f9a798e8440"
     },
     "obsidian-cli": {
       "source": "kepano/obsidian-skills",
       "sourceType": "github",
-      "skillPath": "skills/obsidian-cli/SKILL.md",
+      "skillPath": "plugins/obsidian/skills/obsidian-cli/SKILL.md",
       "computedHash": "56a8c5edc06e8c9333dee3bc84fa731b7d098855a77cb9c94a0f9ad0678c7f7b"
     },
     "obsidian-markdown": {
       "source": "kepano/obsidian-skills",
       "sourceType": "github",
-      "skillPath": "skills/obsidian-markdown/SKILL.md",
+      "skillPath": "plugins/obsidian/skills/obsidian-markdown/SKILL.md",
       "computedHash": "1af4d0bb005b7c7adcb0ed918d49532e2e3dc81b49389f3811beb882b1d5b0ff"
     },
     "ponytail": {
