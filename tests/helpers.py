@@ -1,9 +1,14 @@
 """A throwaway vault per test, and sbmap run against it as the agent runs it: a subprocess."""
+import json
 import os
+import socket
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
+import urllib.error
+import urllib.request
 from datetime import date
 from pathlib import Path
 
@@ -84,3 +89,69 @@ Somewhere.
 
 ## Out of scope
 """)
+
+
+SCRIPT = str(Path(__file__).resolve().parents[1] / "skills" / "sb" / "scripts" / "sbhub.py")
+
+
+def free_port():
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def wait_for(fn, timeout=10):
+    end = time.time() + timeout
+    while time.time() < end:
+        v = fn()
+        if v:
+            return v
+        time.sleep(0.05)
+    raise AssertionError("timed out")
+
+
+class HubCase(unittest.TestCase):
+    """A running sbhub on a free port with a temp home; subclass it for tests."""
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.env = {**os.environ, "SB_HUB_HOME": self._tmp.name, "SB_HUB_NOTIFY": "0"}
+        self.env.pop("SB_HUB_PORT", None)
+        self.port = free_port()
+        self.procs = []
+        self.addCleanup(self._tmp.cleanup)
+        self.addCleanup(self._kill_all)
+        self.server = subprocess.Popen([sys.executable, SCRIPT, "serve", "--port", str(self.port)],
+                                       stdout=subprocess.PIPE, text=True, env=self.env)
+        self.procs.append(self.server)
+        self.assertEqual(self.server.stdout.readline().strip(), f"sb hub on http://127.0.0.1:{self.port}")
+
+    def _kill_all(self):
+        for p in self.procs:
+            p.kill()
+            p.wait()
+            if p.stdout:
+                p.stdout.close()
+
+    def hub(self, *args, port=None, stdin=None):
+        return subprocess.run([sys.executable, SCRIPT, *args, "--port", str(port or self.port)],
+                              capture_output=True, text=True, env=self.env, timeout=30, input=stdin)
+
+    def popen(self, *args):
+        p = subprocess.Popen([sys.executable, SCRIPT, *args, "--port", str(self.port)],
+                             stdout=subprocess.PIPE, text=True, env=self.env)
+        self.procs.append(p)
+        return p
+
+    def get(self, path):
+        with urllib.request.urlopen(f"http://127.0.0.1:{self.port}{path}", timeout=5) as r:
+            return json.load(r)
+
+    def post(self, path, data):
+        req = urllib.request.Request(f"http://127.0.0.1:{self.port}{path}", json.dumps(data).encode(),
+                                     {"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return r.status, json.load(r)
+        except urllib.error.HTTPError as e:
+            with e:
+                return e.code, json.load(e)

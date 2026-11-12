@@ -1,80 +1,22 @@
 """sbhub's server and command line, run as real subprocesses against a free port."""
+import http.server
 import json
 import os
-import socket
 import subprocess
 import sys
-import tempfile
+import threading
 import time
 import unittest
 import urllib.error
 import urllib.request
-from pathlib import Path
 
-SCRIPT = str(Path(__file__).resolve().parents[1] / "skills" / "sb" / "scripts" / "sbhub.py")
+from helpers import HubCase, free_port, wait_for, SCRIPT
 
-
-def free_port():
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+sys.path.insert(0, os.path.dirname(SCRIPT))
+import sbhub  # noqa: E402
 
 
-def wait_for(fn, timeout=10):
-    end = time.time() + timeout
-    while time.time() < end:
-        v = fn()
-        if v:
-            return v
-        time.sleep(0.05)
-    raise AssertionError("timed out")
-
-
-class HubCliTest(unittest.TestCase):
-    def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
-        self.env = {**os.environ, "SB_HUB_HOME": self._tmp.name, "SB_HUB_NOTIFY": "0"}
-        self.env.pop("SB_HUB_PORT", None)
-        self.port = free_port()
-        self.procs = []
-        self.addCleanup(self._tmp.cleanup)
-        self.addCleanup(self._kill_all)
-        self.server = subprocess.Popen([sys.executable, SCRIPT, "serve", "--port", str(self.port)],
-                                       stdout=subprocess.PIPE, text=True, env=self.env)
-        self.procs.append(self.server)
-        self.assertEqual(self.server.stdout.readline().strip(), f"sb hub on http://127.0.0.1:{self.port}")
-
-    def _kill_all(self):
-        for p in self.procs:
-            p.kill()
-            p.wait()
-            if p.stdout:
-                p.stdout.close()
-
-    def hub(self, *args, port=None):
-        return subprocess.run([sys.executable, SCRIPT, *args, "--port", str(port or self.port)],
-                              capture_output=True, text=True, env=self.env, timeout=30)
-
-    def popen(self, *args):
-        p = subprocess.Popen([sys.executable, SCRIPT, *args, "--port", str(self.port)],
-                             stdout=subprocess.PIPE, text=True, env=self.env)
-        self.procs.append(p)
-        return p
-
-    def get(self, path):
-        with urllib.request.urlopen(f"http://127.0.0.1:{self.port}{path}", timeout=5) as r:
-            return json.load(r)
-
-    def post(self, path, data):
-        req = urllib.request.Request(f"http://127.0.0.1:{self.port}{path}", json.dumps(data).encode(),
-                                     {"Content-Type": "application/json"})
-        try:
-            with urllib.request.urlopen(req, timeout=5) as r:
-                return r.status, json.load(r)
-        except urllib.error.HTTPError as e:
-            with e:
-                return e.code, json.load(e)
-
+class HubCliTest(HubCase):
     def test_report_shows_in_state(self):
         self.hub("report", "--agent", "a", "--project", ".", "--state", "working", "--done", "1", "--total", "5")
         a = self.get("/api/state")["agents"]["a"]
@@ -132,6 +74,57 @@ class HubCliTest(unittest.TestCase):
         r = self.hub("lock", "k", "--by", "a", port=down)
         self.assertEqual((r.returncode, r.stderr.strip()), (2, "sbhub: not running"))
         self.assertEqual(self.hub("state", port=down).stdout.strip(), "{}")
+
+    def raw_post(self, headers, path="/api/report", body=None):
+        req = urllib.request.Request(f"http://127.0.0.1:{self.port}{path}",
+                                     json.dumps(body or {"agent": "a", "state": "idle"}).encode(), headers)
+        try:
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return r.status
+        except urllib.error.HTTPError as e:
+            e.close()
+            return e.code
+
+    def test_a_post_needs_the_json_content_type(self):
+        self.assertEqual(self.raw_post({"Content-Type": "text/plain"}), 403)
+        self.assertEqual(self.raw_post({}), 403)
+        self.assertNotIn("a", self.get("/api/state")["agents"])
+
+    def test_a_post_from_another_origin_is_refused(self):
+        json_type = {"Content-Type": "application/json"}
+        self.assertEqual(self.raw_post({**json_type, "Origin": "http://evil.example"}), 403)
+        self.assertEqual(self.raw_post({**json_type, "Origin": "http://127.0.0.1:1"}), 403)
+        self.assertEqual(self.raw_post({**json_type, "Origin": f"http://127.0.0.1:{self.port}"}), 200)
+        self.assertEqual(self.raw_post({**json_type, "Origin": f"http://localhost:{self.port}"}), 200)
+
+    def test_a_non_numeric_port_variable_falls_back(self):
+        for bad in ("abc", "", "99999999"):
+            os.environ["SB_HUB_PORT"] = bad
+            try:
+                self.assertEqual(sbhub.default_port(), 8765, bad)
+            finally:
+                del os.environ["SB_HUB_PORT"]
+        os.environ["SB_HUB_PORT"] = "9000"
+        try:
+            self.assertEqual(sbhub.default_port(), 9000)
+        finally:
+            del os.environ["SB_HUB_PORT"]
+        env = {**self.env, "SB_HUB_PORT": "abc"}
+        r = subprocess.run([sys.executable, SCRIPT, "state"], capture_output=True, text=True, env=env, timeout=30)
+        self.assertEqual(r.returncode, 0)
+
+    def test_an_unexpected_error_is_a_500_not_a_dropped_connection(self):
+        class Broken(sbhub.Hub):
+            def report(self, d):
+                raise RuntimeError("boom")
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), sbhub.make_handler(Broken(self._tmp.name)))
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        code, out = sbhub.call(server.server_address[1], "/api/report", {"agent": "a"})
+        self.assertEqual((code, out["ok"]), (500, False))
+        self.assertIn("boom", out["error"])
 
 
 if __name__ == "__main__":

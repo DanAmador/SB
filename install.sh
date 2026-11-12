@@ -95,19 +95,30 @@ if [ -z "$claude" ]; then
          "vault links in chat will not open or be checked. Install Claude Code and rerun." >&2
     exit 0
 fi
-# quiet-tests (opt in): trims agents' test and Unity output to failures and totals. Installed only
-# on --quiet-tests, or a y at the prompt (asked only when run from a terminal).
+# Opt-in mods. quiet-tests trims agents' test and Unity output to failures and totals; hub-report
+# makes every Claude Code session report to the sb hub. Each is installed only on its flag
+# (--quiet-tests, --hub), or a y at its prompt (asked only when run from a terminal).
 extra=""
-for a in "$@"; do [ "$a" != --quiet-tests ] || extra=quiet-tests; done
-if [ -z "$extra" ] && [ -t 0 ]; then
-    read -r -p "Install quiet-tests (agent test output: failures and totals only)? [y/N] " a
-    case "$a" in [Yy]*) extra=quiet-tests ;; esac
-fi
+for a in "$@"; do
+    case "$a" in --quiet-tests) extra="$extra quiet-tests" ;; --hub) extra="$extra hub-report" ;; esac
+done
+case "$extra" in *quiet-tests*) ;; *)
+    if [ -t 0 ]; then
+        read -r -p "Install quiet-tests (agent test output: failures and totals only)? [y/N] " a
+        case "$a" in [Yy]*) extra="$extra quiet-tests" ;; esac
+    fi ;;
+esac
+case "$extra" in *hub-report*) ;; *)
+    if [ -t 0 ]; then
+        read -r -p "Install hub-report (sessions report to the sb hub)? [y/N] " a
+        case "$a" in [Yy]*) extra="$extra hub-report" ;; esac
+    fi ;;
+esac
 for dir in "$HOME/.claude" "$HOME"/.claude-*; do
     [ "$dir" = "$HOME/.claude" ] || [ -d "$dir/plugins" ] || continue
     cc() { CLAUDE_CONFIG_DIR="$dir" "$claude" "$@"; }
     cc plugin marketplace list 2>/dev/null | grep -q sb-workflow || cc plugin marketplace add "$here"
     cc plugin install obsidian-links@sb-workflow
     cc plugin install vault-link-check@sb-workflow
-    [ -z "$extra" ] || cc plugin install "$extra@sb-workflow"
+    for m in $extra; do cc plugin install "$m@sb-workflow"; done
 done

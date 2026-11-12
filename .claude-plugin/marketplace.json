@@ -4,6 +4,7 @@
   "plugins": [
     { "name": "obsidian-links", "source": "./mods/obsidian-links" },
     { "name": "quiet-tests", "source": "./mods/quiet-tests" },
-    { "name": "vault-link-check", "source": "./mods/vault-link-check" }
+    { "name": "vault-link-check", "source": "./mods/vault-link-check" },
+    { "name": "hub-report", "source": "./mods/hub-report" }
   ]
 }

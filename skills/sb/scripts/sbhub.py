@@ -15,6 +15,8 @@ and never fail a session when it is down.
                                       ask the owner; prints the chosen option, or the
                                       default at the deadline or with the hub down
   sbhub.py state                      the hub's state as JSON ({} when it is down)
+  sbhub.py hook                       read one Claude Code hook event on stdin and report it;
+                                      always exits 0 (the hub-report mod runs this)
 
 Every command but `serve` also takes --port N.
 """
@@ -164,7 +166,11 @@ def notify(title, text):
 
 
 def default_port():
-    return int(os.environ.get("SB_HUB_PORT") or DEFAULT_PORT)
+    try:
+        port = int(os.environ.get("SB_HUB_PORT") or DEFAULT_PORT)
+    except ValueError:
+        return DEFAULT_PORT
+    return port if 0 < port < 65536 else DEFAULT_PORT
 
 
 def make_handler(hub):
@@ -195,8 +201,19 @@ def make_handler(hub):
             else:
                 self.send(404, {"ok": False, "error": "not found"})
 
+        def from_the_page_or_a_program(self):
+            """A POST must be JSON and not from another origin: a web page cannot post to the hub."""
+            if self.headers.get("Content-Type", "").split(";")[0].strip().lower() != "application/json":
+                return False
+            port = self.server.server_address[1]
+            origin = self.headers.get("Origin")
+            return origin is None or origin in ("http://127.0.0.1:{}".format(port), "http://localhost:{}".format(port))
+
         def do_POST(self):
             path = self.path.split("?", 1)[0]
+            if not self.from_the_page_or_a_program():
+                self.send(403, {"ok": False, "error": "forbidden"})
+                return
             try:
                 n = int(self.headers.get("Content-Length") or 0)
                 d = json.loads(self.rfile.read(n) or b"{}")
@@ -228,6 +245,8 @@ def make_handler(hub):
                     self.send(400, {"ok": False, "error": "missing field {}".format(missing)})
             except (ValueError, TypeError) as e:
                 self.send(400, {"ok": False, "error": str(e)})
+            except Exception as e:
+                self.send(500, {"ok": False, "error": "{}: {}".format(type(e).__name__, e)})
 
     return Handler
 
@@ -304,6 +323,48 @@ def cmd_ask(a):
     return 0
 
 
+def event_report(e):
+    """The report body for one Claude Code hook event, or None for an event the hub ignores."""
+    name, sid, cwd = e.get("hook_event_name"), e.get("session_id"), e.get("cwd")
+    session = {"agent": sid, "name": "{} {}".format(os.path.basename(cwd.rstrip("/")), sid[:6]),
+               "project": cwd, "role": "orchestrator"} if name in ("SessionStart", "UserPromptSubmit") else None
+    if name == "SessionStart":
+        return {**session, "state": "idle", "note": "session started"}
+    if name == "UserPromptSubmit":
+        return {**session, "state": "working", "note": "reading your message"}
+    if name == "PreToolUse":
+        tin = e.get("tool_input") or {}
+        detail = next((tin[k] for k in ("description", "file_path", "pattern") if tin.get(k)), "")
+        r = {"agent": sid, "state": "working", "note": "{}: {}".format(e["tool_name"], detail)[:90]}
+        if e.get("agent_id"):
+            r.update(agent=e["agent_id"], role="worker", parent=sid)
+        return r
+    if name == "Notification":
+        return {"agent": sid, "state": "needs you", "note": e["message"]}
+    if name == "Stop":
+        return {"agent": sid, "state": "your turn", "note": "finished its turn"}
+    if name == "SubagentStart":
+        return {"agent": e["agent_id"], "name": e["agent_type"], "role": "worker", "parent": sid,
+                "state": "working", "note": "started"}
+    if name == "SubagentStop":
+        return {"agent": e["agent_id"], "role": "worker", "parent": sid, "state": "done", "note": "finished"}
+    if name == "SessionEnd":
+        return {"agent": sid, "state": "gone"}
+    return None
+
+
+def cmd_hook(port):
+    """Read one hook event on stdin and report it. Whatever goes wrong, exit 0: a hook never fails a session."""
+    try:
+        e = json.load(sys.stdin)
+        r = event_report(e) if isinstance(e, dict) else None
+        if r:
+            call(port, "/api/report", r)
+    except Exception:
+        pass
+    return 0
+
+
 def cmd_state(a):
     print(json.dumps(call(a.port, "/api/state")[1]))
     return 0
@@ -333,10 +394,13 @@ def main(argv=None):
         ("--options", {"required": True}), ("--default", {"required": True}),
         ("--wait", {"type": float, "default": 600}))
     add("state")
+    add("hook")
     a = p.parse_args(argv)
     if a.cmd == "serve":
         serve(a.port)
         return 0
+    if a.cmd == "hook":
+        return cmd_hook(a.port)
     if a.cmd == "report":
         return cmd_report(a)
     if a.cmd in ("lock", "unlock"):
