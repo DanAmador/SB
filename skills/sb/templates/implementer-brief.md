@@ -23,3 +23,7 @@ paths>.
 ## Report path
 
 <report path>
+
+## Agent id
+
+<agent id>, for `--agent` on `sbhub report` and `ask`
