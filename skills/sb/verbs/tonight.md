@@ -87,15 +87,15 @@ changes; a one-repo night skips them.
       with `initiation: user_asked`, `context: fresh`, `model` by tier, `effort: medium` for Sonnet,
       `permission_mode: auto`, `wake_when_done: true`, `name: ticket-<NNN>`, title
       `<ticket name> (<map name> <NNN>)`, `use_worktree: false` in the main tree, and the brief from
-      [templates/session-brief.md](../templates/session-brief.md), naming `<run name>` (the
-      board's, `<date>-<map name>`) as its `--parent`. Log the session's link on the
-      board. Then **wait idle**: no polling; the host wakes you when it ends a turn. Usage is read
+      [templates/session-brief.md](../templates/session-brief.md), naming its agent id and
+      `<run name>` (the board's, `<date>-<map name>`) as its `--parent`. Log the session's link on
+      the board. Then **wait idle**: no polling; the host wakes you when it ends a turn. Usage is read
       once per ticket boundary, never in a loop.
       - No session tool, or a start refused (a turn woken by a timer cannot start one): dispatch a
         fresh `implementer` agent with [templates/implementer-brief.md](../templates/implementer-brief.md),
-        `model: opus` for a complex ticket, and log the fallback on the board. Lookups go to the
-        `scout` agent. The `subagent-driven-development` skill is the per-task engine when present;
-        its review and fix rounds run on the mid tier.
+        naming its agent id, `model: opus` for a complex ticket, and log the fallback on the board.
+        Lookups go to the `scout` agent. The `subagent-driven-development` skill is the per-task
+        engine when present; its review and fix rounds run on the mid tier.
    3. Verify against the tree yourself, from git, the per-ticket checks and the report file: the
       commit exists, touches only the ticket's paths, and the checks pass with counts. Open the
       session's transcript only when those disagree.
@@ -103,11 +103,13 @@ changes; a one-repo night skips them.
       then `sbmap check <map>` and a log line on the board.
    5. At the end of a map's batch, rewrite its `## In plain words`.
 
-   At each ticket boundary, `sbhub report --agent <run name> --role orchestrator --done <n> --total
-   <N> --note "<next ticket name>"`. Workers report as `ticket-<NNN>`; when one night runs maps that
-   reuse a number, as `<map name>-<NNN>`. A resource only one agent may use at a time (the Unity
-   editor, a port) is taken with `sbhub lock <name> --by <agent>` and released with `sbhub unlock`
-   after ([hub.md](../reference/hub.md)).
+   At each ticket boundary, `sbhub report --agent <run name> --role orchestrator --state working
+   --done <n> --total <N> --note "<next ticket name>"`. With the `hub-report` mod installed, the
+   session's own hook events and its `report --agent <id>` show as one row, so nothing else is needed
+   to link them. A worker's agent id is `ticket-<NNN>`; when one night runs maps that reuse a number,
+   `<map name>-<NNN>`. A resource only one agent may use at a time (the Unity editor, a port) is
+   taken with `sbhub lock <name> --by <agent>` and released with `sbhub unlock` after
+   ([hub.md](../reference/hub.md)).
 
    *Operator:* the lane does 0–2 and reports its commit, checks and the usage it read; the operator
    does 3 in the lane's checkout and logs it on the board; then the lane does 4, claiming its
@@ -128,6 +130,7 @@ changes; a one-repo night skips them.
    - The run stops only on the contract's stop conditions. Reporting midway is not one.
 8. **Close the night.**
    - The slow suite, if the contract says so.
+   - `sbhub report --agent <run name> --state done`.
    - The final whole-run review on the capable tier, with **one** fix wave; *operator:* one per lane.
    - The board's *Morning digest*, in the sections [morning](morning.md) step 3 names; *operator:*
      once, every lane in it. Chat: one line and the board's link.

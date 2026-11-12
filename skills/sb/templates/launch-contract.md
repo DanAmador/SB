@@ -19,7 +19,9 @@
   capable model, reason>. A mid ticket that fails once retries once on <capable model>.
 - **Context:** hand off at ~150k; one ticket per session or implementer context; the operator starts
   from the run board `<board path>`.
-- **Blocked:** take the recommendation, write it on the ticket as a ruling, keep going.
+- **Blocked:** by `~/.claude/skills/sb/reference/output.md` *Unattended*: a decision that qualifies
+  there goes to `sbhub ask`; any other is ruled on the spot. Either way it is written on the ticket
+  as `R:`; keep going.
 - **Stop when:** the queue is empty, the window (<hours> h, until ~<time>) is over, or the same
   failure repeats twice. Nothing else stops the run.
 - **Claim** with `sbmap claim`. **Resolve** with `sbmap resolve --answer` (commit, what was verified

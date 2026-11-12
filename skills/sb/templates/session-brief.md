@@ -21,11 +21,12 @@ throwaway data and ports (<ports>), never the owner's.
 - Commit once by pathspec, `Ticket: <map>/<NNN>` as the last line. Don't resolve the ticket; the
   operator does.
 - A blocking decision that qualifies per `~/.claude/skills/sb/reference/output.md` *Unattended*
-  goes to `python3 ~/.claude/skills/sb/scripts/sbhub.py ask --agent ticket-<NNN> …`; any other you
-  rule on the spot. Write every ruling on the ticket before you finish:
+  goes to `python3 ~/.claude/skills/sb/scripts/sbhub.py ask --agent <agent id> … --wait 540`, with
+  the Bash tool's timeout at 600000 ms (the default 120 s kills it); any other you rule on the
+  spot. Write every ruling on the ticket before you finish:
   `sbmap comment <map> <NNN> --text "R: <ruling>, cost if wrong: <…>"`.
 - Report once at the start and once at the end: `python3 ~/.claude/skills/sb/scripts/sbhub.py
-  report --agent ticket-<NNN> --role worker --parent <run name> --ticket "<ticket name>" --state
+  report --agent <agent id> --role worker --parent <run name> --ticket "<ticket name>" --state
   working|blocked|done --note "<commit or blocker>"`.
 - Write your report to `<board folder>/<run name>/<NNN>.md`: commit, each check with its counts,
   what you could **not** verify, rulings, files. Say nothing along the way. Your last message, two

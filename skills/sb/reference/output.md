@@ -17,9 +17,10 @@ lines**:
 - **Unattended:** nothing is said in chat; rulings and progress go on the ticket and the board.
   A decision that changes what gets built or cannot be undone cheaply goes to the hub (anything
   else is ruled on the spot): `sbhub ask --agent <your reported id> --q "<question>" --options "a|b"
-  --default a --wait 540`, two to four choices in the owner's words, the recommendation as
-  `--default`. Whatever it prints is the ruling. Every ruling, asked or on the spot, is written on
-  the ticket as `R: …, cost if wrong: …`.
+  --default a --wait 540`, run with the Bash tool's timeout at 600000 ms (the default 120 s kills
+  it), two to four choices in the owner's words, the recommendation as `--default`. Whatever it
+  prints is the ruling. Every ruling, asked or on the spot, is written on the ticket as `R: …, cost
+  if wrong: …`.
 - **Chat is the product** only for `explain`, `ask`, and questions the owner must answer now (a
   grilling round, tonight's proposal questions). Those follow the **Plain** output style
   ([`output-styles/plain.md`](../../../output-styles/plain.md); read it when the style is off).
