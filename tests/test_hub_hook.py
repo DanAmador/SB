@@ -61,6 +61,13 @@ class EventReportTest(unittest.TestCase):
         self.assertEqual(r, {"agent": "w", "role": "worker", "parent": "abcdef123",
                              "state": "done", "note": "finished"})
 
+    def test_every_event_of_the_session_says_who_it_is(self):
+        for name, kw in (("PreToolUse", {"tool_name": "Grep", "tool_input": {}}),
+                         ("Notification", {"message": "m"}), ("Stop", {}),
+                         ("UserPromptSubmit", {}), ("SessionStart", {})):
+            r = sbhub.event_report(ev(name, **kw))
+            self.assertEqual({k: r[k] for k in SESSION}, SESSION, name)
+
     def test_session_end(self):
         self.assertEqual(sbhub.event_report(ev("SessionEnd")), {"agent": "abcdef123", "state": "gone"})
 

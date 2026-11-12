@@ -1,0 +1,12 @@
+#!/usr/bin/env python3
+"""Example project provider: this repo's test suite, as widgets."""
+import json, re, subprocess
+r = subprocess.run(["python3", "-m", "unittest", "discover", "-s", "tests", "-q"], capture_output=True, text=True)
+out = r.stderr
+ran = int((re.search(r"Ran (\d+) tests", out) or [0, 0])[1])
+bad = sum(int(n) for n in re.findall(r"(?:failures|errors)=(\d+)", out))
+print(json.dumps({"title": "Test suite", "widgets": [
+    {"kind": "status", "label": "Suite", "value": "green" if r.returncode == 0 else "red", "level": "ok" if r.returncode == 0 else "bad"},
+    {"kind": "progress", "label": "Passing", "value": ran - bad, "max": ran},
+    {"kind": "counts", "label": "Tests", "items": {"pass": ran - bad, "fail": bad}},
+    {"kind": "log", "label": "Last lines", "lines": out.strip().splitlines()[-2:]}]}))

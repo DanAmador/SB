@@ -43,6 +43,8 @@ class Hub:
         self.home = Path(home)
         self.now = now
         self._lock = threading.Lock()
+        self.providers = {}
+        self.changed = threading.Event()
         self._data = {"agents": {}, "locks": {}, "questions": {}}
         path = self.home / "state.json"
         try:
@@ -87,6 +89,8 @@ class Hub:
                 return {"ok": True, "needs_you": False}
             a = self._data["agents"].setdefault(d["agent"], {})
             before = a.get("state")
+            if d.get("project") and d["project"] not in self.providers:
+                self.changed.set()
             for f in AGENT_FIELDS:
                 if d.get(f) not in (None, ""):
                     a[f] = d[f]
@@ -147,7 +151,79 @@ class Hub:
     def state(self):
         with self._lock:
             self._settle()
-            return {**json.loads(json.dumps(self._data)), "now": self.now()}
+            return {**json.loads(json.dumps(self._data)), "now": self.now(), "providers": dict(self.providers)}
+
+
+SBMAP = Path(__file__).resolve().parent / "sbmap.py"
+REFRESH_EVERY = 15
+
+
+def _run(cmd, **kw):
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=20, **kw)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def generic_provider(project):
+    """Branch, uncommitted files, last commit and the vault's maps for a project."""
+    git = ["git", "-C", project]
+    branch = _run(git + ["rev-parse", "--abbrev-ref", "HEAD"]) or "unknown"
+    dirty = len(_run(git + ["status", "--porcelain"]).splitlines())
+    last = _run(git + ["log", "-1", "--format=%s (%cr)"]) or "none"
+    maps = _run([sys.executable, str(SBMAP), "maps", "--repo", project]).splitlines()[:8]
+    return {"title": "Repo and maps", "widgets": [
+        {"kind": "status", "label": "Branch", "value": branch, "level": "ok"},
+        {"kind": "status", "label": "Uncommitted files", "value": str(dirty), "level": "warn" if dirty else "ok"},
+        {"kind": "status", "label": "Last commit", "value": last, "level": "ok"},
+        {"kind": "log", "label": "Maps in the vault", "lines": maps}]}
+
+
+def _provider_error(name, reason):
+    return {"title": name, "widgets": [
+        {"kind": "status", "label": "provider", "value": str(reason)[:120], "level": "bad"}]}
+
+
+def run_providers(project, timeout=120):
+    """The generic provider, then each executable in <project>/.sb/providers/ by name."""
+    out = [generic_provider(project)]
+    folder = Path(project) / ".sb" / "providers"
+    try:
+        files = sorted(f for f in folder.iterdir() if f.is_file() and os.access(f, os.X_OK))
+    except OSError:
+        files = []
+    for f in files:
+        try:
+            r = subprocess.run([str(f)], capture_output=True, text=True, timeout=timeout, cwd=project)
+            if r.returncode != 0:
+                out.append(_provider_error(f.name, "exit {}: {}".format(r.returncode, r.stderr.strip() or r.stdout.strip())))
+                continue
+            d = json.loads(r.stdout)
+            if not isinstance(d, dict) or not isinstance(d.get("widgets"), list):
+                raise ValueError("output is not an object with a widgets list")
+            out.append({**d, "title": d.get("title") or f.name})
+        except subprocess.TimeoutExpired:
+            out.append(_provider_error(f.name, "timed out after {:g} s".format(timeout)))
+        except (OSError, ValueError) as e:
+            out.append(_provider_error(f.name, e))
+    return out
+
+
+def refresh_loop(hub, every=REFRESH_EVERY):
+    """Run the providers for each project with an agent, one project at a time, forever."""
+    while True:
+        with hub._lock:
+            projects = sorted({a["project"] for a in hub._data["agents"].values() if a.get("project")})
+        for p in projects:
+            result = run_providers(p)
+            with hub._lock:
+                hub.providers[p] = result
+        with hub._lock:
+            for p in [p for p in hub.providers if p not in projects]:
+                del hub.providers[p]
+        hub.changed.wait(every)
+        hub.changed.clear()
 
 
 DEFAULT_PORT = 8765
@@ -253,7 +329,9 @@ def make_handler(hub):
 
 def serve(port):
     home = Path(os.environ.get("SB_HUB_HOME") or Path.home() / ".sb-hub")
-    server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(Hub(home)))
+    hub = Hub(home)
+    server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(hub))
+    threading.Thread(target=refresh_loop, args=(hub,), daemon=True).start()
     print("sb hub on http://127.0.0.1:{}".format(server.server_address[1]), flush=True)
     try:
         server.serve_forever()
@@ -326,8 +404,9 @@ def cmd_ask(a):
 def event_report(e):
     """The report body for one Claude Code hook event, or None for an event the hub ignores."""
     name, sid, cwd = e.get("hook_event_name"), e.get("session_id"), e.get("cwd")
+    # every event of the session's own carries who it is: the hub often starts after the session did
     session = {"agent": sid, "name": "{} {}".format(os.path.basename(cwd.rstrip("/")), sid[:6]),
-               "project": cwd, "role": "orchestrator"} if name in ("SessionStart", "UserPromptSubmit") else None
+               "project": cwd, "role": "orchestrator"} if sid and cwd else {"agent": sid}
     if name == "SessionStart":
         return {**session, "state": "idle", "note": "session started"}
     if name == "UserPromptSubmit":
@@ -335,14 +414,14 @@ def event_report(e):
     if name == "PreToolUse":
         tin = e.get("tool_input") or {}
         detail = next((tin[k] for k in ("description", "file_path", "pattern") if tin.get(k)), "")
-        r = {"agent": sid, "state": "working", "note": "{}: {}".format(e["tool_name"], detail)[:90]}
+        r = {"state": "working", "note": "{}: {}".format(e["tool_name"], detail)[:90]}
         if e.get("agent_id"):
-            r.update(agent=e["agent_id"], role="worker", parent=sid)
-        return r
+            return {**r, "agent": e["agent_id"], "role": "worker", "parent": sid}
+        return {**session, **r}
     if name == "Notification":
-        return {"agent": sid, "state": "needs you", "note": e["message"]}
+        return {**session, "state": "needs you", "note": e["message"]}
     if name == "Stop":
-        return {"agent": sid, "state": "your turn", "note": "finished its turn"}
+        return {**session, "state": "your turn", "note": "finished its turn"}
     if name == "SubagentStart":
         return {"agent": e["agent_id"], "name": e["agent_type"], "role": "worker", "parent": sid,
                 "state": "working", "note": "started"}
