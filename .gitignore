@@ -2,3 +2,6 @@ backups/
 __pycache__/
 .agents/
 .claude/skills/
+skills/sb/hub/node_modules/
+skills/sb/hub/packages/*/node_modules/
+skills/sb/hub/packages/*/dist/
