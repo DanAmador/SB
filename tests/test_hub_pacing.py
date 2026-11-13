@@ -151,7 +151,10 @@ class FitTest(PacingCase):
         self.assertTrue(waiting)
         self.assertIn("main 77% used, 12% more held by its running work, needs about 12%", waiting[0]["note"])
 
-    def test_two_workers_per_agent_at_most_and_one_per_repo(self):
+    def test_max_workers_per_agent_at_most_and_one_per_repo(self):
+        cap = mock.patch.object(sbhub, "MAX_PER_AGENT", 2)  # three repos here: a cap of 2 shows it binds
+        cap.start()
+        self.addCleanup(cap.stop)
         self.hub.queue_agents(["main"], None)
         with self.hub._lock:
             self.hub._data["installed"]["main"]["costs"] = {"sonnet": {"avg": 0.05, "n": 3}}
