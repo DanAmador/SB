@@ -1,0 +1,9 @@
+{
+  "body": {
+    "error": "no such file for that item",
+    "ok": false
+  },
+  "contentType": "application/json",
+  "route": "GET /api/item/report",
+  "status": 404
+}

@@ -1,0 +1,17 @@
+{
+  "body": {
+    "agent": "w-1",
+    "needs_you": false,
+    "ok": true
+  },
+  "contentType": "application/json",
+  "request": {
+    "agent": "w-1",
+    "parent": "sess-1",
+    "project": "/fixture/repo",
+    "role": "worker",
+    "state": "working"
+  },
+  "route": "POST /api/report",
+  "status": 200
+}

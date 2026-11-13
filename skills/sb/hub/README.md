@@ -2,7 +2,7 @@
 
 pnpm workspace for the TypeScript hub. Packages:
 
-- `packages/contract`: shared API types (placeholder until the real contract lands)
+- `packages/contract`: zod schemas and types for every route sbhub.py serves (`ROUTES`, `answerSchema`, `routeOf`); `fixtures/` holds the hub's real answers, rewritten by `python3 -m unittest tests.test_contract_fixtures` (from `tests/`) and parsed by its Vitest test
 - `packages/server`: the TypeScript server that will front the Python hub
 - `packages/web`: Vite + React 19 board (React compiler on every file, Tailwind v4, shadcn)
 

@@ -1,0 +1,28 @@
+{
+  "body": {
+    "comments": [
+      "- **2026-11-13**: Look at the queue first."
+    ],
+    "file": "/fixture/Vault/wayfinder/repo/one/issues/003 C.md",
+    "key": "repo/one#3",
+    "map_checks": [
+      "true"
+    ],
+    "map_uri": "obsidian://open?path=%2Ffixture%2FVault%2Fwayfinder%2Frepo%2Fone%2Fmap.md",
+    "open": true,
+    "title": "C",
+    "trail": [
+      {
+        "at": 1794528000.0,
+        "first": "Pick up at B.",
+        "name": "handoff.md",
+        "path": "/fixture/Vault/wayfinder/repo/one/handoff.md",
+        "uri": "obsidian://open?path=%2Ffixture%2FVault%2Fwayfinder%2Frepo%2Fone%2Fhandoff.md"
+      }
+    ],
+    "uri": "obsidian://open?path=%2Ffixture%2FVault%2Fwayfinder%2Frepo%2Fone%2Fissues%2F003%20C.md"
+  },
+  "contentType": "application/json",
+  "route": "GET /api/ticket",
+  "status": 200
+}

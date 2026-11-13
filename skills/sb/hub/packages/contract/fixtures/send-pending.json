@@ -1,0 +1,13 @@
+{
+  "body": {
+    "id": "00000004",
+    "ok": true
+  },
+  "contentType": "application/json",
+  "request": {
+    "text": "Stop after the tests.",
+    "to": "w-1"
+  },
+  "route": "POST /api/send",
+  "status": 200
+}

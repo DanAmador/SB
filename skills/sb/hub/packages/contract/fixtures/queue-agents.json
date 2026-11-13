@@ -1,0 +1,26 @@
+{
+  "body": {
+    "ok": true,
+    "queue": {
+      "agent": "main",
+      "agents": [
+        "main",
+        "spare"
+      ],
+      "items": [],
+      "paused": true,
+      "seeded": false,
+      "version": 2
+    }
+  },
+  "contentType": "application/json",
+  "request": {
+    "names": [
+      "main",
+      "spare"
+    ],
+    "version": 1
+  },
+  "route": "POST /api/queue/agents",
+  "status": 200
+}

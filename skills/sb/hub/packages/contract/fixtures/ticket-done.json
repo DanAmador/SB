@@ -1,0 +1,12 @@
+{
+  "body": {
+    "ok": true
+  },
+  "contentType": "application/json",
+  "request": {
+    "key": "repo/one#3",
+    "text": "Done by hand."
+  },
+  "route": "POST /api/ticket/done",
+  "status": 200
+}

@@ -1,0 +1,12 @@
+{
+  "body": {
+    "error": "missing field by",
+    "ok": false
+  },
+  "contentType": "application/json",
+  "request": {
+    "key": "x"
+  },
+  "route": "POST /api/lock",
+  "status": 400
+}

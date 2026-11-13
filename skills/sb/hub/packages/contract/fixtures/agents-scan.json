@@ -1,0 +1,29 @@
+{
+  "body": {
+    "installed": {
+      "agy": {
+        "dir": null,
+        "kind": "agy",
+        "limited_until": null,
+        "model": null
+      },
+      "main": {
+        "dir": "/fixture/.claude-main",
+        "kind": "claude",
+        "limited_until": null,
+        "model": null
+      },
+      "spare": {
+        "dir": "/fixture/.claude-spare",
+        "kind": "claude",
+        "limited_until": null,
+        "model": null
+      }
+    },
+    "ok": true
+  },
+  "contentType": "application/json",
+  "request": {},
+  "route": "POST /api/agents/scan",
+  "status": 200
+}

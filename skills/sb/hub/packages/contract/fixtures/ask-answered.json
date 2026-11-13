@@ -1,0 +1,19 @@
+{
+  "body": {
+    "id": "00000002",
+    "ok": true
+  },
+  "contentType": "application/json",
+  "request": {
+    "agent": "sess-1",
+    "default": "no",
+    "options": [
+      "yes",
+      "no"
+    ],
+    "q": "Ship it?",
+    "wait": 600
+  },
+  "route": "POST /api/ask",
+  "status": 200
+}

@@ -1,0 +1,9 @@
+{
+  "body": {
+    "error": "no such question",
+    "ok": false
+  },
+  "contentType": "application/json",
+  "route": "GET /api/question/nope",
+  "status": 404
+}

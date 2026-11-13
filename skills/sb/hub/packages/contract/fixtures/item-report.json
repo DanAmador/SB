@@ -1,0 +1,6 @@
+{
+  "body": "# A\n\n## Self-checks\n\n- `true`: exit 0\n\n## Hub checks\n\nChecked by the sb hub at 2026-11-13 01:00: passed, commit d8d88e804.\n\n- `true`: exit 0, 0.0 s\n\n  ```\n  ```\n\n### The worker's self-checks\n\n- `true`: exit 0\n",
+  "contentType": "text/plain; charset=utf-8",
+  "route": "GET /api/item/report",
+  "status": 200
+}

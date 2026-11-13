@@ -1,0 +1,13 @@
+{
+  "body": {
+    "id": "00000003",
+    "ok": true
+  },
+  "contentType": "application/json",
+  "request": {
+    "text": "Use port 5174.",
+    "to": "sess-1"
+  },
+  "route": "POST /api/send",
+  "status": 200
+}

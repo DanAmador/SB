@@ -1,0 +1,12 @@
+{
+  "body": {
+    "ok": true
+  },
+  "contentType": "application/json",
+  "request": {
+    "key": "repo/one#4",
+    "text": "Not needed."
+  },
+  "route": "POST /api/ticket/drop",
+  "status": 200
+}

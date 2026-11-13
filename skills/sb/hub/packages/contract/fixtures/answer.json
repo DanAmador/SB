@@ -1,0 +1,13 @@
+{
+  "body": {
+    "ok": true
+  },
+  "contentType": "application/json",
+  "request": {
+    "answer": "yes",
+    "by": "you",
+    "qid": "00000002"
+  },
+  "route": "POST /api/answer",
+  "status": 200
+}

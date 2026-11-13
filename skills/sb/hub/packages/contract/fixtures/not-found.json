@@ -1,0 +1,9 @@
+{
+  "body": {
+    "error": "not found",
+    "ok": false
+  },
+  "contentType": "application/json",
+  "route": "GET /api/nothing",
+  "status": 404
+}

@@ -1,0 +1,18 @@
+{
+  "body": {
+    "error": "a question takes two to four options",
+    "ok": false
+  },
+  "contentType": "application/json",
+  "request": {
+    "agent": "a",
+    "default": "one",
+    "options": [
+      "one"
+    ],
+    "q": "?",
+    "wait": 1
+  },
+  "route": "POST /api/ask",
+  "status": 400
+}

@@ -1,0 +1,19 @@
+{
+  "body": {
+    "agent": "sess-1",
+    "answer": "yes",
+    "answered": 1794528000.0,
+    "asked": 1794528000.0,
+    "by": "you",
+    "deadline": 1794528600.0,
+    "default": "no",
+    "options": [
+      "yes",
+      "no"
+    ],
+    "q": "Ship it?"
+  },
+  "contentType": "application/json",
+  "route": "GET /api/question/00000002",
+  "status": 200
+}

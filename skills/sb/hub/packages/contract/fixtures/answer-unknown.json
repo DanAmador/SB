@@ -1,0 +1,13 @@
+{
+  "body": {
+    "error": "no such question",
+    "ok": false
+  },
+  "contentType": "application/json",
+  "request": {
+    "answer": "yes",
+    "qid": "nope"
+  },
+  "route": "POST /api/answer",
+  "status": 404
+}

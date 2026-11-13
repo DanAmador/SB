@@ -1,0 +1,97 @@
+{
+  "body": [
+    {
+      "blocked_by": [],
+      "blocked_by_open": [],
+      "checks": [
+        "true"
+      ],
+      "claimed_by": null,
+      "done_when": "It works.",
+      "file": "/fixture/Vault/wayfinder/repo/one/issues/002 B.md",
+      "has_done_when": true,
+      "map": "repo/one",
+      "map_order": 1,
+      "map_title": "One",
+      "num": 2,
+      "out": "",
+      "paths": [
+        "two/"
+      ],
+      "priority": "C",
+      "question": "",
+      "queued": true,
+      "reason": "ready",
+      "repo": "/fixture/repo",
+      "state": "ready",
+      "status": "open",
+      "tier": "sonnet",
+      "title": "B",
+      "type": "task",
+      "why": "Because."
+    },
+    {
+      "blocked_by": [],
+      "blocked_by_open": [],
+      "checks": [
+        "true"
+      ],
+      "claimed_by": null,
+      "done_when": "It works.",
+      "file": "/fixture/Vault/wayfinder/repo/one/issues/003 C.md",
+      "has_done_when": true,
+      "map": "repo/one",
+      "map_order": 2,
+      "map_title": "One",
+      "num": 3,
+      "out": "",
+      "paths": [
+        "three/"
+      ],
+      "priority": "C",
+      "question": "",
+      "queued": true,
+      "reason": "ready",
+      "repo": "/fixture/repo",
+      "state": "ready",
+      "status": "open",
+      "tier": "sonnet",
+      "title": "C",
+      "type": "task",
+      "why": "Because."
+    },
+    {
+      "blocked_by": [],
+      "blocked_by_open": [],
+      "checks": [
+        "true"
+      ],
+      "claimed_by": null,
+      "done_when": "It works.",
+      "file": "/fixture/Vault/wayfinder/repo/one/issues/004 D.md",
+      "has_done_when": true,
+      "map": "repo/one",
+      "map_order": 3,
+      "map_title": "One",
+      "num": 4,
+      "out": "",
+      "paths": [
+        "four/"
+      ],
+      "priority": "C",
+      "question": "",
+      "queued": false,
+      "reason": "ready",
+      "repo": "/fixture/repo",
+      "state": "ready",
+      "status": "open",
+      "tier": "sonnet",
+      "title": "D",
+      "type": "task",
+      "why": "Because."
+    }
+  ],
+  "contentType": "application/json",
+  "route": "GET /api/tickets",
+  "status": 200
+}

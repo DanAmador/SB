@@ -1,0 +1,18 @@
+{
+  "body": {
+    "agent": "sess-3",
+    "answer": null,
+    "asked": 1794528000.0,
+    "by": null,
+    "deadline": 1794531600.0,
+    "default": "5173",
+    "options": [
+      "5173",
+      "5174"
+    ],
+    "q": "Which port?"
+  },
+  "contentType": "application/json",
+  "route": "GET /api/question/00000001",
+  "status": 200
+}

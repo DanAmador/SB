@@ -1,0 +1,12 @@
+{
+  "body": {
+    "ok": true
+  },
+  "contentType": "application/json",
+  "request": {
+    "key": "repo/one#3",
+    "text": "opus"
+  },
+  "route": "POST /api/ticket/tier",
+  "status": 200
+}

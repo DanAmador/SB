@@ -1,0 +1,84 @@
+{
+  "body": {
+    "ok": true,
+    "queue": {
+      "agent": "main",
+      "agents": [
+        "main",
+        "spare"
+      ],
+      "bases": {},
+      "final_review": true,
+      "items": [
+        {
+          "agent": null,
+          "base_sha": "3fea00e95453cf271189dc8924ebcd942426162f",
+          "checks": [
+            {
+              "cmd": "true",
+              "code": 0,
+              "secs": 0.0,
+              "tail": ""
+            }
+          ],
+          "commit": "d8d88e8049de73d87e5d3ef7dbd589ee7cda6720",
+          "digested": true,
+          "ended": 1794528000.0,
+          "key": "repo/one#1",
+          "kind": "ticket",
+          "log": "/fixture/Vault/wayfinder/repo/runs/2026-11-13-one/1.log",
+          "log_start": 0,
+          "map": "repo/one",
+          "media": [
+            "board.png"
+          ],
+          "model": "sonnet",
+          "note": "resolved, commit d8d88e804",
+          "pid": null,
+          "pid_start": null,
+          "repo": "/fixture/repo",
+          "run": "/fixture/Vault/wayfinder/repo/runs/2026-11-13-one",
+          "runner": "main",
+          "started": 1794528000.0,
+          "state": "done",
+          "title": "A",
+          "tries": 0
+        },
+        {
+          "agent": null,
+          "commit": null,
+          "ended": null,
+          "key": "repo/one#3",
+          "kind": "ticket",
+          "note": "",
+          "started": null,
+          "state": "queued",
+          "tries": 0
+        },
+        {
+          "agent": "spare",
+          "commit": null,
+          "ended": null,
+          "key": "repo/one#2",
+          "kind": "ticket",
+          "note": "",
+          "started": null,
+          "state": "queued",
+          "tries": 0
+        }
+      ],
+      "paused": true,
+      "runs": {},
+      "seeded": true,
+      "stop_at": 1794549600.0,
+      "version": 15
+    }
+  },
+  "contentType": "application/json",
+  "request": {
+    "key": "repo/one#2",
+    "name": "spare"
+  },
+  "route": "POST /api/queue/item_agent",
+  "status": 200
+}

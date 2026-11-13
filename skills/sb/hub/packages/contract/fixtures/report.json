@@ -1,0 +1,21 @@
+{
+  "body": {
+    "agent": "sess-1",
+    "needs_you": false,
+    "ok": true
+  },
+  "contentType": "application/json",
+  "request": {
+    "agent": "sess-1",
+    "asked": "chart it",
+    "done": 1,
+    "name": "main",
+    "note": "reading sbhub.py",
+    "project": "/fixture/repo",
+    "state": "working",
+    "title": "Charting the hub",
+    "total": 3
+  },
+  "route": "POST /api/report",
+  "status": 200
+}

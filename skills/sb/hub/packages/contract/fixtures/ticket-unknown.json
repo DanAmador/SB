@@ -1,0 +1,9 @@
+{
+  "body": {
+    "error": "no such ticket",
+    "ok": false
+  },
+  "contentType": "application/json",
+  "route": "GET /api/ticket",
+  "status": 404
+}

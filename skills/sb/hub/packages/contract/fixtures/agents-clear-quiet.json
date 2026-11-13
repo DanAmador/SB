@@ -1,0 +1,10 @@
+{
+  "body": {
+    "cleared": 0,
+    "ok": true
+  },
+  "contentType": "application/json",
+  "request": {},
+  "route": "POST /api/agents/clear-quiet",
+  "status": 200
+}

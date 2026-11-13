@@ -1,0 +1,15 @@
+{
+  "body": {
+    "messages": [
+      "Use port 5174."
+    ],
+    "ok": true
+  },
+  "contentType": "application/json",
+  "request": {
+    "agent": "sess-1",
+    "how": "UserPromptSubmit"
+  },
+  "route": "POST /api/take",
+  "status": 200
+}

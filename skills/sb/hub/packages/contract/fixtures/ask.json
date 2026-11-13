@@ -1,0 +1,19 @@
+{
+  "body": {
+    "id": "00000001",
+    "ok": true
+  },
+  "contentType": "application/json",
+  "request": {
+    "agent": "sess-3",
+    "default": "5173",
+    "options": [
+      "5173",
+      "5174"
+    ],
+    "q": "Which port?",
+    "wait": 3600
+  },
+  "route": "POST /api/ask",
+  "status": 200
+}

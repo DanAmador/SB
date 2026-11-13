@@ -1,0 +1,12 @@
+{
+  "body": {
+    "ok": true
+  },
+  "contentType": "application/json",
+  "request": {
+    "by": "sess-1",
+    "key": "port:5173"
+  },
+  "route": "POST /api/lock",
+  "status": 200
+}
