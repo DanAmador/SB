@@ -163,6 +163,34 @@ class HookCommandTest(HubCase):
         w = self.get("/api/state")["agents"]["w"]
         self.assertEqual((w["parent"], w["name"], w["note"]), ("abcdef123", "scout", "Grep: claim"))
 
+    def test_a_queued_message_reaches_the_session_mid_turn(self):
+        self.hub("hook", stdin=json.dumps(ev("SessionStart")))
+        sent = self.hub("send", "--to", "abcdef123", "check the log first")
+        self.assertEqual(sent.returncode, 0, sent.stderr)
+        r = self.hub("hook", stdin=json.dumps(ev("PostToolUse", tool_name="Read", tool_input={})))
+        out = json.loads(r.stdout)["hookSpecificOutput"]
+        self.assertEqual(out["hookEventName"], "PostToolUse")
+        self.assertIn("check the log first", out["additionalContext"])
+        self.assertEqual(self.hub("hook", stdin=json.dumps(ev("PostToolUse", tool_name="Read"))).stdout, "")
+
+    def test_at_the_end_of_a_turn_a_message_keeps_the_session_going(self):
+        self.hub("hook", stdin=json.dumps(ev("SessionStart")))
+        self.hub("send", "--to", "abcdef123", "now do the tests")
+        out = json.loads(self.hub("hook", stdin=json.dumps(ev("Stop"))).stdout)
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("now do the tests", out["reason"])
+
+    def test_a_message_for_a_worker_goes_to_that_worker_only(self):
+        self.hub("hook", stdin=json.dumps(ev("SubagentStart", agent_id="w", agent_type="scout")))
+        self.hub("send", "--to", "w", "look in tests too")
+        self.assertEqual(self.hub("hook", stdin=json.dumps(ev("Stop"))).stdout, "")
+        out = json.loads(self.hub("hook", stdin=json.dumps(ev("PostToolUse", agent_id="w", tool_name="Grep"))).stdout)
+        self.assertIn("look in tests too", out["hookSpecificOutput"]["additionalContext"])
+
+    def test_send_says_when_it_cannot(self):
+        self.assertEqual(self.hub("send", "--to", "nobody", "hi").returncode, 1)
+        self.assertEqual(self.hub("send", "--to", "a", "hi", port=1).returncode, 2)
+
     def test_antigravity_hook_prints_empty_json_and_reports(self):
         r = self.hub("hook", "--event", "PostToolUse", stdin=json.dumps(
             agy(toolCall={"name": "read_file", "args": {"Path": "/work/proj/a.py"}})))

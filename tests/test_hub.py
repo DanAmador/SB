@@ -25,6 +25,63 @@ class HubTest(unittest.TestCase):
         a = h.state()["agents"]["a"]
         self.assertEqual((a["state"], a["total"], a["project"]), ("idle", 5, "/p"))
 
+    def test_a_message_waits_for_its_session_and_is_taken_once(self):
+        h = self.h
+        h.report({"agent": "a", "state": "working"})
+        mid = h.send("a", "  use the second option  ")["id"]
+        self.assertEqual(h.state()["messages"][mid]["delivered"], None)
+        self.assertEqual(h.take("other", "Stop")["messages"], [])
+        self.t += 5
+        self.assertEqual(h.take("a", "PostToolUse")["messages"], ["use the second option"])
+        self.assertEqual(h.take("a", "PostToolUse")["messages"], [])
+        m = h.state()["messages"][mid]
+        self.assertEqual((m["delivered"], m["how"]), (1005.0, "PostToolUse"))
+
+    def test_a_message_follows_the_alias_and_reaches_a_worker(self):
+        h = self.h
+        h.report({"agent": "sid", "state": "working", "alias": "run-1"})
+        h.report({"agent": "w1", "role": "worker", "parent": "sid", "state": "working"})
+        h.send("sid", "for the run")
+        h.send("w1", "for the worker")
+        self.assertEqual(h.take("sid", "Stop")["messages"], ["for the run"])
+        self.assertEqual(h.take("w1", "SubagentStop")["messages"], ["for the worker"])
+
+    def test_a_message_is_refused_without_a_known_session_or_text(self):
+        h = self.h
+        h.report({"agent": "a", "state": "idle"})
+        for to, text in (("nobody", "hi"), ("a", "   "), ("a", 5), ("", "hi"), ("a", "x" * 4001)):
+            with self.assertRaises(ValueError):
+                h.send(to, text)
+
+    def test_unsend_takes_back_only_an_undelivered_message(self):
+        h = self.h
+        h.report({"agent": "a", "state": "idle"})
+        first, second = h.send("a", "one")["id"], h.send("a", "two")["id"]
+        h.unsend(first)
+        self.assertNotIn(first, h.state()["messages"])
+        h.take("a", "Stop")
+        with self.assertRaises(ValueError):
+            h.unsend(second)
+        with self.assertRaises(KeyError):
+            h.unsend("nope")
+
+    def test_a_message_to_a_session_that_ended_is_marked_lost(self):
+        h = self.h
+        h.report({"agent": "a", "state": "idle"})
+        mid = h.send("a", "hello")["id"]
+        h.report({"agent": "a", "state": "gone"})
+        self.assertEqual(h.state()["messages"][mid]["lost"], 1000.0)
+        self.assertEqual(h.take("a", "Stop")["messages"], [])
+
+    def test_finished_messages_are_capped(self):
+        h = self.h
+        h.report({"agent": "a", "state": "idle"})
+        for i in range(40):
+            self.t += 1
+            h.send("a", str(i))
+        h.take("a", "Stop")
+        self.assertEqual(len(h.state()["messages"]), 30)
+
     def test_since_marks_when_the_state_last_changed(self):
         h = self.h
         h.report({"agent": "a", "state": "working", "note": "Read: x"})
