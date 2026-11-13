@@ -104,6 +104,14 @@ class BriefTest(unittest.TestCase):
         self.assertNotIn("<", b)
         self.assertNotIn("sbhub", b)
 
+    def test_the_brief_is_the_template_filled(self):
+        # the form the owner reads is the form the hub fills: a ticket without paths loses only that line
+        b = brief(T(3, paths=[]), "bg", "/runs", "/repo", "main")
+        self.assertNotIn("Files you own", b)
+        self.assertNotIn("{", b)
+        self.assertIn("Leave alone: Other things.", b)
+        self.assertEqual(b.splitlines()[0], "Background: bg")
+
 
 def git(repo, *a):
     return subprocess.run(["git", "-C", str(repo), *a], capture_output=True, text=True, check=True).stdout.strip()

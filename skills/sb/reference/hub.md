@@ -3,8 +3,60 @@
 The hub (`scripts/sbhub.py`) is a local web page and API that shows what sb sessions are doing,
 plus an MCP face (`scripts/sbhub_mcp.py`, bundled in `mods/hub-report/.mcp.json` for Claude Code
 and `mods/hub-report-agy/mcp_config.json` for Antigravity) that renders the same live board and
-question buttons directly in chat. The vault stays the record; the hub never writes into it. Agents
-use three actions (`report`, `ask`, `lock`); the rest of this file is providers.
+question buttons directly in chat. The vault stays the record; the hub writes it only through
+`sbmap` (claim, comment, resolve, run). Agents use three actions (`report`, `ask`, `lock`); the hub
+also holds **tonight's queue** and runs it; the rest of this file is providers.
+
+## Tonight's queue
+
+The owner ticks tickets on the page; the hub orders them, runs each through a headless worker
+(`claude -p` in auto mode, no orchestrator session), checks the result in code and records it in
+the vault. Only the running hub writes the queue (`$SB_HUB_HOME/state.json`); CLI, page and
+`sb_queue` go through its API and refuse when it is down.
+
+- **Ready** only when the ticket's type is `task`, `research` or `prototype`, it has a `Done when`,
+  it has checks (its own or its map's), and every blocker is resolved or queued ahead of it. Else it
+  shows on the page with its reason: `blocked`, `waits for you` (grilling, architecture),
+  `not ready` (no done-when, no check commands), `claimed`.
+- **Checks**: shell commands, run in the ticket's repo after the worker exits, that all exit 0:
+  `sbmap mapset <map> checks="cmd one; cmd two"` on the map, or `sbmap set <map> <NNN> checks="…"`
+  on one ticket. The repo's fast loop only: they run once per ticket.
+- **Tier**: `sbmap set <map> <NNN> tier=opus` on a complex ticket; Sonnet when absent. A failed
+  Sonnet ticket retries once on Opus.
+- **Order**, fixed: after its blockers; then priority S→F; then the ticket that unblocks the most
+  queued or available tickets; then map order.
+- **Verdict**, in code: a commit with the `Ticket:` trailer, every commit since the base inside the
+  ticket's paths, every check green. Then `sbmap resolve`. Anything else stays open with the reason
+  as a comment; the commit is left in place; the repo's next ticket still runs.
+- **Workers**: one per repo at a time; a worker past 90 minutes is killed and fails. A new queue
+  starts **paused**: nothing runs until the owner (or `tonight`) resumes it.
+- **Pool and pacing**: the night's agents are a pool (`sbhub queue agents assembio personal`); a
+  ticket's own `agent` override pins it. Each Claude worker streams its account's usage (5-hour and
+  weekly window, reset times); with nothing running the hub reads it with a one-line Haiku call. An
+  item starts on the pool agent where it fits with the most room: the account's use, plus what its
+  running items still need, plus this item's cost (learned per account and tier from finished
+  items), stays under 90% of the 5-hour window (a reset before the item would need the rest counts),
+  and weekly use is under 80%. Up to 2 workers per account; one until its cost is learned. An item
+  that fits nowhere waits with a note naming the account, its use and the reset time. At 95% the hub
+  tells running workers to commit what passes and stop. A ticket cut off by a limit or a logout
+  resumes on another account with room, from where it stopped. An expired login takes that account
+  out of the pool and asks the owner to sign in.
+- **Jobs**: a one-off prompt for any agent, in a wayfinder project or any git checkout by path
+  (`sbhub queue job …`, or the page's New job form). No claim, no verdict: exit 0 is done.
+
+Commands (`scripts/sbhub.py`):
+
+| command | does |
+|---|---|
+| `queue` | the queue in run order, each item with its state |
+| `queue add\|rm <map> <NNN>...` | tick or untick tickets (running and finished items stay) |
+| `queue pause\|resume` | hold or release the queue |
+| `queue agents <name>...` | the night's pool, in preference order |
+| `queue job --project P --agent A [--model M] [--name N] (--prompt T \| --prompt-file F)` | a one-off job |
+| `agents [--scan]` | installed agents; `--scan` finds `~/.claude*` configs and `agy` |
+
+In chat: `sb_queue(add=["<map>#<num>"], remove=[…])` returns the queue as a few lines;
+`sb_board`'s text carries `queue: N queued, M running, ends about HH:MM`.
 
 ## Chat widgets (MCP)
 
@@ -26,9 +78,9 @@ unlocked.
 
 - **`report`**: with the `hub-report` mod (`./install.sh --hub`) a session's state reaches the hub
   on its own. `report` adds what hooks cannot know: a run's progress (`--done`, `--total`), the
-  ticket a worker is on (`--ticket`), a ticket session's run (`--parent`). The operator runs it at
-  each ticket boundary ([tonight](../verbs/tonight.md) step 6); a ticket session at its start and
-  end ([session brief](../templates/session-brief.md)).
+  ticket a worker is on (`--ticket`), a ticket session's run (`--parent`). Queue workers need
+  none of it: the hub knows what it started. An operator without the hub runs it at each ticket
+  boundary ([tonight](../verbs/tonight.md), *No hub*).
 - **`ask`**: see [output.md](output.md), *Unattended*.
 - **`lock <name> --by <agent>`**, then **`unlock`** with the same arguments: a resource one agent
   may use at a time (the Unity editor, a port). Prints `ok`, or exits 1 `held by <who>`: do the

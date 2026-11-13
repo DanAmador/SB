@@ -16,6 +16,9 @@ later run alone. This replaces the wayfinder skill's *Chart the map*: load no ot
    - `--paths`: the files or folders it will change, when the code already says. `sbmap lanes` runs
      tickets with disjoint paths in parallel; a ticket without paths runs alone.
    - Structural decisions are `architecture` tickets.
+   - `--done-when` names something a command can check (a test, a script's output, a file), so the
+     hub's queue can run the ticket alone; set the map's checks once,
+     `sbmap mapset <map> checks="cmd; cmd"`, from the repo's fast loop ([hub.md](../reference/hub.md)).
 5. **Verify:** `sbmap check <map>` clean, `sbmap verify <map>`. With Obsidian running,
    `obsidian open path="wayfinder/<repo>/<effort>/map.md"`.
 6. **Read it back (plain-reader check).** Read the map's plain-words section and each ticket's

@@ -14,7 +14,11 @@ body{color:var(--ink);font:13px/1.35 var(--font-sans,-apple-system,system-ui,san
 .box{background:var(--card);border:1px solid var(--line);border-radius:var(--r);overflow:hidden;margin-bottom:6px}
 .line{display:flex;gap:8px;align-items:center;padding:5px 9px;border-top:1px solid var(--line);min-height:30px}.line:first-child{border-top:0}
 .grow{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.mute{color:var(--mute);font-size:12px}
-.ic{width:20px;text-align:center;flex:none;font-size:14px;line-height:20px;font-family:"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif}
+.ic{width:20px;text-align:center;flex:none;font-size:14px;line-height:20px}svg{width:1em;height:1em;flex:none;vertical-align:-.14em}
+.ic.ok{color:var(--ok)}.ic.bad{color:var(--bad)}.ic.acc{color:var(--acc)}.ic.warn{color:var(--warn)}
+.lv{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--mute);vertical-align:middle}.lv.ok{background:var(--ok)}.lv.warn{background:var(--warn)}.lv.bad{background:var(--bad)}
+summary::before{content:"";display:inline-block;width:6px;height:6px;border-right:1.5px solid var(--mute);border-bottom:1.5px solid var(--mute);transform:rotate(-45deg);margin:0 6px 1px 1px}details[open]>summary::before{transform:rotate(45deg)}
+.qrow{display:flex;gap:8px;align-items:center;padding:4px 9px;border-top:1px solid var(--line)}.qrow:first-child{border-top:0}
 .pips{display:inline-flex;gap:2px;align-items:center;vertical-align:middle}.pips i{width:6px;height:11px;border-radius:2px;border:1.5px solid var(--mute)}
 .pips i.on{background:var(--ok);border-color:var(--ok)}.pips i.now{height:14px;border:2.5px solid var(--acc)}
 .ses{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:1px 8px;padding:5px 9px;border-top:1px solid var(--line);align-items:start}.ses:first-child{border-top:0}
@@ -51,17 +55,50 @@ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 const num=n=>Number.isFinite(+n)?+n:0, own=(o,k)=>o&&typeof k=='string'&&Object.prototype.hasOwnProperty.call(o,k)?o[k]:undefined;
 const dur=s=>{s=Math.max(0,Math.floor(s));return s<60?s+'s':s<3600?Math.floor(s/60)+'m':s<86400?Math.floor(s/3600)+'h':Math.floor(s/86400)+'d'};
 const ago=(now,t)=>dur(now-num(t))+' ago';
-const ST={working:'⏳',done:'✅',blocked:'⛔','needs you':'🔔','your turn':'💬',waiting:'⏸️',idle:'💤'};
+// Tabler Icons (tabler.io), MIT licence, outline set: the same path data as sbhub_board.js, which this widget cannot load (no external files)
+const ICON = {
+  'alert-triangle': ['M12 9v4', 'M10.363 3.591l-8.106 13.534a1.914 1.914 0 0 0 1.636 2.871h16.214a1.914 1.914 0 0 0 1.636 -2.87l-8.106 -13.536a1.914 1.914 0 0 0 -3.274 0', 'M12 16h.01'],
+  ban: ['M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0', 'M5.7 5.7l12.6 12.6'],
+  bell: ['M10 5a2 2 0 1 1 4 0a7 7 0 0 1 4 6v3a4 4 0 0 0 2 3h-16a4 4 0 0 0 2 -3v-3a7 7 0 0 1 4 -6', 'M9 17v1a3 3 0 0 0 6 0v-1'],
+  check: ['M5 12l5 5l10 -10'],
+  'circle-check': ['M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0', 'M9 12l2 2l4 -4'],
+  clock: ['M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0', 'M12 7v5l3 3'],
+  'device-gamepad-2': ['M12 5h3.5a5 5 0 0 1 0 10h-5.5l-4.015 4.227a2.3 2.3 0 0 1 -3.923 -2.035l1.634 -8.173a5 5 0 0 1 4.904 -4.019h3.4', 'M14 15l4.07 4.284a2.3 2.3 0 0 0 3.925 -2.023l-1.6 -8.232', 'M8 9v2', 'M7 10h2', 'M14 10h2'],
+  'file-text': ['M14 3v4a1 1 0 0 0 1 1h4', 'M17 21h-10a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h7l5 5v11a2 2 0 0 1 -2 2', 'M9 9l1 0', 'M9 13l6 0', 'M9 17l6 0'],
+  flask: ['M9 3l6 0', 'M10 9l4 0', 'M10 3v6l-4 11a.7 .7 0 0 0 .5 1h11a.7 .7 0 0 0 .5 -1l-4 -11v-6'],
+  'git-branch': ['M5 18a2 2 0 1 0 4 0a2 2 0 1 0 -4 0', 'M5 6a2 2 0 1 0 4 0a2 2 0 1 0 -4 0', 'M15 6a2 2 0 1 0 4 0a2 2 0 1 0 -4 0', 'M7 8l0 8', 'M9 18h6a2 2 0 0 0 2 -2v-5', 'M14 14l3 -3l3 3'],
+  hammer: ['M11.414 10l-7.383 7.418a2.091 2.091 0 0 0 0 2.967a2.11 2.11 0 0 0 2.976 0l7.407 -7.385', 'M18.121 15.293l2.586 -2.586a1 1 0 0 0 0 -1.414l-7.586 -7.586a1 1 0 0 0 -1.414 0l-2.586 2.586a1 1 0 0 0 0 1.414l7.586 7.586a1 1 0 0 0 1.414 0'],
+  'help-circle': ['M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0', 'M12 16v.01', 'M12 13a2 2 0 0 0 .914 -3.782a1.98 1.98 0 0 0 -2.414 .483'],
+  'list-numbers': ['M11 6h9', 'M11 12h9', 'M12 18h8', 'M4 16a2 2 0 1 1 4 0c0 .591 -.5 1 -1 1.5l-3 2.5h4', 'M6 10v-6l-2 2'],
+  'loader-2': ['M12 3a9 9 0 1 0 9 9'],
+  lock: ['M5 13a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v6a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2v-6', 'M11 16a1 1 0 1 0 2 0a1 1 0 0 0 -2 0', 'M8 11v-4a4 4 0 1 1 8 0v4'],
+  message: ['M8 9h8', 'M8 13h6', 'M18 4a3 3 0 0 1 3 3v8a3 3 0 0 1 -3 3h-5l-5 3v-3h-2a3 3 0 0 1 -3 -3v-8a3 3 0 0 1 3 -3h12'],
+  pencil: ['M4 20h4l10.5 -10.5a2.828 2.828 0 1 0 -4 -4l-10.5 10.5v4', 'M13.5 6.5l4 4'],
+  'player-pause': ['M6 6a1 1 0 0 1 1 -1h2a1 1 0 0 1 1 1v12a1 1 0 0 1 -1 1h-2a1 1 0 0 1 -1 -1l0 -12', 'M14 6a1 1 0 0 1 1 -1h2a1 1 0 0 1 1 1v12a1 1 0 0 1 -1 1h-2a1 1 0 0 1 -1 -1l0 -12'],
+  robot: ['M6 6a2 2 0 0 1 2 -2h8a2 2 0 0 1 2 2v4a2 2 0 0 1 -2 2h-8a2 2 0 0 1 -2 -2l0 -4', 'M12 2v2', 'M9 12v9', 'M15 12v9', 'M5 16l4 -2', 'M15 14l4 2', 'M9 18h6', 'M10 8v.01', 'M14 8v.01'],
+  search: ['M3 10a7 7 0 1 0 14 0a7 7 0 1 0 -14 0', 'M21 21l-6 -6'],
+  server: ['M3 7a3 3 0 0 1 3 -3h12a3 3 0 0 1 3 3v2a3 3 0 0 1 -3 3h-12a3 3 0 0 1 -3 -3v-2', 'M3 15a3 3 0 0 1 3 -3h12a3 3 0 0 1 3 3v2a3 3 0 0 1 -3 3h-12a3 3 0 0 1 -3 -3l0 -2', 'M7 8l0 .01', 'M7 16l0 .01'],
+  'terminal-2': ['M8 9l3 3l-3 3', 'M13 15l3 0', 'M3 6a2 2 0 0 1 2 -2h14a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2l0 -12'],
+  ticket: ['M15 5l0 2', 'M15 11l0 2', 'M15 17l0 2', 'M5 5h14a2 2 0 0 1 2 2v3a2 2 0 0 0 0 4v3a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2v-3a2 2 0 0 0 0 -4v-3a2 2 0 0 1 2 -2'],
+  tool: ['M7 10h3v-3l-3.5 -3.5a6 6 0 0 1 8 8l6 6a2 2 0 0 1 -3 3l-6 -6a6 6 0 0 1 -8 -8l3.5 3.5'],
+  world: ['M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0', 'M3.6 9h16.8', 'M3.6 15h16.8', 'M11.5 3a17 17 0 0 0 0 18', 'M12.5 3a17 17 0 0 1 0 18'],
+  x: ['M18 6l-12 12', 'M6 6l12 12'],
+  zzz: ['M4 12h6l-6 8h6', 'M14 4h6l-6 8h6']
+};
+const svg=n=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${(own(ICON,n)||[]).map(d=>`<path d="${d}"/>`).join('')}</svg>`;
+const ST={working:['loader-2','acc'],done:['circle-check','ok'],blocked:['ban','bad'],'needs you':['bell','bad'],'your turn':['message','acc'],waiting:['player-pause',''],idle:['zzz','']};
 const RANK={'needs you':0,blocked:0,'your turn':1,working:2,waiting:2,idle:3,done:4}, rank=a=>own(RANK,a.state)??2;
-const TOOL={Bash:'⌨️',run_command:'⌨️',Read:'📄',read_file:'📄',view_file:'📄',Edit:'✏️',edit_file:'✏️',Write:'✏️',write_file:'✏️',Grep:'🔎',grep_search:'🔎',Glob:'🔎',Agent:'🤖',Task:'🤖',invoke_subagent:'🤖',WebFetch:'🌐',WebSearch:'🌐',search_web:'🌐'};
-const LV={ok:'🟢',warn:'🟡',bad:'🔴'}, PICON={git:'🌿',tests:'🧪',unity:'🎮',build:'🔨',server:'🖥️'};
+const TOOL={Bash:'terminal-2',run_command:'terminal-2',Read:'file-text',read_file:'file-text',view_file:'file-text',Edit:'pencil',edit_file:'pencil',Write:'pencil',write_file:'pencil',Grep:'search',grep_search:'search',Glob:'search',Agent:'robot',Task:'robot',invoke_subagent:'robot',WebFetch:'world',WebSearch:'world',search_web:'world'};
+const dot=lv=>`<i class="lv ${lv=='ok'||lv=='warn'||lv=='bad'?lv:''}" aria-hidden="true"></i>`, PICON={git:'git-branch',tests:'flask',unity:'device-gamepad-2',build:'hammer',server:'server'};
 const short=id=>String(id??'').slice(0,6), proj=p=>String(p||'').split('/').filter(Boolean).pop()||'';
 const tnum=t=>/^\d+$/.test(String(t))?'ticket '+t:String(t);
 // the same label as the hub page: title, else ticket, else name, else a short id (raw text: esc it where used)
 const lbl=a=>String(a.title||(a.ticket?tnum(a.ticket):'')||a.name||short(a.agent));
 const who=id=>{const a=S&&typeof id=='string'?own(S.agents,id):null;return a?lbl(a):short(id)};
-const stIc=st=>`<span class="ic" role="img" aria-label="${esc(st||'unknown')}" title="${esc(st||'unknown')}">${own(ST,st)||'•'}</span>`;
+const stI=st=>own(ST,st)||['help-circle',''];
+const stIc=st=>`<span class="ic ${stI(st)[1]}" role="img" aria-label="${esc(st||'unknown')}" title="${esc(st||'unknown')}">${svg(stI(st)[0])}</span>`;
 const act=a=>{const m=/^(\w+)(?:: ?(.*))?$/.exec(a.note||'');return m&&own(TOOL,m[1])?[TOOL[m[1]],m[2]||m[1]]:['',a.note||'']};
+const tic=n=>n?svg(n)+' ':'';
 
 // ---- bridge to the host ----
 let nextId=1, hostCaps={}, canCall=false;const pending=new Map();
@@ -79,7 +116,7 @@ window.addEventListener('message',e=>{
   if(m.method==='ui/notifications/tool-result'){const s=m.params?.structuredContent;
     if(s&&s.agents){take(s,true);return}
     if(m.params?.isError&&!S){const msg=m.params?.content?.[0]?.text||'Error';
-      document.getElementById('app').innerHTML=`<div class="box"><div class="line"><span class="ic">⛔</span><span class="grow">${esc(msg)}</span></div></div>`}
+      document.getElementById('app').innerHTML=`<div class="box"><div class="line"><span class="ic bad">${svg('ban')}</span><span class="grow">${esc(msg)}</span></div></div>`}
     return}
   if(m.method==='ui/notifications/tool-input'){const a=m.params?.arguments;if(a&&a.question&&!S)askPreview(a);return}
   if(m.method==='ui/notifications/host-context-changed'){applyHost(m.params);return}
@@ -140,31 +177,31 @@ function prog(d,t){const label=`${d} of ${t} done`;
   if(t>20)return `<span title="${esc(label)}"><span class="bar"><i style="width:${Math.max(0,Math.min(100,100*d/t))}%"></i></span> ${d}/${t}</span>`;
   let h='';for(let i=0;i<t;i++)h+=`<i class="${i<d?'on':i==d?'now':''}"></i>`;return `<span title="${esc(label)}"><span class="pips" role="img" aria-label="${esc(label)}">${h}</span> ${d}/${t}</span>`}
 function chip(s,a){const [ic]=act(a),c=rank(a)==0?'bad':a.state=='done'?'ok':'';
-  return `<span class="chip ${c}" dir="auto" title="${esc(lbl(a))} · ${esc(a.state)} · ${esc(a.note)}"><span role="img" aria-label="${esc(a.state)}">${own(ST,a.state)||'•'}</span> ${esc(lbl(a))}${ic?' '+ic:''}</span>`}
+  return `<span class="chip ${c}" dir="auto" title="${esc(lbl(a))} · ${esc(a.state)} · ${esc(a.note)}"><span role="img" aria-label="${esc(a.state)}" class="${stI(a.state)[1]}">${svg(stI(a.state)[0])}</span> ${esc(lbl(a))}${ic?' '+svg(ic):''}</span>`}
 // a session as on the hub page: icon, title and age; then what the owner asked, project · ticket · progress, the note, workers
 function row(s,a,kids){const [ic,txt]=act(a),t=num(a.total),silent=s.now-num(a.at),nm=lbl(a),meta=[];
   if(proj(a.project))meta.push(`<span class="one" title="${esc(a.project)}">${esc(proj(a.project))}</span>`);
-  if(a.ticket&&a.role!='worker'&&tnum(a.ticket)!==nm)meta.push(`<span class="tk one" dir="auto">🎫 ${esc(tnum(a.ticket))}</span>`);
+  if(a.ticket&&a.role!='worker'&&tnum(a.ticket)!==nm)meta.push(`<span class="tk one" dir="auto">${svg('ticket')} ${esc(tnum(a.ticket))}</span>`);
   if(t>0)meta.push(prog(num(a.done),t));
   if(a.state=='working'&&num(a.since))meta.push(`<span>working ${esc(dur(s.now-num(a.since)))}</span>`);
-  if(a.state=='working'&&silent>=600)meta.push(`<span class="chip warn">⚠ quiet for ${esc(dur(silent))}</span>`);
+  if(a.state=='working'&&silent>=600)meta.push(`<span class="chip warn">${svg('alert-triangle')} quiet for ${esc(dur(silent))}</span>`);
   return `<div class="ses${a.state=='idle'||a.state=='done'?' calm':''}">${stIc(a.state)}<span class="l1 t" dir="auto" title="${esc(nm)}">${esc(nm)}</span><span class="age">active ${esc(ago(s.now,a.at))}</span>`
     +(a.asked?`<div class="x ask one" dir="auto" title="${esc(a.asked)}">You asked: “${esc(a.asked)}”</div>`:'')
     +(meta.length?`<div class="x l2">${meta.join('<span aria-hidden="true">·</span>')}</div>`:'')
-    +(txt?`<div class="x l3 one" dir="auto" title="${esc(txt)}">${ic} ${esc(txt)}</div>`:'')
+    +(txt?`<div class="x l3 one" dir="auto" title="${esc(txt)}">${tic(ic)}${esc(txt)}</div>`:'')
     +(kids.length?`<div class="x kids">${kids.map(k=>chip(s,k)).join('')}</div>`:'')+'</div>'}
 function widget(w){const label=esc(w.label);
-  if(w.kind=='status')return `<span class="chip" title="${label}">${own(LV,w.level)||''} ${esc(String(w.value).slice(0,36))}</span>`;
+  if(w.kind=='status')return `<span class="chip" title="${label}">${w.label=='Branch'?svg('git-branch'):dot(w.level)} ${esc(String(w.value).slice(0,36))}</span>`;
   if(w.kind=='progress'){const v=num(w.value),m=num(w.max),pc=Math.max(0,Math.min(100,100*v/(m||1)));return `<span class="bar" title="${label} ${v}/${m}"><i style="width:${pc}%"></i></span>`}
-  if(w.kind=='counts'&&w.items&&typeof w.items=='object')return Object.entries(w.items).map(([k,v])=>`<span class="chip ${k=='fail'&&num(v)?'bad':''}" title="${label}">${k=='pass'?'✅':k=='fail'?'❌':esc(k)} ${esc(v)}</span>`).join('');
+  if(w.kind=='counts'&&w.items&&typeof w.items=='object')return Object.entries(w.items).map(([k,v])=>`<span class="chip ${k=='fail'&&num(v)?'bad':''}" title="${label}">${k=='pass'?svg('check'):k=='fail'?svg('x'):esc(k)} ${esc(v)}</span>`).join('');
   return ''}
 function opts(id,q){const busy=own(sending,id);
   return (q.options||[]).map((o,i)=>`<button data-q="${esc(id)}" data-i="${i}" class="${o==q.default?'def':''}${busy===i?' sending':''}" title="${o==q.default?'default':''}"${busy!=null?' disabled':''}>${busy===i?'Sending…':esc(o)}</button>`).join('')}
-const left=(s,q)=>{const l=num(q.deadline)-s.now;return l>0?`⏱ ${dur(l)} left`:'deciding…'};
+const left=(s,q)=>{const l=num(q.deadline)-s.now;return l>0?`${svg('clock')} ${dur(l)} left`:'deciding…'};
 const failLine=id=>own(fails,id)?`<span class="err" role="alert">Not recorded: ${esc(fails[id])}</span>`:'';
 const noteLine=id=>own(chatNote,id)?`<div class="note" title="${esc(chatNote[id].title)}">${esc(chatNote[id].text)}</div>`:'';
-function decidedLine(id,q,choice,by){return `<div class="dec"><span class="ic">${by=='default'?'⏱':'✅'}</span><div class="grow"><span dir="auto">${esc(q)}</span> → <b dir="auto">${esc(choice)}</b>${by=='default'?' <span class="mute">(by default)</span>':''}${noteLine(id)}</div></div>`}
-function askPreview(a){document.getElementById('app').innerHTML=`<div class="box focus"><div class="ask"><p>❓ ${esc(a.question)}</p><div class="opts">${(a.options||[]).map(o=>`<button disabled class="${o===a.default?'def':''}">${esc(o)}</button>`).join('')}</div></div></div>`}
+function decidedLine(id,q,choice,by){return `<div class="dec"><span class="ic ${by=='default'?'':'ok'}">${svg(by=='default'?'clock':'circle-check')}</span><div class="grow"><span dir="auto">${esc(q)}</span> → <b dir="auto">${esc(choice)}</b>${by=='default'?' <span class="mute">(by default)</span>':''}${noteLine(id)}</div></div>`}
+function askPreview(a){document.getElementById('app').innerHTML=`<div class="box focus"><div class="ask"><p>${svg('help-circle')} ${esc(a.question)}</p><div class="opts">${(a.options||[]).map(o=>`<button disabled class="${o===a.default?'def':''}">${esc(o)}</button>`).join('')}</div></div></div>`}
 function render(){
   const s=S, agents=Object.values(s.agents||{}), qs=Object.entries(s.questions||{});
   const order=(x,y)=>rank(x)-rank(y)||num(y.at)-num(x.at);
@@ -177,24 +214,30 @@ function render(){
   const fq=focus&&own(s.questions,focus);
   if(fq){const a=fq.answer??answered[focus];
     h+=`<div class="box focus">`+(a==null
-      ?`<div class="ask"><p>❓ ${esc(fq.q)}</p><div class="opts">${opts(focus,fq)}<span class="mute" style="align-self:center" title="then the default applies">${esc(left(s,fq))}</span></div>${failLine(focus)}</div>`
+      ?`<div class="ask"><p>${svg('help-circle')} ${esc(fq.q)}</p><div class="opts">${opts(focus,fq)}<span class="mute" style="align-self:center" title="then the default applies">${esc(left(s,fq))}</span></div>${failLine(focus)}</div>`
       :decidedLine(focus,fq.q,a,fq.by))+`</div>`}
   // decided here, or decided elsewhere after this widget saw it open: it stays, marked, instead of vanishing
   const dec=[];
   for(const [id,q] of qs)if(id!==focus&&q.answer!=null&&(own(here,id)||seenOpen.has(id)))dec.push(decidedLine(id,q.q,q.answer,q.by));
   for(const [id,x] of Object.entries(here))if(id!==focus&&!own(s.questions,id))dec.push(decidedLine(id,x.q,x.choice,'you'));
-  if(open.length||need.length||dec.length)h+='<div class="box q">'+open.map(([id,q])=>`<div class="line"><span class="ic">❓</span><span class="grow"><b dir="auto">${esc(who(q.agent))}</b> ${esc(q.q)}</span>${opts(id,q)}<span class="mute">${esc(left(s,q))}</span>${own(fails,id)?`<span class="qx">${failLine(id)}</span>`:''}</div>`).join('')
+  if(open.length||need.length||dec.length)h+='<div class="box q">'+open.map(([id,q])=>`<div class="line"><span class="ic acc">${svg('help-circle')}</span><span class="grow"><b dir="auto">${esc(who(q.agent))}</b> ${esc(q.q)}</span>${opts(id,q)}<span class="mute">${esc(left(s,q))}</span>${own(fails,id)?`<span class="qx">${failLine(id)}</span>`:''}</div>`).join('')
     +dec.join('')+need.map(a=>row(s,a,kids(a))).join('')+'</div>';
   h+='<div class="box">'+(tops.filter(a=>rank(a)>0).map(a=>row(s,a,kids(a))).join('')||(tops.length?'':'<div class="empty">no sessions reporting</div>'));
   const locks=Object.entries(s.locks||{});
-  h+=locks.map(([k,l])=>`<div class="line"><span class="ic">🔒</span><span class="grow">${esc(k)}</span><span class="mute">held by ${esc(who(l.by))} · ${esc(ago(s.now,l.at))}</span></div>`).join('');
+  h+=locks.map(([k,l])=>`<div class="line"><span class="ic">${svg('lock')}</span><span class="grow">${esc(k)}</span><span class="mute">held by ${esc(who(l.by))} · ${esc(ago(s.now,l.at))}</span></div>`).join('');
   const provs=Object.entries(s.providers||{});
-  if(provs.length)h+=`<details data-k="providers"><summary>▸ projects (${provs.length})</summary>`+provs.map(([p,list])=>(Array.isArray(list)?list:[]).map(x=>{
+  if(provs.length)h+=`<details data-k="providers"><summary>projects (${provs.length})</summary>`+provs.map(([p,list])=>(Array.isArray(list)?list:[]).map(x=>{
       const ws=Array.isArray(x.widgets)?x.widgets.filter(w=>w&&typeof w=='object'):[];
       const logs=ws.filter(w=>w.kind==='log'&&Array.isArray(w.lines)&&w.lines.length);
-      return `<div class="line"><span class="ic" title="${esc(x.title)}">${own(PICON,x.icon)||'🔧'}</span><span class="mute">${esc(p.split('/').pop())}</span>${ws.map(widget).join('')}<span class="grow"></span></div>`
-        +logs.map(l=>`<details data-k="${esc(p+'|'+x.title+'|'+l.label)}"><summary>▸ ${esc(l.label)}</summary><pre>${l.lines.map(esc).join('\n')}</pre></details>`).join('')}).join('')).join('')+'</details>';
+      return `<div class="line"><span class="ic" title="${esc(x.title)}">${svg(own(PICON,x.icon)||'tool')}</span><span class="mute">${esc(p.split('/').pop())}</span>${ws.map(widget).join('')}<span class="grow"></span></div>`
+        +logs.map(l=>`<details data-k="${esc(p+'|'+x.title+'|'+l.label)}"><summary>${esc(l.label)}</summary><pre>${l.lines.map(esc).join('\n')}</pre></details>`).join('')}).join('')).join('')+'</details>';
   h+='</div>';
+  // tonight's queue: its summary line, then the first five items still to run (the hub page has the rest)
+  const qi=(s.queue&&Array.isArray(s.queue.items)?s.queue.items:[]).filter(i=>i&&(i.state=='running'||i.state=='queued'));
+  if(qi.length){const run=qi.filter(i=>i.state=='running').length,wait=qi.length-run;
+    h+=`<div class="box"><div class="qrow"><span class="ic">${svg('list-numbers')}</span><span class="grow"><b>Tonight's queue</b> <span class="mute">${wait} queued · ${run} running${s.queue.paused?' · paused until you resume it on the hub page':''}</span></span></div>`
+      +qi.slice(0,5).map(i=>`<div class="qrow"><span class="ic ${i.state=='running'?'acc':''}">${svg(i.state=='running'?'loader-2':i.kind=='job'?'terminal-2':'ticket')}</span><span class="grow" dir="auto" title="${esc(i.key)}">${esc(i.name||i.key)}</span><span class="mute">${esc(i.state)}</span></div>`).join('')
+      +(qi.length>5?`<div class="qrow mute">and ${qi.length-5} more</div>`:'')+'</div>'}
   const app=document.getElementById('app'),kept=new Set([...app.querySelectorAll('details[open]')].map(d=>d.dataset.k));
   app.innerHTML=h;app.querySelectorAll('details').forEach(d=>{if(kept.has(d.dataset.k))d.open=true});
 }

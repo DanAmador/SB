@@ -3,6 +3,7 @@
 Tickets are the dicts `sbmap tickets --json` prints. Nothing here reads the vault or the hub's state.
 """
 import heapq
+import re
 import subprocess
 from pathlib import Path
 
@@ -99,37 +100,31 @@ def move(order_keys, k, to_index, tickets):
     return rest
 
 
+BRIEF_TEMPLATE = Path(__file__).resolve().parent.parent / "templates" / "session-brief.md"
+
+
 def brief(t, map_plain_words, run_folder, repo, branch):
-    """The worker's prompt, from the ticket alone (templates/session-brief.md, minus what a ticket cannot fill)."""
+    """The worker's prompt: templates/session-brief.md with each {name} filled from the ticket alone.
+    A line whose value is empty (no paths, say) is dropped; a name the template uses and this does not fill is a bug."""
     num = int(t["num"])
     sbmap = f"python3 {SBMAP}"
-    lines = [
-        f"Background: {map_plain_words}",
-        "",
-        f"Implement one ticket, alone, in {repo} on {branch}, unattended.",
-        f"Read the ticket first: {sbmap} show {t['map']} {num:03d}",
-        "",
-        f"{t['title']}.",
-        f"Why: {t['why']}",
-        f"Do: {t['question']}",
-        f"Leave alone: {t['out'] or 'anything outside the ticket'}",
-    ]
-    if t["paths"]:
-        lines.append("Files you own: " + ", ".join(t["paths"]) + ". Touch no other file.")
-    lines += ["", f"Done when: {t['done_when']}", "These commands must all exit 0 when you finish:"]
-    lines += [f"- {c}" for c in t["checks"]]
-    lines += [
-        "",
-        "- Commit once by pathspec, with this as the last line of the message:",
-        f"  Ticket: {t['map']}/{num:03d}",
-        "  Do not resolve the ticket; the operator does.",
-        f"- Write every ruling you make on the ticket: {sbmap} comment {t['map']} {num:03d} "
-        "--text \"R: the ruling, cost if wrong: what it costs\"",
-        f"- Write your report to {run_folder}/{num}.md: the commit, each check with its counts, "
-        "what you could not verify, rulings, files. Say nothing along the way. "
-        "Your last message, two lines: what works now and how to see it; the report's path.",
-    ]
-    return "\n".join(lines) + "\n"
+    values = {
+        "background": map_plain_words, "repo": repo, "branch": branch, "sbmap": sbmap, "map": t["map"],
+        "num": str(num), "num3": f"{num:03d}", "title": t["title"], "why": t["why"], "question": t["question"],
+        "out": t["out"] or "anything outside the ticket", "paths": ", ".join(t["paths"]),
+        "done_when": t["done_when"], "checks": "\n".join(f"- {c}" for c in t["checks"]), "run_folder": str(run_folder),
+    }
+    text = re.sub(r"\A<!--.*?-->\n+", "", BRIEF_TEMPLATE.read_text(encoding="utf-8"), flags=re.S)
+    out = []
+    for line in text.split("\n"):
+        names = re.findall(r"\{(\w+)\}", line)
+        unknown = [n for n in names if n not in values]
+        if unknown:
+            raise KeyError(f"session-brief.md names {unknown[0]}, which the hub cannot fill")
+        if any(not values[n] for n in names):
+            continue
+        out.append(re.sub(r"\{(\w+)\}", lambda m: values[m.group(1)], line))
+    return "\n".join(out).rstrip("\n") + "\n"
 
 
 def _under(f, paths):

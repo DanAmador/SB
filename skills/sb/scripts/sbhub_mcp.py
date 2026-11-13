@@ -10,7 +10,7 @@ when it is down. Run over stdio by Claude Code through the hub-report mod's .mcp
 
   uv run --script sbhub_mcp.py
 
-Tools the model sees:  sb_board, sb_ask, sb_report, sb_lock, sb_unlock
+Tools the model sees:  sb_board, sb_ask, sb_queue, sb_report, sb_lock, sb_unlock
 Tools only the widget calls (no model tokens): sb_state, sb_answer
 The widget (ui://sbhub/board.html) polls sb_state through the host, so it stays live while
 nobody spends a token, and a click on an option answers the hub and tells the chat.
@@ -36,6 +36,7 @@ BOARD_URI = "ui://sbhub/board.html"
 BOARD_HTML = HERE / "sbhub_widget.html"
 PORT = sbhub.default_port()
 ALERT = ("needs you", "blocked")
+EST = 5400  # a queue item's estimate, seconds: the hub page's 1.5 h
 
 
 def hub(path, data=None, timeout=2):
@@ -94,7 +95,32 @@ def summary(s):
                      key=lambda q: q.get("answered", 0))[-3:]
     for q in decided:
         lines.append("decided: {} -> {} (by {})".format(q["q"], q["answer"], q.get("by") or "you"))
+    if queue_line(s):
+        lines.append(queue_line(s))
     return "\n".join(lines)
+
+
+def queue_line(s):
+    """One line on tonight's queue ('' when it holds nothing to run), the numbers the hub page shows."""
+    q, now = s.get("queue") or {}, s.get("now") or time.time()
+    items = q.get("items", [])
+    run = [i for i in items if i["state"] == "running"]
+    wait = [i for i in items if i["state"] == "queued"]
+    if not run and not wait:
+        return ""
+    start = min(i.get("started") or now for i in run) if run else now
+    end = max(start + EST * (len(run) + len(wait)), now + EST * len(wait))
+    line = "queue: {} queued, {} running, ends about {}".format(len(wait), len(run), time.strftime("%H:%M", time.localtime(end)))
+    return line + (" (paused: nothing starts until the owner resumes it)" if q.get("paused") else "")
+
+
+def queue_text(q, s=None):
+    """The queue as a few text lines: the summary, then each live item."""
+    lines = [queue_line({"queue": q, "now": (s or {}).get("now")}) or "queue: empty"]
+    for i in q.get("items", []):
+        if i["state"] in ("queued", "running"):
+            lines.append("- {} [{}]{}".format(i["key"], i["state"], " " + i["name"] if i.get("name") else ""))
+    return "\n".join(lines[:9] + (["..."] if len(lines) > 9 else []))
 
 
 def board_state(focus=None):
@@ -118,7 +144,11 @@ def snapshot(focus=None, **extra):
     keep = ("agent", "name", "title", "project", "role", "parent", "ticket", "state", "note", "done", "total", "at")
     return {"agents": {k: {f: a[f] for f in keep if f in a} for k, a in s["agents"].items()},
             "questions": {k: q for k, q in s["questions"].items() if q.get("answer") is None or k == focus},
-            "locks": s["locks"], "now": s["now"], **({"focus": focus} if focus else {}), **extra}
+            "locks": s["locks"], "now": s["now"],
+            "queue": {"paused": s["queue"].get("paused"), "agent": s["queue"].get("agent"),
+                      "items": [{f: i.get(f) for f in ("key", "kind", "state", "name", "started")}
+                                for i in s["queue"].get("items", [])[:5]]} if s.get("queue") else None,
+            **({"focus": focus} if focus else {}), **extra}
 
 
 def build_server():
@@ -190,6 +220,39 @@ def build_server():
         "The sb hub coordinates agent sessions. Show the owner the live board with sb_board instead of "
         "writing status in chat. Ask real questions with sb_ask, never in prose. Report progress with "
         "sb_report and take shared resources (the Unity editor, a port) with sb_lock / sb_unlock."))
+
+    @mcp.tool(description="Tonight's ticket queue on the hub: add or remove tickets by key '<map>#<num>' "
+                          "(for example 'wayfinder/foo#3'), then it lists the queue. With no arguments it only "
+                          "lists. A new queue starts paused: nothing runs until the owner resumes it on the hub "
+                          "page. Tell the owner the count and the end time it returns.")
+    def sb_queue(add: list[str] = [], remove: list[str] = []) -> CallToolResult:  # noqa: B006 (never mutated)
+        code, s = hub("/api/state")
+        if code != 200:
+            return result("The sb hub is not running and could not be started; start it with "
+                          "`python3 skills/sb/scripts/sbhub.py serve`, then try again.", error=True)
+        q = s["queue"]
+        if add or remove:
+            for attempt in (0, 1):
+                have = [i["key"] for i in q["items"] if i["kind"] == "ticket" and i["state"] == "queued"]
+                want = [k for k in have if k not in remove] + [k for k in dict.fromkeys(add) if k not in have and k not in remove]
+                code, out = hub("/api/queue/set", {"keys": want, "version": q["version"]}, timeout=75)
+                if code == 409 and out.get("queue") and attempt == 0:
+                    q = out["queue"]  # someone wrote first: once more, from what they left
+                    continue
+                break
+            if code == 0:
+                return result("The sb hub stopped answering; nothing was changed.", error=True)
+            if not out.get("ok"):
+                return result("The queue changed twice meanwhile; try again." if out.get("stale")
+                              else out.get("error") or "the hub refused it", error=True)
+            q = out["queue"]
+            live = {i["key"] for i in q["items"] if i["state"] in ("queued", "running")}
+            missed = [k for k in add if k not in live]
+            text = queue_text(q, s)
+            if missed:
+                text += "\nnot queued (not a ready open ticket, or already finished): " + ", ".join(missed)
+            return result(text, {"ok": True})
+        return result(queue_text(q, s), {"ok": True})
 
     @mcp.tool(description="Tell the hub what this agent is doing. Hooks report tool use already; use this for "
                           "what they cannot know: the ticket, a run's progress (done of total), a parent run, "

@@ -130,6 +130,12 @@ and open http://127.0.0.1:8765. A project's own `.sb/providers/` scripts run onl
 `python3 skills/sb/scripts/sbhub.py trust <project path>`
 ([hub.md](skills/sb/reference/hub.md)).
 
+The hub also runs **tonight's queue**: tick tickets on the page (or `/sb tonight` queues them),
+press Resume, and each ticket runs through a headless `claude -p` worker, is checked by its map's
+check commands and resolved in the vault, with no session left open. It paces each signed-in
+account's usage so no ticket starts that the window cannot finish, and shares tickets between
+accounts (`sbhub.py queue agents assembio personal`).
+
 ## The tracker is Obsidian-native
 
 Tickets are Obsidian notes: fields in properties, every reference a wikilink, a Bases board per map

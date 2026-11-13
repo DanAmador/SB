@@ -3,6 +3,9 @@
 A run stopped (a usage limit, a crash, a context that ran out) or the owner says "continue" or
 "reorient me". Pick up where the work is, never where a summary says it was.
 
+0. **Read the queue first** when the hub runs: `sbhub queue` says what ran, failed (with the
+   reason), waits for an account's reset, or is still queued; the hub resumes its own items, so a
+   queue item is never re-dispatched by hand.
 1. **Find the trail.** The files `sbmap status <map>` lists (`checkpoint.md`, `handoff.md`, then
    the run boards naming it, newest first) and the claimed tickets. In the repo:
    `git log --oneline` since the checkpoint's base, the ledger it names, `git status --short`.
