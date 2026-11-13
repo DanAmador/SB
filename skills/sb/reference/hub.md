@@ -89,6 +89,25 @@ is in every path; without it every path answers an empty 404. It forwards reads 
 only three writes, all display state: clear finished, dismiss, clear quiet sessions. Every other write answers
 403, and the page hides its controls.
 
+## Running it unattended
+
+A hub started from a terminal or an app session stops when that session does, and its workers with
+it (one night's queue lost two hours that way). For a night, run it as macOS background services:
+`scripts/sbhub_service.sh install` writes two LaunchAgents, `com.sb.hub` (the hub, under `caffeinate
+-i`, so the Mac does not idle-sleep while it runs; closing the lid on battery still sleeps) and
+`com.sb.hub-lan` (the phone page; `--no-lan` leaves it out), and starts them. Each restarts within
+10 s when it exits and starts again at login. PATH, `SB_HUB_HOME` and `SB_VAULT` come from the shell
+that ran install: run it again after those change.
+
+- A hub already on port 8765 makes install stop; `--take-over` kills only that hub's own process,
+  and the new hub adopts its running workers (*started before the hub restarted*). Re-running
+  install on the service keeps the workers the same way.
+- `status` prints each service's state; `uninstall` stops the hub normally, which ends its running
+  workers, and removes both.
+- Logs: `$SB_HUB_HOME/com.sb.hub.log` and `com.sb.hub-lan.log`.
+- To keep one account out of a night, set the pool without it (`sbhub queue agents assembio`); an
+  item already running there finishes.
+
 ## Chat widgets (MCP)
 
 When the `sbhub` MCP server is connected (`./install.sh --hub`):

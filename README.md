@@ -126,7 +126,16 @@ each Claude Code session reports with no command), then start it:
 python3 skills/sb/scripts/sbhub.py serve
 ```
 
-and open http://127.0.0.1:8765. A project's own `.sb/providers/` scripts run only after
+and open http://127.0.0.1:8765. For a night's queue, run it as a background service instead, so it
+outlives the terminal or app session that started it (macOS): it restarts if it exits, keeps the
+Mac from idle-sleeping, and serves the read-only phone page on the WiFi (`sbhub_lan.py url` prints
+the link):
+
+```bash
+skills/sb/scripts/sbhub_service.sh install --take-over
+```
+
+`status` and `uninstall` do the rest. A project's own `.sb/providers/` scripts run only after
 `python3 skills/sb/scripts/sbhub.py trust <project path>`
 ([hub.md](skills/sb/reference/hub.md)).
 

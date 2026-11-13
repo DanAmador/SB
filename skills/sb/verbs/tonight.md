@@ -7,7 +7,9 @@ window: 8 h. Default maps: this repo's open maps, in the order `sbmap maps` list
 queue into the same hub.
 
 Two phases: **propose** (the owner is present; one round of questions) and **queue** (nothing
-waits on them). Without a running hub, see *No hub* at the end.
+waits on them). The hub runs the night as a background service (`scripts/sbhub_service.sh
+install`; `status` to check), never from this session, which can end before the queue does.
+Without a running hub, see *No hub* at the end.
 
 ## Propose
 
