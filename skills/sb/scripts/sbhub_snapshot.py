@@ -4,22 +4,31 @@
   python3 sbhub_snapshot.py [--out PNG] [--port N]
 
 Renders http://127.0.0.1:<port>/ (port: --port, else SB_HUB_PORT, else 8765) at 430 px wide with headless
-Chrome and prints the PNG's absolute path (default out: a temp file). Exits 2 with one line when Chrome is
+Chrome (or Chromium) and prints the PNG's absolute path (default out: a temp file). Exits 2 with one line when Chrome is
 missing, the hub does not answer, or Chrome writes no picture in time.
 """
 import argparse
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
 import time
 import urllib.request
 
-CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+MAC_CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+LINUX_CHROMES = ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser")
 CHROME_TIMEOUT = 60  # a safety net: --timeout ends the page after 8 s of real time (virtual time could hang for ever)
 
 NEXT_SHOWN = 5  # the next queued tickets a map's block lists
 WAITING_SHOWN = 10
+
+
+def chrome():
+    """The Chrome to render with: the macOS app, else the first Chrome or Chromium on PATH; None when missing."""
+    if os.path.exists(MAC_CHROME):
+        return MAC_CHROME
+    return next(filter(None, map(shutil.which, LINUX_CHROMES)), None)
 
 
 def _one(text, n=140):
@@ -120,7 +129,8 @@ def main(argv=None):
     p.add_argument("--out")
     p.add_argument("--port", type=int, default=int(os.environ.get("SB_HUB_PORT") or 8765))
     a = p.parse_args(argv)
-    if not os.path.exists(CHROME):
+    exe = chrome()
+    if exe is None:
         print("snapshot: Google Chrome is not installed", file=sys.stderr)
         return 2
     url = "http://127.0.0.1:{}/".format(a.port)
@@ -133,7 +143,7 @@ def main(argv=None):
     late = False
     with tempfile.TemporaryDirectory() as prof:
         try:
-            subprocess.run([CHROME, "--headless=new", "--disable-gpu", "--hide-scrollbars", "--window-size=430,2200",
+            subprocess.run([exe, "--headless=new", "--disable-gpu", "--hide-scrollbars", "--window-size=430,2200",
                             "--timeout=8000", "--user-data-dir=" + prof, "--screenshot=" + out, url],
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=CHROME_TIMEOUT)
         except subprocess.TimeoutExpired:  # Chrome killed

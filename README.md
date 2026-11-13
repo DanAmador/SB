@@ -130,13 +130,15 @@ python3 skills/sb/scripts/sbhub.py serve
 ```
 
 and open http://127.0.0.1:8765. For a night's queue, run it as a background service instead, so it
-outlives the terminal or app session that started it (macOS): it restarts if it exits, keeps the
-Mac from idle-sleeping, and serves the read-only phone page on the WiFi (`sbhub_lan.py url` prints
-the link):
+outlives the terminal or app session that started it (launchd on macOS, systemd user units on
+Linux): it restarts if it exits, keeps the machine from idle-sleeping, and serves the read-only phone
+page on the WiFi (`sbhub_lan.py url` prints the link):
 
 ```bash
 skills/sb/scripts/sbhub_service.sh install --take-over
 ```
+
+On Linux, `--linger` also starts it at boot and keeps it running after logout.
 
 `status` and `uninstall` do the rest. A project's own `.sb/providers/` scripts run only after
 `python3 skills/sb/scripts/sbhub.py trust <project path>`

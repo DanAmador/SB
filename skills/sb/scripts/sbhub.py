@@ -5368,12 +5368,19 @@ DEFAULT_PORT = 8765
 
 
 def notify(title, text):
-    """One macOS notification; skipped off macOS or with SB_HUB_NOTIFY=0."""
-    if sys.platform != "darwin" or os.environ.get("SB_HUB_NOTIFY") == "0":
+    """One desktop notification (osascript on macOS, notify-send on Linux); skipped elsewhere or with
+    SB_HUB_NOTIFY=0."""
+    if os.environ.get("SB_HUB_NOTIFY") == "0":
         return
-    script = "display notification {} with title {}".format(json.dumps(text), json.dumps(title))
+    if sys.platform == "darwin":
+        script = "display notification {} with title {}".format(json.dumps(text), json.dumps(title))
+        cmd = ["osascript", "-e", script]
+    elif sys.platform.startswith("linux") and shutil.which("notify-send"):
+        cmd = ["notify-send", "--app-name=sb hub", "--", title, text]
+    else:
+        return
     try:
-        subprocess.run(["osascript", "-e", script], capture_output=True, timeout=5)
+        subprocess.run(cmd, capture_output=True, timeout=5)
     except (OSError, subprocess.SubprocessError):
         pass
 

@@ -172,7 +172,7 @@ byte ranges, so a phone plays the clips) and answers anything else with an empty
 
 **Phone page.** `python3 scripts/sbhub_lan.py serve` (port 8766, every interface; the `sb-hub-lan` entry in
 `.claude/launch.json`) serves the same page read-only to a phone on the WiFi: `sbhub_lan.py url` prints its
-address, `http://<the Mac's WiFi address>:8766/v/<token>/`. The token (32 characters, `$SB_HUB_HOME/lan-token`)
+address, `http://<the machine's WiFi address>:8766/v/<token>/`. The token (32 characters, `$SB_HUB_HOME/lan-token`)
 is in every path; without it every path answers an empty 404. It forwards reads under `/api/` to the hub and
 only the writes that change display state: dismiss, clear quiet sessions. Every other write answers
 403, and the page hides its controls.
@@ -199,8 +199,16 @@ it (one night's queue lost two hours that way). For a night, run it as macOS bac
 `scripts/sbhub_service.sh install` writes two LaunchAgents, `com.sb.hub` (the hub, under `caffeinate
 -i`, so the Mac does not idle-sleep while it runs; closing the lid on battery still sleeps) and
 `com.sb.hub-lan` (the phone page; `--no-lan` leaves it out), and starts them. Each restarts within
-10 s when it exits and starts again at login. PATH, `SB_HUB_HOME` and `SB_VAULT` come from the shell
+10 s when it exits and starts again at login. PATH, `SB_HUB_HOME`, `SB_VAULT` and `SB_CODE` come from the shell
 that ran install: run it again after those change.
+
+On Linux the same command writes systemd user units to `~/.config/systemd/user` instead: `com.sb.hub`
+and `com.sb.hub-lan` with the same restart, environment, take-over and log behaviour
+(`KillMode=process` keeps the workers across restarts), plus `com.sb.hub-awake`, a `systemd-inhibit`
+idle and sleep lock in place of `caffeinate` that stops with the hub. logind grants that lock only to a
+logged-in user, so before login it retries every minute. `--linger` runs `loginctl enable-linger`:
+the units then start at boot and keep running after logout; without it they start at login. Desktop
+notifications use `notify-send`.
 
 - A hub already on port 8765 makes install stop; `--take-over` kills only that hub's own process,
   and the new hub adopts its running workers (*started before the hub restarted*). Re-running
