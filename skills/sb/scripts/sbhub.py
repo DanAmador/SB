@@ -212,6 +212,10 @@ class Hub:
             if usable_project(d.get("project")) and d["project"] not in self.providers and d["project"] not in self.queued:
                 self.queued.add(d["project"])
                 self.changed.set()
+            session = d.get("session")
+            if isinstance(session, str) and session:
+                if a.setdefault("session", session) != session:
+                    d = {**d, "asked": None, "note": None}  # a helper's session (loop checker) inherited our name
             for f in AGENT_FIELDS:
                 if d.get(f) in (None, ""):
                     continue
@@ -2932,7 +2936,7 @@ def worker_report(r, e, agent, parent):
     if r.get("state") == "gone":
         return {"agent": agent, "role": "worker", "parent": parent, "state": "done", "note": "finished"}
     mine = {k: v for k, v in r.items() if k not in ("alias", "name", "title", "spawn")}
-    return {**mine, "agent": agent, "role": "worker", "parent": parent}
+    return {**mine, "session": r.get("agent"), "agent": agent, "role": "worker", "parent": parent}
 
 
 # Claude Code events whose hook output can hand the session text, and how it does so

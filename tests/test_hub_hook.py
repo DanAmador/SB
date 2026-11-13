@@ -255,3 +255,23 @@ class SessionsSayWhatTheyAreDoing(unittest.TestCase):
                        "<system-reminder>x</system-reminder>", "Another Claude session sent a message: <agent-message>"):
             r = sbhub.event_report({"hook_event_name": "UserPromptSubmit", "session_id": "s", "cwd": "/p", "prompt": prompt})
             self.assertNotIn("asked", r, prompt)
+
+
+class WorkerSessionTest(unittest.TestCase):
+    def test_helper_session_keeps_workers_first_prompt(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as tmp:
+            hub = sbhub.Hub(Path(tmp))
+
+            def prompt(sid, text):
+                e = {"session_id": sid, "cwd": "/work/proj", "hook_event_name": "UserPromptSubmit", "prompt": text}
+                hub.report(sbhub.worker_report(sbhub.event_report(e), e, "proj/042", "queue"))
+
+            prompt("worker1", "Implement ticket 042")
+            prompt("helper2", "An AI coding agent is stuck in a REPETITIVE loop")
+            a = hub.state()["agents"]["proj/042"]
+            self.assertEqual(a["asked"], "Implement ticket 042")
+            self.assertEqual(a["note"], "reading your message")
+            prompt("worker1", "Second worker prompt")
+            self.assertEqual(hub.state()["agents"]["proj/042"]["asked"], "Second worker prompt")
