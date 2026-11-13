@@ -1,0 +1,9 @@
+{
+  "body": {
+    "error": "no trail for that agent",
+    "ok": false
+  },
+  "contentType": "application/json",
+  "route": "GET /api/trail",
+  "status": 404
+}

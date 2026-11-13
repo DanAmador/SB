@@ -1,0 +1,44 @@
+{
+  "body": {
+    "actions": [
+      {
+        "end": 1794528002.0,
+        "label": "sbhub.py",
+        "ok": true,
+        "start": 1794528001.0,
+        "sub": false,
+        "tool": "Read"
+      },
+      {
+        "end": 1794528004.0,
+        "label": "run tests",
+        "ok": false,
+        "start": 1794528003.0,
+        "sub": false,
+        "tool": "Bash"
+      },
+      {
+        "end": null,
+        "label": "started",
+        "ok": null,
+        "start": 1794528005.0,
+        "sub": true,
+        "tool": "scout"
+      },
+      {
+        "end": null,
+        "label": "claim",
+        "ok": null,
+        "start": 1794528006.0,
+        "sub": false,
+        "tool": "Grep"
+      }
+    ],
+    "agent": "sess-1",
+    "ctx": null,
+    "ended": null
+  },
+  "contentType": "application/json",
+  "route": "GET /api/trail",
+  "status": 200
+}

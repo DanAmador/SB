@@ -1,0 +1,23 @@
+{
+  "body": {
+    "agent": "w-1",
+    "needs_you": false,
+    "ok": true
+  },
+  "contentType": "application/json",
+  "request": {
+    "agent": "w-1",
+    "name": "scout",
+    "note": "started",
+    "parent": "sess-1",
+    "role": "worker",
+    "state": "working",
+    "trail": {
+      "kind": "substart",
+      "label": "started",
+      "tool": "scout"
+    }
+  },
+  "route": "POST /api/report",
+  "status": 200
+}

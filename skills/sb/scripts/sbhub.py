@@ -78,6 +78,8 @@ AGENT_FIELDS = ("name", "title", "asked", "project", "role", "parent", "ticket",
 ALERT_STATES = ("needs you", "blocked")
 SILENT_LIMIT = 86400
 ORPHAN_LOCK_LIMIT = 600
+TRAIL_KEPT = 40  # actions kept per agent for the Sessions view
+TRAIL_LIMIT = 600  # an ended agent's trail goes this long after it ended
 DONE_WORKER_LIMIT = 600  # a finished worker stays on its session's row this long
 DECIDED_KEPT = 50
 SENT_KEPT = 30  # finished messages kept for the page's log
@@ -97,6 +99,9 @@ class Hub:
         self.queued = set()
         self._roots = {}  # a folder an agent reported from -> the checkout it belongs to (see project_root)
         self.changed = threading.Event()
+        # agent -> {"ring": the last TRAIL_KEPT actions, "ctx": context percent or None, "ended": when or None}.
+        # Held in memory only, and kept out of api/state
+        self._trails = {}
         self.queue_kick = threading.Event()  # set by every queue write: the supervisor ticks at once
         # aliases: session id -> the agent id that session reports as (`report --agent X`)
         self._data = {"agents": {}, "locks": {}, "questions": {}, "aliases": {}, "messages": {},
@@ -124,7 +129,9 @@ class Hub:
         """Drop an agent, its workers and every alias to or from it."""
         agents, aliases = self._data["agents"], self._data["aliases"]
         agents.pop(agent, None)
+        self._trail_ended(agent)
         for k in [k for k, v in agents.items() if v.get("parent") == agent]:
+            self._trail_ended(k)
             del agents[k]
         for k in [k for k, v in aliases.items() if agent in (k, v)]:
             del aliases[k]
@@ -163,6 +170,9 @@ class Hub:
                                               and v.get("role") == "worker" and v.get("state") == "done"):
                 self._remove(k)
                 changed = True
+        for k, t in list(self._trails.items()):
+            if t["ended"] is not None and now - t["ended"] > TRAIL_LIMIT:
+                del self._trails[k]
         for k, held in list(self._data["locks"].items()):
             if self._resolve(held["by"]) not in self._data["agents"] and now - held["at"] > ORPHAN_LOCK_LIMIT:
                 del self._data["locks"][k]
@@ -179,6 +189,58 @@ class Hub:
             changed = True
         if changed:
             self._save()
+
+    def _trail_ended(self, agent):
+        t = self._trails.get(agent)
+        if t and t["ended"] is None:
+            t["ended"] = self.now()
+
+    def _trail_add(self, agent, tr, ctx):
+        """Fold one hook event (`tr`: kind, tool, label) into the agent's ring of actions."""
+        now = self.now()
+        t = self._trails.setdefault(agent, {"ring": [], "ctx": None, "ended": None})
+        t["ended"] = None
+        ring, kind = t["ring"], tr.get("kind")
+        tool, label = str(tr.get("tool") or "")[:60], str(tr.get("label") or "")[:140]
+        if isinstance(ctx, (int, float)) and not isinstance(ctx, bool):
+            t["ctx"] = max(0, min(100, ctx))
+
+        def open_one(sub, name=None):
+            return next((a for a in reversed(ring) if a["end"] is None and a["sub"] == sub
+                         and (name is None or a["tool"] == name)), None)
+
+        def action(sub=False, end=None, ok=None):
+            ring.append({"tool": tool, "label": label, "start": now, "end": end, "ok": ok, "sub": sub})
+
+        if kind == "pre":
+            action()
+        elif kind in ("post", "fail"):
+            a = open_one(False, tool)
+            if a is None:
+                action(end=now, ok=kind == "post")
+            else:
+                a["end"], a["ok"] = now, kind == "post"
+        elif kind == "substart":
+            action(sub=True)
+        elif kind == "substop":
+            a = open_one(True)
+            if a:
+                a["end"], a["ok"] = now, True
+        elif kind in ("prompt", "stop"):
+            if kind == "stop":
+                for a in ring:
+                    if a["end"] is None:
+                        a["end"], a["ok"] = now, True
+            action(end=now, ok=True)
+        del ring[:-TRAIL_KEPT]
+
+    def trail(self, agent):
+        """The last actions of one agent, oldest first; KeyError when it has none."""
+        with self._lock:
+            self._settle()
+            t = self._trails[self._resolve(agent)]
+            return {"agent": self._resolve(agent), "ctx": t["ctx"], "ended": t["ended"],
+                    "actions": [dict(a) for a in t["ring"]]}
 
     def report(self, d):
         if isinstance(d.get("project"), str) and d["project"]:  # outside the lock: it may ask git once
@@ -198,6 +260,10 @@ class Hub:
             new = agent not in self._data["agents"]
             a = self._data["agents"].setdefault(agent, {})
             before = a.get("state")
+            tr = d.get("trail")
+            if isinstance(tr, dict):
+                boss = self._resolve(d.get("parent")) if tr.get("kind") in ("substart", "substop") else agent
+                self._trail_add(boss, tr, d.get("ctx"))
             if isinstance(d.get("spawn"), str) and d["spawn"]:
                 # what this session just sent a subagent to do: the next worker it starts is named by it
                 a["spawns"] = (a.get("spawns", []) + [d["spawn"][:60]])[-10:]
@@ -226,6 +292,8 @@ class Hub:
             after = a.get("state")
             if after is not None and (after != before or "since" not in a):
                 a["since"] = a["at"]  # when the agent entered its current state, for "working 14m"
+            if after == "done" and a.get("role") == "worker":
+                self._trail_ended(agent)
             self._save()
             return {"ok": True, "needs_you": after in ALERT_STATES and after != before, "agent": agent}
 
@@ -2571,6 +2639,12 @@ def make_handler(hub):
                 self.send(200, BOARD_JS.read_bytes(), "text/javascript; charset=utf-8")
             elif path == "/api/state":
                 self.send(200, hub.state())
+            elif path == "/api/trail":
+                from urllib.parse import parse_qs, urlsplit
+                try:
+                    self.send(200, hub.trail((parse_qs(urlsplit(self.path).query).get("agent") or [""])[0]))
+                except KeyError:
+                    self.send(404, {"ok": False, "error": "no trail for that agent"})
             elif path == "/api/tickets":
                 self.send(200, hub.tickets())
             elif path == "/api/ticket":
@@ -2883,6 +2957,13 @@ def _agy_event_report(e, event):
     return None
 
 
+def _tool_detail(e):
+    """The tool of a PreToolUse, PostToolUse or PostToolUseFailure event and what it works on."""
+    tin = e.get("tool_input") or {}
+    detail = next((tin[k] for k in ("description", "file_path", "pattern", "question", "note") if tin.get(k)), "")
+    return e["tool_name"].rsplit("__", 1)[-1], detail  # mcp__Server__navigate -> navigate
+
+
 def event_report(e, event=None):
     """The report body for one Claude Code or Antigravity hook event, or None if ignored."""
     if event or ("conversationId" in e and "hook_event_name" not in e):
@@ -2897,12 +2978,19 @@ def event_report(e, event=None):
         asked = " ".join(e["prompt"].split())[:140] if isinstance(e.get("prompt"), str) else ""
         if asked.startswith(("<", "[SYSTEM", "Another Claude session")):
             asked = ""  # a subagent's hand-back or a system notice, not the owner's words
-        return {**session, "state": "working", "note": "reading your message", **({"asked": asked} if asked else {})}
+        return {**session, "state": "working", "note": "reading your message", **({"asked": asked} if asked else {}),
+                "trail": {"kind": "prompt", "tool": "prompt", "label": asked}}
+    if name in ("PostToolUse", "PostToolUseFailure"):
+        tool, detail = _tool_detail(e)
+        trail = {"kind": "post" if name == "PostToolUse" else "fail", "tool": tool, "label": detail}
+        if e.get("agent_id"):
+            return {"agent": e["agent_id"], "role": "worker", "parent": sid, "trail": trail}
+        return {**session, "trail": trail}
     if name == "PreToolUse":
         tin = e.get("tool_input") or {}
-        detail = next((tin[k] for k in ("description", "file_path", "pattern", "question", "note") if tin.get(k)), "")
-        tool = e["tool_name"].rsplit("__", 1)[-1]  # mcp__Server__navigate -> navigate
-        r = {"state": "working", "note": ("{}: {}".format(tool, detail) if detail else tool)[:90]}
+        tool, detail = _tool_detail(e)
+        r = {"state": "working", "note": ("{}: {}".format(tool, detail) if detail else tool)[:90],
+             "trail": {"kind": "pre", "tool": tool, "label": detail}}
         if e.get("agent_id"):
             return {**r, "agent": e["agent_id"], "role": "worker", "parent": sid}
         tname = e["tool_name"]
@@ -2916,12 +3004,15 @@ def event_report(e, event=None):
                 else "waiting for your input" in e["message"])
         return {**session, "state": "your turn" if idle else "needs you", "note": e["message"]}
     if name == "Stop":
-        return {**session, "state": "your turn", "note": "finished its turn"}
+        return {**session, "state": "your turn", "note": "finished its turn",
+                "trail": {"kind": "stop", "tool": "stop", "label": ""}}
     if name == "SubagentStart":
         return {"agent": e["agent_id"], "name": e["agent_type"], "role": "worker", "parent": sid,
-                "state": "working", "note": "started"}
+                "state": "working", "note": "started",
+                "trail": {"kind": "substart", "tool": e["agent_type"], "label": "started"}}
     if name == "SubagentStop":
-        return {"agent": e["agent_id"], "role": "worker", "parent": sid, "state": "done", "note": "finished"}
+        return {"agent": e["agent_id"], "role": "worker", "parent": sid, "state": "done", "note": "finished",
+                "trail": {"kind": "substop", "tool": "", "label": "finished"}}
     if name == "SessionEnd":
         return {"agent": sid, "state": "gone"}
     return None

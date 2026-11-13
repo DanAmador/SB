@@ -173,6 +173,22 @@ class ContractFixturesTest(unittest.TestCase):
                                                           "note": "which port?"})
         self.hub.providers[project] = [sbhub.generic_provider(project)]
 
+        # the trail: a read that ended, a command that failed, a subagent's run
+        sess = {"session_id": "sess-1", "cwd": project}
+        t0 = self.clock.t  # the rest of the fixtures keep their times
+        for n, ev in enumerate((
+                {"hook_event_name": "PreToolUse", "tool_name": "Read", "tool_input": {"file_path": "sbhub.py"}},
+                {"hook_event_name": "PostToolUse", "tool_name": "Read", "tool_input": {"file_path": "sbhub.py"}},
+                {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"description": "run tests"}},
+                {"hook_event_name": "PostToolUseFailure", "tool_name": "Bash", "tool_input": {"description": "run tests"}},
+                {"hook_event_name": "SubagentStart", "agent_id": "w-1", "agent_type": "scout"},
+                {"hook_event_name": "PreToolUse", "tool_name": "Grep", "tool_input": {"pattern": "claim"}})):
+            self.clock.t += 1
+            self.record("report-trail-%d" % n, "/api/report", sbhub.event_report({**sess, **ev}))
+        self.record("trail", "/api/trail?agent=sess-1")
+        self.record("trail-unknown", "/api/trail?agent=nope", status=404)
+        self.clock.t = t0
+
         # a lock, and the answer to someone else's try
         r("lock", {"key": "port:5173", "by": "sess-1"})
         self.record("lock-held", "/api/lock", {"key": "port:5173", "by": "sess-3"}, 409)

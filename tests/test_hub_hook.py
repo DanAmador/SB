@@ -25,7 +25,8 @@ class EventReportTest(unittest.TestCase):
 
     def test_user_prompt_submit(self):
         self.assertEqual(sbhub.event_report(ev("UserPromptSubmit")),
-                         {**SESSION, "state": "working", "note": "reading your message"})
+                         {**SESSION, "state": "working", "note": "reading your message",
+                          "trail": {"kind": "prompt", "tool": "prompt", "label": ""}})
 
     def test_pre_tool_use_detail_order(self):
         r = sbhub.event_report(ev("PreToolUse", tool_name="Bash", tool_input={
@@ -91,10 +92,12 @@ class EventReportTest(unittest.TestCase):
     def test_subagent_start_and_stop(self):
         r = sbhub.event_report(ev("SubagentStart", agent_id="w", agent_type="scout"))
         self.assertEqual(r, {"agent": "w", "name": "scout", "role": "worker", "parent": "abcdef123",
-                             "state": "working", "note": "started"})
+                             "state": "working", "note": "started",
+                             "trail": {"kind": "substart", "tool": "scout", "label": "started"}})
         r = sbhub.event_report(ev("SubagentStop", agent_id="w"))
         self.assertEqual(r, {"agent": "w", "role": "worker", "parent": "abcdef123",
-                             "state": "done", "note": "finished"})
+                             "state": "done", "note": "finished",
+                             "trail": {"kind": "substop", "tool": "", "label": "finished"}})
 
     def test_every_event_of_the_session_says_who_it_is(self):
         for name, kw in (("PreToolUse", {"tool_name": "Grep", "tool_input": {}}),

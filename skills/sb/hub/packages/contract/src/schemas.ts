@@ -208,6 +208,31 @@ export type ProviderPanel = z.infer<typeof ProviderPanel>;
 
 // ---- GET answers ----
 
+/** One action in a session's trail: a tool call, a subagent's run, a prompt or the end of a turn. */
+export const TrailAction = z.strictObject({
+  tool: z.string(),
+  label: z.string(),
+  start: Seconds,
+  /** null while it runs. */
+  end: Seconds.nullable(),
+  /** null while it runs; false when the tool failed. */
+  ok: z.boolean().nullable(),
+  /** A subagent's run rather than a tool call. */
+  sub: z.boolean(),
+});
+export type TrailAction = z.infer<typeof TrailAction>;
+
+/** The last 40 actions of one agent, oldest first. Served by GET /api/trail, never part of /api/state. */
+export const Trail = z.strictObject({
+  agent: z.string(),
+  /** Context used, in percent, when a report said so. */
+  ctx: z.number().nullable(),
+  /** When the agent ended; its trail goes ten minutes later. */
+  ended: Seconds.nullable(),
+  actions: z.array(TrailAction).max(40),
+});
+export type Trail = z.infer<typeof Trail>;
+
 export const State = z.strictObject({
   agents: z.record(z.string(), AgentRow),
   locks: z.record(z.string(), Lock),
@@ -306,6 +331,16 @@ export const ReportBody = z.strictObject({
   note: z.string().optional(),
   done: Count.optional(),
   total: Count.optional(),
+  /** One hook event for the trail (GET /api/trail). */
+  trail: z
+    .strictObject({
+      kind: z.enum(["pre", "post", "fail", "substart", "substop", "prompt", "stop"]),
+      tool: z.string(),
+      label: z.string(),
+    })
+    .optional(),
+  /** Context used, in percent. */
+  ctx: z.number().optional(),
 });
 export const LockBody = z.strictObject({ key: z.string(), by: z.string() });
 export const AskBody = z.strictObject({

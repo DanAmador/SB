@@ -1,0 +1,23 @@
+{
+  "body": {
+    "agent": "sess-1",
+    "needs_you": false,
+    "ok": true
+  },
+  "contentType": "application/json",
+  "request": {
+    "agent": "sess-1",
+    "name": "repo sess-1",
+    "note": "Read: sbhub.py",
+    "project": "/fixture/repo",
+    "role": "orchestrator",
+    "state": "working",
+    "trail": {
+      "kind": "pre",
+      "label": "sbhub.py",
+      "tool": "Read"
+    }
+  },
+  "route": "POST /api/report",
+  "status": 200
+}

@@ -17,6 +17,7 @@ const post = <B extends z.ZodType, A extends Answers>(body: B, answers: A) => ({
 
 export const ROUTES = {
   "GET /api/state": json({ 200: s.State }),
+  "GET /api/trail": json({ 200: s.Trail, 404: s.ApiError }),
   "GET /api/tickets": json({ 200: s.Tickets }),
   "GET /api/ticket": json({ 200: s.TicketDetail, 404: s.ApiError }),
   "GET /api/item/report": text({ 200: s.ItemText, 404: s.ApiError }),
