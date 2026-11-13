@@ -3,7 +3,7 @@
 pnpm workspace for the TypeScript hub. Packages:
 
 - `packages/contract`: zod schemas and types for every route sbhub.py serves (`ROUTES`, `answerSchema`, `routeOf`); `fixtures/` holds the hub's real answers, rewritten by `python3 -m unittest tests.test_contract_fixtures` (from `tests/`) and parsed by its Vitest test
-- `packages/server`: the TypeScript server that will front the Python hub
+- `packages/server`: the hub's server (Hono on Node 24). It listens on 127.0.0.1:8765 (`SB_HUB_PORT` or `--port`), serves the built board at `/` and the Python hub's own board at `/classic`, and starts `sbhub.py serve` as its child on a port the OS picks. Every `/api` route is forwarded to that child and its answer is checked against the contract: a mismatch is logged on stderr and the caller gets a 502 instead. SIGTERM stops both; a child left by a server killed with SIGKILL is killed by the next one (its workers live on, as with `--take-over`)
 - `packages/web`: Vite + React 19 board (React compiler on every file, Tailwind v4, shadcn)
 
 pnpm is pinned to 10.20.0 through `packageManager`. Run from the repo root or from this folder:
@@ -14,7 +14,13 @@ pnpm --dir skills/sb/hub typecheck   # tsc, strict + noUncheckedIndexedAccess + 
 pnpm --dir skills/sb/hub lint        # ESLint flat config: strictTypeChecked, stylisticTypeChecked, react-hooks compiler rules
 pnpm --dir skills/sb/hub test        # Vitest in every package
 pnpm --dir skills/sb/hub build       # tsc for contract and server, vite build for web
+pnpm --dir skills/sb/hub start       # the hub: node runs packages/server/src/index.ts as it is (type stripping)
 ```
+
+As a service: `skills/sb/scripts/sbhub_service.sh install --ts` (installs the packages, builds, writes the LaunchAgent);
+`sbhub_service.sh plist --ts` prints that LaunchAgent without installing it. Every Python suite that starts a hub
+runs against this server with `SB_HUB_SERVER=ts`, for example (from `tests/`)
+`SB_HUB_SERVER=ts python3 -m unittest test_hub_cli test_hub_hook test_hub_mcp test_hub_lan test_hub_queue`.
 
 If `pnpm` fails with a corepack "Cannot find module" error, run `corepack prepare pnpm@10.20.0 --activate`.
 Board dev server: `pnpm --dir skills/sb/hub/packages/web dev`.

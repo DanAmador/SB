@@ -2,10 +2,15 @@
 # Run the sb hub (and its read-only phone page) as macOS background services, so the queue keeps
 # going when the terminal or app session that started it closes.
 #
-#   sbhub_service.sh install [--no-lan] [--take-over]
+#   sbhub_service.sh install [--ts] [--no-lan] [--take-over]
 #   sbhub_service.sh uninstall
 #   sbhub_service.sh status
 #   sbhub_service.sh restart
+#   sbhub_service.sh plist [--ts]     print the hub's LaunchAgent without installing it
+#
+# --ts runs the TypeScript server (skills/sb/hub/packages/server) on the port instead of sbhub.py serve;
+# it starts sbhub.py as its child on a port of its own. install --ts first installs the workspace's
+# packages and builds the board (pnpm), so node and pnpm must be on PATH.
 #
 # install writes two LaunchAgents (com.sb.hub, com.sb.hub-lan) to ~/Library/LaunchAgents and starts
 # them. Each restarts within 10 s if it exits and starts again at login. The hub runs under
@@ -35,7 +40,22 @@ LAN_PORT=8766
 
 esc() { sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' <<<"$1"; }
 
-write_plist() { # label, program args...
+HUB="$REPO/skills/sb/hub"
+
+need_node() { # --ts flag
+  [ "$1" = 1 ] || return 0
+  command -v node >/dev/null || { echo "sbhub_service: --ts needs node (24 or later) on PATH"; exit 2; }
+}
+
+hub_args() { # --ts flag: the hub LaunchAgent's program arguments, one per line
+  if [ "$1" = 1 ]; then
+    printf '%s\n' /usr/bin/caffeinate -i "$(command -v node)" "$HUB/packages/server/src/index.ts" --port $HUB_PORT
+  else
+    printf '%s\n' /usr/bin/caffeinate -i "$PY" "$SCRIPTS/sbhub.py" serve --port $HUB_PORT
+  fi
+}
+
+plist() { # label, program args...: the plist on stdout
   local label=$1; shift
   local env="    <key>PATH</key><string>$(esc "$PATH")</string>
     <key>HOME</key><string>$(esc "$HOME")</string>"
@@ -66,8 +86,12 @@ $env
   <key>StandardErrorPath</key><string>$(esc "$HUB_HOME/$label.log")</string>
 </dict></plist>
 EOF
-  } >"$LA/$label.plist"
-  plutil -lint -s "$LA/$label.plist"
+  }
+}
+
+write_plist() { # label, program args...
+  plist "$@" >"$LA/$1.plist"
+  plutil -lint -s "$LA/$1.plist"
 }
 
 loaded() { launchctl print "$DOMAIN/$1" >/dev/null 2>&1; }
@@ -100,17 +124,25 @@ free_port() { # port, --take-over flag
 case "${1:-}" in
   install)
     shift
-    lan=1 take=0
+    lan=1 take=0 ts=0
     for a in "$@"; do
       case "$a" in
+        --ts) ts=1 ;;
         --no-lan) lan=0 ;;
         --take-over) take=1 ;;
         *) echo "sbhub_service: unknown option $a"; exit 2 ;;
       esac
     done
+    need_node $ts
     mkdir -p "$LA" "$HUB_HOME"
+    args=()
+    while IFS= read -r a; do args+=("$a"); done < <(hub_args $ts)
+    if [ $ts = 1 ]; then
+      pnpm --dir "$HUB" install --frozen-lockfile
+      pnpm --dir "$HUB" build
+    fi
     loaded com.sb.hub || free_port $HUB_PORT $take
-    write_plist com.sb.hub /usr/bin/caffeinate -i "$PY" "$SCRIPTS/sbhub.py" serve --port $HUB_PORT
+    write_plist com.sb.hub "${args[@]}"
     start com.sb.hub $HUB_PORT
     if [ $lan = 1 ]; then
       loaded com.sb.hub-lan || free_port $LAN_PORT $take
@@ -143,6 +175,14 @@ case "${1:-}" in
     done
     echo "sbhub_service: the hub did not come back within 30 s; see $HUB_HOME/com.sb.hub.log"
     exit 1
+    ;;
+  plist)
+    ts=0
+    [ "${2:-}" = --ts ] && ts=1
+    need_node $ts
+    args=()
+    while IFS= read -r a; do args+=("$a"); done < <(hub_args $ts)
+    plist com.sb.hub "${args[@]}"
     ;;
   status)
     for l in com.sb.hub com.sb.hub-lan; do

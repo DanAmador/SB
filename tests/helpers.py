@@ -1,6 +1,7 @@
 """A throwaway vault per test, and sbmap run against it as the agent runs it: a subprocess."""
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -100,6 +101,27 @@ Somewhere.
 
 
 SCRIPT = str(Path(__file__).resolve().parents[1] / "skills" / "sb" / "scripts" / "sbhub.py")
+# SB_HUB_SERVER=ts: every HubCase talks to the TypeScript server, which runs sbhub.py as its child
+TS_SERVER = str(Path(__file__).resolve().parents[1] / "skills" / "sb" / "hub" / "packages" / "server" / "src" / "index.ts")
+
+
+NODE = shutil.which("node") or "node"  # found once: some tests run the CLI with a bare PATH
+
+
+def ts_mode():
+    return os.environ.get("SB_HUB_SERVER") == "ts"
+
+
+def serve_command(port, ts=None):
+    """How a test starts the hub: sbhub.py serve, or the TypeScript server with SB_HUB_SERVER=ts."""
+    if ts_mode() if ts is None else ts:
+        return [NODE, TS_SERVER, "--port", str(port)]
+    return [sys.executable, SCRIPT, "serve", "--port", str(port)]
+
+
+# The old board: / on sbhub.py, /classic on the TypeScript server (its / is the new board)
+def page_path():
+    return "/classic" if ts_mode() else "/"
 
 
 def free_port():
@@ -119,18 +141,21 @@ def wait_for(fn, timeout=10):
 
 
 class HubCase(unittest.TestCase):
-    """A running sbhub on a free port with a temp home; subclass it for tests."""
+    """A running sbhub on a free port with a temp home; subclass it for tests.
+    ts: True runs the TypeScript server; None follows SB_HUB_SERVER."""
+    ts = None
+
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         # SB_HUB_QUEUE=0: the board only; the queue runner never starts a worker or scans ~/.claude* in a test
         self.env = {**os.environ, "SB_HUB_HOME": self._tmp.name, "SB_HUB_NOTIFY": "0", "SB_HUB_QUEUE": "0"}
-        self.env.pop("SB_HUB_PORT", None)
+        for k in ("SB_HUB_PORT", "SB_HUB_AGENT", "SB_HUB_PARENT"):  # a test run by a queued worker is not that worker
+            self.env.pop(k, None)
         self.port = free_port()
         self.procs = []
         self.addCleanup(self._tmp.cleanup)
         self.addCleanup(self._kill_all)
-        self.server = subprocess.Popen([sys.executable, SCRIPT, "serve", "--port", str(self.port)],
-                                       stdout=subprocess.PIPE, text=True, env=self.env)
+        self.server = subprocess.Popen(serve_command(self.port, self.ts), stdout=subprocess.PIPE, text=True, env=self.env)
         self.procs.append(self.server)
         self.assertEqual(self.server.stdout.readline().strip(), f"sb hub on http://127.0.0.1:{self.port}")
 
@@ -140,6 +165,10 @@ class HubCase(unittest.TestCase):
             p.wait()
             if p.stdout:
                 p.stdout.close()
+        try:  # the TypeScript server's Python child outlives a SIGKILL of its parent
+            os.kill(int((Path(self._tmp.name) / "hub-python.pid").read_text()), 9)
+        except (OSError, ValueError):
+            pass
 
     def hub(self, *args, port=None, stdin=None):
         return subprocess.run([sys.executable, SCRIPT, *args, "--port", str(port or self.port)],

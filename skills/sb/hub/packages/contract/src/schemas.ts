@@ -7,6 +7,8 @@ import { z } from "zod";
 
 /** Epoch seconds, as Python's time.time() gives them. */
 export const Seconds = z.number();
+/** A progress count: a number from a hook or the page, the text as typed from `sbhub.py report --done N`. */
+export const Count = z.union([z.number(), z.string()]);
 
 // ---- agents, locks, questions, messages ----
 
@@ -21,8 +23,8 @@ export const AgentRow = z.strictObject({
   ticket: z.string().optional(),
   state: z.string().optional(),
   note: z.string().optional(),
-  done: z.number().optional(),
-  total: z.number().optional(),
+  done: Count.optional(),
+  total: Count.optional(),
   at: Seconds,
   since: Seconds.optional(),
   spawns: z.array(z.string()).optional(),
@@ -293,8 +295,8 @@ export const ReportBody = z.strictObject({
   /** "gone" removes the agent. */
   state: z.string().optional(),
   note: z.string().optional(),
-  done: z.number().optional(),
-  total: z.number().optional(),
+  done: Count.optional(),
+  total: Count.optional(),
 });
 export const LockBody = z.strictObject({ key: z.string(), by: z.string() });
 export const AskBody = z.strictObject({

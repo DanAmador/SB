@@ -11,7 +11,7 @@ import unittest
 import urllib.error
 import urllib.request
 
-from helpers import HubCase, free_port, wait_for, SCRIPT
+from helpers import HubCase, free_port, wait_for, SCRIPT, page_path
 
 sys.path.insert(0, os.path.dirname(SCRIPT))
 import sbhub  # noqa: E402
@@ -58,13 +58,13 @@ class HubCliTest(HubCase):
         self.assertEqual(self.post("/api/answer", {"qid": "nope", "answer": "x"})[0], 404)
 
     def test_the_page_placeholder_is_served(self):
-        with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/", timeout=5) as r:
+        with urllib.request.urlopen(f"http://127.0.0.1:{self.port}{page_path()}", timeout=5) as r:
             self.assertEqual(r.status, 200)
 
     def page(self):
         """The page as the browser gets it: the html and the renderer it loads from /board.js."""
         get = lambda path: urllib.request.urlopen(f"http://127.0.0.1:{self.port}{path}", timeout=5).read().decode()
-        return get("/") + "\n" + get("/board.js")
+        return get(page_path()) + "\n" + get("/board.js")
 
     def test_the_page_is_served_and_names_its_endpoints(self):
         html = self.page()
@@ -200,7 +200,7 @@ class HubCliTest(HubCase):
         self.assertNotIn("a", self.get("/api/state")["agents"])
 
     def test_every_response_refuses_framing_and_sniffing(self):
-        for path in ("/", "/api/state", "/nope"):
+        for path in (page_path(), "/", "/api/state", "/nope"):
             headers = self.raw_get({}, path)[1]
             self.assertEqual((headers["X-Frame-Options"], headers["X-Content-Type-Options"]), ("DENY", "nosniff"))
 

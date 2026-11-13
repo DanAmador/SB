@@ -4,12 +4,15 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "start": "node src/index.ts",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
     "build": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
-    "@sb-hub/contract": "workspace:*"
+    "@hono/node-server": "^2.1.8",
+    "@sb-hub/contract": "workspace:*",
+    "hono": "^4.13.18"
   },
   "devDependencies": {
     "vitest": "^5.1.0"
