@@ -15,7 +15,7 @@ body{margin:0 auto;background:var(--bg);color:var(--ink);padding:0 16px 24px;max
 <script>
 // the hub page: polls /api/state (2 s) and /api/tickets (15 s); posts JSON to /api/answer, /api/send, /api/unsend,
 // the queue's writes (/api/queue/set, /api/queue/move, /api/queue/pause, /api/queue/agent, /api/queue/item_agent,
-// /api/queue/options, /api/queue/job) and /api/agents/scan; sbhub_board.js draws
+// /api/queue/options, /api/queue/job, /api/queue/remove_job) and /api/agents/scan; sbhub_board.js draws
 const clock=ms=>new Date(ms).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
 let S=null,T=null,okAt=0,downSince=0,last='',lastAt=0,tBusy=false;
 async function post(path,body){

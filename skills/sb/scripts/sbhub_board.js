@@ -3,7 +3,9 @@
    A host calls SBBoard(root, io) once, then board.render(state, opts) on every new state.
      io.answer(qid, option) / io.send(to, text) / io.unsend(id) -> Promise of null, or why it failed
      io.queue(path, body)  optional: post a queue write (/api/queue/..., /api/agents/scan) -> Promise of
-                           the hub's answer, {ok, stale, queue, error, ...}; without it the queue is read-only
+                           the hub's answer, {ok, stale, queue, error, ...}; without it the queue is read-only.
+                           Only set, move, options and remove_job carry the queue's version: the hub checks it
+                           there; pause, agent, item_agent, job and scan are not about the list's order
      io.changed(tickets)   optional: refresh now (tickets true: the open tickets too);  io.page  true on the hub page
      opts: {live: [ok, text], down: banner text or '', skipQ: a question the host draws itself,
             canSend: false when this host cannot send, tickets: /api/tickets rows or null while unread}
@@ -157,6 +159,7 @@ const STYLE = `
 .sb-job textarea{resize:vertical;min-height:72px;line-height:1.4}
 .sb-job .go{grid-column:1/-1;display:flex;flex-wrap:wrap;align-items:center;gap:8px}
 @media(max-width:599px){
+  .sb-stats{flex-basis:100%;order:3}.sb .sb-fold{margin-left:auto}
   .sb-cmp{grid-template-columns:minmax(0,1fr) auto}.sb-cmp select{grid-column:1/-1}
   .r{grid-template-columns:18px minmax(0,1fr) auto 28px;row-gap:1px;align-items:start;padding:5px 6px 5px 10px}
   .r .ic{grid-row:1/span 3}
@@ -428,7 +431,8 @@ window.SBBoard = function (root, io) {
       : isT ? `<input type="checkbox" checked data-tick="${esc(i.key)}" data-key="${esc('tick:' + i.key)}" aria-label="${esc('Run tonight: ' + title)}" title="Untick to leave it out tonight"${off ? ' disabled' : ''}>`
       : icon('terminal-2', 'a one-off job');
     const pick = !running && canQ && installed().length ? `<span class="qa"><select data-ia="${esc(i.key)}" data-key="${esc('ia:' + i.key)}" aria-label="${esc('Agent for ' + title)}"${off ? ' disabled' : ''}>${agentOpts(i.agent, `<option value="">night's agent${q.agent ? ' (' + esc(q.agent) + ')' : ''}</option>`)}</select></span>` : '<span class="qa"></span>';
-    const mv = !running && isT && canQ ? `<span class="mv"><button type="button" data-up="${esc(i.key)}" data-key="${esc('up:' + i.key)}" aria-label="${esc('Move up: ' + title)}" title="Move up"${off || at <= 0 ? ' disabled' : ''}>${svg('chevron-up')}</button><button type="button" data-dn="${esc(i.key)}" data-key="${esc('dn:' + i.key)}" aria-label="${esc('Move down: ' + title)}" title="Move down"${off || at < 0 || at >= qt.length - 1 ? ' disabled' : ''}>${svg('chevron-down')}</button></span>` : '<span class="mv"></span>';
+    const rm = !running && !isT && canQ ? `<span class="mv"><button type="button" data-rmjob="${esc(i.key)}" data-key="${esc('rm:' + i.key)}" aria-label="${esc('Remove the job: ' + title)}" title="Remove this job"${off ? ' disabled' : ''}>${svg('x')}</button></span>` : '';
+    const mv = rm || (!running && isT && canQ ? `<span class="mv"><button type="button" data-up="${esc(i.key)}" data-key="${esc('up:' + i.key)}" aria-label="${esc('Move up: ' + title)}" title="Move up"${off || at <= 0 ? ' disabled' : ''}>${svg('chevron-up')}</button><button type="button" data-dn="${esc(i.key)}" data-key="${esc('dn:' + i.key)}" aria-label="${esc('Move down: ' + title)}" title="Move down"${off || at < 0 || at >= qt.length - 1 ? ' disabled' : ''}>${svg('chevron-down')}</button></span>` : '<span class="mv"></span>');
     return `<li class="qi${running ? ' running' : ''}" data-qk="${esc(i.key)}"${!running && isT && canQ && !off ? ' draggable="true"' : ''}>`
       + `<span class="qn">${n}</span>${lead}<span class="t" dir="auto">${esc(title)}</span>${pick}${mv}<span class="qm">${meta.join('')}</span></li>`;
   }
@@ -460,7 +464,9 @@ window.SBBoard = function (root, io) {
     return h;
   }
   // can a ticket be ticked: ready, or blocked by tickets that are queued or can be ticked too
+  const doneKeys = () => new Set(items().filter(i => i.kind == 'ticket' && i.state == 'done').map(i => i.key));
   function addable(t, seen) {
+    if (doneKeys().has(tkey(t))) return false;
     if (t.state == 'ready') return true;
     if (t.state != 'blocked') return false;
     seen = seen || new Set([tkey(t)]);
@@ -485,13 +491,13 @@ window.SBBoard = function (root, io) {
     for (const t of rest) { const p = projOf(t.map); if (!groups.has(p)) groups.set(p, []); groups.get(p).push(t); }
     if (!groups.size) return h + '<div class="box"><div class="empty">No other open tickets: everything open is queued.</div></div></section>';
     for (const [p, list] of [...groups].sort((x, y) => x[0].localeCompare(y[0]))) {
-      const k = 'p:av:' + p, ready = list.filter(t => t.state == 'ready' && !ended.has(tkey(t))).length;
+      const k = 'p:av:' + p, ready = list.filter(t => t.state == 'ready').length;
       h += `<details class="box pj" data-k="${esc(k)}"${collapsed.has(k) ? '' : ' open'}><summary data-key="${esc('d:' + k)}"><span class="pn" dir="auto">${esc(p)}</span><span class="cnt"><span>${plural(list.length, 'open ticket')}</span>${ready ? `<span><b>${ready}</b>&nbsp;ready</span>` : ''}</span></summary>`;
       for (const t of list) {
-        const key = tkey(t), e = ended.get(key), can = !e && addable(t), st = String(t.state || '');
+        const key = tkey(t), e = ended.get(key), can = addable(t), st = String(t.state || '');
         const cls = e ? 'ended' : st == 'ready' ? 'ready' : st == 'blocked' ? 'blocked' : st == 'waits for you' ? 'waits' : '';
         const word = e ? `${e.state} ${ago(S.now, e.ended)}` : st;
-        const why = e ? (e.state == 'done' ? (e.commit ? 'commit ' + String(e.commit).slice(0, 9) : '') : firstLine(e.note) + ' · it stays out of tonight\'s queue')
+        const why = e ? (e.state == 'done' ? (e.commit ? 'commit ' + String(e.commit).slice(0, 9) : '') : (firstLine(e.note) || 'no reason recorded') + (can ? ' · tick it to run it again' : ''))
           : st == 'blocked' && can ? t.reason + ' · ticking it also ticks what it waits on'
           : st == 'blocked' ? t.reason + ', which cannot run tonight' : t.reason && t.reason != st ? t.reason : '';
         h += `<div class="av${can ? '' : ' off'}">`
@@ -594,11 +600,16 @@ window.SBBoard = function (root, io) {
     if (io.changed) io.changed();
   }
   // one queue write: it carries the version; a stale answer redraws from the hub's queue
+  const CHECKED = new Set(['/api/queue/set', '/api/queue/move', '/api/queue/options', '/api/queue/remove_job']);
   async function qwrite(path, data, done) {
     const q = Q();
-    if (!canQ || qbusy || O.down || !q) return null;
+    if (!canQ || qbusy || O.down || !q) {  // not sent: undo what the click already changed (a disabled box)
+      for (const k of Object.keys(lastH)) delete lastH[k];
+      if (S) render(S, O, true);
+      return null;
+    }
     qbusy = true; qnote = '<span class="mute">Saving…</span>'; render(S, O, true);
-    const out = await Promise.resolve(io.queue(path, {...data, version: q.version})).catch(e => ({ok: false, error: String(e)})) || {};
+    const out = await Promise.resolve(io.queue(path, CHECKED.has(path) ? {...data, version: q.version} : data)).catch(e => ({ok: false, error: String(e)})) || {};
     qbusy = false;
     if (out.queue && typeof out.queue == 'object' && S) S.queue = out.queue;
     if (out.installed && typeof out.installed == 'object' && S) S.installed = out.installed;
@@ -606,7 +617,8 @@ window.SBBoard = function (root, io) {
       : out.ok === false || out.error ? `<span class="err" role="alert">Not done: ${esc(out.error || 'the hub refused it')}</span>`
       : done ? `<span class="okc">${svg('check')} ${esc(done)}</span>` : null;
     render(S, O, true);
-    if (qnote && !out.stale && out.ok !== false) setTimeout(() => { qnote = null; if (S) render(S, O); }, 5000);
+    const shown = qnote;
+    if (qnote && !out.stale && out.ok !== false) setTimeout(() => { if (qnote === shown) { qnote = null; if (S) render(S, O); } }, 5000);
     if (io.changed) io.changed(true);
     return out;
   }
@@ -650,6 +662,7 @@ window.SBBoard = function (root, io) {
     }
     if (b && b.dataset.to) { target(b.dataset.to); msg.focus(); return; }
     if (b && b.dataset.qact == 'pause') { const q = Q(); if (q) qwrite('/api/queue/pause', {paused: !q.paused}, q.paused ? 'Resumed: the queue runs.' : 'Paused: nothing new starts.'); return; }
+    if (b && b.dataset.rmjob) { qwrite('/api/queue/remove_job', {key: b.dataset.rmjob}, 'Job removed. You can queue it again, corrected.'); return; }
     if (b && b.dataset.qact == 'scan') { qwrite('/api/agents/scan', {}, 'Agents scanned.'); return; }
     if (b && (b.dataset.up || b.dataset.dn)) {
       const k = b.dataset.up || b.dataset.dn, qt = queuedTickets(), at = qt.indexOf(k);

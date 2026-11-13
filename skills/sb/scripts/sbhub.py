@@ -397,16 +397,30 @@ class Hub:
             self._save()
 
     def _apply_selection(self, q, keys, rows):
-        """Queued tickets become `keys`, in run order; every other item stays where it was, in front."""
+        """Queued tickets become `keys`, in run order; every other item stays where it was, in front. A
+        failed or skipped ticket that is ticked again is queued afresh (a stop time or a passing error is
+        no reason to keep it out); a running or done one is never queued twice."""
+        want = set(keys)
         have = {i["key"]: i for i in q["items"] if i["kind"] == "ticket"}
-        keep = [i for i in q["items"] if not (i["kind"] == "ticket" and i["state"] == "queued")]
+        again = lambda i: i["kind"] == "ticket" and (
+            i["state"] == "queued" or i["state"] in ("failed", "skipped") and i["key"] in want)
+        keep = [i for i in q["items"] if not again(i)]
         taken = {i["key"] for i in keep if i["kind"] == "ticket"}
         keys = [k for k in dict.fromkeys(keys) if k not in taken]
         running = taken & self._live_keys()
         ordered = [k for k in sbqueue.order(rows, keys + sorted(running)) if k in keys]
         known = {sbqueue.key(t) for t in rows}
         ordered += [k for k in keys if k not in known and k in have]  # no longer listed: kept, not dropped
-        q["items"] = keep + [have.get(k) or self._item(k) for k in ordered]
+        q["items"] = keep + [self._afresh(have.get(k)) or self._item(k) for k in ordered]
+
+    def _afresh(self, item):
+        """A failed or skipped item queued again: its last try's outcome is cleared; the owner's agent stays."""
+        if item is None or item["state"] == "queued":
+            return item
+        for f in ("retry", "digested", "runner", "pid", "pid_start", "result", "base_sha"):
+            item.pop(f, None)
+        item.update(state="queued", note="", ended=None, tries=0, started=None, commit=None)
+        return item
 
     def _queue_write(self, version, change, needs_tickets=False):
         """One accepted queue write: stale versions are refused, the rest bump the version once."""
@@ -443,6 +457,18 @@ class Hub:
             others = [i for i in q["items"] if i not in queued]
             q["items"] = others + [by[k] for k in moved]
         return self._queue_write(version, change, needs_tickets=True)
+
+    def queue_remove_job(self, key, version):
+        """Take a queued job out of the queue; it no longer counts as a duplicate. Running and finished
+        items are never removed, and tickets are unticked with queue_set."""
+        def change(q, rows):
+            item = next((i for i in q["items"] if i["key"] == key), None)
+            if item is None or item["kind"] != "job":
+                raise ValueError("not a job in the queue: {}".format(key))
+            if item["state"] != "queued":
+                raise ValueError("only a queued job can be removed; this one is {}".format(item["state"]))
+            q["items"].remove(item)
+        return self._queue_write(version, change)
 
     def queue_pause(self, paused):
         def change(q, rows):
@@ -1426,6 +1452,8 @@ def make_handler(hub):
                     out = hub.queue_options(d.get("stop_at"), d.get("final_review", False), d["version"])
                 elif path == "/api/queue/job":
                     out = hub.queue_job(d["project"], d["prompt"], d.get("agent"), d.get("model"), d.get("name"))
+                elif path == "/api/queue/remove_job":
+                    out = hub.queue_remove_job(d["key"], d["version"])
                 elif path == "/api/queue/item_agent":
                     out = hub.queue_item_agent(d["key"], d.get("name"))
                 elif path == "/api/agents/scan":

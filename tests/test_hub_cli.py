@@ -70,7 +70,7 @@ class HubCliTest(HubCase):
         html = self.page()
         for needle in ("<title>sb hub</title>", "/api/state", "/api/answer", "/api/send", "/api/unsend",
                        "/api/tickets", "/api/queue/set", "/api/queue/move", "/api/queue/pause", "/api/queue/agent",
-                       "/api/queue/item_agent", "/api/queue/options", "/api/queue/job", "/api/agents/scan",
+                       "/api/queue/item_agent", "/api/queue/options", "/api/queue/job", "/api/queue/remove_job", "/api/agents/scan",
                        "prefers-color-scheme", "application/json"):
             self.assertIn(needle, html)
 
@@ -86,6 +86,10 @@ class HubCliTest(HubCase):
         self.assertEqual(emoji.findall(html), [])
         self.assertIn("Tabler Icons", html)
         self.assertIn('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"', html)
+
+    def test_the_counts_strip_wraps_below_the_title_on_a_phone(self):
+        phone = self.page().rsplit("@media(max-width:599px){", 1)[1]  # the renderer's phone block
+        self.assertIn(".sb-stats{flex-basis:100%", phone)
 
     def test_the_page_is_a_command_office(self):
         html = self.page()

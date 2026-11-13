@@ -80,6 +80,47 @@ class QueueTest(unittest.TestCase):
         self.assertEqual([(i["key"], i["state"]) for i in self.h.state()["queue"]["items"]],
                          [("repo/one#4", "done"), ("repo/one#1", "queued")])
 
+    def test_a_failed_or_skipped_ticket_ticked_again_is_queued_afresh(self):
+        v = self.h.state()["queue"]["version"]
+        with self.h._lock:
+            a, b = self.h._data["queue"]["items"]
+            a.update(state="failed", note="the worker exited 1", ended=5.0, tries=1, started=4.0, commit="abc",
+                     retry="it failed", agent="main", digested=True)
+            b.update(state="skipped", note="past the stop time", ended=6.0)
+        self.h.queue_set([], v)  # unticked: they stay as they ended
+        self.assertEqual([i["state"] for i in self.h.state()["queue"]["items"]], ["failed", "skipped"])
+        self.h.queue_set(["repo/one#4", "repo/one#1"], v + 1)
+        items = {i["key"]: i for i in self.h.state()["queue"]["items"]}
+        self.assertEqual(list(items), ["repo/one#4", "repo/one#1"])
+        for i in items.values():
+            self.assertEqual((i["state"], i["note"], i["ended"], i["tries"], i["started"], i["commit"]),
+                             ("queued", "", None, 0, None, None))
+            self.assertNotIn("retry", i)
+            self.assertNotIn("digested", i)
+        self.assertEqual(items["repo/one#4"]["agent"], "main")  # the owner's agent choice stays
+
+    def test_a_queued_job_can_be_removed_and_queued_again(self):
+        prompt = "Audit it"
+        with self.h._lock:
+            self.h._data["installed"]["main"] = {"kind": "claude", "dir": "/x", "model": None, "limited_until": None}
+        with mock.patch("sbhub.project_repo", return_value="/r"):
+            key = self.h.queue_job("repo", prompt, "main")["key"]
+            v = self.h.state()["queue"]["version"]
+            self.assertTrue(self.h.queue_remove_job(key, v - 1)["stale"])
+            out = self.h.queue_remove_job(key, v)
+            self.assertEqual((out["ok"], [i["key"] for i in out["queue"]["items"]]), (True, ["repo/one#4", "repo/one#1"]))
+            again = self.h.queue_job("repo", prompt, "main")["key"]  # no longer a duplicate
+            v = self.h.state()["queue"]["version"]
+            with self.assertRaises(ValueError):
+                self.h.queue_remove_job("repo/one#4", v)  # a ticket is unticked, not removed
+            with self.h._lock:
+                next(i for i in self.h._data["queue"]["items"] if i["key"] == again)["state"] = "running"
+            with self.assertRaises(ValueError):
+                self.h.queue_remove_job(again, v)  # running and finished items are never removed
+            with self.assertRaises(ValueError):
+                self.h.queue_remove_job("job:nope:1", v)
+        self.assertEqual(self.h.state()["queue"]["version"], v)
+
     def test_move_clamps_and_never_moves_a_running_item(self):
         v = self.h.state()["queue"]["version"]
         self.h.queue_set(["repo/one#1", "repo/one#2", "repo/one#4"], v)
@@ -308,6 +349,9 @@ class QueueHttpTest(HubCase):
     def test_unknown_agent_is_400(self):
         self.assertEqual(self.post("/api/queue/agent", {"name": "nope"})[0], 400)
         self.assertEqual(self.post("/api/queue/item_agent", {"key": "repo/one#1", "name": "nope"})[0], 400)
+        self.assertEqual(self.post("/api/queue/remove_job", {"key": "repo/one#1", "version": 0})[0], 400)
+        v = self.get("/api/state")["queue"]["version"]
+        self.assertEqual(self.post("/api/queue/remove_job", {"key": "job:x:1", "version": v - 1})[0], 409)
 
     def test_scan_and_agents_cli(self):
         r = self.hub("agents", "--scan")
