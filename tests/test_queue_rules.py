@@ -155,6 +155,21 @@ class VerdictTest(unittest.TestCase):
         self.assertIn("other/b.py", why)
         self.assertNotIn("src/a.py", why)
 
+    def test_an_untrailered_commit_outside_paths_before_a_good_one_fails(self):
+        self.commit(["other/sneaky.py"], trailer=None)
+        sha = self.commit(["src/a.py"])
+        ok, why, got = verdict(self.t(checks=["true"]), self.repo, self.base)
+        self.assertEqual((ok, got), (False, sha))
+        self.assertIn("other/sneaky.py", why)
+        self.assertNotIn("src/a.py", why)
+
+    def test_a_bad_base_says_so(self):
+        self.commit(["src/a.py"])
+        ok, why, sha = verdict(self.t(), self.repo, "0123456789abcdef0123456789abcdef01234567")
+        self.assertEqual((ok, sha), (False, None))
+        self.assertFalse(why.startswith("no commit"))
+        self.assertIn("0123456789ab", why)
+
     def test_failing_check(self):
         self.commit(["src/a.py"])
         ok, why, sha = verdict(self.t(checks=["true", "echo boom; exit 3"]), self.repo, self.base)

@@ -7,6 +7,7 @@ its arguments (the log keeps them), and does what FAKE_WORKER_MODE says:
 
   commit   commit a change inside the ticket's paths with the right trailer, exit 0
   stray    commit a file outside the ticket's paths, with the trailer, exit 0
+  commit-limit  commit as `commit` does, then print a usage-limit line and exit 1
   nothing  commit nothing, exit 1
   limit    print a usage-limit line, exit 1
   hang     start a child that sleeps, write both pids to FAKE_WORKER_PIDS, sleep past any limit
@@ -17,6 +18,9 @@ import re
 import subprocess
 import sys
 import time
+
+
+LIMIT = "You've hit your session limit · resets 4:40am (Europe/Madrid)"
 
 
 def main():
@@ -30,21 +34,23 @@ def main():
     ticket = re.search(r"^\s*Ticket: (\S+)\s*$", brief, re.M).group(1)
     owned = re.search(r"^Files you own: (.+)\. Touch no other file\.$", brief, re.M)
     paths = owned.group(1).split(", ") if owned else ["work/"]
-    if mode in ("commit", "stray"):
+    if mode in ("commit", "stray", "commit-limit"):
         target = "stray.txt" if mode == "stray" else paths[0] + ("done.txt" if paths[0].endswith("/") else "")
         os.makedirs(os.path.dirname(target) or ".", exist_ok=True)
         with open(target, "a", encoding="utf-8") as f:
             f.write("work for {}\n".format(ticket))
         subprocess.run(["git", "add", target], check=True)
         subprocess.run(["git", "commit", "-q", "-m", "feat: work\n\nTicket: " + ticket], check=True)
+        if mode == "commit-limit":
+            print(json.dumps({"type": "result", "is_error": True, "result": LIMIT}))
+            return 1
         print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "result": "done"}))
         return 0
     if mode == "nothing":
         print(json.dumps({"type": "result", "subtype": "success", "is_error": True, "result": "gave up"}))
         return 1
     if mode == "limit":
-        print(json.dumps({"type": "result", "is_error": True,
-                          "result": "You've hit your session limit · resets 4:40am (Europe/Madrid)"}))
+        print(json.dumps({"type": "result", "is_error": True, "result": LIMIT}))
         return 1
     if mode == "hang":
         child = subprocess.Popen(["sleep", "60"])

@@ -137,11 +137,15 @@ def _under(f, paths):
 
 
 def verdict(t, repo, base_sha, run=subprocess.run):
-    """(passed, reason, sha): a trailered commit after base_sha, inside the ticket's paths, every check green."""
+    """(passed, reason, sha): a trailered commit after base_sha, every file changed since base_sha up to it
+    inside the ticket's paths (trailered or not), every check green."""
     num = int(t["num"])
     wanted = {f"Ticket: {t['map']}/{num}", f"Ticket: {t['map']}/{num:03d}"}
-    log = run(["git", "-C", str(repo), "log", f"{base_sha}..HEAD", "--format=%H%x00%B%x01"],
-              capture_output=True, text=True).stdout
+    r = run(["git", "-C", str(repo), "log", f"{base_sha}..HEAD", "--format=%H%x00%B%x01"],
+            capture_output=True, text=True)
+    if r.returncode != 0:
+        return False, f"cannot read the commits after {base_sha[:12]}: {(r.stderr or '').strip()[:200]}", None
+    log = r.stdout
     entries = [e.strip("\n").split("\x00", 1) for e in log.split("\x01") if e.strip()]
     if not entries:
         return False, f"no commit after {base_sha[:9]}", None
@@ -149,11 +153,11 @@ def verdict(t, repo, base_sha, run=subprocess.run):
     if not sha:
         return False, f"no commit carries the trailer Ticket: {t['map']}/{num:03d}", None
     if t["paths"]:
-        files = run(["git", "-C", str(repo), "show", "--name-only", "--format=", sha],
+        files = run(["git", "-C", str(repo), "diff", "--name-only", f"{base_sha}..{sha}"],
                     capture_output=True, text=True).stdout.split("\n")
         stray = [f for f in files if f and not _under(f, t["paths"])]
         if stray:
-            return False, "commit touches files outside the ticket's paths: " + ", ".join(stray), sha
+            return False, "commits since the start touch files outside the ticket's paths: " + ", ".join(stray), sha
     for cmd in t["checks"]:
         try:
             r = run(cmd, shell=True, cwd=str(repo), capture_output=True, text=True, timeout=CHECK_TIMEOUT)

@@ -26,6 +26,14 @@ FAKE = Path(__file__).resolve().parent / "fake_worker.py"
 START = datetime(2026, 11, 13, 1, 0).timestamp()  # 01:00 local: the limit's 4:40am is later the same night
 
 
+TEMPLATES = {}  # MAPS -> the built template, shared by the classes with the same maps
+
+
+def tearDownModule():
+    for t in TEMPLATES.values():
+        t.cleanup()
+
+
 class Clock:
     def __init__(self, t):
         self.t = t
@@ -60,9 +68,12 @@ class RunnerCase(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        """One vault (maps and tickets made through sbmap), repos and fake `claude`/`agy` per class; each
+        """One vault (maps and tickets made through sbmap), repos and fake `claude`/`agy` per set of maps; each
         test copies them: building them is most of a test's time."""
-        cls._template = tempfile.TemporaryDirectory()
+        if cls.MAPS in TEMPLATES:
+            cls._template = TEMPLATES[cls.MAPS]
+            return
+        cls._template = TEMPLATES[cls.MAPS] = tempfile.TemporaryDirectory()
         t = Path(cls._template.name).resolve()
         (t / "Vault" / "wayfinder").mkdir(parents=True)
         (t / "bin").mkdir()
@@ -81,10 +92,6 @@ class RunnerCase(unittest.TestCase):
             for title, path in tickets:
                 sb("new", folder, "--title", title, "--why", "Because.", "--done-when", "It works.", "--paths", path,
                    "--no-sync")
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._template.cleanup()
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -223,7 +230,7 @@ class TicketLoopTest(RunnerCase):
 
     def test_a_commit_outside_its_paths_fails_leaves_the_commit_and_the_next_ticket_runs(self):
         self.sb("set", "repo/one", "001", "tier=opus", "--no-sync")
-        self.modes = {"repo/one#1": "stray"}
+        self.modes = {"repo/one#1": "stray", "repo/one#2": "hang"}
         self.resume()
         self.until(lambda: self.state_of("repo/one#1") == "failed")
         item = self.items()["repo/one#1"]
@@ -231,7 +238,7 @@ class TicketLoopTest(RunnerCase):
         self.assertEqual(self.open_tickets()[1]["status"], "open")
         self.assertIn("stray.txt", self.sb("show", "repo/one", "001").stdout + self.ticket_text(1))
         self.assertIn("Ticket: repo/one/001", git(self.repos["repo/one"], "log", "--format=%B"))
-        self.until(lambda: self.state_of("repo/one#2") == "done")
+        self.until(lambda: self.state_of("repo/one#2") == "running")
 
     def test_a_failing_check_leaves_the_ticket_open_with_its_commit_in_place(self):
         self.sb("set", "repo/one", "001", "tier=opus", "checks=test -f nope.txt", "--no-sync")
@@ -279,27 +286,40 @@ class StopsTest(RunnerCase):
             self.sup.tick()
         self.assertEqual(len(self.launched), 1)
         self.clock.t = reset + 1
-        self.mode = "hang"
-        self.sup.tick()
-        self.assertEqual([x["key"] for x in self.launched], ["repo/one#1", "repo/one#1"])
-        self.assertEqual(self.state_of("repo/one#1"), "running")
+        # the next try is judged on its own output, not the limit line the log still holds from the last one;
+        # and a worker that commits correctly before it hits a limit is resolved, its agent not limited again
+        self.mode, self.modes = "commit", {"repo/one#2": "commit-limit"}
+        self.until(lambda: self.state_of("repo/one#2") == "done")
+        self.assertEqual([x["key"] for x in self.launched], ["repo/one#1", "repo/one#1", "repo/one#2"])
+        self.assertEqual(self.state_of("repo/one#1"), "done")
+        self.assertIn("session limit", Path(self.launched[0]["log"]).read_text(encoding="utf-8"))
+        self.assertEqual(self.hub.state()["installed"]["main"]["limited_until"], reset)
+        self.assertEqual(self.open_tickets(), {})
 
-    def test_a_worker_past_its_time_limit_has_its_whole_group_killed(self):
+    def test_a_worker_past_its_time_limit_has_its_whole_group_killed_and_a_sonnet_ticket_retries_on_opus(self):
         self.sup.limit = 1
-        self.sb("set", "repo/one", "001", "tier=opus", "--no-sync")
         self.mode = "hang"
         self.resume()
         self.sup.tick()
-        leader, child = self.pids()
+        groups = [self.pids()]
+        Path(os.environ["FAKE_WORKER_PIDS"]).unlink()
+        self.clock.t += 2
+        self.sup.tick()  # killed, then retried on opus at once
+        runs = [x for x in self.launched if x["key"] == "repo/one#1"]
+        self.assertEqual([x["model"] for x in runs], ["sonnet", "opus"])
+        self.assertIn("ran past", runs[1]["brief"])
+        self.assertEqual((self.items()["repo/one#1"]["state"], self.items()["repo/one#1"]["tries"]), ("running", 1))
+        groups.append(self.pids())
         self.clock.t += 2
         self.sup.tick()
         item = self.items()["repo/one#1"]
         self.assertEqual(item["state"], "failed")
         self.assertIn("ran past", item["note"])
+        pids = [pid for g in groups for pid in g]
         end = time.time() + 5
-        while (alive(leader) or alive(child)) and time.time() < end:
+        while any(map(alive, pids)) and time.time() < end:
             time.sleep(0.02)
-        self.assertFalse(alive(leader) or alive(child))
+        self.assertFalse(any(map(alive, pids)))
         self.assertEqual(self.open_tickets()[1]["status"], "open")
 
     def test_three_failures_with_no_commit_pause_the_queue(self):
@@ -452,12 +472,11 @@ class LaunchAndHookTest(RunnerCase):
         self.addCleanup(server.shutdown)
         port = str(server.server_address[1])
         env = {**os.environ, "SB_HUB_AGENT": "repo/one#1", "SB_HUB_PARENT": "queue", "SB_HUB_PORT": port}
-        for e in ({"hook_event_name": "SessionStart", "session_id": "s1", "cwd": "/w/p"},
-                  {"hook_event_name": "PreToolUse", "session_id": "s1", "cwd": "/w/p", "tool_name": "Bash",
-                   "tool_input": {"command": "python3 sbhub.py report --agent other"}}):
-            r = subprocess.run([sys.executable, SCRIPT, "hook"], input=json.dumps(e), capture_output=True, text=True,
-                               env=env, timeout=20)
-            self.assertEqual(r.returncode, 0, r.stderr)
+        e = {"hook_event_name": "PreToolUse", "session_id": "s1", "cwd": "/w/p", "tool_name": "Bash",
+             "tool_input": {"command": "python3 sbhub.py report --agent other"}}  # its alias is dropped too
+        r = subprocess.run([sys.executable, SCRIPT, "hook"], input=json.dumps(e), capture_output=True, text=True,
+                           env=env, timeout=20)
+        self.assertEqual(r.returncode, 0, r.stderr)
         agents = self.hub.state()["agents"]
         self.assertEqual(list(agents), ["repo/one#1"])
         row = agents["repo/one#1"]

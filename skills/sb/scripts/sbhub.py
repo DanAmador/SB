@@ -337,16 +337,15 @@ class Hub:
                 return rows
             if failed is not None and self.now() - failed < TICKETS_FAILED_FOR:
                 return rows
-        got = self._fetch(run)
+        got = self._fresh_tickets(run)
+        if got is not None:
+            return got
         with self._lock:
-            if got is not None:
-                self._tcache = (self.now(), got)
-            self._tfailed = None if got is not None else self.now()
-            return got if got is not None else self._tcache[1]
+            return self._tcache[1]
 
-    def _fresh_tickets(self):
+    def _fresh_tickets(self, run=None):
         """The open tickets read now, which also refreshes the cache; None when sbmap failed (never the cache)."""
-        got = self._fetch()
+        got = self._fetch(run)
         with self._lock:
             if got is not None:
                 self._tcache = (self.now(), got)
@@ -595,11 +594,12 @@ def _git(repo, *args):
     return r.stdout.strip() if r.returncode == 0 else ""
 
 
-def _tail(path, size=LOG_TAIL):
+def _tail(path, start=0, size=LOG_TAIL):
+    """The end of a log from byte `start` on: one try's output, as tries of an item share its log."""
     try:
         with open(path, "rb") as f:
             f.seek(0, os.SEEK_END)
-            f.seek(max(0, f.tell() - size))
+            f.seek(max(start, f.tell() - size))
             return f.read().decode("utf-8", "replace")
     except (OSError, TypeError):
         return ""
@@ -617,6 +617,11 @@ def _plain_words(t):
         body = ""
     m = re.search(r"^## In plain words\s*\n(.*?)(?=^## |\Z)", body, re.M | re.S)
     return (m.group(1).strip() if m else "") or t.get("map_title") or t["map"]
+
+
+def _hub_holds(t):
+    """The hub's own claim (`hub <agent>, <time>`) is on this ticket row."""
+    return bool(t) and t["status"] == "claimed" and str(t.get("claimed_by") or "").startswith("hub ")
 
 
 def _fail_class(reason):
@@ -712,7 +717,7 @@ class Supervisor:
         """Reopen the ticket when the hub holds its claim (`hub <agent>`); a session's claim, or a ticket
         resolved meanwhile, is left alone."""
         found, t = self._row(key)
-        if t and t["status"] == "claimed" and str(t.get("claimed_by") or "").startswith("hub "):
+        if _hub_holds(t):
             self.sbmap("set", t["map"], "{:03d}".format(int(t["num"])), "status=open")
 
     # ---- workers that ended, ran too long, or were lost with a restart ----
@@ -750,7 +755,15 @@ class Supervisor:
 
     def _finish(self, item, run, over):
         key, t = item["key"], run["t"]
-        until = None if over else limited_until(_tail(run["log"]), self.hub.now())
+        if over:
+            passed, reason, sha = False, ran_past(self.limit), None
+        else:
+            passed, reason, sha = sbqueue.verdict(t, t["repo"], run["base"])
+        if passed:  # a worker that did the work is resolved, whatever it printed afterwards
+            self._resolve(item, run, sha)
+            return
+        # a failed run whose own output (not an earlier try's) names a usage limit waits for the reset
+        until = None if over else limited_until(_tail(run["log"], run.get("start", 0)), self.hub.now())
         if until is not None:
             with self.hub._lock:
                 inst = self.hub._data["installed"].get(run["agent"])
@@ -762,14 +775,7 @@ class Supervisor:
                          note="{} hit its usage limit; waits until {}".format(
                              run["agent"], datetime.fromtimestamp(until).strftime("%H:%M")))
             return
-        if over:
-            passed, reason, sha = False, ran_past(self.limit), None
-        else:
-            passed, reason, sha = sbqueue.verdict(t, t["repo"], run["base"])
-        if passed:
-            self._resolve(item, run, sha)
-            return
-        if not over and not item.get("tries") and t.get("tier", "sonnet") == "sonnet" and run["inst"].get("kind") == "claude":
+        if not item.get("tries") and t.get("tier", "sonnet") == "sonnet" and run["inst"].get("kind") == "claude":
             self._release(key)
             self._update(key, front=True, state="queued", tries=1, model="opus", retry=reason, commit=sha,
                           pid=None, pid_start=None, started=None,
@@ -780,7 +786,7 @@ class Supervisor:
     def _resolve(self, item, run, sha):
         key, t = item["key"], run["t"]
         found, now_t = self._row(key)
-        if found and not (now_t and now_t["status"] == "claimed" and str(now_t.get("claimed_by") or "").startswith("hub ")):
+        if found and not _hub_holds(now_t):
             self._end(key, "skipped", commit=sha, note="passed its checks, but the ticket changed while it ran ({})".format(
                 "no longer open" if now_t is None else "claimed by " + str(now_t.get("claimed_by"))))
             return
@@ -925,6 +931,10 @@ class Supervisor:
         log = str(folder / "{}.log".format(int(t["num"])))
         env = {"SB_HUB_AGENT": key, "SB_HUB_PARENT": "queue", "SB_HUB_PORT": str(self.port)}
         try:
+            start = os.path.getsize(log)  # launch appends: this try's output begins here
+        except OSError:
+            start = 0
+        try:
             if self.stopped:
                 raise OSError("the hub is stopping")
             p = self.hub.launcher(inst, brief, t["repo"], item["model"], env, log)
@@ -932,7 +942,7 @@ class Supervisor:
             self._release(key)
             self._end(key, "failed", note="could not start the worker: {}".format(e))
             return
-        self.procs[key] = {"p": p, "t": t, "agent": name, "inst": inst, "base": base, "log": log}
+        self.procs[key] = {"p": p, "t": t, "agent": name, "inst": inst, "base": base, "log": log, "start": start}
         self._update(key, base_sha=base, log=log, run=str(folder), pid=p.pid, pid_start=_proc_start(p.pid),
                      note="running on {} ({})".format(name, item["model"]))
 
