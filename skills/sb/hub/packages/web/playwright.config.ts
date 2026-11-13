@@ -1,8 +1,19 @@
+import { execFileSync } from "node:child_process";
 import { defineConfig, devices } from "@playwright/test";
 
+/** A port nothing listens on now, so two checks running at once do not collide. */
+function freePort(): string {
+  const script = "const s=require('net').createServer().listen(0,'127.0.0.1',()=>{process.stdout.write(String(s.address().port));s.close()})";
+  return execFileSync(process.execPath, ["-e", script], { encoding: "utf8" }).trim();
+}
+
+// Chosen once in the main process; workers inherit the env and so read the same ports.
+process.env.SB_E2E_FIXTURE_PORT ??= freePort();
+process.env.SB_E2E_WEB_PORT ??= freePort();
+
 /** The board against a fixture hub: the Vite dev server's /api goes to e2e/fixture-server.ts. */
-const FIXTURE = 8799;
-const WEB = 5199;
+const FIXTURE = Number(process.env.SB_E2E_FIXTURE_PORT);
+const WEB = Number(process.env.SB_E2E_WEB_PORT);
 
 export default defineConfig({
   testDir: "e2e",

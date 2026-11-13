@@ -142,7 +142,8 @@ class RunnerCase(unittest.TestCase):
         rows = json.loads(self.sb("tickets", "--json").stdout)
         return {r["num"]: r for r in rows if r["map"] == folder}
 
-    def until(self, cond, timeout=10):
+    def until(self, cond, timeout=60):
+        # returns as soon as cond holds; the long limit is for a loaded machine (several hub checks at once)
         end = time.time() + timeout
         while time.time() < end:
             self.sup.tick()
