@@ -11,6 +11,7 @@ its arguments (the log keeps them), and does what FAKE_WORKER_MODE says:
   nothing  commit nothing, exit 1
   limit    print a usage-limit line, exit 1 (with FAKE_WORKER_RESET set, first a rate_limit_event whose 5-hour
            window is rejected until then)
+  slow     commit as `commit` does, then sleep FAKE_WORKER_SLEEP seconds (default 2) before its result, exit 0
   auth     print the expired-login failure (an assistant message and an error result), exit 1
   job      a prompt, not a ticket: print a result naming the prompt's first line and the folder it was told, exit 0
   hang     start a child that sleeps, write both pids to FAKE_WORKER_PIDS, sleep past any limit
@@ -66,13 +67,15 @@ def main():
     ticket = found.group(1) if found else None
     owned = re.search(r"^Files you own: (.+)\. Touch no other file\.$", brief, re.M)
     paths = owned.group(1).split(", ") if owned else ["work/"]
-    if mode in ("commit", "stray", "commit-limit"):
+    if mode in ("commit", "stray", "commit-limit", "slow"):
         target = "stray.txt" if mode == "stray" else paths[0] + ("done.txt" if paths[0].endswith("/") else "")
         os.makedirs(os.path.dirname(target) or ".", exist_ok=True)
         with open(target, "a", encoding="utf-8") as f:
             f.write("work for {}\n".format(ticket))
         subprocess.run(["git", "add", target], check=True)
         subprocess.run(["git", "commit", "-q", "-m", "feat: work\n\nTicket: " + ticket], check=True)
+        if mode == "slow":
+            time.sleep(float(os.environ.get("FAKE_WORKER_SLEEP") or 2))
         if mode == "commit-limit":
             result({"type": "result", "is_error": True, "result": LIMIT})
             return 1

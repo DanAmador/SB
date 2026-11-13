@@ -423,7 +423,7 @@ class Hub:
         """A failed or skipped item queued again: its last try's outcome is cleared; the owner's agent stays."""
         if item is None or item["state"] == "queued":
             return item
-        for f in ("retry", "digested", "runner", "pid", "pid_start", "result", "base_sha", "resume"):
+        for f in ("retry", "digested", "runner", "pid", "pid_start", "result", "base_sha", "resume", "stops", "log_start"):
             item.pop(f, None)
         item.update(state="queued", note="", ended=None, tries=0, started=None, commit=None)
         return item
@@ -655,6 +655,11 @@ WINDOW = 5 * 3600
 SAME_WINDOW = 600  # two readings whose reset times are this close belong to one window
 PROBE_TIMEOUT = 90
 BRAKE_TEXT = "Usage is at 95%: commit what passes now with the ticket's trailer, write your report, and stop."
+BRAKE_JOB_TEXT = "Usage is at 95%: commit what passes now, write your result, and stop."
+NEED_CAP = 0.60  # no item is judged to need more of a window than this: a big learned cost never blocks for good
+IDLE_FLOOR = 0.10  # an account running nothing and under this much 5-hour use always takes an eligible item
+READING_OLD = 1800  # a reading older than this counts as none (one worker; the probe is due long before)
+STOPS_MAX = 3  # an item cut off by a limit or a logout this many times ends failed
 AUTH_PATTERNS = ("authentication_failed", "failed to authenticate", "oauth session expired")
 RESUME = ("\n## An earlier try stopped\n\nAn earlier try on {agent} stopped {why}. Its changes may already be in "
           "the tree, committed or not: read `git log {base}..HEAD` and {diff} first, continue from there, do not "
@@ -694,8 +699,8 @@ def readings(text):
 
 
 def _said(text):
-    """What the agent itself printed: each JSON line's `result` or `error` text, and every line that is not
-    JSON (stderr, agy's output). Tool output inside the stream is left out: a worker that read a file
+    """What the agent itself printed: each JSON line's `error`, the `result` of one marked `is_error`, and every
+    line that is not JSON (stderr, agy's output). Tool output inside the stream is left out: a worker that read a file
     naming a usage limit has not hit one."""
     out = []
     for line in text.splitlines():
@@ -707,7 +712,10 @@ def _said(text):
         if not isinstance(d, dict):
             out.append(line)
             continue
-        out += [d[k] for k in ("result", "error") if isinstance(d.get(k), str)]
+        if isinstance(d.get("error"), str):
+            out.append(d["error"])
+        if d.get("is_error") is True and isinstance(d.get("result"), str):  # a summary that went well is not a stop
+            out.append(d["result"])
     return "\n".join(out)
 
 
@@ -726,13 +734,13 @@ def _same_window(a, b):
 
 def _cost(inst, tier):
     """(share of a 5-hour window one item of `tier` costs on this agent, whether it is learned): its own
-    average, else its other tier's (opus twice sonnet), else DEFAULT_COST."""
-    costs = inst.get("costs") or {}
+    average, else its other tier's (opus twice sonnet), never under a third of DEFAULT_COST; else DEFAULT_COST."""
+    costs, floor = inst.get("costs") or {}, round(DEFAULT_COST[tier] / 3, 4)  # one cheap run never makes a ticket free
     if tier in costs:
-        return costs[tier]["avg"], True
+        return max(floor, costs[tier]["avg"]), True
     other = "sonnet" if tier == "opus" else "opus"
     if other in costs:
-        return costs[other]["avg"] * (2 if tier == "opus" else 0.5), True
+        return max(floor, costs[other]["avg"] * (2 if tier == "opus" else 0.5)), True
     return DEFAULT_COST[tier], False
 
 
@@ -812,6 +820,54 @@ def _proc_start(pid):
     return out.stdout.strip() or None
 
 
+def _pid_exists(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True  # it exists, owned by someone else
+    return True
+
+
+class _Adopted:
+    """A worker an earlier hub started that still runs: not this hub's child, so only its pid (and, when ps
+    confirmed it, its start time: `sure`) is known. Quacks like the Popen parts the supervisor uses."""
+
+    def __init__(self, pid, started):
+        self.pid, self.started, self.sure, self.returncode = pid, started, bool(started), None
+
+    def poll(self):
+        try:
+            out = subprocess.run(["ps", "-o", "stat=", "-o", "lstart=", "-p", str(self.pid)], capture_output=True,
+                                 text=True, timeout=10).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            return None  # ps cannot tell: still waited for (the 90-minute limit still ends it)
+        stat, _, began = out.partition(" ")
+        alive = bool(out) and not stat.startswith("Z") and (not self.sure or began.strip() == self.started)
+        return None if alive else 0
+
+    def wait(self, timeout=None):
+        end = time.time() + (timeout or 0)
+        while self.poll() is None:
+            if time.time() >= end:
+                raise subprocess.TimeoutExpired("worker {}".format(self.pid), timeout)
+            time.sleep(0.05)
+        return 0
+
+
+def _result_ok(text):
+    """The stream's last `result` line says it went well (`is_error` false)."""
+    for line in reversed(text.splitlines()):
+        try:
+            d = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(d, dict) and d.get("type") == "result":
+            return d.get("is_error") is False
+    return False
+
+
 def _git(repo, *args):
     try:
         r = subprocess.run(["git", "-c", "core.fsmonitor=false", "-C", str(repo), *args], capture_output=True,
@@ -822,14 +878,18 @@ def _git(repo, *args):
 
 
 def _tail(path, start=0, size=LOG_TAIL):
-    """The end of a log from byte `start` on: one try's output, as tries of an item share its log."""
+    """The end of a log from byte `start` on (whole lines only): one try's output, as tries of an item share its log."""
     try:
         with open(path, "rb") as f:
             f.seek(0, os.SEEK_END)
-            f.seek(max(start, f.tell() - size))
-            return f.read().decode("utf-8", "replace")
+            at = max(start, f.tell() - size)
+            f.seek(at)
+            data = f.read()
     except (OSError, TypeError):
         return ""
+    if at > start:  # cut inside a line: that partial line could be any quoted text, so it is dropped
+        data = data[data.find(b"\n") + 1:] if b"\n" in data else b""
+    return data.decode("utf-8", "replace")
 
 
 def _vault():
@@ -933,7 +993,8 @@ class Supervisor:
         """Kill every worker's process group; their items are queued again when the hub next starts."""
         self.stopped = True
         for run in list(self.procs.values()):
-            _kill_group(run["p"], grace=1)
+            if getattr(run["p"], "sure", True):  # an adopted pid ps could not confirm is never killed
+                _kill_group(run["p"], grace=1)
         self.procs.clear()
 
     def sbmap(self, *args):
@@ -1034,7 +1095,7 @@ class Supervisor:
             if run.get("braked") or not u or (u.get("five_hour_resets") or 0) <= now or u["five_hour"] < BRAKE_5H:
                 continue
             try:
-                self.hub.send(key, BRAKE_TEXT)
+                self.hub.send(key, BRAKE_JOB_TEXT if key.startswith("job:") else BRAKE_TEXT)
                 run["braked"] = True
             except ValueError:
                 pass  # its session has not reported yet: tried again next tick
@@ -1144,18 +1205,21 @@ class Supervisor:
             over = not ended and self.hub.now() - (item.get("started") or self.hub.now()) > self.limit
             if not (ended or over):
                 continue
-            _kill_group(run["p"], grace=3 if over else 0)  # also whatever it left running
+            if not run.get("adopted") or over and run["p"].sure:  # an ended adopted pid may be reused: left alone
+                _kill_group(run["p"], grace=3 if over else 0)  # also whatever it left running
             del self.procs[item["key"]]
             self._consume(run, final=True)
             try:
                 (self._finish_job if item["kind"] == "job" else self._finish)(item, run, over)
             except Exception as e:  # the item still ends, never resolved
                 why = "the hub could not check it: {}: {}".format(type(e).__name__, e)
-                if item["kind"] == "job":
+                if item["kind"] == "job" or run.get("t") is None:
                     self._end(item["key"], "failed", note=why)
                 else:
                     self._fail(item, run, why, None)
-            if not run.get("stopped"):  # a run cut off by a limit or a logout says nothing of what a ticket costs
+            with self.hub._lock:
+                now_item = next((i for i in self.hub._data["queue"]["items"] if i["key"] == item["key"]), {})
+            if now_item.get("state") == "done":  # only finished work says what an item costs
                 self._learn(run, item.get("model") or "sonnet")
 
     def _stopped(self, item, run):
@@ -1176,6 +1240,7 @@ class Supervisor:
         signed out), the claim is released, and the item goes back to the front of the queue for any agent of
         the pool that fits, keeping its base commit; its next brief says where the last try stopped."""
         run["stopped"] = True
+        stops = (item.get("stops") or 0) + 1
         if until is not None:
             with self.hub._lock:
                 inst = self.hub._data["installed"].get(run["agent"])
@@ -1184,28 +1249,53 @@ class Supervisor:
                 self.hub._save()
         if auth:
             self._signed_out(run["agent"])
+        why = "when its login expired" if auth else "at its usage limit"
+        if stops >= STOPS_MAX:  # something keeps cutting it off: the owner looks rather than the queue looping
+            reason = "stopped {} times at a usage limit or a logout (the last on {}, {}); not tried again".format(
+                stops, run["agent"], why)
+            if item["kind"] == "ticket":
+                self._fail(item, run, reason, None)
+            else:
+                self._end(item["key"], "failed", note=reason)
+            return
         if item["kind"] == "ticket":
             self._release(item["key"])
-        why = "when its login expired" if auth else "at its usage limit"
-        self._update(item["key"], front=True, state="queued", pid=None, pid_start=None, started=None,
+        self._update(item["key"], front=True, state="queued", pid=None, pid_start=None, started=None, stops=stops,
                      resume={"agent": run["agent"], "log": run["log"], "why": why},
                      note="{} stopped {}{}; queued again at the front".format(
                          run["agent"], why, "" if auth else " (until {})".format(_hm(until))))
 
     def _recover(self, item):
+        """A `running` item this hub did not start (it restarted). When its worker still runs, it is waited for
+        and judged when it ends, never started twice; otherwise its claim is released and it is queued again.
+        The same worker is known by its pid and start time; when ps cannot tell, a live pid is waited for too,
+        but never killed (it might be another process by now)."""
         pid, started = item.get("pid"), item.get("pid_start")
-        if pid and started and _proc_start(pid) == started:  # the same worker outlived its hub
-            try:
-                os.killpg(pid, signal.SIGKILL)
-            except OSError:
-                pass
+        now_start = _proc_start(pid) if pid else None
+        sure = bool(started) and now_start == started
+        if pid and (sure or (not started or now_start is None) and _pid_exists(pid)):
+            with self.hub._lock:
+                inst = dict(self.hub._data["installed"].get(item.get("runner")) or {})
+            self.procs[item["key"]] = {"p": _Adopted(pid, started if sure else None), "t": None, "adopted": True,
+                                       "agent": item.get("runner"), "inst": inst, "base": item.get("base_sha"),
+                                       "log": item.get("log"), "start": item.get("log_start") or 0, "alone": False}
+            self._update(item["key"], note="running on {}, started before the hub restarted".format(item.get("runner")))
+            return
         if item["kind"] == "ticket":
             self._release(item["key"])
         self._update(item["key"], state="queued", pid=None, pid_start=None, started=None,
                      note="queued again: the hub stopped while it ran")
 
     def _finish(self, item, run, over):
-        key, t = item["key"], run["t"]
+        key = item["key"]
+        if run.get("t") is None:  # a worker started before the hub restarted: its ticket is read now
+            found, row = self._row(key)
+            if row is None or not run.get("base"):
+                self._end(key, "skipped" if found else "failed", note="its worker ended after a hub restart, but "
+                          + ("the ticket is no longer open" if found else "the tickets could not be read to check it"))
+                return
+            run["t"] = row
+        t = run["t"]
         if over:
             passed, reason, sha = False, ran_past(self.limit), None
         else:
@@ -1275,6 +1365,8 @@ class Supervisor:
         which queues it again for the agent's reset. Its result text is saved in its run folder."""
         key, code = item["key"], run["p"].returncode
         text = _tail(run["log"], run.get("start", 0))
+        if run.get("adopted"):  # not this hub's child: its exit code is lost, its result line says how it went
+            code = 0 if _result_ok(text) else 1
         if not over and code != 0 and self._stopped(item, run):
             return
         result = Path(run["log"]).parent / "result.md"
@@ -1312,13 +1404,14 @@ class Supervisor:
 
     def _load(self, running):
         """agent -> [its running workers, the share of its 5-hour window they still need]: a worker's cost
-        less the rise its agent's use has already shown since it started, never below 0."""
+        less the rise its agent's use has already shown since it started (only when it runs alone), never below 0."""
         load = {}
         for i in running:
             inst = self.hub._data["installed"].get(i.get("runner")) or {}
             run = self.procs.get(i["key"]) or {}
             u, u0 = inst.get("usage"), run.get("u0")
-            rise = u["five_hour"] - u0["five_hour"] if u and u0 and _same_window(u, u0) else 0.0
+            # only a worker alone on its account owns the rise; overlapped ones still owe their whole cost
+            rise = u["five_hour"] - u0["five_hour"] if run.get("alone") and u and u0 and _same_window(u, u0) else 0.0
             l = load.setdefault(i.get("runner"), [0, 0.0])
             l[0] += 1
             l[1] += max(0.0, _cost(inst, _tier(i.get("model")))[0] - rise)
@@ -1337,6 +1430,8 @@ class Supervisor:
             return None, 0.0, "{} is at its usage limit until {}".format(name, _hm(inst["limited_until"]))
         n, owed = load.get(name, (0, 0.0))
         u = inst.get("usage") if inst.get("kind") == "claude" else None
+        if u and (now - (u.get("at") or 0) > READING_OLD or not u.get("five_hour_resets")):
+            u = None  # too old to trust, or a window with no known reset: as good as no reading
         if not u:
             return ((0, 0.0), 0.0, "") if n == 0 else (None, 0.0, "")
         week_resets = u.get("seven_day_resets")
@@ -1348,8 +1443,10 @@ class Supervisor:
             return None, 0.0, ""
         resets = u.get("five_hour_resets") or 0
         five, left = (u["five_hour"], resets - now) if resets > now else (0.0, WINDOW)  # a reset window is empty
-        need = cost * min(1.0, left / TICKET_SECONDS)
+        need = min(NEED_CAP, cost * min(1.0, left / TICKET_SECONDS))
         room = GATE_5H - five - owed - need
+        if n == 0 and five < IDLE_FLOOR:
+            return (1, room), need, ""  # an idle, nearly empty account is never left waiting
         if room < -1e-9:
             return None, need, "{} {} used{}, needs about {}; resets {}".format(
                 name, _pct(five), ", {} more held by its running work".format(_pct(owed)) if owed >= 0.005 else "",
@@ -1437,6 +1534,8 @@ class Supervisor:
                         continue
                     name, inst, need = self._pick(q, item, None, load, now)
                     if name is None:
+                        if item.get("resume"):  # its last try's work is in the tree: nothing else goes first
+                            repos.add(item.get("repo"))
                         continue
                     item.update(state="running", runner=name, started=now, ended=None, note="starting")
                     take(name, need)
@@ -1449,6 +1548,8 @@ class Supervisor:
                     continue  # its repo is busy: it is not about to start, so it is not judged yet
                 name, inst, need = self._pick(q, item, t, load, now)
                 if name is None:
+                    if item.get("resume") and t is not None:  # its last try's work is in the tree: nothing else goes first
+                        repos.add(t.get("repo"))
                     continue  # no agent has room for it now (the first pass noted why)
                 skip = None
                 if t is None:
@@ -1547,7 +1648,7 @@ class Supervisor:
             self._end(key, "failed", note="could not start the worker: {}".format(e))
             return
         self._track(key, {"p": p, "t": t, "agent": name, "inst": inst, "base": base, "log": log, "start": start})
-        self._update(key, base_sha=base, log=log, run=str(folder), pid=p.pid, pid_start=_proc_start(p.pid),
+        self._update(key, base_sha=base, log=log, log_start=start, run=str(folder), pid=p.pid, pid_start=_proc_start(p.pid),
                      note="running on {} ({})".format(name, item["model"]))
 
     def _launch_job(self, item, name, inst):
@@ -1580,7 +1681,7 @@ class Supervisor:
             self._end(key, "failed", note="could not start the worker: {}".format(e))
             return
         self._track(key, {"p": p, "agent": name, "inst": inst, "log": log, "start": start})
-        self._update(key, log=log, run=folder, pid=p.pid, pid_start=_proc_start(p.pid),
+        self._update(key, log=log, log_start=start, run=folder, pid=p.pid, pid_start=_proc_start(p.pid),
                      note="running on {} ({})".format(name, model))
 
     # ---- the night's digest ----

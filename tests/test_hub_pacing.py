@@ -10,6 +10,7 @@ import threading
 import unittest
 from datetime import datetime
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills" / "sb" / "scripts"))
 from helpers import SCRIPT  # noqa: E402
@@ -262,6 +263,113 @@ class ReadingTest(unittest.TestCase):
         self.assertEqual(sbhub._cost({}, "opus"), (0.30, False))
         self.assertEqual(sbhub._cost({"costs": {"sonnet": {"avg": 0.1, "n": 1}}}, "opus"), (0.2, True))
         self.assertEqual(sbhub._cost({"costs": {"opus": {"avg": 0.4, "n": 1}}}, "sonnet"), (0.2, True))
+
+
+class FixRoundOneTest(PacingCase):
+    def setup_main(self, **usage):
+        with self.hub._lock:
+            inst = self.hub._data["installed"]["main"]
+            inst["usage"] = {"five_hour": 0.5, "five_hour_resets": R, "seven_day": 0.1,
+                             "seven_day_resets": R + 86400, "at": START, **usage}
+            inst["costs"] = {"sonnet": {"avg": 0.30, "n": 2}}
+        return inst
+
+    def test_only_a_worker_that_ran_alone_is_credited_with_the_rise(self):
+        self.setup_main()
+        running = [{"key": "a", "runner": "main", "model": "sonnet"}, {"key": "b", "runner": "main", "model": "sonnet"}]
+        self.addCleanup(setattr, self.sup, "procs", {})  # fake runs: nothing for stop() to kill
+        u0 = {"five_hour": 0.10, "five_hour_resets": R}
+        self.sup.procs = {"a": {"agent": "main", "u0": u0, "alone": False},
+                          "b": {"agent": "main", "u0": u0, "alone": False}}
+        self.assertEqual(self.sup._load(running), {"main": [2, 0.60]})  # overlapped: each still owes its full cost
+        self.sup.procs = {"a": {"agent": "main", "u0": {"five_hour": 0.40, "five_hour_resets": R}, "alone": True}}
+        n, owed = self.sup._load(running[:1])["main"]
+        self.assertEqual(n, 1)
+        self.assertAlmostEqual(owed, 0.20)
+
+    def test_a_failed_run_teaches_no_cost_and_a_cost_has_a_floor(self):
+        self.hub.queue_agents(["main"], None)
+        self.sb("set", "repo/one", "001", "tier=opus", "--no-sync")
+        self.probe_out = {"main": ev(0.10)}
+        self.agent_env = {"main": {"FAKE_WORKER_USAGE": "0.10>0.11", "FAKE_WORKER_RESET": str(int(R))}}
+        self.modes = {"repo/one#1": "nothing", "repo/one#2": "hang"}
+        self.resume()
+        self.until(lambda: self.state_of("repo/one#1") == "failed")
+        self.assertNotIn("costs", self.inst("main"))
+        self.assertEqual(sbhub._cost({"costs": {"sonnet": {"avg": 0.01, "n": 1}}}, "sonnet"), (0.05, True))
+        self.assertEqual(sbhub._cost({"costs": {"sonnet": {"avg": 0.01, "n": 1}}}, "opus"), (0.10, True))
+
+    def test_quoted_limit_text_is_not_a_stop(self):
+        log = self.root / "cut.log"
+        log.write_text('{"type":"user","x":"' + "a" * 200 + ' usage limit reached, resets 4:40am ' + "b" * 200 + '"}\n'
+                       '{"type":"result","is_error":true,"result":"gave up"}\n')
+        self.assertNotIn("usage limit", sbhub._tail(str(log), 0, size=300))  # the cut first line is dropped
+        self.assertIn("gave up", sbhub._tail(str(log), 0, size=300))
+        ok = '{"type":"result","is_error":false,"result":"fixed how the hub reads Failed to authenticate"}'
+        self.assertFalse(sbhub.logged_out(sbhub._said(ok)))
+        self.assertIsNone(sbhub.limited_until(sbhub._said(ok.replace("Failed to authenticate", "usage limit reached")),
+                                              START))
+
+    def test_an_item_that_stops_three_times_fails_in_plain_words(self):
+        self.probe_out = {"main": ev(0.10), "spare": ev(0.20)}
+        self.agent_modes = {"main": "limit", "spare": "limit"}
+        env = {"FAKE_WORKER_RESET": str(int(START + 3600))}
+        self.agent_env = {"main": env, "spare": env}
+        self.resume()
+        self.until(lambda: len(self.launched) == 2 and self.state_of("repo/one#1") == "queued")
+        self.clock.t = START + 3601
+        self.until(lambda: self.state_of("repo/one#1") == "failed")
+        self.assertEqual([x["key"] for x in self.launched].count("repo/one#1"), 3)
+        self.assertIn("stopped 3 times at a usage limit or a logout", self.items()["repo/one#1"]["note"])
+        self.assertEqual(self.open_tickets()[1]["status"], "open")
+
+    def test_a_big_cost_is_capped_and_an_idle_nearly_empty_account_always_takes_the_item(self):
+        inst = {"kind": "claude", "costs": {"sonnet": {"avg": 0.5, "n": 1}},
+                "usage": {"five_hour": 0.0, "five_hour_resets": R, "seven_day": 0.1, "seven_day_resets": R + 86400,
+                          "at": START}}
+        score, need, why = sbhub.Supervisor._fit("main", inst, "opus", {}, START)
+        self.assertEqual((need, why), (sbhub.NEED_CAP, ""))
+        self.assertIsNotNone(score)
+        inst["usage"]["five_hour"] = 0.09
+        with mock.patch.object(sbhub, "NEED_CAP", 2.0):
+            self.assertIsNotNone(sbhub.Supervisor._fit("main", inst, "opus", {}, START)[0])
+            inst["usage"]["five_hour"] = 0.10
+            self.assertIsNone(sbhub.Supervisor._fit("main", inst, "opus", {}, START)[0])
+
+    def test_a_resumed_item_that_cannot_start_keeps_its_repo(self):
+        self.probe_out = {"main": ev(0.10), "spare": ev(0.70)}
+        self.hub.tickets()
+        with self.hub._lock:
+            self.hub._data["installed"]["main"]["limited_until"] = R
+            self.hub._data["queue"]["items"][0].update(
+                tries=1, model="opus", resume={"agent": "main", "log": "x.log", "why": "at its usage limit"})
+        self.hub.queue_pause(False)
+        self.sup.tick()
+        self.assertEqual(self.launched, [])  # the sonnet ticket behind it would fit on spare, but waits
+
+    def test_an_old_or_reset_less_reading_counts_as_none(self):
+        base = {"kind": "claude", "costs": {"sonnet": {"avg": 0.05, "n": 1}}}
+        fresh = {"five_hour": 0.85, "five_hour_resets": R, "seven_day": 0.1, "seven_day_resets": R + 86400}
+        old = {**base, "usage": {**fresh, "five_hour": 0.1, "at": START - 1801}}
+        self.assertIsNone(sbhub.Supervisor._fit("main", old, "sonnet", {"main": [1, 0.05]}, START)[0])  # one worker
+        self.assertIsNotNone(sbhub.Supervisor._fit("main", old, "sonnet", {}, START)[0])
+        bare = {**base, "usage": {**fresh, "five_hour_resets": None, "at": START}}
+        self.assertEqual(sbhub.Supervisor._fit("main", bare, "sonnet", {}, START), ((0, 0.0), 0.0, ""))
+
+    def test_the_brake_for_a_job_names_no_trailer(self):
+        self.hub.queue_agents(["main"], None)
+        self.probe_out = {"main": ev(0.10)}
+        self.agent_env = {"main": {"FAKE_WORKER_USAGE": "0.96>0.97", "FAKE_WORKER_RESET": str(int(R))}}
+        self.mode = "hang"
+        key = self.hub.queue_job("repo", "Audit it", None, "sonnet", "audit")["key"]
+        self.hub.tickets()
+        self.hub.queue_set([], self.hub.state()["queue"]["version"])
+        self.hub.queue_pause(False)
+        self.sup.tick()
+        self.hub.report({"agent": key, "role": "worker", "parent": "queue", "state": "working"})
+        sent = lambda: [m["text"] for m in self.hub.state()["messages"].values() if m["to"] == key]
+        self.until(sent)
+        self.assertEqual(sent(), ["Usage is at 95%: commit what passes now, write your result, and stop."])
 
 
 class PoolTest(PacingCase):

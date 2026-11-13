@@ -371,25 +371,30 @@ class StopsTest(RunnerCase):
         self.assertEqual(self.open_tickets()[1]["status"], "open")
         self.assertEqual(self.launched, [])
 
-    def test_a_worker_that_outlived_its_hub_is_killed_before_its_ticket_is_queued_again(self):
+    def test_a_worker_that_outlived_its_hub_is_waited_for_and_judged_never_run_twice(self):
+        self.modes = {"repo/one#1": "slow"}
+        os.environ["FAKE_WORKER_SLEEP"] = "1.5"
         self.mode = "hang"
         self.resume()
         self.sup.tick()
-        leader, child = self.pids()
-        Path(os.environ["FAKE_WORKER_PIDS"]).unlink()
+        pid = self.items()["repo/one#1"]["pid"]
         hub = Hub(self.root / "hub", now=self.clock, launcher=self.launcher)  # the hub died; a new one starts
         sup = Supervisor(hub)
         self.addCleanup(sup.stop)
         sup.tick()
-        q = hub.state()["queue"]
-        # the orphan is killed and its claim released, then the resumed queue (still resumed) starts it afresh
-        self.assertEqual((q["paused"], q["items"][0]["state"]), (False, "running"))
-        self.assertEqual([x["key"] for x in self.launched], ["repo/one#1", "repo/one#1"])
-        self.assertNotIn((leader, child), [self.pids()])
-        end = time.time() + 5
-        while (alive(leader) or alive(child)) and time.time() < end:
-            time.sleep(0.02)
-        self.assertFalse(alive(leader) or alive(child))
+        item = hub.state()["queue"]["items"][0]
+        self.assertEqual((item["key"], item["state"], item["pid"]), ("repo/one#1", "running", pid))  # waited for
+        self.assertEqual([x["key"] for x in self.launched], ["repo/one#1"])
+        self.assertTrue(alive(pid))
+        end = time.time() + 10
+        while time.time() < end and hub.state()["queue"]["items"][0]["state"] == "running":
+            sup.tick()
+            time.sleep(0.05)
+        item = hub.state()["queue"]["items"][0]
+        sha = git(self.repos["repo/one"], "log", "-1", "--format=%H", "--grep", "^Ticket: repo/one/001")
+        self.assertEqual((item["state"], item["commit"]), ("done", sha))  # judged by the new hub, in code
+        self.assertEqual([x["key"] for x in self.launched].count("repo/one#1"), 1)
+        self.assertNotIn(1, self.open_tickets())
 
     def test_a_restart_never_releases_a_claim_a_session_holds(self):
         self.hub.tickets()
