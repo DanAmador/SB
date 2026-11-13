@@ -36,6 +36,8 @@ class RunTicketCase(RunnerCase):
         text = re.sub(r"\b[0-9a-f]{9}\b", "0" * 9, text)
         text = re.sub(r"\d{4}-\d{2}-\d{2}-", "2026-11-13-", text)
         text = re.sub(r"-\d{8}-\d{6}-\d{6}\.", "-20261113-010000-000000.", text)
+        text = re.sub(r"run-ticket/\d+\.json", "run-ticket/4242.json", text)
+        text = re.sub(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}", "2026-11-13 01:00", text)
         out = json.loads(text)
 
         def stable(o):
