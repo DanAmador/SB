@@ -13,7 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { addable, blockerTitles, filterOptions, firstLine, hm, itemProject, itemTitle, mapTitle, plural, projOf, searchTickets, showCounts, tkey, type Show } from "@/lib/board.ts";
 import { setLink, useLink } from "@/lib/link.ts";
 import { cn } from "@/lib/utils";
-import { Empty, SectionTitle, VaultLink } from "./bits.tsx";
+import { Empty, MapName, SectionTitle, TicketTitle } from "./bits.tsx";
 import { AccountPicker, QueueButton } from "./AccountPicker.tsx";
 import { useBoard } from "./context.tsx";
 
@@ -168,19 +168,13 @@ function Found({ t, drag, setDrag }: { t: TicketRow; drag: Drag; setDrag: (d: Dr
     >
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1">
-          <button
-            type="button"
-            className="line-clamp-2 min-w-0 text-left text-sm font-medium hover:underline"
-            onClick={() => {
-              setLink({ t: key });
-            }}
-          >
+          <TicketTitle itemKey={key} links={t.links} className="line-clamp-2">
             {t.title}
-          </button>
-          <VaultLink path={t.file} what="the ticket" className="-my-1" />
+          </TicketTitle>
         </div>
-        <p className="truncate text-xs text-muted-foreground" title={mapTitle(t)}>
-          {`${projOf(t.map)} · ${t.map.split("/").pop() ?? ""}`}
+        <p className="truncate text-xs text-muted-foreground">
+          {`${projOf(t.map)} · `}
+          <MapName links={t.links} name={t.map.split("/").pop() ?? ""} title={mapTitle(t)} />
           {why && ` · ${why}`}
         </p>
       </div>
@@ -352,16 +346,9 @@ function NextLine(props: {
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1">
-          <button
-            type="button"
-            className="line-clamp-2 min-w-0 text-left text-sm font-medium hover:underline"
-            onClick={() => {
-              setLink({ t: i.key });
-            }}
-          >
+          <TicketTitle itemKey={i.key} links={i.links} className="line-clamp-2">
             {title}
-          </button>
-          <VaultLink path={t?.file} what="the ticket" className="-my-1" />
+          </TicketTitle>
         </div>
         <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
           <span className="shrink-0">{itemProject(i, t)}</span>

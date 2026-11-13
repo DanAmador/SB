@@ -10,13 +10,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { Skeleton } from "@/components/ui/skeleton";
-import { addable, agentOf, ago, blockerTitles, dur, firstLine, folder, itemMap, itemProject, itemTitle, mapNote, mapTitle, projOf, vaultUri } from "@/lib/board.ts";
+import { addable, agentOf, ago, dur, firstLine, folder, itemProject, itemTitle, mapTitle, projOf } from "@/lib/board.ts";
 import { useTicketDetail } from "@/lib/hub.ts";
 import { setLink, useLink } from "@/lib/link.ts";
 import { say } from "@/lib/notice.ts";
 import { cn } from "@/lib/utils";
-import { Checks, FileLinks, Pictures, SelfChecks, StateIcon } from "./bits.tsx";
+import { Checks, Pictures, StateIcon } from "./bits.tsx";
 import { AccountPicker } from "./AccountPicker.tsx";
 import { useBoard } from "./context.tsx";
 
@@ -37,12 +36,10 @@ export function DetailSheet(): React.JSX.Element {
   );
 }
 
-const obsidian = (u: string | undefined): string | null => (u?.startsWith("obsidian://") === true ? u : null);
-
 function ObsidianButton({ href, words, main }: { href: string; words: string; main?: boolean }): React.JSX.Element {
   return (
-    <Button asChild size="xs" variant={main === true ? "outline" : "ghost"}>
-      <a href={href} title={`Open in Obsidian: ${words.toLowerCase()}`}>
+    <Button asChild size="xs" variant={main === true ? "default" : "outline"}>
+      <a href={href} title={`${words} in Obsidian`}>
         <IconNotebook aria-hidden />
         {words}
       </a>
@@ -59,6 +56,9 @@ function Block({ title, children }: { title: string; children: React.ReactNode }
   );
 }
 
+const obsidian = (u: string | undefined): string | null => (u?.startsWith("obsidian://") === true ? u : null);
+
+/** The panel is a digest: title, state, why in one line, checks and pictures, and the actions. Everything longer opens in Obsidian. */
 function TicketPanel({ itemKey }: { itemKey: string }): React.JSX.Element {
   const { state, ix, qv } = useBoard();
   const detail = useTicketDetail(itemKey);
@@ -69,7 +69,6 @@ function TicketPanel({ itemKey }: { itemKey: string }): React.JSX.Element {
   const where = t ? `${projOf(t.map)} · ${mapTitle(t)}` : i ? itemProject(i, null) : "";
   const word = t ? t.state : d?.open === false ? "closed" : "";
   const isJob = i?.kind === "job";
-  const after = t ? blockerTitles(t, ix) : [];
   let status = "";
   if (i) {
     if (i.state === "running") {
@@ -80,9 +79,12 @@ function TicketPanel({ itemKey }: { itemKey: string }): React.JSX.Element {
       status = `Queued, number ${n > 0 ? String(n) : "–"} in line${i.agent !== null ? `, on ${i.agent}` : ""}`;
     } else status = `${i.state[0]?.toUpperCase() ?? ""}${i.state.slice(1)} ${ago(state.now, i.ended)}${i.commit !== null ? `, commit ${i.commit.slice(0, 9)}` : ""}`;
   }
-  const ticketUri = obsidian(d?.uri) ?? vaultUri(t?.file);
-  const mapUri = obsidian(d?.map_uri) ?? vaultUri(t ? mapNote(t.file) : null);
-  const board = vaultUri(state.queue.runs?.[t?.map ?? (i?.kind === "ticket" ? (i.map ?? itemMap(i)) : "")]);
+  const ticketUri = t?.links.ticket ?? i?.links.ticket ?? obsidian(d?.uri);
+  const mapUri = t?.links.map ?? i?.links.map ?? obsidian(d?.map_uri);
+  const board = i?.links.board ?? t?.links.board ?? null;
+  const why = firstLine(t?.why ?? (i?.kind === "job" ? i.prompt : ""));
+  const buttons: [string, string | null][] = [["Open in Obsidian", ticketUri], ["Map", mapUri], ["Run board", board], ["Report", i?.links.report ?? null], ["Log", i?.links.log ?? null]];
+  const shown = buttons.filter((x): x is [string, string] => x[1] !== null);
   return (
     <>
       <SheetHeader>
@@ -91,11 +93,12 @@ function TicketPanel({ itemKey }: { itemKey: string }): React.JSX.Element {
           <span>{where}</span>
           {word && <Badge tone={word === "ready" ? "ok" : word === "blocked" ? "warn" : word === "waits for you" ? "brand" : "neutral"}>{word}</Badge>}
         </SheetDescription>
-        {(ticketUri !== null || mapUri !== null || board !== null) && (
+        {why && <p className="line-clamp-1 text-sm text-muted-foreground">{why}</p>}
+        {shown.length > 0 && (
           <nav aria-label="In Obsidian" className="mt-2 flex flex-wrap gap-1.5">
-            {ticketUri !== null && <ObsidianButton href={ticketUri} words="Ticket" main />}
-            {mapUri !== null && <ObsidianButton href={mapUri} words="Map" />}
-            {board !== null && <ObsidianButton href={board} words="Tonight's run board" />}
+            {shown.map(([words, href], n) => (
+              <ObsidianButton key={words} href={href} words={words} main={n === 0 && words === "Open in Obsidian"} />
+            ))}
           </nav>
         )}
       </SheetHeader>
@@ -103,74 +106,16 @@ function TicketPanel({ itemKey }: { itemKey: string }): React.JSX.Element {
         {i && (
           <Block title="In the queue">
             <p className="text-sm">{status}</p>
-            {(i.state === "failed" || i.state === "skipped") && <p className="text-sm whitespace-pre-wrap text-destructive">{i.note || "no reason recorded"}</p>}
+            {(i.state === "failed" || i.state === "skipped") && <p className="text-sm text-destructive">{firstLine(i.note) || "no reason recorded"}</p>}
             <Checks checks={i.checks ?? []} />
-            <SelfChecks item={i} />
             <Pictures item={i} full />
-            <FileLinks item={i} />
-          </Block>
-        )}
-        {isJob && (
-          <Block title="Prompt">
-            <p className="text-sm whitespace-pre-wrap">{i.prompt}</p>
-          </Block>
-        )}
-        {t?.why && (
-          <Block title="Why">
-            <p className="text-sm text-pretty">{t.why}</p>
-          </Block>
-        )}
-        {t?.question && (
-          <Block title="Question">
-            <p className="text-sm whitespace-pre-wrap">{t.question}</p>
-          </Block>
-        )}
-        {t && (
-          <Block title="Done when">
-            <p className="text-sm whitespace-pre-wrap">{t.done_when || <span className="text-muted-foreground">not written yet</span>}</p>
-          </Block>
-        )}
-        {after.length > 0 && (
-          <Block title="After">
-            <p className="text-sm">{after.join(", ")}</p>
           </Block>
         )}
         {t?.checks.length === 0 && <p className="text-sm text-warn">It has no checks, so it cannot be queued until its map has some.</p>}
-        {!isJob && <Trail itemKey={itemKey} />}
         <QueueActions itemKey={itemKey} />
         {!isJob && <TicketActions itemKey={itemKey} mapChecks={d?.map_checks ?? null} />}
       </div>
     </>
-  );
-}
-
-/** The handoff, checkpoint and newest run of its map, and the comment count: each opens in Obsidian. */
-function Trail({ itemKey }: { itemKey: string }): React.JSX.Element | null {
-  const { state } = useBoard();
-  const detail = useTicketDetail(itemKey);
-  if (detail.isPending) return <Skeleton className="h-10 w-full" />;
-  if (detail.isError) return <p className="text-sm text-destructive">Its details could not be read: {detail.error.message}</p>;
-  const d = detail.data;
-  const trail = d.trail.filter((x) => obsidian(x.uri) !== null);
-  if (trail.length === 0 && d.comments.length === 0) return null;
-  return (
-    <Block title="In the vault">
-      {d.comments.length > 0 && (
-        <p className="text-sm text-muted-foreground">
-          {d.comments.length === 1 ? "1 comment" : `${String(d.comments.length)} comments`}, newest: “{d.comments.at(-1)?.replace(/^- /, "").slice(0, 160)}”
-        </p>
-      )}
-      <ul className="flex flex-col gap-1">
-        {trail.map((x) => (
-          <li key={x.path} className="flex items-baseline gap-2 text-sm">
-            <a className="text-brand hover:underline" href={obsidian(x.uri) ?? undefined}>
-              {x.name}
-            </a>
-            <span className="text-xs text-muted-foreground">{ago(state.now, x.at)}</span>
-          </li>
-        ))}
-      </ul>
-    </Block>
   );
 }
 

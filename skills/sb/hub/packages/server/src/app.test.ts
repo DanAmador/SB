@@ -1,21 +1,24 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { obsidianUri, type LinkContext, type Links } from "@sb-hub/contract";
 import { createApp } from "./app.ts";
+import { linkContext } from "./vault.ts";
 import type { Forward, Reply } from "./upstream.ts";
 
 const PORT = 8765;
 const HOST = `127.0.0.1:${String(PORT)}`;
 /** The real hub's answer, written by tests/test_contract_fixtures.py. */
-const STATE = (JSON.parse(readFileSync(new URL("../../contract/fixtures/state.json", import.meta.url), "utf8")) as { body: object }).body;
+const STATE = (JSON.parse(readFileSync(new URL("../../contract/fixtures/state.json", import.meta.url), "utf8")) as { body: { queue: { items: { key: string }[]; cleared?: object[] } } & Record<string, unknown> }).body;
 
-function setup(reply: (f: Forward) => Reply, webDir = "/nonexistent") {
+function setup(reply: (f: Forward) => Reply, webDir = "/nonexistent", links: LinkContext = { exists: () => false, real: (p) => p, findTicket: () => null, runs: {} }) {
   const sent: Forward[] = [];
   const logged: string[] = [];
   const app = createApp({
     port: PORT,
     webDir,
+    links,
     log: (l) => logged.push(l),
     upstream: (f) => {
       sent.push(f);
@@ -39,7 +42,13 @@ describe("forwarding to the Python hub", () => {
     const { call, sent } = setup(() => json(200, STATE));
     const r = await call("/api/state");
     expect(r.status).toBe(200);
-    expect(await r.json()).toEqual(STATE);
+    // the same answer, each queue item with its links (all null here: nothing exists on this disk)
+    const nothing = { ticket: null, map: null, board: null, report: null, log: null };
+    const queue = STATE.queue as { items: object[]; cleared?: object[] };
+    expect(await r.json()).toEqual({
+      ...STATE,
+      queue: { ...queue, items: queue.items.map((i) => ({ ...i, links: nothing })), ...(queue.cleared ? { cleared: queue.cleared.map((i) => ({ ...i, links: nothing })) } : {}) },
+    });
     expect(r.headers.get("x-frame-options")).toBe("DENY");
     expect(r.headers.get("x-content-type-options")).toBe("nosniff");
     expect(sent[0]?.path).toBe("/api/state");
@@ -111,7 +120,7 @@ describe("forwarding to the Python hub", () => {
   });
 
   it("says the hub is starting while the Python hub is not up", async () => {
-    const app = createApp({ port: PORT, webDir: "/nonexistent", log: () => undefined, upstream: () => Promise.reject(new Error("down")) });
+    const app = createApp({ port: PORT, webDir: "/nonexistent", links: { exists: () => false, real: (p) => p, findTicket: () => null, runs: {} }, log: () => undefined, upstream: () => Promise.reject(new Error("down")) });
     const r = await app.request(`http://${HOST}/api/state`, { headers: { host: HOST } });
     expect(r.status).toBe(503);
   });
@@ -150,5 +159,33 @@ describe("pages", () => {
   it("answers 404 for any other path", async () => {
     const { call } = setup(() => json(200, STATE));
     expect((await call("/nope")).status).toBe(404);
+  });
+});
+
+describe("obsidian links", () => {
+  it("adds the links of the notes that exist to every ticket row and queue item", async () => {
+    const vault = realpathSync(mkdtempSync(join(tmpdir(), "vault-")));
+    const effort = join(vault, "wayfinder", "repo", "one");
+    const run = join(vault, "wayfinder", "repo", "runs", "2026-11-13-one");
+    mkdirSync(join(effort, "issues", "done"), { recursive: true });
+    mkdirSync(run, { recursive: true });
+    writeFileSync(join(effort, "map.md"), "map");
+    writeFileSync(join(effort, "issues", "done", "001 A, 'b'.md"), "t");
+    writeFileSync(join(run, "1.md"), "report");
+    writeFileSync(join(run, "1.log"), "log");
+    writeFileSync(join(run, "board.md"), "board");
+    const items = STATE.queue.items.map((i): object => (i.key === "repo/one#1" ? { ...i, run, log: join(run, "1.log"), map: "repo/one" } : i));
+    const state = { ...STATE, queue: { ...STATE.queue, runs: { "repo/one": join(run, "board.md") }, items } };
+    const { call } = setup(() => json(200, state), "/nonexistent", linkContext(vault));
+    const body = (await (await call("/api/state")).json()) as { queue: { items: { key: string; links: Links }[] } };
+    const one = body.queue.items.find((i) => i.key === "repo/one#1");
+    expect(one?.links).toEqual({
+      ticket: obsidianUri(join(effort, "issues", "done", "001 A, 'b'.md")),
+      map: obsidianUri(join(effort, "map.md")),
+      board: obsidianUri(join(run, "board.md")),
+      report: obsidianUri(join(run, "1.md")),
+      log: obsidianUri(join(run, "1.log")),
+    });
+    expect(body.queue.items.find((i) => i.key === "repo/one#3")?.links.report).toBeNull();
   });
 });

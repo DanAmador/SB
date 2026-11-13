@@ -24,16 +24,16 @@ test("Runs is the landing page: one row per worker run, the silent one amber, ne
   await expect(busy).toContainText("running the tests");
   await expect(busy).toContainText("12 min");
   await expect(busy).toContainText("opus");
-  await expect(busy.getByRole("link", { name: "Open the ticket in Obsidian" })).toHaveAttribute("href", "obsidian://open?path=%2Fvault%2Fdemo%2Fboard%2Fissues%2F5.md");
+  await expect(busy.getByRole("link", { name: "Run the board against the real hub" })).toHaveAttribute("href", "obsidian://open?path=%2Fvault%2Fdemo%2Fboard%2Fissues%2F5.md");
   await expect(busy.getByRole("link", { name: "Log" })).toHaveAttribute("href", /^obsidian:\/\/open\?path=%2Fvault%2Fruns%2F2026-11-13-board%2F5\.log$/);
   // your chat session is not a run
   await expect(page.getByText("Charting the board")).toHaveCount(0);
   // the Waits for you count is the page's alarm: a question, a failed run, a done run
   await expect(page.getByRole("tab", { name: /Waits for you/ })).toContainText("3");
   // a row opens the ticket's panel, with Message and Stop
-  await busy.getByRole("button", { name: "Run the board against the real hub", exact: true }).click();
+  await busy.getByRole("button", { name: "Show details" }).click();
   const sheet = page.getByRole("dialog");
-  await expect(sheet.getByRole("link", { name: "Ticket" })).toHaveAttribute("href", /^obsidian:/);
+  await expect(sheet.getByRole("link", { name: "Open in Obsidian" }).first()).toHaveAttribute("href", /^obsidian:/);
   await expect(sheet.getByRole("link", { name: "Map" })).toHaveAttribute("href", /^obsidian:/);
   await sheet.getByRole("button", { name: "Stop" }).click();
   await sheet.getByRole("button", { name: "Yes, stop it" }).click();
@@ -66,15 +66,19 @@ test("a ticket found by the Queue's search and dragged into Up next lands at tha
 test("the search's filters live in the page link; one click queues; the panel opens as a sheet", async ({ page }) => {
   await page.goto("/next/?view=queue&q=header");
   const found = page.getByTestId("found");
-  await expect(found.getByRole("button", { name: "Draw the header", exact: true })).toBeVisible();
+  // the title opens the ticket in Obsidian
+  await expect(found.getByRole("link", { name: "Draw the header", exact: true })).toHaveAttribute("href", "obsidian://open?path=%2Fvault%2Fdemo%2Fboard%2Fissues%2F1.md");
   await page.getByRole("radio", { name: /Needs a decision/ }).click();
   await expect(page).toHaveURL(/s=waits/);
   await expect(page.getByText("No open ticket here matches.")).toBeVisible();
   await page.getByRole("radio", { name: /Can run/ }).click();
-  await found.getByRole("button", { name: "Draw the header", exact: true }).click();
+  await found.getByRole("button", { name: "Show details" }).click();
   await expect(page).toHaveURL(/t=demo%2Fboard%231/);
   const sheet = page.getByRole("dialog");
   await expect(sheet.getByRole("heading", { name: "Draw the header" })).toBeVisible();
+  // a digest: Open in Obsidian first, no ticket body of its own
+  await expect(sheet.getByRole("navigation", { name: "In Obsidian" }).getByRole("link").first()).toHaveText("Open in Obsidian");
+  await expect(sheet.getByText("Done when")).toHaveCount(0);
   await expect(sheet.getByRole("button", { name: "Queue it" })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(sheet).toHaveCount(0);

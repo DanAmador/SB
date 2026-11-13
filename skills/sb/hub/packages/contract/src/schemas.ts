@@ -4,6 +4,7 @@
  * Only what a project's own provider script returns stays open (`ProviderPanel`).
  */
 import { z } from "zod";
+import { Links } from "./links.ts";
 
 /** Epoch seconds, as Python's time.time() gives them. */
 export const Seconds = z.number();
@@ -124,6 +125,8 @@ const itemFields = {
   digested: z.boolean().optional(),
   media: z.array(z.string()).optional(),
   checks: z.array(CheckRun).optional(),
+  /** obsidian:// links to its notes, added by the TypeScript server (links.ts). */
+  links: Links,
 };
 
 export const TicketItem = z.strictObject({
@@ -247,6 +250,8 @@ export const TicketRow = z.strictObject({
   queued: z.boolean(),
   state: TicketState,
   reason: z.string(),
+  /** obsidian:// links to its notes, added by the TypeScript server (links.ts). */
+  links: Links,
 });
 export type TicketRow = z.infer<typeof TicketRow>;
 export const Tickets = z.array(TicketRow);

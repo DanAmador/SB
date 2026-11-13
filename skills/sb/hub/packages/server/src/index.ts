@@ -9,13 +9,14 @@ import { createApp } from "./app.ts";
 import { hubHome, hubPort } from "./config.ts";
 import { startPython, type PythonHub } from "./python.ts";
 import { upstream } from "./upstream.ts";
+import { linkContext, vaultDir } from "./vault.ts";
 
 const port = hubPort(process.argv.slice(2), process.env);
 const home = hubHome(process.env);
 const webDir = new URL("../../web/dist", import.meta.url).pathname;
 let python: PythonHub | undefined;
 
-const app = createApp({ port, webDir, upstream: upstream(() => python?.port), log: (line) => { console.error(line); } });
+const app = createApp({ port, webDir, links: linkContext(vaultDir(process.env)), upstream: upstream(() => python?.port), log: (line) => { console.error(line); } });
 
 // The public port first: when it is taken this exits before touching any Python hub.
 const server = serve({ fetch: app.fetch, hostname: "127.0.0.1", port });

@@ -6,7 +6,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { ApiError, ROUTES, RepoProvider, State, answerSchema, bodySchema, routeOf, type RouteAnswer, type RouteName } from "./index.ts";
+import { ApiError, ROUTES, addLinks, type LinkContext, RepoProvider, State, answerSchema, bodySchema, routeOf, type RouteAnswer, type RouteName } from "./index.ts";
 
 const Fixture = z.strictObject({
   route: z.string().regex(/^(GET|POST) \/api\//),
@@ -17,6 +17,9 @@ const Fixture = z.strictObject({
   bytes: z.number().int().optional(),
 });
 type Fixture = z.infer<typeof Fixture>;
+
+/** A vault with nothing in it: every link is null, which the schemas allow. links.test.ts covers real files. */
+const bare = (): LinkContext => ({ exists: () => false, real: (p) => p, findTicket: () => null, runs: {} });
 
 const dir = join(import.meta.dirname, "..", "fixtures");
 const fixtures = readdirSync(dir)
@@ -49,7 +52,7 @@ describe("fixtures written by the hub", () => {
       schema?.parse(fx.status === 200 || fx.status === 206 ? fx.contentType : "");
     } else {
       expect(fx.contentType).toBe(kind === "text" && fx.status === 200 ? "text/plain; charset=utf-8" : "application/json");
-      schema?.parse(fx.body);
+      schema?.parse(addLinks(route, fx.body, bare()));
     }
     const body = bodySchema(route);
     if (body !== undefined) {
@@ -68,7 +71,7 @@ describe("fixtures written by the hub", () => {
   });
 
   it("holds the hub's own provider panel to its exact shape", () => {
-    const state = State.parse(fixtures.find(([f]) => f === "state.json")?.[1].body);
+    const state = State.parse(addLinks("GET /api/state", fixtures.find(([f]) => f === "state.json")?.[1].body, bare()));
     const panels = Object.values(state.providers).flat();
     expect(panels.length).toBeGreaterThan(0);
     for (const p of panels) RepoProvider.parse(p);
@@ -80,7 +83,7 @@ describe("the schemas refuse what the hub never sends", () => {
 
   it("a renamed field", () => {
     const { now, ...rest } = state;
-    expect(State.safeParse({ ...rest, time: now }).success).toBe(false);
+    expect(State.safeParse(addLinks("GET /api/state", { ...rest, time: now }, bare())).success).toBe(false);
   });
 
   it("an unknown route", () => {
@@ -90,7 +93,7 @@ describe("the schemas refuse what the hub never sends", () => {
   });
 
   it("types follow the routes", () => {
-    const stale: RouteAnswer<"POST /api/queue/set", 409> = { ok: false, stale: true, queue: State.parse(state).queue };
+    const stale: RouteAnswer<"POST /api/queue/set", 409> = { ok: false, stale: true, queue: State.parse(addLinks("GET /api/state", state, bare())).queue };
     expect(stale.stale).toBe(true);
   });
 });

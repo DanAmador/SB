@@ -2,8 +2,7 @@
 import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import type { Queue, RouteAnswer, RouteBody, State, TicketAction } from "@sb-hub/contract";
 import { QueueStale } from "@sb-hub/contract";
-import { get, getText, post, ticketPath } from "./api.ts";
-import { selfChecksOf } from "./board.ts";
+import { get, post, ticketPath } from "./api.ts";
 
 export const STATE_MS = 2000;
 export const TICKETS_MS = 15000;
@@ -18,13 +17,6 @@ export const useTicketDetail = (key: string | null) =>
     queryFn: () => get("GET /api/ticket", { key: key ?? "" }),
     enabled: key !== null && /#\d+$/.test(key),
     refetchInterval: TICKETS_MS,
-  });
-export const useSelfChecks = (key: string, enabled: boolean) =>
-  useQuery({
-    queryKey: ["self", key],
-    queryFn: async () => selfChecksOf(await getText("GET /api/item/report", key)) || "none reported",
-    enabled,
-    staleTime: 60_000,
   });
 
 /** The outcome of a write, in the words the page shows. */

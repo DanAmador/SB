@@ -8,9 +8,7 @@ import {
   dayStart,
   endedToday,
   endsAt,
-  mapNote,
   queueView,
-  runFiles,
   runRows,
   filterOptions,
   plainReason,
@@ -21,13 +19,13 @@ import {
   type Find,
   splitAgents,
   ticketIndex,
-  vaultUri,
   waitsFor,
   withBlockers,
 } from "./board.ts";
 import { readLink, writeLink } from "./link.ts";
 
 const NOW = 1_800_000_000;
+const NO_LINKS = { ticket: null, map: null, board: null, report: null, log: null };
 
 const agent = (id: string, more: Partial<AgentRow> = {}): AgentRow => ({ agent: id, at: NOW - 10, state: "working", ...more });
 const question = (more: Partial<Question> = {}): Question => ({
@@ -42,7 +40,7 @@ const question = (more: Partial<Question> = {}): Question => ({
   ...more,
 });
 const item = (key: string, state: QueueItem["state"], more: Partial<QueueItem> = {}): QueueItem =>
-  ({ key, kind: "ticket", agent: null, state, note: "", commit: null, tries: 0, started: null, ended: null, ...more }) as QueueItem;
+  ({ key, kind: "ticket", agent: null, state, note: "", commit: null, tries: 0, started: null, ended: null, links: NO_LINKS, ...more }) as QueueItem;
 const ticket = (map: string, num: number, more: Partial<TicketRow> = {}): TicketRow => ({
   map,
   num,
@@ -68,6 +66,7 @@ const ticket = (map: string, num: number, more: Partial<TicketRow> = {}): Ticket
   queued: false,
   state: "ready",
   reason: "ready",
+  links: NO_LINKS,
   ...more,
 });
 
@@ -217,17 +216,6 @@ describe("failure reasons", () => {
     );
     expect(r("blocked: after The new board", "skipped")).toBe("waited on “The new board”");
     expect(r("", "failed")).toBe("no reason recorded");
-  });
-});
-
-describe("the vault", () => {
-  it("links a file the way sbmap uri does, and finds a ticket's map and a run's report and log", () => {
-    expect(vaultUri("/V/Second Brain/a (b)/030 It's done.md")).toBe("obsidian://open?path=%2FV%2FSecond%20Brain%2Fa%20%28b%29%2F030%20It%27s%20done.md");
-    expect(vaultUri("relative.md")).toBeNull();
-    expect(mapNote("/V/wayfinder/sb/hub/issues/030 X.md")).toBe("/V/wayfinder/sb/hub/map.md");
-    expect(mapNote("/V/wayfinder/sb/hub/issues/done/030 X.md")).toBe("/V/wayfinder/sb/hub/map.md");
-    expect(runFiles(item("sb/hub#30", "done", { run: "/V/runs/r", log: "/V/runs/r/30.log" }))).toEqual({ report: "/V/runs/r/30.md", log: "/V/runs/r/30.log" });
-    expect(runFiles(item("sb/hub#30", "queued"))).toEqual({ report: null, log: null });
   });
 });
 

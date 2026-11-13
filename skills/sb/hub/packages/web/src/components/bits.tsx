@@ -5,6 +5,7 @@ import {
   IconChevronRight,
   IconCircleCheck,
   IconHelpCircle,
+  IconLayoutSidebarRight,
   IconLoader2,
   IconMessage,
   IconNotebook,
@@ -15,10 +16,10 @@ import {
   type Icon,
 } from "@tabler/icons-react";
 import type * as React from "react";
-import type { CheckRun, QueueItem } from "@sb-hub/contract";
-import { itemUrl, mediaUrl } from "@/lib/api.ts";
-import { plural, runFiles, vaultUri } from "@/lib/board.ts";
-import { useSelfChecks } from "@/lib/hub.ts";
+import type { CheckRun, Links, QueueItem } from "@sb-hub/contract";
+import { mediaUrl } from "@/lib/api.ts";
+import { plural } from "@/lib/board.ts";
+import { setLink } from "@/lib/link.ts";
 import { cn } from "@/lib/utils";
 
 type Tone = "brand" | "ok" | "warn" | "bad" | "muted";
@@ -128,22 +129,6 @@ export function Checks({ checks }: { checks: readonly CheckRun[] }): React.JSX.E
   );
 }
 
-/** The worker's own self-checks, read from its report when opened. */
-export function SelfChecks({ item }: { item: QueueItem }): React.JSX.Element | null {
-  if (item.kind !== "ticket" || item.run === undefined) return null;
-  return (
-    <Fold summary={<span className="text-xs text-muted-foreground">Self-checks</span>}>
-      <SelfChecksBody itemKey={item.key} />
-    </Fold>
-  );
-}
-function SelfChecksBody({ itemKey }: { itemKey: string }): React.JSX.Element {
-  const q = useSelfChecks(itemKey, true);
-  if (q.isPending) return <p className="pl-5 text-xs text-muted-foreground">Reading the report…</p>;
-  if (q.isError) return <p className="pl-5 text-xs text-muted-foreground">No report to read yet.</p>;
-  return <pre className="mt-1 ml-5 max-h-60 overflow-auto rounded-md bg-muted p-2 font-mono text-[11px] whitespace-pre-wrap">{q.data}</pre>;
-}
-
 const MEDIA = /\.(png|jpe?g|gif|webp|mp4|webm)$/i;
 const isClip = (n: string): boolean => /\.(mp4|webm)$/i.test(n);
 
@@ -186,40 +171,63 @@ export function Pictures({ item, full }: { item: QueueItem; full?: boolean }): R
   );
 }
 
-/** A notebook icon that opens a vault file in Obsidian, beside a row whose own click opens the panel. */
-export function VaultLink({ path, what, className }: { path: string | null | undefined; what: string; className?: string }): React.JSX.Element | null {
-  const href = vaultUri(path);
-  if (href === null) return null;
+/**
+ * A ticket's title: it opens the ticket in Obsidian (the hub renders no ticket text), and a small button beside it opens the
+ * panel (digest and actions). With no note to open, the title opens the panel itself. `stretch` makes the whole row the link.
+ */
+export function TicketTitle({ itemKey, links, className, stretch, children }: { itemKey: string; links: Links | undefined; className?: string; stretch?: boolean; children: React.ReactNode }): React.JSX.Element {
+  const href = links?.ticket ?? null;
+  const open = (): void => {
+    setLink({ t: itemKey });
+  };
+  const cls = cn("min-w-0 text-left text-sm font-medium hover:underline focus-visible:underline focus-visible:outline-none", stretch === true && "after:absolute after:inset-0 after:content-['']", className);
   return (
-    <a
-      href={href}
-      aria-label={`Open ${what} in Obsidian`}
-      title={`Open ${what} in Obsidian`}
-      className={cn(
-        "inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-        className,
+    <>
+      {href === null ? (
+        <button type="button" onClick={open} className={cls}>
+          {children}
+        </button>
+      ) : (
+        <a href={href} title="Open in Obsidian" className={cls}>
+          {children}
+        </a>
       )}
-      onClick={(ev) => {
-        ev.stopPropagation();
-      }}
-    >
-      <IconNotebook className="size-4" aria-hidden />
+      {href !== null && (
+        <button
+          type="button"
+          aria-label="Show details"
+          title="Show details and actions"
+          onClick={open}
+          className="relative z-10 -my-1 inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+        >
+          <IconLayoutSidebarRight className="size-4" aria-hidden />
+        </button>
+      )}
+    </>
+  );
+}
+
+/** A map's name, opening its map note in Obsidian when it has one. */
+export function MapName({ links, name, title }: { links: Links | undefined; name: string; title?: string }): React.JSX.Element {
+  const href = links?.map ?? null;
+  if (href === null) return <span title={title}>{name}</span>;
+  return (
+    <a href={href} title={title === undefined ? "Open the map in Obsidian" : `${title} · open the map in Obsidian`} className="relative z-10 underline-offset-2 hover:underline">
+      {name}
     </a>
   );
 }
 
-/** The worker's report and log: in Obsidian when they are vault files, else as the hub serves them. */
+/** The worker's report and log, which open in Obsidian: a link is there only when the note is. */
 export function FileLinks({ item }: { item: QueueItem }): React.JSX.Element | null {
-  const f = runFiles(item);
-  const links: [string, string][] = [];
-  if (f.report !== null) links.push(["Report", vaultUri(f.report) ?? itemUrl("report", item.key)]);
-  if (f.log !== null) links.push(["Log", vaultUri(f.log) ?? itemUrl("log", item.key)]);
-  if (links.length === 0) return null;
+  const found: [string, string | null][] = [["Report", item.links.report], ["Log", item.links.log]];
+  const shown = found.filter((x): x is [string, string] => x[1] !== null);
+  if (shown.length === 0) return null;
   return (
-    <div className="flex flex-wrap gap-3 text-xs">
-      {links.map(([word, href]) => (
-        <a key={word} className="inline-flex items-center gap-1 text-brand underline-offset-2 hover:underline" href={href} {...(href.startsWith("obsidian:") ? {} : { target: "_blank", rel: "noopener noreferrer" })}>
-          {href.startsWith("obsidian:") && <IconNotebook className="size-3.5" aria-hidden />}
+    <div className="relative z-10 flex flex-wrap gap-3 text-xs">
+      {shown.map(([word, href]) => (
+        <a key={word} className="inline-flex items-center gap-1 text-brand underline-offset-2 hover:underline" href={href} title={`Open the ${word.toLowerCase()} in Obsidian`}>
+          <IconNotebook className="size-3.5" aria-hidden />
           {word}
         </a>
       ))}

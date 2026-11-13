@@ -2,6 +2,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { serveStatic } from "@hono/node-server/serve-static";
+import { addLinks, routeOf, type LinkContext } from "@sb-hub/contract";
 import { Hono, type Context } from "hono";
 import { checkAnswer, type Verdict } from "./check.ts";
 import type { Reply, Upstream } from "./upstream.ts";
@@ -12,6 +13,8 @@ export interface AppOptions {
   readonly upstream: Upstream;
   /** packages/web/dist. */
   readonly webDir: string;
+  /** The vault, for the obsidian:// links added to ticket rows and queue items. */
+  readonly links: LinkContext;
   /** Where a mismatch with the contract is written. */
   readonly log: (line: string) => void;
 }
@@ -40,6 +43,18 @@ export function createApp(o: AppOptions): Hono {
     return undefined;
   });
 
+  /** The reply with `links` added to its ticket rows and queue items; an answer that is not JSON is left to the check. */
+  function withLinks(method: string, path: string, reply: Reply): Reply {
+    const route = routeOf(method, path);
+    if (route === undefined || !reply.contentType.startsWith("application/json")) return reply;
+    try {
+      const body = addLinks(route, JSON.parse(reply.body.toString("utf8")) as unknown, o.links);
+      return { ...reply, body: Buffer.from(JSON.stringify(body)) };
+    } catch {
+      return reply;
+    }
+  }
+
   /** The Python hub's answer to `path` (path and query), passed on only when the contract allows it. */
   async function forward(c: Context, path: string, body?: Buffer, check = true): Promise<Response> {
     const headers: Record<string, string> = {};
@@ -53,6 +68,7 @@ export function createApp(o: AppOptions): Hono {
       return error(503, "the hub is starting or its Python half is down");
     }
     if (check) {
+      reply = withLinks(c.req.method, path, reply);
       const v: Verdict = checkAnswer(c.req.method, path, reply);
       if (!v.ok) {
         o.log(`contract mismatch: ${v.route} answered ${String(reply.status)}: ${v.problem}`);

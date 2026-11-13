@@ -7,11 +7,10 @@ import type * as React from "react";
 import type { QueueItem, TicketRow } from "@sb-hub/contract";
 import { Button } from "@/components/ui/button";
 import { ago, canTickAgain, folder, hm, itemProject, itemTitle, mapTitle, plainReason, plural, projOf, seenKey, tkey, type Waits } from "@/lib/board.ts";
-import { setLink } from "@/lib/link.ts";
 import { cn } from "@/lib/utils";
 import { markSeen } from "@/lib/seen.ts";
 import { QuestionCard } from "./QuestionCard.tsx";
-import { Checks, Empty, FileLinks, Fold, Pictures, SectionTitle, SelfChecks, ToneIcon, VaultLink } from "./bits.tsx";
+import { Checks, Empty, FileLinks, Fold, MapName, Pictures, SectionTitle, TicketTitle, ToneIcon } from "./bits.tsx";
 import { useBoard } from "./context.tsx";
 
 export function WaitsView({ w }: { w: Waits }): React.JSX.Element {
@@ -139,16 +138,9 @@ function RunLine({ i, cleared }: { i: QueueItem; cleared?: boolean }): React.JSX
         <div className="flex items-start gap-2">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1">
-              <button
-                type="button"
-                className="line-clamp-2 min-w-0 text-left text-sm font-medium hover:underline"
-                onClick={() => {
-                  setLink({ t: i.key });
-                }}
-              >
+              <TicketTitle itemKey={i.key} links={i.links} className="line-clamp-2">
                 {title}
-              </button>
-              <VaultLink path={t?.file} what="the ticket" className="-my-1" />
+              </TicketTitle>
             </div>
             <p className="text-xs text-muted-foreground">
               {itemProject(i, t)}
@@ -212,7 +204,6 @@ function RunLine({ i, cleared }: { i: QueueItem; cleared?: boolean }): React.JSX
             <pre className="mt-1 max-h-60 overflow-auto rounded-md bg-muted p-2 font-mono text-[11px] whitespace-pre-wrap">{i.note}</pre>
           </Fold>
         )}
-        {!old && <SelfChecks item={i} />}
       </div>
     </li>
   );
@@ -223,18 +214,15 @@ function DecideLine({ t }: { t: TicketRow }): React.JSX.Element {
     <li className="flex items-center gap-3 px-4 py-2.5">
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1">
-          <button
-            type="button"
-            className="min-w-0 truncate text-left text-sm font-medium hover:underline"
-            onClick={() => {
-              setLink({ t: tkey(t) });
-            }}
-          >
+          <TicketTitle itemKey={tkey(t)} links={t.links} className="truncate">
             {t.title}
-          </button>
-          <VaultLink path={t.file} what="the ticket" className="-my-1" />
+          </TicketTitle>
         </div>
-        <p className="truncate text-xs text-muted-foreground" title={mapTitle(t)}>{`${projOf(t.map)} · ${t.map.split("/").pop() ?? ""} · ${t.type}`}</p>
+        <p className="truncate text-xs text-muted-foreground">
+          {`${projOf(t.map)} · `}
+          <MapName links={t.links} name={t.map.split("/").pop() ?? ""} title={mapTitle(t)} />
+          {` · ${t.type}`}
+        </p>
       </div>
     </li>
   );

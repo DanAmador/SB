@@ -3,18 +3,22 @@
  * against the contract before it leaves. Run with `node e2e/fixture-server.ts` (Node strips the types).
  */
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { QueueMoveBody, QueueSetBody, SendBody, State, Tickets, type Message, type QueueItem, type TicketRow } from "@sb-hub/contract";
+import { QueueMoveBody, QueueSetBody, SendBody, State, Tickets, addLinks, type LinkContext, type Message, type QueueItem, type TicketRow } from "@sb-hub/contract";
+
+/** Every file the fixtures name exists; the server's own vault lookup is covered by the server's tests. */
+const ctx: LinkContext = { exists: () => true, real: (p) => p, findTicket: (map, num) => `/vault/${map}/issues/${String(num)}.md`, runs: {} };
 
 const PORT = Number(process.env.FIXTURE_PORT ?? "8799");
 const now = (): number => Date.now() / 1000;
 
-const ticket = (num: number, title: string, more: Partial<TicketRow> = {}): TicketRow => ({
+type Raw<T> = Omit<T, "links">;
+const ticket = (num: number, title: string, more: Partial<Raw<TicketRow>> = {}): Raw<TicketRow> => ({
   map: "demo/board", num, title, why: "So the board can be tested.", type: "task", status: "open", priority: null,
   blocked_by: [], blocked_by_open: [], paths: ["src/"], tier: "sonnet", has_done_when: true, done_when: "It shows.",
   question: "", out: "", checks: ["pnpm test"], repo: "/demo", file: `/vault/demo/board/issues/${String(num)}.md`,
   map_title: "The demo board", map_order: 1, claimed_by: null, queued: false, state: "ready", reason: "ready", ...more,
 });
-const tickets: TicketRow[] = Tickets.parse([
+const tickets = (): TicketRow[] => Tickets.parse(addLinks("GET /api/tickets", [
   ticket(1, "Draw the header"),
   ticket(2, "Drag a ticket into the queue"),
   ticket(3, "Show the queue in order"),
@@ -22,9 +26,9 @@ const tickets: TicketRow[] = Tickets.parse([
   ticket(5, "Run the board against the real hub", { status: "claimed", state: "claimed", reason: "claimed by hub main" }),
   ticket(6, "Fix the sheet's focus", { status: "claimed", state: "claimed", reason: "claimed by hub main" }),
   ticket(8, "Read the accounts' usage", { status: "claimed", state: "claimed", reason: "claimed by hub main" }),
-]);
+], ctx));
 
-const item = (key: string, state: QueueItem["state"]): QueueItem => ({
+const item = (key: string, state: QueueItem["state"]): Raw<QueueItem> => ({
   key, kind: "ticket", agent: null, state, note: "", commit: null, tries: 0, started: state === "running" ? now() - 300 : null, ended: null,
 });
 const RUN = "/vault/runs/2026-11-13-board";
@@ -41,7 +45,7 @@ const queue = {
       checks: [{ cmd: "pnpm test", code: 0, secs: 12, tail: "" }],
     },
     item("demo/board#3", "queued"),
-  ] as QueueItem[],
+  ] as Raw<QueueItem>[],
 };
 
 const messages: Record<string, Message> = {};
@@ -57,7 +61,7 @@ function state(): State {
     questions: { q1: { agent: "s-1", q: "Ship the new board tonight?", options: ["Yes", "Not yet"], default: "Yes", asked: now() - 10, deadline: now() + 600, answer: null, by: null } },
     installed: { main: { kind: "claude", dir: null, model: null, limited_until: null } },
     now: now(),
-    queue,
+    queue: (addLinks("GET /api/state", { queue }, ctx) as { queue: unknown }).queue,
   });
 }
 
@@ -75,18 +79,18 @@ createServer((req, res) => {
   void (async () => {
     const path = (req.url ?? "").split("?")[0];
     if (req.method === "GET" && path === "/api/state") { send(res, 200, state()); return; }
-    if (req.method === "GET" && path === "/api/tickets") { send(res, 200, tickets.map((t) => ({ ...t, queued: queue.items.some((i) => i.key === `${t.map}#${String(t.num)}`) }))); return; }
+    if (req.method === "GET" && path === "/api/tickets") { send(res, 200, tickets().map((t) => ({ ...t, queued: queue.items.some((i) => i.key === `${t.map}#${String(t.num)}`) }))); return; }
     if (req.method === "GET" && path === "/api/ticket") {
       const key = new URL(req.url ?? "", "http://x").searchParams.get("key") ?? "";
       { send(res, 200, { key, title: key, file: "/vault/x.md", open: true, comments: [], map_checks: ["pnpm test"], trail: [], uri: "obsidian://open?path=x", map_uri: "obsidian://open?path=m" }); return; }
     }
     if (req.method === "POST" && path === "/api/queue/set") {
       const b = QueueSetBody.parse(await body(req));
-      if (b.version !== null && b.version !== queue.version) { send(res, 409, { ok: false, stale: true, queue }); return; }
+      if (b.version !== null && b.version !== queue.version) { send(res, 409, addLinks("POST /api/queue/set", { ok: false, stale: true, queue }, ctx)); return; }
       const others = queue.items.filter((i) => i.state !== "queued");
       queue.items = [...others, ...b.keys.map((k) => queue.items.find((i) => i.key === k && i.state === "queued") ?? item(k, "queued"))];
       queue.version += 1;
-      { send(res, 200, { ok: true, queue }); return; }
+      { send(res, 200, addLinks("POST /api/queue/set", { ok: true, queue }, ctx)); return; }
     }
     if (req.method === "POST" && path === "/api/queue/move") {
       const b = QueueMoveBody.parse(await body(req));
@@ -96,7 +100,7 @@ createServer((req, res) => {
       if (moved) queued.splice(b.to, 0, moved);
       queue.items = [...queue.items.filter((i) => i.state !== "queued"), ...queued];
       queue.version += 1;
-      { send(res, 200, { ok: true, queue }); return; }
+      { send(res, 200, addLinks("POST /api/queue/set", { ok: true, queue }, ctx)); return; }
     }
     if (req.method === "POST" && path === "/api/send") {
       const b = SendBody.parse(await body(req));

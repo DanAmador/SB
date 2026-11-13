@@ -437,26 +437,6 @@ export function plainReason(i: Pick<QueueItem, "note" | "state">): string {
   return first.length > 140 ? `${first.slice(0, 139)}…` : first;
 }
 
-// ---- the vault ----
-
-/** The link Obsidian opens a vault file with, built the way `sbmap uri` builds it: the absolute path, fully encoded. */
-export function vaultUri(path: string | null | undefined): string | null {
-  if (!path?.startsWith("/")) return null;
-  const enc = encodeURIComponent(path).replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
-  return `obsidian://open?path=${enc}`;
-}
-/** A ticket file's map: wayfinder/<repo>/<effort>/issues/[done/]NNN.md -> wayfinder/<repo>/<effort>/map.md. */
-export function mapNote(ticketFile: string): string | null {
-  const m = /^(.*)\/issues\/(?:done\/)?[^/]+$/.exec(ticketFile);
-  return m ? `${m[1] ?? ""}/map.md` : null;
-}
-/** A run's report and log in the vault: the ticket's report is <run folder>/<number>.md, a job's is its result. */
-export function runFiles(i: QueueItem): { report: string | null; log: string | null } {
-  const num = /#(\d+)$/.exec(i.key)?.[1];
-  const report = i.kind === "job" ? (i.result ?? null) : i.run !== undefined && num !== undefined ? `${i.run}/${num}.md` : null;
-  return { report, log: i.log ?? null };
-}
-
 // ---- messages ----
 
 /** Messages queued for an id and not delivered yet. */
@@ -493,19 +473,4 @@ export function nextClock(v: string, now: number): number | null {
   d.setHours(hh, mm, 0, 0);
   if (d.getTime() / 1000 <= now) d.setDate(d.getDate() + 1);
   return d.getTime() / 1000;
-}
-
-/** The worker's own self-checks, from its report's "## Self-checks" section. */
-export function selfChecksOf(report: string): string {
-  const out: string[] = [];
-  let on = false;
-  for (const l of report.split("\n")) {
-    if (!on) {
-      on = /^#{2,3} (Self-checks|The worker's self-checks)/.test(l);
-      continue;
-    }
-    if (/^#{1,3} /.test(l)) break;
-    out.push(l);
-  }
-  return out.join("\n").trim();
 }

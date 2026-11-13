@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { agentLabel, agentOf, dur, folder } from "@/lib/board.ts";
 import { say } from "@/lib/notice.ts";
 import { cn } from "@/lib/utils";
-import { ToneIcon, VaultLink } from "./bits.tsx";
+import { ToneIcon } from "./bits.tsx";
+import { IconNotebook } from "@tabler/icons-react";
 import { useBoard } from "./context.tsx";
 
 /** The clock, once a second: question countdowns move between polls. */
@@ -49,7 +50,11 @@ export function QuestionCard({ id, q }: { id: string; q: Question }): React.JSX.
         <ToneIcon icon={IconHelpCircle} tone="brand" label="question" />
         <span className="truncate font-medium text-foreground">{asker ? agentLabel(asker) : q.agent.slice(0, 6)}</span>
         {asker?.project !== undefined && <span className="truncate">· {folder(asker.project)}</span>}
-        <VaultLink path={ticket?.file} what="its ticket" className="-my-1.5 size-6" />
+        {ticket?.links.ticket != null && (
+          <a href={ticket.links.ticket} aria-label="Open its ticket in Obsidian" title="Open its ticket in Obsidian" className="-my-1.5 inline-flex size-6 shrink-0 items-center justify-center rounded-md hover:bg-accent hover:text-foreground">
+            <IconNotebook className="size-4" aria-hidden />
+          </a>
+        )}
         <span className="ml-auto flex shrink-0 items-center gap-1">
           {decided ? (
             q.by === "default" ? "default applied" : q.by === "you" ? "you chose" : `chosen by ${q.by ?? ""}`

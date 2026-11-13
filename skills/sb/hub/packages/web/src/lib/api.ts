@@ -45,13 +45,6 @@ export async function get<K extends JsonGet>(route: K, query?: Record<string, st
   return parse(route, r.status, await r.json()) as RouteAnswer<K>;
 }
 
-/** A plain-text GET: a worker's report or log. */
-export async function getText(route: "GET /api/item/report" | "GET /api/item/log", key: string): Promise<string> {
-  const r = await fetch(`${BASE}${pathOf(route)}?key=${encodeURIComponent(key)}`, { cache: "no-store" });
-  if (!r.ok) throw await errorOf(r);
-  return r.text();
-}
-
 /** What a POST answered: its 200 body, or the other answer the route lists for a status it gives (a stale 409). */
 export type PostResult<K extends PostRoute> =
   | { ok: true; data: RouteAnswer<K> }
@@ -75,5 +68,3 @@ export const ticketPath = (action: string): string => `/api/ticket/${action}`;
 
 export const mediaUrl = (key: string, name: string): string =>
   `${BASE}/api/media?key=${encodeURIComponent(key)}&name=${encodeURIComponent(name)}`;
-export const itemUrl = (what: "report" | "log", key: string): string =>
-  `${BASE}/api/item/${what}?key=${encodeURIComponent(key)}`;
