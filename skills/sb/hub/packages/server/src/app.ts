@@ -1,4 +1,6 @@
 /** The hub on its public port: the built board, and every /api route forwarded to the Python hub and checked. */
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono, type Context } from "hono";
 import { checkAnswer, type Verdict } from "./check.ts";
@@ -78,8 +80,11 @@ export function createApp(o: AppOptions): Hono {
   app.get("/classic", (c) => forward(c, "/", undefined, false));
   app.get("/board.js", (c) => forward(c, "/board.js", undefined, false));
 
-  app.use("/*", serveStatic({ root: o.webDir, index: "index.html" }));
-  app.get("/", () => answer(503, "The board is not built yet: run pnpm --dir skills/sb/hub build.\n", "text/plain; charset=utf-8"));
+  // The board is built for /next/ (Vite's base), so it lives there; / sends you to it once it is built.
+  app.get("/next", (c) => c.redirect("/next/"));
+  app.use("/next/*", serveStatic({ root: o.webDir, index: "index.html", rewriteRequestPath: (p) => p.replace(/^\/next/, "") }));
+  app.get("/", (c) => existsSync(join(o.webDir, "index.html")) ? c.redirect("/next/")
+    : answer(503, "The board is not built yet: run pnpm --dir skills/sb/hub build.\n", "text/plain; charset=utf-8"));
   app.all("*", () => error(404, "not found"));
   return app;
 }

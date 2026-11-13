@@ -55,7 +55,7 @@ class TsServerTest(HubCase):
         self.assertEqual((held.returncode, held.stderr.strip()), (1, "held by a"))
         self.assertEqual(self.hub("unlock", "unity", "--by", "a").returncode, 0)
 
-    def test_the_new_board_is_at_the_root_and_the_old_one_at_classic(self):
+    def test_the_root_opens_the_new_board_and_the_old_one_is_at_classic(self):
         get = lambda path: urllib.request.urlopen(f"http://127.0.0.1:{self.port}{path}", timeout=5)
         built = (ROOT / "skills" / "sb" / "hub" / "packages" / "web" / "dist" / "index.html").exists()
         try:

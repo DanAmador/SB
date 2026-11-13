@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -118,11 +118,16 @@ describe("forwarding to the Python hub", () => {
 });
 
 describe("pages", () => {
-  it("serves the built board at /", async () => {
+  it("serves the built board at /next/ and sends / there", async () => {
     const dir = mkdtempSync(join(tmpdir(), "web-"));
     writeFileSync(join(dir, "index.html"), "<!doctype html><title>sb hub</title>");
+    mkdirSync(join(dir, "assets"));
+    writeFileSync(join(dir, "assets", "app.js"), "export {};");
     const { call } = setup(() => json(200, STATE), dir);
-    const r = await call("/");
+    const home = await call("/");
+    expect([home.status, home.headers.get("location")]).toEqual([302, "/next/"]);
+    expect((await call("/next/assets/app.js")).status).toBe(200);
+    const r = await call("/next/");
     expect(r.status).toBe(200);
     expect(r.headers.get("content-type")).toContain("text/html");
     expect(r.headers.get("x-frame-options")).toBe("DENY");
