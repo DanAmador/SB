@@ -32,8 +32,9 @@ Without a running hub, see *No hub* at the end.
    - **Checks** per map from the contract's fast loop: `sbmap mapset <map> checks="cmd; cmd"`. A
      check that fails on today's tree fails every ticket: fix it first as the night's first ticket,
      or leave it out until that ticket lands.
-   - Every pick needs a `Done when` a command can check and `paths` (the verdict refuses commits
-     outside them): `sbmap set <map> <NNN> paths=a,b` from the code it names.
+   - Every pick needs a `Done when` a command can check and `paths` (where the worker starts; it may
+     edit other files it needs, and the verdict names them): `sbmap set <map> <NNN> paths=a,b` from the
+     code it names.
    - `tier=opus` on a ticket judged complex, by [models.md](../reference/models.md), with the
      reason as a comment ("Opus: migrates serialized assets and changes 9 callers").
    - Hours from this repo's commits closest in kind, ~1.5 h each. The pool's pacing decides how many

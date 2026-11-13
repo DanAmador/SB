@@ -25,9 +25,11 @@ the vault. Only the running hub writes the queue (`$SB_HUB_HOME/state.json`); CL
   Sonnet ticket retries once on Opus.
 - **Order**, fixed: after its blockers; then priority S→F; then the ticket that unblocks the most
   queued or available tickets; then map order.
-- **Verdict**, in code: a commit with the `Ticket:` trailer, every commit since the base inside the
-  ticket's paths (tests beside them count: a test-named file in an owned file's folder, or any file in a
-  `test/`, `tests/` or `__tests__/` folder of the package holding them; a test config does not), every check green. A check that fails while the repo holds someone else's uncommitted work runs once more on a
+- **Verdict**, in code: a commit with the `Ticket:` trailer and every check green. The ticket's paths
+  are where the worker starts, not a fence: a change may edit other files it needs, and the verdict
+  names them in the ticket's answer (tests beside owned files are not named). A research ticket that
+  made no commit passes on its written report. Workers test in the shared checkout with the editor or
+  dev server already running, never a second copy. A check that fails while the repo holds someone else's uncommitted work runs once more on a
   clean copy of the commit (a detached worktree, installed `node_modules` linked in), and passes if it passes there;
   a clean folder never pays for this. Then `sbmap resolve`. Anything else stays open with the reason
   as a comment; the commit is left in place; the repo's next ticket still runs.

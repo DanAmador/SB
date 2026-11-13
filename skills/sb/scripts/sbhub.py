@@ -1571,11 +1571,12 @@ class Supervisor:
             passed, reason, sha = False, ran_past(self.limit), None
         else:
             checks = []
-            passed, reason, sha = sbqueue.verdict(t, t["repo"], run["base"], run=_recording(checks))
+            report = Path(run["log"]).parent / "{}.md".format(int(t["num"])) if run.get("log") else None
+            passed, reason, sha = sbqueue.verdict(t, t["repo"], run["base"], run=_recording(checks), report=report)
             self._update(key, checks=checks)
             self._report_checks(t, run, passed, reason, sha, checks)
         if passed:  # a worker that did the work is resolved, whatever it printed afterwards
-            self._resolve(item, run, sha)
+            self._resolve(item, run, sha, reason)
             return
         # a failed run whose own output (not an earlier try's) names a usage limit or a logout is tried again
         if not over and self._stopped(item, run):
@@ -1600,7 +1601,7 @@ class Supervisor:
         except OSError as e:
             print("sb hub queue: report for {}: {}".format(t["map"], e), file=sys.stderr, flush=True)
 
-    def _resolve(self, item, run, sha):
+    def _resolve(self, item, run, sha, reason=""):
         key, t = item["key"], run["t"]
         found, now_t = self._row(key)
         if found and not _hub_holds(now_t):
@@ -1608,12 +1609,22 @@ class Supervisor:
                 "no longer open" if now_t is None else "claimed by " + str(now_t.get("claimed_by"))))
             return
         checks = "; ".join("`{}`".format(c) for c in t["checks"])
-        answer = ("Checked by the sb hub in code: commit {} carries `Ticket: {}/{:03d}`, stays inside the ticket's "
-                  "paths, and every check exited 0 ({n} of {n}): {}. Model: {} on agent {} (try {}). "
-                  "Worker's report: {}/{}.md; its log: {}.").format(
-            sha, t["map"], int(t["num"]), checks, item.get("model"), run["agent"], (item.get("tries") or 0) + 1,
-            Path(run["log"]).parent, int(t["num"]), run["log"], n=len(t["checks"]))
+        tail = "Model: {} on agent {} (try {}). Worker's report: {}/{}.md; its log: {}.".format(
+            item.get("model"), run["agent"], (item.get("tries") or 0) + 1, Path(run["log"]).parent, int(t["num"]),
+            run["log"])
         nnn = "{:03d}".format(int(t["num"]))
+        if not sha:  # research that needed no commit: its findings are the report
+            rc, out, err = self.sbmap("resolve", t["map"], nnn, "--gist", t["title"], "--answer",
+                                      "Checked by the sb hub in code: {}. {}".format(reason, tail))
+            if rc != 0:
+                self._fail(item, run, "the report is written, but sbmap resolve failed: " + (err or out), None)
+                return
+            self.streak = (None, 0)
+            self._end(key, "done", note="resolved: research, findings in the report")
+            return
+        answer = ("Checked by the sb hub in code: commit {} carries `Ticket: {}/{:03d}` and every check exited 0 "
+                  "({n} of {n}): {}. {}{} {}").format(
+            sha, t["map"], int(t["num"]), checks, reason[:1].upper(), reason[1:] + ".", tail, n=len(t["checks"]))
         rc, out, err = self.sbmap("resolve", t["map"], nnn, "--gist", t["title"], "--answer", answer,
                                   "--commit", sha, "--repo-root", t["repo"])
         if rc != 0 and "remote" in err:  # sbmap stamps a commit only in a repo with an origin: name it in the gist

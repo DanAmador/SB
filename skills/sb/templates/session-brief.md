@@ -10,8 +10,10 @@ Read the ticket first: {sbmap} show {map} {num3}
 Why: {why}
 Do: {question}
 Leave alone: {out}
-Files you own: {paths}. Touch no other file, except tests: a test file in the same folder as one of
-yours, or any file in a test/, tests/ or __tests__/ folder of the package that holds them, is yours too.
+Files you own: {paths}. Start there, and change another file when the ticket truly needs it (a caller,
+a registry, a shared type, a test): name each one under `## Files` in your report with why. Do not stop
+only because a file is not on the list.
+Test in this checkout and with the editor or dev server already running for it: never open a second copy.
 
 Done when: {done_when}
 These commands must all exit 0 when you finish:

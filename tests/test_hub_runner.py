@@ -238,16 +238,13 @@ class TicketLoopTest(RunnerCase):
         self.assertIn("A: done, commit " + sha[:9], board)
         self.assertIn("B: done, commit", board)
 
-    def test_a_commit_outside_its_paths_fails_leaves_the_commit_and_the_next_ticket_runs(self):
+    def test_a_commit_outside_its_paths_passes_and_names_the_files(self):
         self.sb("set", "repo/one", "001", "tier=opus", "--no-sync")
         self.modes = {"repo/one#1": "stray", "repo/one#2": "hang"}
         self.resume()
-        self.until(lambda: self.state_of("repo/one#1") == "failed")
-        item = self.items()["repo/one#1"]
-        self.assertIn("stray.txt", item["note"])
-        self.assertEqual(self.open_tickets()[1]["status"], "open")
-        self.assertIn("stray.txt", self.sb("show", "repo/one", "001").stdout + self.ticket_text(1))
-        self.assertIn("Ticket: repo/one/001", git(self.repos["repo/one"], "log", "--format=%B"))
+        self.until(lambda: self.state_of("repo/one#1") == "done")
+        done = next((self.vault / "wayfinder").rglob("done/001*.md")).read_text()
+        self.assertIn("stray.txt", done)
         self.until(lambda: self.state_of("repo/one#2") == "running")
 
     def test_a_failing_check_leaves_the_ticket_open_with_its_commit_in_place(self):

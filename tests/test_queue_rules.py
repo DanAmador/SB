@@ -164,18 +164,18 @@ class VerdictTest(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("Ticket: r/m/005", why)
 
-    def test_outside_paths(self):
+    def test_files_outside_paths_pass_and_are_named(self):
         self.commit(["src/a.py", "other/b.py"])
-        ok, why, sha = verdict(self.t(), self.repo, self.base)
-        self.assertFalse(ok)
+        ok, why, sha = verdict(self.t(checks=["true"]), self.repo, self.base)
+        self.assertTrue(ok, why)
         self.assertIn("other/b.py", why)
         self.assertNotIn("src/a.py", why)
 
-    def test_an_untrailered_commit_outside_paths_before_a_good_one_fails(self):
+    def test_an_untrailered_commit_outside_paths_before_a_good_one_is_named(self):
         self.commit(["other/sneaky.py"], trailer=None)
         sha = self.commit(["src/a.py"])
         ok, why, got = verdict(self.t(checks=["true"]), self.repo, self.base)
-        self.assertEqual((ok, got), (False, sha))
+        self.assertEqual((ok, got), (True, sha))
         self.assertIn("other/sneaky.py", why)
         self.assertNotIn("src/a.py", why)
 
@@ -207,6 +207,15 @@ class VerdictTest(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("sleep 99", why)
 
+    def test_research_with_no_commit_passes_on_its_report(self):
+        report = self.repo / "report.md"
+        self.assertFalse(verdict(T(5, type="research", checks=["true"]), self.repo, self.base, report=report)[0])
+        report.write_text("findings")
+        ok, why, sha = verdict(T(5, type="research", checks=["true"]), self.repo, self.base, report=report)
+        self.assertEqual((ok, sha), (True, None))
+        self.assertIn("research", why)
+        self.assertFalse(verdict(T(5, checks=["true"]), self.repo, self.base, report=report)[0])
+
     def test_pass(self):
         sha = self.commit(["src/a.py"])
         self.assertEqual(verdict(self.t(checks=["true"]), self.repo, self.base)[::2], (True, sha))
@@ -231,11 +240,11 @@ class VerdictTest(unittest.TestCase):
         ok, why, _ = self.owned(["pkg/src/shared/host"], ["pkg/src/shared/host/a.ts", "pkg/src/shared/a.test.ts"])
         self.assertTrue(ok, why)
 
-    def test_a_test_elsewhere_and_a_test_config_stay_outside(self):
+    def test_a_test_elsewhere_and_a_test_config_are_named_as_outside(self):
         ok, why, _ = self.owned(["pkg/src/host/plugin.ts"],
                                 ["pkg/src/host/plugin.ts", "other/src/x.test.ts", "pkg/src/ui/y.test.ts",
                                  "pkg/vitest.config.mts"])
-        self.assertFalse(ok)
+        self.assertTrue(ok, why)
         for f in ("other/src/x.test.ts", "pkg/src/ui/y.test.ts", "pkg/vitest.config.mts"):
             self.assertIn(f, why)
         self.assertNotIn("plugin.ts", why)

@@ -152,9 +152,10 @@ def _owned_test(f, paths):
     return False
 
 
-def verdict(t, repo, base_sha, run=subprocess.run):
-    """(passed, reason, sha): a trailered commit after base_sha, every file changed since base_sha up to it
-    inside the ticket's paths (trailered or not), every check green."""
+def verdict(t, repo, base_sha, run=subprocess.run, report=None):
+    """(passed, reason, sha): a trailered commit after base_sha and every check green. Files changed outside the
+    ticket's paths are allowed (a change may need them) and named in the reason. A research ticket that made no
+    commit passes on its written report alone (`report`, the worker's report file)."""
     num = int(t["num"])
     wanted = {f"Ticket: {t['map']}/{num}", f"Ticket: {t['map']}/{num:03d}"}
     r = run(["git", "-C", str(repo), "log", f"{base_sha}..HEAD", "--format=%H%x00%B%x01"],
@@ -163,20 +164,24 @@ def verdict(t, repo, base_sha, run=subprocess.run):
         return False, f"cannot read the commits after {base_sha[:12]}: {(r.stderr or '').strip()[:200]}", None
     log = r.stdout
     entries = [e.strip("\n").split("\x00", 1) for e in log.split("\x01") if e.strip()]
+    sha = next((s.strip() for s, body in entries if wanted & {l.strip() for l in body.splitlines()}), None)
+    if not sha and t.get("type") == "research" and report and Path(report).is_file() and Path(report).stat().st_size:
+        return True, "research: no commit needed, the findings are in the worker's report", None
     if not entries:
         return False, f"no commit after {base_sha[:9]}", None
-    sha = next((s.strip() for s, body in entries if wanted & {l.strip() for l in body.splitlines()}), None)
     if not sha:
         return False, f"no commit carries the trailer Ticket: {t['map']}/{num:03d}", None
+    outside = ""
     if t["paths"]:
         files = run(["git", "-C", str(repo), "diff", "--name-only", f"{base_sha}..{sha}"],
                     capture_output=True, text=True).stdout.split("\n")
         stray = [f for f in files if f and not _under(f, t["paths"]) and not _owned_test(f, t["paths"])]
         if stray:
-            return False, "commits since the start touch files outside the ticket's paths: " + ", ".join(stray), sha
+            outside = "; it also changed files outside the ticket's list: " + ", ".join(stray[:10]) + (
+                f" and {len(stray) - 10} more" if len(stray) > 10 else "")
     failed = _run_checks(t["checks"], repo, run)
     if not failed:
-        return True, "commit, paths and checks all good", sha
+        return True, "commit and checks all good" + outside, sha
     # Others' uncommitted work in the shared folder can break a check the commit itself passes: only then, try the
     # checks once more on a clean copy of the commit. A clean folder never pays for this.
     dirty = run(["git", "-C", str(repo), "status", "--porcelain", "--untracked-files=no"],
@@ -194,8 +199,8 @@ def verdict(t, repo, base_sha, run=subprocess.run):
     if again:
         return False, again, sha
     shown = ", ".join(dirty[:5]) + (f" and {len(dirty) - 5} more" if len(dirty) > 5 else "")
-    return True, ("commit, paths and checks all good; the checks passed on a clean copy of the commit, because "
-                  f"other uncommitted work in the shared folder breaks them there ({shown})"), sha
+    return True, ("commit and checks all good; the checks passed on a clean copy of the commit, because "
+                  f"other uncommitted work in the shared folder breaks them there ({shown})" + outside), sha
 
 
 def _run_checks(checks, cwd, run):
