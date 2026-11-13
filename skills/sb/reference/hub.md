@@ -58,6 +58,37 @@ Commands (`scripts/sbhub.py`):
 In chat: `sb_queue(add=["<map>#<num>"], remove=[…])` returns the queue as a few lines;
 `sb_board`'s text carries `queue: N queued, M running, ends about HH:MM`.
 
+## The board and the phone page
+
+The hub page (`http://127.0.0.1:8765/`) is a kanban board that redraws itself every few seconds, keeping
+scroll, the open panel and half-typed text. Above it: the counts, one chip per account (5-hour use, reset
+time, sign-in state), one chip per project (its repo, Unity and provider widgets open in the side panel), and
+filters (project, map, text) kept in the page link. Columns:
+
+| column | holds |
+|---|---|
+| Needs you | open questions, sessions that need you, signed-out accounts, grilling and architecture tickets |
+| Ready | what can be queued, by project then map; the rest of the open tickets folded underneath |
+| Queued | tonight's order: drag to reorder, drag back to Ready to untick (or a card's menu) |
+| Running | queue workers and the sessions you run by hand ("yours"), each with its latest step |
+| Done | every finished item of the last 7 days, newest first: commit, checks, self-checks, report and log |
+| Failed | failed and skipped items with the reason; Tick again queues one afresh |
+
+Dragging a Ready card into Queued queues it (and what it waits on). Clear finished takes done, failed and
+skipped items off the list (they stay in the vault and fold under each column); Dismiss and Clear quiet
+sessions take rows off the board without stopping anything. A card opens a side panel: why, done when, paths,
+checks, comments, its map's handoff, checkpoint and newest run board, Open in Obsidian links (`sbmap uri`), and
+the actions Done, Drop, Release, Comment, Tier and the map's Checks, each confirmed and each run through
+`sbmap` (`GET /api/ticket?key=`, `POST /api/ticket/<action>`); a ticket a queue worker is running refuses them,
+and a failed `sbmap` shows its own message.
+
+**Phone page.** `python3 scripts/sbhub_lan.py serve` (port 8766, every interface; the `sb-hub-lan` entry in
+`.claude/launch.json`) serves the same page read-only to a phone on the WiFi: `sbhub_lan.py url` prints its
+address, `http://<the Mac's WiFi address>:8766/v/<token>/`. The token (32 characters, `$SB_HUB_HOME/lan-token`)
+is in every path; without it every path answers an empty 404. It forwards reads under `/api/` to the hub and
+only three writes, all display state: clear finished, dismiss, clear quiet sessions. Every other write answers
+403, and the page hides its controls.
+
 ## Chat widgets (MCP)
 
 When the `sbhub` MCP server is connected (`./install.sh --hub`):

@@ -507,6 +507,94 @@ class Hub:
             raise KeyError(key)
         return path, _tail(path, 0, LOG_SERVED) if what == "log" else Path(path).read_text(encoding="utf-8", errors="replace")
 
+    # ---- the page's side panel: a ticket's details and actions; the vault is written only through sbmap ----
+
+    def _ticket_file(self, key):
+        """(map, num, the open row or None, the ticket's file or None) of a well-formed key; KeyError otherwise."""
+        m = re.fullmatch(r"([\w.-]+(?:/[\w.-]+)*)#(\d+)", str(key))
+        if not m or any(p in ("", ".", "..") for p in m.group(1).split("/")):
+            raise KeyError(key)
+        name, num = m.group(1), int(m.group(2))
+        row = next((t for t in self._open_tickets() or [] if sbqueue.key(t) == "{}#{}".format(name, num)), None)
+        if row and row.get("file") and os.path.isfile(row["file"]):
+            return name, num, row, Path(row["file"])
+        issues = _vault() / "wayfinder" / name / "issues"  # resolved and dropped ones live in issues/done
+        found = sorted(p for d in (issues, issues / "done") for p in d.glob("{:03d}[ -]*.md".format(num)))
+        return name, num, row, (found[0] if found else None)
+
+    def ticket_detail(self, key):
+        """What the side panel shows beyond the ticket row: its comments, its map's checks, the map's handoff,
+        checkpoint and newest run board (age and first line), and obsidian:// links built by `sbmap uri`."""
+        name, num, row, path = self._ticket_file(key)
+        if path is None:
+            raise KeyError(key)
+        text = path.read_text(encoding="utf-8", errors="replace")
+        rc, out, _ = sbmap_call("info", name)
+        checks = next((l[len("checks: "):].split("; ") for l in out.splitlines() if l.startswith("checks: ")), [])
+        rc, out, _ = sbmap_call("status", name)
+        line = next((l for l in out.splitlines() if l.startswith("handoff/checkpoint: ")), "")
+        files = [_vault() / f for f in line[len("handoff/checkpoint: "):].split(", ") if f and f != "none"]
+        own = [f for f in files if f.name in ("handoff.md", "checkpoint.md")]
+        runs = [f for f in files if f not in own][:1]  # sbmap lists run boards newest first
+        trail = []
+        for f in own + runs:
+            if f.is_file():
+                trail.append({"name": f.name, "path": str(f), "at": f.stat().st_mtime, "first": _first_words(f),
+                              "uri": obsidian_uri(f)})
+        comments = re.search(r"^## Comments[^\n]*\n(.*?)(?=^## |\Z)", text, re.M | re.S)
+        named = re.search(r"^title:\s*[\"']?(.+?)[\"']?\s*$", text.split("\n---", 1)[0] if text.startswith("---\n") else "", re.M)
+        return {"key": key, "title": (row or {}).get("title") or (named.group(1) if named else _first_words(path, heading=True)),
+                "file": str(path),
+                "open": row is not None, "comments": [c.strip() for c in re.split(r"\n(?=- )", comments.group(1).strip())
+                                                       if c.strip()] if comments else [],
+                "map_checks": checks, "trail": trail, "uri": obsidian_uri(path),
+                "map_uri": obsidian_uri(_vault() / "wayfinder" / name / "map.md")}
+
+    def ticket_action(self, action, key, text=None, commit=None):
+        """Done, Drop, Release, Comment, Tier or Checks on one ticket through sbmap; refused while a queue worker
+        runs it. A failed sbmap raises ValueError with sbmap's message; a done one refreshes the ticket list."""
+        if action not in TICKET_ACTIONS:
+            raise ValueError("unknown action: {}".format(action))
+        with self._lock:
+            running = any(i["key"] == key and i["state"] == "running" for i in self._data["queue"]["items"])
+        if running:
+            raise ValueError("a worker is running it; wait until it ends")
+        try:
+            name, num, row, path = self._ticket_file(key)
+        except KeyError:
+            raise ValueError("no such ticket") from None
+        words = " ".join(str(text or "").split())
+        if action in ("done", "drop", "comment", "checks", "tier") and not words:
+            raise ValueError("type a line first")
+        if action != "comment" and row is None:
+            raise ValueError("the ticket is no longer open")
+        nnn = "{:03d}".format(num)
+        if action == "done":
+            sha = str(commit or "").strip()
+            calls = [["resolve", name, nnn, "--gist", words, "--answer", "Closed from the hub page: " + words]
+                     + (["--commit", sha] if sha else []) + (["--repo-root", row["repo"]] if sha and row.get("repo") else [])]
+        elif action == "drop":
+            calls = [["comment", name, nnn, "--text", "Dropped from the hub page: " + words],
+                     ["set", name, nnn, "status=out-of-scope"]]
+        elif action == "release":
+            if row.get("status") != "claimed":
+                raise ValueError("it is not claimed")
+            calls = [["set", name, nnn, "status=open"]]
+        elif action == "comment":
+            if path is None:
+                raise ValueError("no such ticket")
+            calls = [["comment", name, nnn, "--text", words]]
+        elif action == "tier":
+            calls = [["set", name, nnn, "tier=" + words]]
+        else:
+            calls = [["mapset", name, "checks=" + str(text).strip()]]
+        for c in calls:
+            rc, out, err = sbmap_call(*c)
+            if rc != 0:
+                raise ValueError(err or out or "sbmap failed")
+        self._fresh_tickets()
+        return {"ok": True}
+
     def queue_pause(self, paused):
         def change(q, rows):
             q["paused"] = bool(paused)
@@ -691,6 +779,41 @@ def hub_checks_section(passed, reason, sha, checks, report_text, stamp):
     m = re.search(r"^## Self-checks[^\n]*\n(.*?)(?=^## |\Z)", report_text or "", re.M | re.S)
     lines += ["", "### The worker's self-checks", "", (m.group(1).strip() if m and m.group(1).strip() else "none reported"), ""]
     return "\n".join(lines)
+
+
+TICKET_ACTIONS = ("done", "drop", "release", "comment", "tier", "checks")
+
+
+def sbmap_call(*args):
+    """(exit code, stdout, stderr) of one sbmap command, run as the agents run it."""
+    try:
+        r = subprocess.run([sys.executable, str(SBMAP), *args], capture_output=True, text=True, errors="replace",
+                           timeout=120)
+    except (OSError, subprocess.SubprocessError) as e:
+        return 1, "", str(e)
+    return r.returncode, r.stdout.strip(), r.stderr.strip()
+
+
+def obsidian_uri(path):
+    """The obsidian:// link `sbmap uri` prints for a vault file, or '' when it has none."""
+    rc, out, _ = sbmap_call("uri", str(path))
+    i = out.rfind("](obsidian://")
+    return out[i + 2:-1] if rc == 0 and i >= 0 and out.endswith(")") else ""
+
+
+def _first_words(path, heading=False):
+    """A note's first line of prose (after its properties and headings): what a handoff says first."""
+    try:
+        text = Path(path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    if text.startswith("---\n"):
+        end = text.find("\n---", 4)
+        text = text[end + 4:] if end >= 0 else text
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    if heading:
+        return next((l.lstrip("# ") for l in lines if l.startswith("# ")), Path(path).stem)
+    return next((l for l in lines if not l.startswith(("#", ">", "```"))), lines[0].lstrip("# ") if lines else "")[:200]
 
 
 def firstline(text):
@@ -2010,7 +2133,7 @@ def refresh_loop(hub, every=REFRESH_EVERY):
 
 DEFAULT_PORT = 8765
 PAGE = Path(__file__).resolve().parent / "sbhub.html"
-BOARD_JS = Path(__file__).resolve().parent / "sbhub_board.js"  # the page's renderer, shared with the chat widget
+BOARD_JS = Path(__file__).resolve().parent / "sbhub_board.js"  # the page's renderer
 
 
 def notify(title, text):
@@ -2068,6 +2191,12 @@ def make_handler(hub):
                 self.send(200, hub.state())
             elif path == "/api/tickets":
                 self.send(200, hub.tickets())
+            elif path == "/api/ticket":
+                from urllib.parse import parse_qs, urlsplit
+                try:
+                    self.send(200, hub.ticket_detail((parse_qs(urlsplit(self.path).query).get("key") or [""])[0]))
+                except (KeyError, OSError):
+                    self.send(404, {"ok": False, "error": "no such ticket"})
             elif path in ("/api/item/report", "/api/item/log"):
                 from urllib.parse import parse_qs, urlsplit
                 key = (parse_qs(urlsplit(self.path).query).get("key") or [""])[0]
@@ -2148,6 +2277,8 @@ def make_handler(hub):
                     out = hub.agents_dismiss(d["agent"])
                 elif path == "/api/agents/clear-quiet":
                     out = hub.agents_clear_quiet()
+                elif path.startswith("/api/ticket/") and path[len("/api/ticket/"):] in TICKET_ACTIONS:
+                    out = hub.ticket_action(path[len("/api/ticket/"):], d["key"], d.get("text"), d.get("commit"))
                 elif path == "/api/queue/item_agent":
                     out = hub.queue_item_agent(d["key"], d.get("name"))
                 elif path == "/api/agents/scan":

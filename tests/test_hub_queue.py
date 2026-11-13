@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import urllib.error
 from pathlib import Path
 from unittest import mock
 
@@ -260,6 +261,97 @@ class QueueTest(unittest.TestCase):
         self.assertEqual(h.tickets(), [])
 
 
+class TicketActionTest(unittest.TestCase):
+    """The page's side panel: a ticket's details and its actions, each a hub call that runs sbmap on a throwaway vault."""
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        root = Path(self._tmp.name)
+        self.vault = root / "Vault"
+        (self.vault / "wayfinder").mkdir(parents=True)
+        patcher = mock.patch.dict(os.environ, {"SB_VAULT": str(self.vault), "PATH": "/usr/bin:/bin"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.sb("init", "repo/one", "--title", "One", "--why", "Why.", "--destination", "Somewhere.")
+        self.sb("mapset", "repo/one", "checks=true")
+        for t in ("A", "B"):
+            self.sb("new", "repo/one", "--title", t, "--why", "Because.", "--done-when", "It works.", "--no-sync")
+        (self.vault / "wayfinder" / "repo" / "one" / "handoff.md").write_text(
+            "---\ntitle: Handoff\n---\n# Handoff\n\nPick up at B.\n", encoding="utf-8")
+        self.h = Hub(root / "home")
+        self.h.tickets()
+
+    def sb(self, *a):
+        return subprocess.run([sys.executable, str(SBMAP), *a], check=True, capture_output=True, text=True,
+                              cwd=self.vault).stdout
+
+    def row(self, num):
+        return next((t for t in self.h.tickets() if t["num"] == num), None)
+
+    def text(self, num):
+        return next((self.vault / "wayfinder" / "repo" / "one" / "issues").glob("**/{:03d} *.md".format(num))).read_text()
+
+    def test_details_carry_comments_the_maps_checks_its_handoff_and_obsidian_links(self):
+        self.sb("comment", "repo/one", "001", "--text", "Looked at it.")
+        d = self.h.ticket_detail("repo/one#1")
+        self.assertEqual(d["title"], "A")
+        self.assertTrue(any("Looked at it." in c for c in d["comments"]))
+        self.assertEqual(d["map_checks"], ["true"])
+        self.assertEqual([(f["name"], f["first"]) for f in d["trail"]], [("handoff.md", "Pick up at B.")])
+        for uri in (d["uri"], d["map_uri"], d["trail"][0]["uri"]):
+            self.assertTrue(uri.startswith("obsidian://open?path="), uri)
+
+    def test_details_of_an_unknown_or_odd_key_are_a_key_error(self):
+        for key in ("repo/one#9", "repo/none#1", "../one#1", "repo/one", "/etc#1"):
+            with self.assertRaises(KeyError, msg=key):
+                self.h.ticket_detail(key)
+
+    def test_done_resolves_it_with_the_typed_line_and_the_list_updates_at_once(self):
+        out = self.h.ticket_action("done", "repo/one#1", "Done by hand")
+        self.assertTrue(out["ok"])
+        self.assertIsNone(self.row(1))
+        self.assertIn("Done by hand", self.text(1))
+        self.assertIn("Project.Finished", self.text(1))
+
+    def test_drop_rules_it_out_with_the_reason_as_a_comment(self):
+        self.h.ticket_action("drop", "repo/one#2", "Not needed any more")
+        self.assertIsNone(self.row(2))
+        self.assertIn("Not needed any more", self.text(2))
+        self.assertIn("Project.Dropped", self.text(2))
+
+    def test_release_reopens_a_claimed_ticket_and_refuses_an_open_one(self):
+        self.sb("claim", "repo/one", "002", "--by", "someone", "--no-sync")
+        self.h.tickets(fresh=True)
+        self.h.ticket_action("release", "repo/one#2")
+        self.assertEqual((self.row(2)["status"], self.row(2)["claimed_by"]), ("open", None))
+        with self.assertRaisesRegex(ValueError, "not claimed"):
+            self.h.ticket_action("release", "repo/one#1")
+
+    def test_comment_tier_and_the_maps_checks(self):
+        self.h.ticket_action("comment", "repo/one#1", "A note from the page")
+        self.assertIn("A note from the page", self.text(1))
+        self.h.ticket_action("tier", "repo/one#1", "opus")
+        self.assertEqual(self.row(1)["tier"], "opus")
+        with self.assertRaisesRegex(ValueError, "tier must be one of"):  # sbmap's own message
+            self.h.ticket_action("tier", "repo/one#1", "gpt")
+        self.h.ticket_action("checks", "repo/one#1", "true; echo ok")
+        self.assertEqual(self.row(2)["checks"], ["true", "echo ok"])
+
+    def test_a_ticket_a_worker_runs_is_left_alone_and_empty_words_are_refused(self):
+        with self.h._lock:
+            self.h._data["queue"]["items"].append({**Hub._item("repo/one#1"), "state": "running"})
+        before = self.text(1)
+        for action in ("done", "drop", "release", "comment", "tier", "checks"):
+            with self.assertRaisesRegex(ValueError, "a worker is running it", msg=action):
+                self.h.ticket_action(action, "repo/one#1", "opus")
+        self.assertEqual(self.text(1), before)
+        for action in ("done", "drop", "comment", "checks"):
+            with self.assertRaises(ValueError, msg=action):
+                self.h.ticket_action(action, "repo/one#2", "  ")
+        with self.assertRaises(ValueError):
+            self.h.ticket_action("explode", "repo/one#2", "x")
+
+
 class ScanTest(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -353,6 +445,19 @@ class QueueHttpTest(HubCase):
         code, out = self.post("/api/queue/set", {"keys": [], "version": q["version"]})
         self.assertEqual((code, out["stale"]), (409, True))
         self.assertEqual([i["key"] for i in out["queue"]["items"]], ["repo/one#2"])
+
+    def test_ticket_details_and_actions_over_http(self):
+        code, out = self.post("/api/ticket/tier", {"key": "repo/one#1", "text": "gpt"})
+        self.assertEqual(code, 400)
+        self.assertIn("tier must be one of", out["error"])  # sbmap's message, for the panel
+        self.assertEqual(self.post("/api/ticket/comment", {"key": "repo/one#1", "text": "From the page"})[0], 200)
+        d = self.get("/api/ticket?key=repo%2Fone%231")
+        self.assertTrue(any("From the page" in c for c in d["comments"]))
+        with self.assertRaises(urllib.error.HTTPError) as c:
+            self.get("/api/ticket?key=repo%2Fone%239")
+        c.exception.close()
+        self.assertEqual(c.exception.code, 404)
+        self.assertEqual(self.post("/api/ticket/explode", {"key": "repo/one#1", "text": "x"})[0], 404)
 
     def test_unknown_agent_is_400(self):
         self.assertEqual(self.post("/api/queue/agent", {"name": "nope"})[0], 400)
