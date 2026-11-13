@@ -1,0 +1,40 @@
+{
+ "key": "repo/one#1",
+ "known": true,
+ "log": "/tmp/sb/hub/run-ticket/repo-one-1-20261113-010000-000000.log",
+ "note": "ended: done",
+ "pid": 4242,
+ "result": {
+  "agent": "main",
+  "base": "0000000000000000000000000000000000000000",
+  "branch": null,
+  "checks": [
+   {
+    "cmd": "true",
+    "code": 0,
+    "secs": 0.5,
+    "tail": ""
+   }
+  ],
+  "commit": "0000000000000000000000000000000000000000",
+  "key": "repo/one#1",
+  "log": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one/1.log",
+  "media": [],
+  "model": "sonnet",
+  "note": "resolved, commit 000000000",
+  "report": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one/1.md",
+  "retry": null,
+  "run": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one",
+  "state": "done",
+  "stop": null,
+  "stops": 0,
+  "tree": null,
+  "tries": 1
+ },
+ "running": false,
+ "worker": {
+  "agent": "main",
+  "log": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one/1.log",
+  "pid": 4242
+ }
+}

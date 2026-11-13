@@ -1,0 +1,10 @@
+{
+ "key": null,
+ "known": false,
+ "log": null,
+ "note": "no run-ticket started with --detach has this pid",
+ "pid": 4242,
+ "result": null,
+ "running": false,
+ "worker": null
+}

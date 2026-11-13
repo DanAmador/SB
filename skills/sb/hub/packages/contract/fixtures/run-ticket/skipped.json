@@ -1,0 +1,20 @@
+{
+ "agent": "main",
+ "base": null,
+ "branch": null,
+ "checks": [],
+ "commit": null,
+ "key": "repo/one#2",
+ "log": null,
+ "media": [],
+ "model": "sonnet",
+ "note": "claimed: claimed by someone, 2026-11-13 19:56",
+ "report": null,
+ "retry": null,
+ "run": null,
+ "state": "skipped",
+ "stop": null,
+ "stops": 0,
+ "tree": null,
+ "tries": 1
+}

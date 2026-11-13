@@ -30,6 +30,13 @@ and never fail a session when it is down.
   sbhub.py agents [--scan]            the installed agents; --scan finds ~/.claude* configs and agy
   sbhub.py trust  <project path>      let the hub run that project's own .sb/providers scripts
   sbhub.py untrust <project path>     stop doing so (both work with the hub stopped)
+  sbhub.py run-ticket <map>#<num> [--agent A] [--model M] [--item JSON] [--limit SECONDS]
+                                      run one ticket to its end, as the queue does (claim, worker, checks,
+                                      resolve or comment, release) and print one JSON result (the contract's
+                                      RunTicketResult); exit 0 when done. --item carries an earlier try's queue
+                                      fields (tries, stops, retry, resume, base_sha, tree, branch)
+  sbhub.py run-ticket <map>#<num> ... --detach   start it in the background: prints its pid and files
+  sbhub.py run-ticket --status <pid>  a detached run: running, its worker, and its result once it ended
   sbhub.py hook                       read one Claude Code hook event on stdin and report it;
                                       always exits 0 (the hub-report mod runs this)
 
@@ -520,15 +527,11 @@ class Hub:
         return Path(item["run"]) / "{}-media".format(item["key"].rsplit("#", 1)[-1])
 
     def media_of(self, key):
-        """The sorted names of the pictures and clips a worker left for this item: known kinds, at most
-        MEDIA_MAX, none over MEDIA_BYTES (the phone page forwards a file whole)."""
+        """The pictures and clips a worker left for this item (see media_in)."""
         with self._lock:
             item = next((i for i in self._data["queue"]["items"] if i["key"] == key), None)
         d = item and self._media_dir(item)
-        if not d or not d.is_dir():
-            return []
-        return sorted(p.name for p in d.iterdir()
-                      if p.suffix.lower() in MEDIA_TYPES and p.is_file() and p.stat().st_size <= MEDIA_BYTES)[:MEDIA_MAX]
+        return media_in(d.parent, d.name.split("-", 1)[0]) if d else []
 
     def media_file(self, key, name):
         """(path, content type) of one of an item's recorded media; KeyError for a name it did not record, a name
@@ -1321,6 +1324,271 @@ def _fail_class(reason):
     return None
 
 
+def media_in(run_folder, num):
+    """The sorted names of the pictures and clips a worker left in <run folder>/<num>-media: known kinds, at most
+    MEDIA_MAX, none over MEDIA_BYTES (the phone page forwards a file whole)."""
+    d = Path(run_folder) / "{}-media".format(int(num)) if run_folder else None
+    if not d or not d.is_dir():
+        return []
+    return sorted(p.name for p in d.iterdir()
+                  if p.suffix.lower() in MEDIA_TYPES and p.is_file() and p.stat().st_size <= MEDIA_BYTES)[:MEDIA_MAX]
+
+
+# ---- one ticket from its claim to its end: `sbhub.py run-ticket` and the queue's Supervisor both run a ticket
+# through TicketRun, so there is one way to run a ticket. Its answer is one result (the contract's
+# RunTicketResult): what happened, and what the queue does next (retry on another model, or wait for a limit) ----
+
+RESULT_STATES = ("done", "failed", "skipped", "retry", "stopped")
+STOP_WHY = {"auth": "when its login expired", "limit": "at its usage limit"}
+
+
+def stop_of(run, now):
+    """{kind, agent, until} when this try's own output shows a logout (kind `auth`, until None) or a usage limit
+    (kind `limit`: a rejected window's exact reset, else the reset its message names); None otherwise."""
+    text = _tail(run["log"], run.get("start", 0))
+    said = _said(text)
+    if run.get("auth") or logged_out(said):
+        return {"kind": "auth", "agent": run["agent"], "until": None}
+    rejected = next((r for u, r in reversed(readings(text)) if r and r > now), None)
+    until = rejected or limited_until(said, now)
+    return None if until is None else {"kind": "limit", "agent": run["agent"], "until": until}
+
+
+class TicketRun:
+    """Start a ticket's worker (`start`) and judge it once it ended (`finish`). It claims, briefs, launches, checks,
+    resolves or comments, and releases through sbmap; it never touches the hub's queue state: the caller applies the
+    result (the Supervisor to its queue item; `run-ticket` prints it).
+
+    `hub` gives the clock (`now`), the home, the launcher and the fresh ticket rows; `item` is the queue item's
+    fields from earlier tries (tries, stops, retry, resume, base_sha, tree, branch); `run` is the dict a started
+    worker lives in: p, t, agent, inst, base, log, start, folder, tree, branch."""
+
+    def __init__(self, hub, port, limit=WORKER_LIMIT, stopping=lambda: False):
+        self.hub, self.port, self.limit, self.stopping = hub, port, limit, stopping
+
+    @staticmethod
+    def sbmap(*args):
+        return sbmap_call(*args)
+
+    @staticmethod
+    def result(item, state, note, run=None, commit=None, checks=None, retry=None, stop=None, model=None):
+        """The one answer of a ticket's run (see RESULT_STATES)."""
+        run = run or {}
+        t = run.get("t") or {}
+        folder = run.get("folder") or (str(Path(run["log"]).parent) if run.get("log") else None)
+        num = int(t["num"]) if t.get("num") is not None else int(item["key"].rsplit("#", 1)[-1])
+        report = str(Path(folder) / "{}.md".format(num)) if folder else None
+        return {"key": item["key"], "state": state, "note": note, "commit": commit, "checks": list(checks or []),
+                "media": media_in(folder, num) if state in ("done", "failed") else [],
+                "retry": retry, "stop": stop, "agent": run.get("agent"), "model": model or item.get("model"),
+                "tries": int(item.get("tries") or 0) + 1, "stops": int(item.get("stops") or 0),
+                "base": run.get("base"), "log": run.get("log"),
+                "report": report if report and os.path.isfile(report) else None, "run": folder,
+                "tree": run.get("tree"), "branch": run.get("branch")}
+
+    # ---- the ticket's row and its claim ----
+
+    def row(self, key):
+        """(found, row): the ticket read now; found is False when sbmap could not be read."""
+        rows = self.hub._fresh_tickets()
+        if rows is None:
+            return False, None
+        return True, next((t for t in rows if sbqueue.key(t) == key), None)
+
+    def release(self, key):
+        """Reopen the ticket when the hub holds its claim (`hub <agent>`); a session's claim, or a ticket
+        resolved meanwhile, is left alone."""
+        found, t = self.row(key)
+        if _hub_holds(t):
+            self.sbmap("set", t["map"], "{:03d}".format(int(t["num"])), "status=open")
+
+    def board(self, map_name):
+        """The map's run board for today (`sbmap run <map>`), or None when sbmap failed."""
+        rc, out, err = self.sbmap("run", map_name)
+        if rc != 0 or not out:
+            return None
+        return str(_vault() / out.splitlines()[-1])  # sbmap prints it vault-relative (absolute outside the vault)
+
+    # ---- starting ----
+
+    def start(self, item, t, name, inst, board=None):
+        """(run, None) once the worker runs, or (None, result) when it could not start: the board, the base
+        commit, the worktree, the claim or the launch failed. `item["model"]` is the model it runs on."""
+        key, nnn = item["key"], "{:03d}".format(int(t["num"]))
+        board = board if board is not None else self.board(t["map"])
+        tree, branch = item.get("tree"), item.get("branch")
+        bare = {"t": t, "agent": name, "inst": inst, "tree": tree, "branch": branch}
+        # a later try (cut off by a limit, or retried on opus) goes on in the worktree it had
+        reuse = bool(tree) and bool(item.get("resume") or item.get("tries")) and Path(tree).is_dir()
+        where = tree if tree else t["repo"]
+        # a try after one cut off by a limit or a logout keeps its base: the verdict sees all of the ticket's commits
+        base = item.get("resume") and item.get("base_sha") or _git(where if reuse else t["repo"], "rev-parse", "HEAD")
+        if board is None or not base:
+            return None, self.result(item, "failed", "could not start: " + (
+                "sbmap run failed" if board is None else "the repo has no commit to start from"), bare)
+        if tree and not reuse:
+            why = make_tree(t["repo"], tree, branch, base)
+            if why:
+                return None, self.result(item, "failed", "could not start: could not make its worktree: " + firstline(why),
+                                         bare)
+        if _hub_holds(t):  # a claim of the hub's own left from an earlier try: reopened, then claimed afresh
+            self.sbmap("set", t["map"], nnn, "status=open")
+        rc, out, err = self.sbmap("claim", t["map"], nnn, "--by", "hub " + name)
+        if rc != 0:
+            return None, self.result(item, "skipped", "could not claim it: " + (err or out), bare)
+        folder = Path(board).parent
+        brief = sbqueue.brief(t, _plain_words(t), str(folder), where, branch or
+                              _git(t["repo"], "rev-parse", "--abbrev-ref", "HEAD") or "the current branch")
+        if item.get("retry"):
+            brief += "\nThe first try failed; the hub's check said:\n" + item["retry"] + "\n"
+        log = str(folder / "{}.log".format(int(t["num"])))
+        if item.get("resume"):
+            r, paths = item["resume"], " ".join(t.get("paths") or [])
+            brief += RESUME.format(agent=r["agent"], why=r["why"], base=base, log=r.get("log") or log,
+                                   diff="`git diff -- {}`".format(paths) if paths else "`git diff`")
+        env = {"SB_HUB_AGENT": key, "SB_HUB_PARENT": "queue", "SB_HUB_PORT": str(self.port)}
+        try:
+            start = os.path.getsize(log)  # launch appends: this try's output begins here
+        except OSError:
+            start = 0
+        run = {**bare, "base": base, "log": log, "start": start, "folder": str(folder)}
+        try:
+            if self.stopping():
+                raise OSError("the hub is stopping")
+            run["p"] = self.hub.launcher(inst, brief, where, item["model"], env, log)
+        except (OSError, ValueError, subprocess.SubprocessError) as e:
+            self.release(key)
+            return None, self.result(item, "failed", "could not start the worker: {}".format(e), run)
+        return run, None
+
+    # ---- judging ----
+
+    def finish(self, item, run, over):
+        """The result of a worker that ended (`over`: it ran past the limit and was killed): checked in code,
+        then resolved, retried, stopped for a limit or a logout, or failed with a comment on the ticket."""
+        t = run["t"]
+        tree, branch = run.get("tree"), run.get("branch")
+        checks = []
+        if over:
+            passed, reason, sha = False, ran_past(self.limit), None
+        elif not tree:
+            report = Path(run["log"]).parent / "{}.md".format(int(t["num"])) if run.get("log") else None
+            passed, reason, sha = sbqueue.verdict(t, t["repo"], run["base"], run=_recording(checks), report=report)
+            self.report_checks(t, run, passed, reason, sha, checks)
+        else:
+            passed, reason, sha, checks = self.land(t, run, tree)
+            self.report_checks(t, run, passed, reason, sha, checks)
+        if tree and not passed:
+            reason += "\nIts work stays on branch {} in {}.".format(branch, tree)
+        if passed:  # a worker that did the work is resolved, whatever it printed afterwards
+            return self.resolve(item, run, sha, reason, checks)
+        # a failed run whose own output (not an earlier try's) names a usage limit or a logout is tried again
+        if not over:
+            stopped = self.stopped(item, run, checks)
+            if stopped:
+                return stopped
+        if not item.get("tries") and t.get("tier", "sonnet") == "sonnet" and run["inst"].get("kind") == "claude":
+            self.release(item["key"])
+            return self.result(item, "retry", "retrying on opus: " + reason.splitlines()[0], run, sha, checks,
+                               retry={"model": "opus", "reason": reason})
+        return self.fail(item, run, reason, sha, checks)
+
+    def stopped(self, item, run, checks=()):
+        """A `stopped` result when this try's own output shows a logout or a usage limit (a rejected window's
+        exact reset, else the reset its message names), else None. The claim is released and the item goes back
+        to the queue's front for any agent that fits; after STOPS_MAX stops it fails instead."""
+        stop = stop_of(run, self.hub.now())
+        if stop is None:
+            return None
+        run["stopped"] = True
+        stops = (item.get("stops") or 0) + 1
+        auth, until = stop["kind"] == "auth", stop["until"]
+        why = STOP_WHY[stop["kind"]]
+        if stops >= STOPS_MAX:  # something keeps cutting it off: the owner looks rather than the queue looping
+            out = self.fail(item, run, "stopped {} times at a usage limit or a logout (the last on {}, {}); not tried "
+                            "again".format(stops, run["agent"], why), None, checks)
+            return {**out, "stop": stop, "stops": stops}
+        self.release(item["key"])
+        note = "{} stopped {}{}; queued again at the front".format(
+            run["agent"], why, "" if auth else " (until {})".format(_hm(until)))
+        return {**self.result(item, "stopped", note, run, checks=checks, stop=stop), "stops": stops}
+
+    def land(self, t, run, tree):
+        """(passed, reason, sha, checks) of a worktree ticket: its commits rebased onto the checkout's newest commit,
+        judged there, then fast-forwarded into the checkout; the worktree and branch go once it landed."""
+        report = Path(run["log"]).parent / "{}.md".format(int(t["num"])) if run.get("log") else None
+        checks, sha = [], None
+        for _ in range(LAND_TRIES):
+            checks = []
+            head = _git(t["repo"], "rev-parse", "HEAD")
+            why = rebase_tree(tree, head) if head else "the checkout has no commit"
+            if why:
+                return False, "could not land: " + why, None, checks
+            passed, reason, sha = sbqueue.verdict(t, tree, head, run=_recording(checks), report=report)
+            if not passed:
+                return passed, reason, sha, checks
+            why = land(t["repo"], sha) if sha else None
+            if why == MOVED:
+                continue  # someone committed on the checkout meanwhile: on top of that, and checked again
+            if why:
+                return False, "could not land: " + why, sha, checks
+            drop_tree(t["repo"], tree, run.get("branch") or "")
+            return passed, reason, sha, checks
+        return False, "could not land: the checkout kept gaining commits ({} tries)".format(LAND_TRIES), sha, checks
+
+    def report_checks(self, t, run, passed, reason, sha, checks):
+        """Append the hub's verdict and every check to the worker's report in the run folder (a run file, not a
+        ticket: written directly), so the run itself shows what was tested."""
+        report = Path(run["log"]).parent / "{}.md".format(int(t["num"]))
+        try:
+            text = report.read_text(encoding="utf-8") if report.exists() else ""
+            stamp = datetime.fromtimestamp(self.hub.now()).strftime("%Y-%m-%d %H:%M")
+            with open(report, "a", encoding="utf-8") as f:
+                f.write(hub_checks_section(passed, reason, sha, checks, text, stamp))
+        except OSError as e:
+            print("sb hub queue: report for {}: {}".format(t["map"], e), file=sys.stderr, flush=True)
+
+    def resolve(self, item, run, sha, reason="", checks=()):
+        key, t = item["key"], run["t"]
+        found, now_t = self.row(key)
+        if found and not _hub_holds(now_t):
+            return self.result(item, "skipped", "passed its checks, but the ticket changed while it ran ({})".format(
+                "no longer open" if now_t is None else "claimed by " + str(now_t.get("claimed_by"))), run, sha, checks)
+        listed = "; ".join("`{}`".format(c) for c in t["checks"])
+        tail = "Model: {} on agent {} (try {}). Worker's report: {}/{}.md; its log: {}.".format(
+            item.get("model"), run["agent"], (item.get("tries") or 0) + 1, Path(run["log"]).parent, int(t["num"]),
+            run["log"])
+        nnn = "{:03d}".format(int(t["num"]))
+        if not sha:  # research that needed no commit: its findings are the report
+            rc, out, err = self.sbmap("resolve", t["map"], nnn, "--gist", t["title"], "--answer",
+                                      "Checked by the sb hub in code: {}. {}".format(reason, tail))
+            if rc != 0:
+                return self.fail(item, run, "the report is written, but sbmap resolve failed: " + (err or out), None,
+                                 checks)
+            return self.result(item, "done", "resolved: research, findings in the report", run, None, checks)
+        answer = ("Checked by the sb hub in code: commit {} carries `Ticket: {}/{:03d}` and every check exited 0 "
+                  "({n} of {n}): {}. {}{} {}").format(
+            sha, t["map"], int(t["num"]), listed, reason[:1].upper(), reason[1:] + ".", tail, n=len(t["checks"]))
+        rc, out, err = self.sbmap("resolve", t["map"], nnn, "--gist", t["title"], "--answer", answer,
+                                  "--commit", sha, "--repo-root", t["repo"])
+        if rc != 0 and "remote" in err:  # sbmap stamps a commit only in a repo with an origin: name it in the gist
+            rc, out, err = self.sbmap("resolve", t["map"], nnn, "--gist", "{} ({})".format(t["title"], sha[:9]),
+                                      "--answer", answer)
+        if rc != 0:
+            return self.fail(item, run, "checks passed, but sbmap resolve failed: " + (err or out), sha, checks)
+        return self.result(item, "done", "resolved, commit " + sha[:9], run, sha, checks)
+
+    def fail(self, item, run, reason, sha, checks=()):
+        """Leave the ticket open with the reason as a comment and release the claim."""
+        t = run["t"]
+        text = "The sb hub's run of this ticket failed ({} on agent {}): {}{}".format(
+            item.get("model"), run["agent"], reason.replace("\n", "\n  "),
+            "\n  The commit {} is left in place.".format(sha[:9]) if sha else "")
+        self.sbmap("comment", t["map"], "{:03d}".format(int(t["num"])), "--text", text)
+        self.release(item["key"])
+        return self.result(item, "failed", reason[:2000], run, sha, checks)
+
+
 class Supervisor:
     """Runs tonight's queue, one pass per `tick()` (every TICK_EVERY s from `serve`; tests call it).
 
@@ -1330,7 +1598,8 @@ class Supervisor:
     restarted) has its leftover process group killed, its claim released, and is queued again."""
 
     def __init__(self, hub, port=None, limit=WORKER_LIMIT, probe=None):
-        self.hub, self.port, self.limit = hub, port or default_port(), limit
+        self.hub, self.port = hub, port or default_port()
+        self.runner = TicketRun(hub, self.port, limit, stopping=lambda: self.stopped)  # every ticket's try runs here
         self.probe = probe or probe_usage  # (agent entry, cwd) -> its output; tests hand in their own
         self.probe_async, self.probing = True, []  # probes run in their own thread (tests may run them inline)
         self.close_off = True  # the daily morning close-off job (tests of other things turn it off)
@@ -1339,6 +1608,15 @@ class Supervisor:
         self.procs = {}
         self.streak = (None, 0)  # the failure class of the last failed items in a row, and how many
         self.stopped = False
+
+    @property
+    def limit(self):
+        """How long a worker may run before its process group is killed (the runner's, so both agree)."""
+        return self.runner.limit
+
+    @limit.setter
+    def limit(self, value):
+        self.runner.limit = value
 
     def run(self, every=TICK_EVERY):
         """The daemon thread `serve` starts: find the agents once if none are known, then tick forever."""
@@ -1562,18 +1840,10 @@ class Supervisor:
         self._update(key, state=state, ended=self.hub.now(), pid=None, pid_start=None, **fields)
 
     def _row(self, key):
-        """(found, row): the ticket read now; found is False when sbmap could not be read."""
-        rows = self.hub._fresh_tickets()
-        if rows is None:
-            return False, None
-        return True, next((t for t in rows if sbqueue.key(t) == key), None)
+        return self.runner.row(key)
 
     def _release(self, key):
-        """Reopen the ticket when the hub holds its claim (`hub <agent>`); a session's claim, or a ticket
-        resolved meanwhile, is left alone."""
-        found, t = self._row(key)
-        if _hub_holds(t):
-            self.sbmap("set", t["map"], "{:03d}".format(int(t["num"])), "status=open")
+        self.runner.release(key)
 
     # ---- workers that ended, ran too long, or were lost with a restart ----
 
@@ -1601,54 +1871,81 @@ class Supervisor:
                 if item["kind"] == "job" or run.get("t") is None:
                     self._end(item["key"], "failed", note=why)
                 else:
-                    self._fail(item, run, why, None)
+                    self._apply(item, self.runner.fail(item, run, why, None))
             with self.hub._lock:
                 now_item = next((i for i in self.hub._data["queue"]["items"] if i["key"] == item["key"]), {})
             if now_item.get("state") == "done":  # only finished work says what an item costs
                 self._learn(run, item.get("model") or "sonnet")
 
-    def _stopped(self, item, run):
-        """True when this try's own output shows a logout or a usage limit (a rejected window's exact reset,
-        else the reset its message names); the item is then queued again (see _stopped_early)."""
-        text, now = _tail(run["log"], run.get("start", 0)), self.hub.now()
-        said = _said(text)
-        auth = run.get("auth") or logged_out(said)
-        rejected = next((r for u, r in reversed(readings(text)) if r and r > now), None)
-        until = None if auth else rejected or limited_until(said, now)
-        if not auth and until is None:
+    def _job_stopped(self, item, run):
+        """True when a job's own output shows a logout or a usage limit: its agent waits and the job goes back to
+        the front (after STOPS_MAX stops it fails)."""
+        stop = stop_of(run, self.hub.now())
+        if stop is None:
             return False
-        self._stopped_early(item, run, until, auth)
-        return True
-
-    def _stopped_early(self, item, run, until, auth):
-        """The worker stopped at its agent's usage limit or a logout: the agent waits (limited until `until`, or
-        signed out), the claim is released, and the item goes back to the front of the queue for any agent of
-        the pool that fits, keeping its base commit; its next brief says where the last try stopped."""
         run["stopped"] = True
         stops = (item.get("stops") or 0) + 1
-        if until is not None:
+        if stops >= STOPS_MAX:
+            self._agent_stopped(stop)
+            self._end(item["key"], "failed", note="stopped {} times at a usage limit or a logout (the last on {}, {}); "
+                      "not tried again".format(stops, run["agent"], STOP_WHY[stop["kind"]]))
+            return True
+        self._apply(item, {"state": "stopped", "stop": stop, "stops": stops, "log": run["log"],
+                           "note": "{} stopped {}{}; queued again at the front".format(
+                               run["agent"], STOP_WHY[stop["kind"]],
+                               "" if stop["kind"] == "auth" else " (until {})".format(_hm(stop["until"])))})
+        return True
+
+    def _agent_stopped(self, stop):
+        """The agent a worker stopped on waits: limited until the reset, or signed out until the owner signs in."""
+        if stop.get("until") is not None:
             with self.hub._lock:
-                inst = self.hub._data["installed"].get(run["agent"])
+                inst = self.hub._data["installed"].get(stop["agent"])
                 if inst is not None:
-                    inst["limited_until"] = until
+                    inst["limited_until"] = stop["until"]
                 self.hub._save()
-        if auth:
-            self._signed_out(run["agent"])
-        why = "when its login expired" if auth else "at its usage limit"
-        if stops >= STOPS_MAX:  # something keeps cutting it off: the owner looks rather than the queue looping
-            reason = "stopped {} times at a usage limit or a logout (the last on {}, {}); not tried again".format(
-                stops, run["agent"], why)
-            if item["kind"] == "ticket":
-                self._fail(item, run, reason, None)
-            else:
-                self._end(item["key"], "failed", note=reason)
+        if stop["kind"] == "auth":
+            self._signed_out(stop["agent"])
+
+    def _apply(self, item, res, judged=True):
+        """Put a TicketRun result (or a job's stop) on the queue: the item ends, or goes back to the front of the
+        queue (a retry on another model, or a stop at a limit or a logout); three failures of one class in a row
+        pause the queue."""
+        key, state = item["key"], res["state"]
+        if res.get("stop"):
+            self._agent_stopped(res["stop"])
+        if state == "stopped":
+            self._update(key, front=True, state="queued", pid=None, pid_start=None, started=None, stops=res["stops"],
+                         resume={"agent": res["stop"]["agent"], "log": res["log"], "why": STOP_WHY[res["stop"]["kind"]]},
+                         note=res["note"])
             return
-        if item["kind"] == "ticket":
-            self._release(item["key"])
-        self._update(item["key"], front=True, state="queued", pid=None, pid_start=None, started=None, stops=stops,
-                     resume={"agent": run["agent"], "log": run["log"], "why": why},
-                     note="{} stopped {}{}; queued again at the front".format(
-                         run["agent"], why, "" if auth else " (until {})".format(_hm(until))))
+        if state == "retry":
+            self._update(key, front=True, state="queued", tries=1, model=res["retry"]["model"],
+                         retry=res["retry"]["reason"], commit=res["commit"], pid=None, pid_start=None, started=None,
+                         note=res["note"])
+            return
+        # a worker that never started leaves the item's commit (an earlier try's) as it was
+        fields = {"commit": res["commit"]} if judged or res["commit"] else {}
+        if res.get("media"):
+            fields["media"] = res["media"]
+        self._end(key, state, note=res["note"], **fields)
+        if state == "done":
+            self.streak = (None, 0)
+        elif state == "failed" and judged:
+            self._count_failure(res["note"])
+
+    def _count_failure(self, reason):
+        cls = _fail_class(reason)
+        n = self.streak[1] + 1 if cls is not None and self.streak[0] == cls else 1
+        self.streak = (cls, n if cls is not None else 0)
+        if cls is not None and n >= 3:
+            with self.hub._lock:
+                q = self.hub._data["queue"]
+                q["paused"] = True
+                q["note"] = "paused: three tickets in a row failed with {}".format(cls)
+                q["version"] += 1
+                self.hub._save()
+            self.streak = (None, 0)
 
     def _recover(self, item):
         """A `running` item this hub did not start (it restarted). When its worker still runs, it is waited for
@@ -1664,7 +1961,7 @@ class Supervisor:
             self.procs[item["key"]] = {"p": _Adopted(pid, started if sure else None), "t": None, "adopted": True,
                                        "agent": item.get("runner"), "inst": inst, "base": item.get("base_sha"),
                                        "log": item.get("log"), "start": item.get("log_start") or 0, "alone": False,
-                                       "tree": item.get("tree"), "branch": item.get("branch")}
+                                       "tree": item.get("tree"), "branch": item.get("branch"), "folder": item.get("run")}
             self._update(item["key"], note="running on {}, started before the hub restarted".format(item.get("runner")))
             return
         if item["kind"] == "ticket":
@@ -1684,125 +1981,10 @@ class Supervisor:
                           + ("the ticket is no longer open" if found else "the tickets could not be read to check it"))
                 return
             run["t"] = row
-        t = run["t"]
-        tree, branch = run.get("tree"), run.get("branch")
-        if over:
-            passed, reason, sha = False, ran_past(self.limit), None
-        elif not tree:
-            checks = []
-            report = Path(run["log"]).parent / "{}.md".format(int(t["num"])) if run.get("log") else None
-            passed, reason, sha = sbqueue.verdict(t, t["repo"], run["base"], run=_recording(checks), report=report)
-            self._update(key, checks=checks)
-            self._report_checks(t, run, passed, reason, sha, checks)
-        else:
-            passed, reason, sha, checks = self._land(t, run, tree)
-            self._update(key, checks=checks)
-            self._report_checks(t, run, passed, reason, sha, checks)
-        if tree and not passed:
-            reason += "\nIts work stays on branch {} in {}.".format(branch, tree)
-        if passed:  # a worker that did the work is resolved, whatever it printed afterwards
-            self._resolve(item, run, sha, reason)
-            return
-        # a failed run whose own output (not an earlier try's) names a usage limit or a logout is tried again
-        if not over and self._stopped(item, run):
-            return
-        if not item.get("tries") and t.get("tier", "sonnet") == "sonnet" and run["inst"].get("kind") == "claude":
-            self._release(key)
-            self._update(key, front=True, state="queued", tries=1, model="opus", retry=reason, commit=sha,
-                          pid=None, pid_start=None, started=None,
-                          note="retrying on opus: " + reason.splitlines()[0])
-            return
-        self._fail(item, run, reason, sha)
-
-    def _land(self, t, run, tree):
-        """(passed, reason, sha, checks) of a worktree ticket: its commits rebased onto the checkout's newest commit,
-        judged there, then fast-forwarded into the checkout; the worktree and branch go once it landed."""
-        report = Path(run["log"]).parent / "{}.md".format(int(t["num"])) if run.get("log") else None
-        for _ in range(LAND_TRIES):
-            checks = []
-            head = _git(t["repo"], "rev-parse", "HEAD")
-            why = rebase_tree(tree, head) if head else "the checkout has no commit"
-            if why:
-                return False, "could not land: " + why, None, checks
-            passed, reason, sha = sbqueue.verdict(t, tree, head, run=_recording(checks), report=report)
-            if not passed:
-                return passed, reason, sha, checks
-            why = land(t["repo"], sha) if sha else None
-            if why == MOVED:
-                continue  # someone committed on the checkout meanwhile: on top of that, and checked again
-            if why:
-                return False, "could not land: " + why, sha, checks
-            drop_tree(t["repo"], tree, run.get("branch") or "")
-            return passed, reason, sha, checks
-        return False, "could not land: the checkout kept gaining commits ({} tries)".format(LAND_TRIES), sha, checks
-
-    def _report_checks(self, t, run, passed, reason, sha, checks):
-        """Append the hub's verdict and every check to the worker's report in the run folder (a run file, not a
-        ticket: written directly), so the run itself shows what was tested."""
-        report = Path(run["log"]).parent / "{}.md".format(int(t["num"]))
-        try:
-            text = report.read_text(encoding="utf-8") if report.exists() else ""
-            stamp = datetime.fromtimestamp(self.hub.now()).strftime("%Y-%m-%d %H:%M")
-            with open(report, "a", encoding="utf-8") as f:
-                f.write(hub_checks_section(passed, reason, sha, checks, text, stamp))
-        except OSError as e:
-            print("sb hub queue: report for {}: {}".format(t["map"], e), file=sys.stderr, flush=True)
-
-    def _resolve(self, item, run, sha, reason=""):
-        key, t = item["key"], run["t"]
-        found, now_t = self._row(key)
-        if found and not _hub_holds(now_t):
-            self._end(key, "skipped", commit=sha, note="passed its checks, but the ticket changed while it ran ({})".format(
-                "no longer open" if now_t is None else "claimed by " + str(now_t.get("claimed_by"))))
-            return
-        checks = "; ".join("`{}`".format(c) for c in t["checks"])
-        tail = "Model: {} on agent {} (try {}). Worker's report: {}/{}.md; its log: {}.".format(
-            item.get("model"), run["agent"], (item.get("tries") or 0) + 1, Path(run["log"]).parent, int(t["num"]),
-            run["log"])
-        nnn = "{:03d}".format(int(t["num"]))
-        if not sha:  # research that needed no commit: its findings are the report
-            rc, out, err = self.sbmap("resolve", t["map"], nnn, "--gist", t["title"], "--answer",
-                                      "Checked by the sb hub in code: {}. {}".format(reason, tail))
-            if rc != 0:
-                self._fail(item, run, "the report is written, but sbmap resolve failed: " + (err or out), None)
-                return
-            self.streak = (None, 0)
-            self._end(key, "done", note="resolved: research, findings in the report")
-            return
-        answer = ("Checked by the sb hub in code: commit {} carries `Ticket: {}/{:03d}` and every check exited 0 "
-                  "({n} of {n}): {}. {}{} {}").format(
-            sha, t["map"], int(t["num"]), checks, reason[:1].upper(), reason[1:] + ".", tail, n=len(t["checks"]))
-        rc, out, err = self.sbmap("resolve", t["map"], nnn, "--gist", t["title"], "--answer", answer,
-                                  "--commit", sha, "--repo-root", t["repo"])
-        if rc != 0 and "remote" in err:  # sbmap stamps a commit only in a repo with an origin: name it in the gist
-            rc, out, err = self.sbmap("resolve", t["map"], nnn, "--gist", "{} ({})".format(t["title"], sha[:9]),
-                                      "--answer", answer)
-        if rc != 0:
-            self._fail(item, run, "checks passed, but sbmap resolve failed: " + (err or out), sha)
-            return
-        self.streak = (None, 0)
-        self._end(key, "done", commit=sha, note="resolved, commit " + sha[:9])
-
-    def _fail(self, item, run, reason, sha):
-        """Leave the ticket open with the reason as a comment, release the claim, and count the failure."""
-        key, t = item["key"], run["t"]
-        text = "The sb hub's run of this ticket failed ({} on agent {}): {}{}".format(
-            item.get("model"), run["agent"], reason.replace("\n", "\n  "),
-            "\n  The commit {} is left in place.".format(sha[:9]) if sha else "")
-        self.sbmap("comment", t["map"], "{:03d}".format(int(t["num"])), "--text", text)
-        self._release(key)
-        self._end(key, "failed", commit=sha, note=reason[:2000])
-        cls = _fail_class(reason)
-        n = self.streak[1] + 1 if cls is not None and self.streak[0] == cls else 1
-        self.streak = (cls, n if cls is not None else 0)
-        if cls is not None and n >= 3:
-            with self.hub._lock:
-                q = self.hub._data["queue"]
-                q["paused"] = True
-                q["note"] = "paused: three tickets in a row failed with {}".format(cls)
-                q["version"] += 1
-                self.hub._save()
-            self.streak = (None, 0)
+        res = self.runner.finish(item, run, over)
+        if not over:
+            self._update(key, checks=res["checks"])
+        self._apply(item, res)
 
     def _finish_job(self, item, run, over):
         """A job has no claim, verdict or retry: exit 0 is done, anything else failed, except a usage limit,
@@ -1811,7 +1993,7 @@ class Supervisor:
         text = _tail(run["log"], run.get("start", 0))
         if run.get("adopted"):  # not this hub's child: its exit code is lost, its result line says how it went
             code = 0 if _result_ok(text) else 1
-        if not over and code != 0 and self._stopped(item, run):
+        if not over and code != 0 and self._job_stopped(item, run):
             return
         result = Path(run["log"]).parent / "result.md"
         result.write_text(_job_result(text) + "\n", encoding="utf-8")
@@ -2111,60 +2293,19 @@ class Supervisor:
         self.procs[key] = run
 
     def _launch(self, item, t, name, inst):
-        key, nnn = item["key"], "{:03d}".format(int(t["num"]))
-        board = self._board(t["map"])
-        tree, branch = item.get("tree"), item.get("branch")
-        # a later try (cut off by a limit, or retried on opus) goes on in the worktree it had
-        reuse = bool(tree) and bool(item.get("resume") or item.get("tries")) and Path(tree).is_dir()
-        where = tree if tree else t["repo"]
-        # a try after one cut off by a limit or a logout keeps its base: the verdict sees all of the ticket's commits
-        base = item.get("resume") and item.get("base_sha") or _git(where if reuse else t["repo"], "rev-parse", "HEAD")
-        if board is None or not base:
-            self._end(key, "failed", note="could not start: " + ("sbmap run failed" if board is None else
-                                                                 "the repo has no commit to start from"))
+        run, res = self.runner.start(item, t, name, inst, board=self._board(t["map"]))
+        if res is not None:
+            self._apply(item, res, judged=False)
             return
-        if tree and not reuse:
-            why = make_tree(t["repo"], tree, branch, base)
-            if why:
-                self._end(key, "failed", note="could not start: could not make its worktree: " + firstline(why))
-                return
-        if _hub_holds(t):  # a claim of the hub's own left from an earlier try: reopened, then claimed afresh
-            self.sbmap("set", t["map"], nnn, "status=open")
-        rc, out, err = self.sbmap("claim", t["map"], nnn, "--by", "hub " + name)
-        if rc != 0:
-            self._end(key, "skipped", note="could not claim it: " + (err or out))
-            return
+        key, base = item["key"], run["base"]
         with self.hub._lock:  # the night's first base of each repo, for the final review
             self.hub._data["queue"].setdefault("bases", {}).setdefault(
                 t["repo"], {"sha": base, "project": _project_of(t["map"])})
             self.hub._save()
-        folder = Path(board).parent
-        brief = sbqueue.brief(t, _plain_words(t), str(folder), where, branch or
-                              _git(t["repo"], "rev-parse", "--abbrev-ref", "HEAD") or "the current branch")
-        if item.get("retry"):
-            brief += "\nThe first try failed; the hub's check said:\n" + item["retry"] + "\n"
-        log = str(folder / "{}.log".format(int(t["num"])))
-        if item.get("resume"):
-            r, paths = item["resume"], " ".join(t.get("paths") or [])
-            brief += RESUME.format(agent=r["agent"], why=r["why"], base=base, log=r.get("log") or log,
-                                   diff="`git diff -- {}`".format(paths) if paths else "`git diff`")
-        env = {"SB_HUB_AGENT": key, "SB_HUB_PARENT": "queue", "SB_HUB_PORT": str(self.port)}
-        try:
-            start = os.path.getsize(log)  # launch appends: this try's output begins here
-        except OSError:
-            start = 0
-        try:
-            if self.stopped:
-                raise OSError("the hub is stopping")
-            p = self.hub.launcher(inst, brief, where, item["model"], env, log)
-        except (OSError, ValueError, subprocess.SubprocessError) as e:
-            self._release(key)
-            self._end(key, "failed", note="could not start the worker: {}".format(e))
-            return
-        self._track(key, {"p": p, "t": t, "agent": name, "inst": inst, "base": base, "log": log, "start": start,
-                          "tree": tree, "branch": branch})
-        self._update(key, base_sha=base, log=log, log_start=start, run=str(folder), pid=p.pid, pid_start=_proc_start(p.pid),
-                     note="running on {} ({})".format(name, item["model"]))
+        self._track(key, run)
+        p = run["p"]
+        self._update(key, base_sha=base, log=run["log"], log_start=run["start"], run=run["folder"], pid=p.pid,
+                     pid_start=_proc_start(p.pid), note="running on {} ({})".format(name, item["model"]))
 
     def _launch_job(self, item, name, inst):
         key = item["key"]
@@ -2932,6 +3073,169 @@ def cmd_agents(a):
     return 0
 
 
+RUN_ITEM_FIELDS = ("tries", "stops", "retry", "resume", "base_sha", "tree", "branch")
+
+
+def _hub_home():
+    return Path(os.environ.get("SB_HUB_HOME") or Path.home() / ".sb-hub")
+
+
+def _emit(obj):
+    print(json.dumps(obj, indent=1), flush=True)
+
+
+def _run_status_file(home, pid):
+    return Path(home) / "run-ticket" / "{}.json".format(int(pid))
+
+
+def _ticket_agent(hub, name):
+    """(name, entry) of the agent a ticket runs on: the one named, else the queue's pool's first installed one,
+    else the first installed Claude account, else plain `claude` with its default config. ValueError for a name
+    that is not installed (except `claude` and `agy` themselves)."""
+    installed = hub._data.get("installed") or {}
+    if name:
+        if name in installed:
+            return name, dict(installed[name])
+        if name in ("claude", "agy"):
+            return name, {"kind": name, "dir": None, "model": None}
+        raise ValueError("{} is not an installed agent (sbhub.py agents --scan lists them)".format(name))
+    for n in pool(hub._data.get("queue") or {}) + sorted(n for n, e in installed.items() if e.get("kind") == "claude"):
+        if n in installed:
+            return n, dict(installed[n])
+    return "claude", {"kind": "claude", "dir": None, "model": None}
+
+
+def run_ticket(key, agent=None, model=None, item=None, home=None, port=None, limit=WORKER_LIMIT, hub=None,
+               on_start=None):
+    """Run one ticket to its end and return its result (TicketRun.result): read it, check it is ready, claim it,
+    start its worker, wait (killed past `limit`), check it in code, resolve or comment, release. The hub's state
+    is only read (its installed agents), never written: the queue applies the result. `item` carries an earlier
+    try's fields (RUN_ITEM_FIELDS); `on_start(run)` is told once the worker runs."""
+    hub = hub or Hub(home or _hub_home())
+    item = {"key": key, "kind": "ticket", **{k: v for k, v in (item or {}).items() if k in RUN_ITEM_FIELDS}}
+    runner = TicketRun(hub, port or default_port(), limit)
+    try:
+        name, inst = _ticket_agent(hub, agent)
+    except ValueError as e:
+        return runner.result({**item, "model": model}, "failed", "could not start: {}".format(e))
+    rows = hub._fresh_tickets()
+    if rows is None:
+        return runner.result({**item, "model": model}, "failed", "could not start: the tickets could not be read")
+    t = next((r for r in rows if sbqueue.key(r) == key), None)
+    if t is None:
+        return runner.result({**item, "model": model}, "skipped", "no longer open: resolved, dropped or not a ticket")
+    mine = {**t, "status": "open", "claimed_by": None} if _hub_holds(t) else t
+    state, reason = sbqueue.classify(mine, set(), rows)  # nothing is queued ahead of it: an open blocker blocks
+    skip = "{}: {}".format(state, reason) if state != "ready" else None
+    if not skip and not usable_project(t.get("repo")):
+        skip = "its map's repo is not a folder here: {}".format(t.get("repo") or "none")
+    item["model"] = model or (item.get("model") if item.get("tries") else None) or (
+        inst.get("model") if inst.get("kind") == "agy" else None) or t.get("tier") or "sonnet"
+    if skip:
+        return runner.result(item, "skipped", skip, {"t": t, "agent": name, "inst": inst})
+    run, res = runner.start(item, t, name, inst)
+    if res is not None:
+        return res
+    if on_start:
+        on_start(run)
+    p, over = run["p"], False
+    try:
+        p.wait(timeout=limit)
+    except subprocess.TimeoutExpired:
+        over = True
+    _kill_group(p, grace=3 if over else 0)  # also whatever it left running
+    return runner.finish(item, run, over)
+
+
+def cmd_run_ticket(a):
+    """`run-ticket`: one JSON result on stdout (exit 0 when done, 1 otherwise, 2 for a bad call); --detach, the
+    child's pid and files; --status <pid>, a detached run's progress and, once it ended, its result."""
+    home = _hub_home()
+    if a.status is not None:
+        return _run_status(home, a.status)
+    if not a.key or not re.fullmatch(r"[\w.-]+(?:/[\w.-]+)*#\d+", a.key):
+        print("usage: run-ticket <map>#<num> [--agent A] [--model M] [--item JSON] [--detach] | run-ticket --status PID",
+              file=sys.stderr)
+        return 2
+    try:
+        item = json.loads(a.item) if a.item else None
+        if item is not None and not isinstance(item, dict):
+            raise ValueError("not an object")
+    except ValueError as e:
+        print("sbhub: --item is the queue item's JSON object: {}".format(e), file=sys.stderr)
+        return 2
+    if a.detach:
+        return _run_detached(home, a)
+    detached = os.environ.get("SB_RUN_DETACHED") == "1"  # a detached run notes its worker in <home>/run-ticket/<pid>.json
+
+    def started(run):
+        if detached:
+            _note_status(home, os.getpid(), worker={"pid": run["p"].pid, "log": run["log"], "agent": run["agent"]})
+    res = run_ticket(a.key, a.agent, a.model, item, home=home, port=a.port, limit=a.limit, on_start=started)
+    _emit(res)
+    return 0 if res["state"] == "done" else 1
+
+
+def _run_detached(home, a):
+    """Start `run-ticket` again without --detach in its own session: stdout (the result) to <stamp>.json, stderr
+    to <stamp>.log under <home>/run-ticket/, and <pid>.json to find them by pid."""
+    folder = home / "run-ticket"
+    folder.mkdir(parents=True, exist_ok=True)
+    stem = "{}-{}".format(re.sub(r"[^A-Za-z0-9._-]+", "-", a.key).strip("-"), datetime.now().strftime("%Y%m%d-%H%M%S-%f"))
+    result, log = folder / (stem + ".json"), folder / (stem + ".log")
+    cmd = [sys.executable, str(Path(__file__).resolve()), "run-ticket", a.key, "--port", str(a.port),
+           "--limit", str(a.limit)]
+    for flag, v in (("--agent", a.agent), ("--model", a.model), ("--item", a.item)):
+        if v:
+            cmd += [flag, v]
+    with open(result, "wb") as out, open(log, "ab") as err:
+        p = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=out, stderr=err, start_new_session=True,
+                             env={**os.environ, "SB_RUN_DETACHED": "1"})
+    status = _note_status(home, p.pid, key=a.key, log=str(log), result=str(result), started=time.time(), pid=p.pid,
+                          pid_start=_proc_start(p.pid))
+    _emit({"pid": p.pid, "log": str(log), "result": str(result), "status": str(status)})
+    return 0
+
+
+def _note_status(home, of, **fields):
+    """Merge `fields` into a detached run's status file (the parent writes its files, the child its worker)."""
+    path = _run_status_file(home, of)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        data = {"worker": None}
+    tmp = path.with_suffix(".tmp{}".format(os.getpid()))
+    tmp.write_text(json.dumps({**data, **fields}), encoding="utf-8")
+    os.replace(tmp, path)
+    return path
+
+
+def _run_status(home, pid):
+    """A detached run's progress: running (its own process is alive), its worker once started, and its result
+    once it printed one."""
+    path = _run_status_file(home, pid)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        data = None
+    if not isinstance(data, dict) or "key" not in data:
+        _emit({"pid": pid, "known": False, "running": False, "key": None, "log": None, "worker": None, "result": None,
+               "note": "no run-ticket started with --detach has this pid"})
+        return 1
+    res = None
+    try:
+        got = json.loads(Path(data["result"]).read_text(encoding="utf-8"))
+        res = got if isinstance(got, dict) and got.get("state") in RESULT_STATES else None
+    except (OSError, ValueError):
+        pass
+    running = res is None and _Adopted(pid, data.get("pid_start")).poll() is None
+    note = ("running" if running else "ended: " + res["state"] if res else
+            "ended without a result: read its log")
+    _emit({"pid": pid, "known": True, "running": running, "key": data["key"], "log": data["log"],
+           "worker": data.get("worker"), "result": res, "note": note})
+    return 0
+
+
 def cmd_state(a):
     print(json.dumps(call(a.port, "/api/state")[1]))
     return 0
@@ -2969,6 +3273,9 @@ def main(argv=None):
     add("trust", ("project", {}))
     add("untrust", ("project", {}))
     add("hook", ("--event", {}))
+    add("run-ticket", ("key", {"nargs": "?"}), ("--agent", {}), ("--model", {}), ("--item", {}),
+        ("--detach", {"action": "store_true"}), ("--status", {"type": int}),
+        ("--limit", {"type": float, "default": WORKER_LIMIT}))
     a = p.parse_args(argv)
     if a.cmd == "serve":
         serve(a.port)
@@ -2989,6 +3296,8 @@ def main(argv=None):
         return cmd_queue(a)
     if a.cmd == "agents":
         return cmd_agents(a)
+    if a.cmd == "run-ticket":
+        return cmd_run_ticket(a)
     return cmd_state(a)
 
 

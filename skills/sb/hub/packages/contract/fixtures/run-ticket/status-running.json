@@ -1,0 +1,10 @@
+{
+ "key": "repo/one#1",
+ "known": true,
+ "log": "/tmp/sb/hub/run-ticket/repo-one-1-20261113-010000-000000.log",
+ "note": "running",
+ "pid": 4242,
+ "result": null,
+ "running": true,
+ "worker": null
+}

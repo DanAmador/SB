@@ -1,0 +1,23 @@
+{
+ "agent": "main",
+ "base": "0000000000000000000000000000000000000000",
+ "branch": null,
+ "checks": [],
+ "commit": null,
+ "key": "repo/one#1",
+ "log": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one/1.log",
+ "media": [],
+ "model": "sonnet",
+ "note": "retrying on opus: no commit after 000000000",
+ "report": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one/1.md",
+ "retry": {
+  "model": "opus",
+  "reason": "no commit after 000000000"
+ },
+ "run": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one",
+ "state": "retry",
+ "stop": null,
+ "stops": 0,
+ "tree": null,
+ "tries": 1
+}

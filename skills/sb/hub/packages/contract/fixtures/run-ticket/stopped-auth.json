@@ -1,0 +1,24 @@
+{
+ "agent": "spare",
+ "base": "0000000000000000000000000000000000000000",
+ "branch": null,
+ "checks": [],
+ "commit": null,
+ "key": "repo/one#1",
+ "log": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one/1.log",
+ "media": [],
+ "model": "sonnet",
+ "note": "spare stopped when its login expired; queued again at the front",
+ "report": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one/1.md",
+ "retry": null,
+ "run": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one",
+ "state": "stopped",
+ "stop": {
+  "agent": "spare",
+  "kind": "auth",
+  "until": null
+ },
+ "stops": 1,
+ "tree": null,
+ "tries": 1
+}

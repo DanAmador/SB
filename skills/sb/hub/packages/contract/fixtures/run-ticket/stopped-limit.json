@@ -1,0 +1,24 @@
+{
+ "agent": "main",
+ "base": "0000000000000000000000000000000000000000",
+ "branch": null,
+ "checks": [],
+ "commit": null,
+ "key": "repo/one#1",
+ "log": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one/1.log",
+ "media": [],
+ "model": "sonnet",
+ "note": "main stopped at its usage limit (until 04:40); queued again at the front",
+ "report": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one/1.md",
+ "retry": null,
+ "run": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one",
+ "state": "stopped",
+ "stop": {
+  "agent": "main",
+  "kind": "limit",
+  "until": 1794541200.0
+ },
+ "stops": 1,
+ "tree": null,
+ "tries": 1
+}
