@@ -234,10 +234,10 @@ function render(){
   h+='</div>';
   // tonight's queue: its summary line, then the first five items still to run (the hub page has the rest)
   const qi=(s.queue&&Array.isArray(s.queue.items)?s.queue.items:[]).filter(i=>i&&(i.state=='running'||i.state=='queued'));
-  if(qi.length){const run=qi.filter(i=>i.state=='running').length,wait=qi.length-run;
+  if(qi.length){let run=qi.filter(i=>i.state=='running').length,wait=qi.length-run;if(Number.isInteger(s.queue.queued)&&Number.isInteger(s.queue.running)){run=s.queue.running;wait=s.queue.queued}
     h+=`<div class="box"><div class="qrow"><span class="ic">${svg('list-numbers')}</span><span class="grow"><b>Tonight's queue</b> <span class="mute">${wait} queued · ${run} running${s.queue.paused?' · paused until you resume it on the hub page':''}</span></span></div>`
       +qi.slice(0,5).map(i=>`<div class="qrow"><span class="ic ${i.state=='running'?'acc':''}">${svg(i.state=='running'?'loader-2':i.kind=='job'?'terminal-2':'ticket')}</span><span class="grow" dir="auto" title="${esc(i.key)}">${esc(i.name||i.key)}</span><span class="mute">${esc(i.state)}</span></div>`).join('')
-      +(qi.length>5?`<div class="qrow mute">and ${qi.length-5} more</div>`:'')+'</div>'}
+      +(run+wait>5?`<div class="qrow mute">and ${run+wait-5} more</div>`:'')+'</div>'}
   const app=document.getElementById('app'),kept=new Set([...app.querySelectorAll('details[open]')].map(d=>d.dataset.k));
   app.innerHTML=h;app.querySelectorAll('details').forEach(d=>{if(kept.has(d.dataset.k))d.open=true});
 }

@@ -64,7 +64,7 @@ class HubMcpTest(McpBase):
     def test_board_returns_text_and_the_state(self):
         self.hub("report", "--agent", "a", "--name", "alpha", "--state", "blocked", "--note", "no editor")
         r = self.run_client(lambda c: c.call_tool("sb_board", {}))
-        self.assertIn("alpha blocked: no editor", r.content[0].text)
+        self.assertIn("Needs you: alpha blocked: no editor", r.content[0].text)
         # the model gets the few summary lines only: the widget pulls the state itself (sb_state),
         # so a board never puts every provider log into the conversation
         self.assertEqual(r.structured_content["agents"]["a"]["state"], "blocked")
@@ -184,7 +184,7 @@ class HubMcpQueueTest(McpBase):
 
     def test_the_board_text_has_the_queue_line(self):
         r = self.run_client(lambda c: c.call_tool("sb_board", {}))
-        self.assertRegex(r.content[0].text, r"queue: 2 queued, 0 running, ends about \d\d:\d\d")
+        self.assertRegex(r.content[0].text, r"Queued: 2.*\nEnds about \d\d:\d\d")
         q = r.structured_content["queue"]  # trimmed for the model: no provider data, five lines at most
         self.assertLessEqual(len(q["items"]), 5)
         self.assertNotIn("providers", r.structured_content)
@@ -192,7 +192,33 @@ class HubMcpQueueTest(McpBase):
     def test_the_board_text_has_no_queue_line_for_an_empty_queue(self):
         self.post("/api/queue/set", {"keys": [], "version": self.get("/api/state")["queue"]["version"]})
         r = self.run_client(lambda c: c.call_tool("sb_board", {}))
-        self.assertNotIn("queue:", r.content[0].text)
+        self.assertNotIn("Queued", r.content[0].text)
+
+    def test_the_board_text_is_a_few_plain_lines(self):
+        now = time.time()
+        s = {"now": now, "agents": {}, "questions": {}, "locks": {},
+             "queue": {"paused": False, "items": [
+                 {"key": "m#1", "state": "running", "name": "Fix the thing", "agent": "work", "started": now - 600}]
+                 + [{"key": "m#%d" % n, "state": "queued"} for n in range(2, 13)]},
+             "installed": {"work": {"usage": {"five_hour": 0.42, "five_hour_resets": now + 3600}},
+                           "alt": {"limited_until": now + 7200}}}
+        t = self.mod.summary(s)
+        hm = lambda x: time.strftime("%H:%M", time.localtime(x))
+        self.assertIn("Nothing needs you.", t)
+        self.assertIn("Running: Fix the thing on work, 10 min", t)
+        self.assertIn("Queued: 11", t)
+        self.assertIn("work 42% of 5 hours, resets " + hm(now + 3600), t)
+        self.assertIn("alt at its limit until " + hm(now + 7200), t)
+        self.assertRegex(t, r"Ends about \d\d:\d\d")
+        self.assertTrue(5 <= len(t.splitlines()) <= 8)
+
+    def test_the_snapshot_counts_the_whole_queue(self):
+        items = [{"key": "m#%d" % n, "kind": "ticket", "state": "queued"} for n in range(11)]
+        items.append({"key": "m#99", "kind": "ticket", "state": "running"})
+        fake = {"agents": {}, "questions": {}, "locks": {}, "now": 1, "queue": {"items": items}}
+        with mock.patch.object(self.mod, "board_state", lambda focus=None: fake):
+            q = self.mod.snapshot()["queue"]
+        self.assertEqual((q["queued"], q["running"], len(q["items"])), (11, 1, 5))
 
     def test_the_widget_has_no_emoji_and_draws_the_queue(self):
         html = self.mod.BOARD_HTML.read_text(encoding="utf-8")

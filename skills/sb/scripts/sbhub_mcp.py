@@ -74,30 +74,55 @@ def result(text, structured=None, error=False):
 
 
 def summary(s):
-    """The board in a few lines of text: what the model (and a text-only client) reads."""
+    """The board as a few plain lines (at most 7; 8 with the widget hint): what a phone, a text-only client and the model read."""
+    now = s.get("now") or time.time()
     agents = s.get("agents", {})
-    open_qs = {k: q for k, q in s.get("questions", {}).items() if q.get("answer") is None}
-    workers = [a for a in agents.values() if a.get("role") == "worker"]
-    tops = [a for a in agents.values() if a.get("role") != "worker"]
-    need = [a for a in agents.values() if a.get("state") in ALERT]
-    lines = ["{} sessions, {} workers, {} open questions, {} locks".format(
-        len(tops), len(workers), len(open_qs), len(s.get("locks", {})))]
-    for k, q in open_qs.items():
-        lines.append("? [{}] {}: {} ({}; default {})".format(k, q["agent"], q["q"], " | ".join(q["options"]), q["default"]))
-    for a in need:
-        lines.append("! {} {}: {}".format(a.get("name") or a.get("agent"), a["state"], a.get("note", "")))
-    for a in tops:
-        done = " {}/{}".format(a["done"], a["total"]) if a.get("total") else ""
-        lines.append("- {} [{}{}] {}".format(a.get("name") or a.get("agent"), a.get("state", "?"), done, a.get("note", "")[:80]))
-    for k, l in s.get("locks", {}).items():
-        lines.append("lock {} held by {}".format(k, l["by"]))
-    decided = sorted((q for q in s.get("questions", {}).values() if q.get("answer") is not None),
-                     key=lambda q: q.get("answered", 0))[-3:]
-    for q in decided:
-        lines.append("decided: {} -> {} (by {})".format(q["q"], q["answer"], q.get("by") or "you"))
-    if queue_line(s):
-        lines.append(queue_line(s))
-    return "\n".join(lines)
+    items = (s.get("queue") or {}).get("items", [])
+    need = ["{}: {} ({})".format(q["agent"], q["q"], " | ".join(q["options"]))
+            for q in s.get("questions", {}).values() if q.get("answer") is None]
+    need += ["{} {}: {}".format(a.get("name") or a.get("agent"), a["state"], a.get("note", ""))
+             for a in agents.values() if a.get("state") in ALERT]
+    lines = ["Needs you: " + "; ".join(need) if need else "Nothing needs you."]
+    run = [i for i in items if i["state"] == "running"]
+    for i in run[:3]:
+        mins = int((now - i["started"]) // 60) if i.get("started") else 0
+        lines.append("Running: {} on {}, {} min".format((i.get("name") or i["key"])[:50], i.get("agent") or "default", mins))
+    if len(run) > 3:
+        lines.append("and {} more running".format(len(run) - 3))
+    wait = [i for i in items if i["state"] == "queued"]
+    q = s.get("queue") or {}
+    if run or wait:
+        lines.append("Queued: {}{}".format(len(wait), " (paused until you resume it)" if q.get("paused") else ""))
+    use = []
+    for n, e in (s.get("installed") or {}).items():
+        u, lim = e.get("usage") or {}, e.get("limited_until") or 0
+        if lim > now:
+            use.append("{} at its limit until {}".format(n, time.strftime("%H:%M", time.localtime(lim))))
+        elif u.get("five_hour") is not None:
+            r = u.get("five_hour_resets") or 0
+            use.append("{} {:.0f}% of 5 hours{}".format(n, 100 * u["five_hour"], ", resets " + time.strftime("%H:%M", time.localtime(r)) if r > now else ""))
+    if use:
+        lines.append("Accounts: " + "; ".join(use))
+    decided = sorted((x for x in s.get("questions", {}).values() if x.get("answer") is not None),
+                     key=lambda x: x.get("answered", 0))[-2:]
+    for x in decided:
+        lines.append("decided: {} -> {} (by {})".format(x["q"], x["answer"], x.get("by") or "you"))
+    end = ends(s)
+    if end:
+        lines.append("Ends about " + end)
+    return "\n".join(lines[:7])
+
+
+def ends(s):
+    """HH:MM the queue should finish ('' when it holds nothing to run)."""
+    q, now = s.get("queue") or {}, s.get("now") or time.time()
+    items = q.get("items", [])
+    run = [i for i in items if i["state"] == "running"]
+    wait = [i for i in items if i["state"] == "queued"]
+    if not run and not wait:
+        return ""
+    start = min(i.get("started") or now for i in run) if run else now
+    return time.strftime("%H:%M", time.localtime(max(start + EST * (len(run) + len(wait)), now + EST * len(wait))))
 
 
 def queue_line(s):
@@ -108,9 +133,7 @@ def queue_line(s):
     wait = [i for i in items if i["state"] == "queued"]
     if not run and not wait:
         return ""
-    start = min(i.get("started") or now for i in run) if run else now
-    end = max(start + EST * (len(run) + len(wait)), now + EST * len(wait))
-    line = "queue: {} queued, {} running, ends about {}".format(len(wait), len(run), time.strftime("%H:%M", time.localtime(end)))
+    line = "queue: {} queued, {} running, ends about {}".format(len(wait), len(run), ends({"queue": q, "now": now}))
     return line + (" (paused: nothing starts until the owner resumes it)" if q.get("paused") else "")
 
 
@@ -146,6 +169,7 @@ def snapshot(focus=None, **extra):
             "questions": {k: q for k, q in s["questions"].items() if q.get("answer") is None or k == focus},
             "locks": s["locks"], "now": s["now"],
             "queue": {"paused": s["queue"].get("paused"), "agent": s["queue"].get("agent"),
+                      **{n: sum(i["state"] == n for i in s["queue"].get("items", [])) for n in ("queued", "running")},
                       "items": [{f: i.get(f) for f in ("key", "kind", "state", "name", "started")}
                                 for i in s["queue"].get("items", [])[:5]]} if s.get("queue") else None,
             **({"focus": focus} if focus else {}), **extra}
