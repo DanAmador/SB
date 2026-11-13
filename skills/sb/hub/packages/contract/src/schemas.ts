@@ -29,6 +29,8 @@ export const AgentRow = z.strictObject({
   at: Seconds,
   since: Seconds.optional(),
   spawns: z.array(z.string()).optional(),
+  /** The Claude session id a hub worker first reported from; a helper under the same name has another. */
+  session: z.string().optional(),
 });
 export type AgentRow = z.infer<typeof AgentRow>;
 
@@ -288,6 +290,8 @@ export const MediaType = z.enum(MEDIA_TYPES);
 
 export const ReportBody = z.strictObject({
   agent: z.string(),
+  /** The reporting Claude session's id, sent by the hook for a hub worker. */
+  session: z.string().optional(),
   alias: z.string().optional(),
   spawn: z.string().optional(),
   name: z.string().optional(),
