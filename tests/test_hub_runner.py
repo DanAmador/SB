@@ -426,6 +426,125 @@ class ConcurrencyTest(RunnerCase):
                           ("repo/two#3", str(self.root / ".claude-spare"))])
 
 
+class JobsTest(RunnerCase):
+    MAPS = (("repo/one", "repoA", ("A", "one/"), ("B", "two/")),
+            ("repo/two", "repoB", ("C", "three/")))
+
+    def launcher(self, agent, brief, repo, model, env, log):
+        key = env["SB_HUB_AGENT"]
+        mode = self.modes.get(key, self.mode)
+        if key.startswith("job:") and mode == "commit":  # a prompt has no ticket to commit for
+            mode = "job"
+        self.launched.append({"key": key, "model": model, "brief": brief, "agent": agent, "log": log, "repo": repo})
+        return sbhub.launch(agent, brief, repo, model, {**env, "FAKE_WORKER_MODE": mode}, log)
+
+    def setUp(self):
+        super().setUp()
+        repo = self.repos["repo/two"]  # built alike, the two repos share a head: give one its own
+        (repo / "other.txt").write_text("y\n")
+        git(repo, "add", "other.txt")
+        git(repo, "commit", "-q", "-m", "other")
+
+    def jobs(self):
+        return [i for i in self.hub.state()["queue"]["items"] if i["kind"] == "job"]
+
+    def test_a_jobs_result_lands_in_its_run_folder_and_the_item_links_it(self):
+        out = self.hub.queue_job("repo", "Audit the thing\nin detail", "main", "sonnet", "audit")
+        self.resume()
+        self.until(lambda: self.state_of(out["key"]) == "done")
+        item = self.items()[out["key"]]
+        folder = Path(item["run"])
+        self.assertEqual((folder.parent, folder.name.endswith("-audit")), (self.vault / "wayfinder/repo/runs", True))
+        self.assertEqual(Path(item["result"]).read_text(encoding="utf-8").strip(), "did: Audit the thing")
+        self.assertIn("did: Audit the thing", (folder / "job.log").read_text(encoding="utf-8"))
+        self.assertEqual((item["kind"], self.launched[0]["repo"], self.launched[0]["model"]),
+                         ("job", str(self.repos["repo/one"]), "sonnet"))
+        self.assertIn(str(folder), self.launched[0]["brief"])
+
+    def test_a_queue_with_final_review_gets_one_review_job_per_touched_repo_after_its_last_ticket(self):
+        bases = {r: git(self.repos[r], "rev-parse", "HEAD") for r in self.repos}
+        self.hub.tickets()
+        v = self.hub.state()["queue"]["version"]
+        self.assertTrue(self.hub.queue_options(None, True, v)["ok"])
+        self.assertTrue(self.hub.queue_options(None, True, v)["stale"])
+        self.resume()
+        self.until(lambda: len(self.jobs()) == 2)
+        for _ in range(3):
+            self.sup.tick()
+        jobs = self.jobs()
+        self.assertEqual(len(jobs), 2)
+        self.assertEqual(sorted(j["repo"] for j in jobs), sorted(map(str, self.repos.values())))
+        for j in jobs:
+            self.assertEqual((j["agent"], j["model"]), ("main", "opus"))
+            self.assertIn("since " + bases["repo/one" if j["repo"].endswith("repoA") else "repo/two"], j["prompt"])
+            self.assertIn("Review the commits of tonight's tickets", j["prompt"])
+        self.assertTrue(all(self.state_of(k) == "done" for k in ("repo/one#1", "repo/one#2", "repo/two#3")))
+        self.until(lambda: all(j["state"] == "done" for j in self.jobs()))
+        self.assertEqual(len(self.jobs()), 2)
+
+    def test_past_the_stop_time_nothing_starts_and_the_rest_are_skipped(self):
+        self.hub.tickets()
+        job = self.hub.queue_job("repo", "Audit it", "main")["key"]
+        self.hub.queue_options(START + 60, False, self.hub.state()["queue"]["version"])
+        self.resume()
+        self.clock.t = START + 120
+        self.sup.tick()
+        self.assertEqual(self.launched, [])
+        notes = {i["state"] + ": " + i["note"] for i in self.hub.state()["queue"]["items"]}
+        self.assertEqual(notes, {"skipped: past the stop time"})
+        self.assertEqual(self.state_of(job), "skipped")
+
+    def test_the_stop_time_also_ends_what_waits_for_an_agents_reset(self):
+        self.mode = "limit"
+        self.hub.queue_options(START + 3600, False, self.hub.state()["queue"]["version"])
+        self.resume()
+        self.until(lambda: self.hub.state()["installed"]["main"]["limited_until"])
+        self.assertEqual(self.state_of("repo/one#1"), "queued")
+        self.clock.t = START + 3601
+        self.sup.tick()
+        self.assertEqual({i["state"] for i in self.hub.state()["queue"]["items"]}, {"skipped"})
+        self.assertEqual(len(self.launched), 1)
+
+    def test_a_duplicate_job_within_a_day_is_refused_naming_the_earlier_item_and_accepted_after_a_day(self):
+        first = self.hub.queue_job("repo", "Audit it", "main", None, "audit")["key"]
+        with self.assertRaises(ValueError) as e:
+            self.hub.queue_job("repo", "Audit it", "spare", "opus", "other name")
+        self.assertIn(first, str(e.exception))
+        self.hub.queue_job("repo", "Audit it too", "main")  # another prompt is no duplicate
+        self.clock.t = START + 86401
+        again = self.hub.queue_job("repo", "Audit it", "main")["key"]
+        self.assertNotEqual(again, first)
+        self.assertEqual(len(self.jobs()), 3)
+        with self.assertRaises(ValueError):
+            self.hub.queue_job("nowhere", "x", "main")
+
+    def test_a_limited_agent_requeues_the_job_until_its_reset(self):
+        self.mode = "limit"
+        key = self.hub.queue_job("repo", "Audit it", "main", "sonnet", "audit")["key"]
+        self.resume()
+        self.until(lambda: self.hub.state()["installed"]["main"]["limited_until"])
+        reset = datetime(2026, 11, 13, 4, 40).timestamp()
+        self.assertEqual(self.state_of(key), "queued")
+        for _ in range(3):
+            self.sup.tick()
+        tries = [x for x in self.launched if x["key"] == key]
+        self.assertEqual(len(tries), 1)
+        self.clock.t = reset + 1
+        self.mode = "job"
+        self.until(lambda: self.state_of(key) == "done")
+        tries = [x for x in self.launched if x["key"] == key]
+        self.assertEqual(len(tries), 2)
+        self.assertEqual(Path(tries[0]["log"]), Path(tries[1]["log"]))
+        self.assertEqual(Path(self.items()[key]["result"]).read_text(encoding="utf-8").strip(), "did: Audit it")
+
+    def test_a_failed_job_is_failed_without_a_retry(self):
+        self.mode = "nothing"
+        key = self.hub.queue_job("repo", "Audit it", "main", "sonnet")["key"]
+        self.resume()
+        self.until(lambda: self.state_of(key) == "failed")
+        self.assertEqual([x["key"] for x in self.launched].count(key), 1)
+
+
 class LaunchAndHookTest(RunnerCase):
     def test_launch_starts_agy_in_its_own_group_with_its_model(self):
         log = self.root / "agy.log"

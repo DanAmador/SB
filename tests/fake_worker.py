@@ -10,6 +10,7 @@ its arguments (the log keeps them), and does what FAKE_WORKER_MODE says:
   commit-limit  commit as `commit` does, then print a usage-limit line and exit 1
   nothing  commit nothing, exit 1
   limit    print a usage-limit line, exit 1
+  job      a prompt, not a ticket: print a result naming the prompt's first line and the folder it was told, exit 0
   hang     start a child that sleeps, write both pids to FAKE_WORKER_PIDS, sleep past any limit
 """
 import json
@@ -31,7 +32,8 @@ def main():
                                 ("CLAUDE_CONFIG_DIR", "SB_HUB_AGENT", "SB_HUB_PARENT", "SB_HUB_PORT")}), flush=True)
     print("cwd: " + os.getcwd(), flush=True)
     mode = os.environ.get("FAKE_WORKER_MODE", "commit")
-    ticket = re.search(r"^\s*Ticket: (\S+)\s*$", brief, re.M).group(1)
+    found = re.search(r"^\s*Ticket: (\S+)\s*$", brief, re.M)
+    ticket = found.group(1) if found else None
     owned = re.search(r"^Files you own: (.+)\. Touch no other file\.$", brief, re.M)
     paths = owned.group(1).split(", ") if owned else ["work/"]
     if mode in ("commit", "stray", "commit-limit"):
@@ -45,6 +47,10 @@ def main():
             print(json.dumps({"type": "result", "is_error": True, "result": LIMIT}))
             return 1
         print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "result": "done"}))
+        return 0
+    if mode == "job":
+        print(json.dumps({"type": "result", "subtype": "success", "is_error": False,
+                          "result": "did: " + brief.splitlines()[0]}))
         return 0
     if mode == "nothing":
         print(json.dumps({"type": "result", "subtype": "success", "is_error": True, "result": "gave up"}))
