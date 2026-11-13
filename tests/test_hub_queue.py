@@ -43,7 +43,7 @@ class QueueTest(unittest.TestCase):
     def test_default_selection_is_every_ready_ticket(self):
         q = self.h.state()["queue"]
         self.assertEqual(self.keys(), ["repo/one#4", "repo/one#1"])
-        self.assertEqual((q["paused"], q["agent"]), (False, None))
+        self.assertEqual((q["paused"], q["agent"]), (True, None))  # a new queue waits for the owner's resume
         self.assertTrue(all(i["state"] == "queued" and i["kind"] == "ticket" for i in q["items"]))
 
     def test_queue_set_orders_by_the_rule_and_bumps_the_version_once(self):
@@ -119,6 +119,14 @@ class QueueTest(unittest.TestCase):
         again = Hub(self.home, run=lambda: "not json")
         q = again.state()["queue"]
         self.assertEqual(([i["key"] for i in q["items"]], q["paused"], q["version"]), (["repo/one#1"], True, v + 2))
+
+    def test_a_new_queue_is_paused_and_a_resumed_one_stays_resumed_after_a_restart(self):
+        with tempfile.TemporaryDirectory() as fresh:
+            self.assertTrue(Hub(fresh).state()["queue"]["paused"])
+        self.h.queue_pause(False)
+        again = Hub(self.home, run=lambda: json.dumps(TICKETS))
+        again.tickets()
+        self.assertFalse(again.state()["queue"]["paused"])
 
     def test_an_emptied_queue_is_not_refilled(self):
         v = self.h.state()["queue"]["version"]

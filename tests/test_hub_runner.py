@@ -144,6 +144,11 @@ class RunnerCase(unittest.TestCase):
             time.sleep(0.03)
         self.fail("timed out; queue: {}".format(json.dumps(self.hub.state()["queue"], indent=1)))
 
+    def resume(self):
+        """The owner's resume: the first read seeds tonight's queue, paused; nothing starts before this."""
+        self.hub.tickets()
+        self.hub.queue_pause(False)
+
     def pids(self):
         """The hanging fake worker's pid and its child's, once it has written them."""
         f = Path(os.environ["FAKE_WORKER_PIDS"])
@@ -174,7 +179,20 @@ class LimitTextTest(unittest.TestCase):
 
 
 class TicketLoopTest(RunnerCase):
+    def test_a_new_queue_starts_nothing_until_the_owner_resumes_it(self):
+        for _ in range(2):
+            self.sup.tick()
+        q = self.hub.state()["queue"]
+        self.assertEqual((q["paused"], [i["state"] for i in q["items"]]), (True, ["queued", "queued"]))
+        self.assertEqual(self.launched, [])
+        self.assertEqual(self.open_tickets()[1]["status"], "open")
+        self.hub.queue_pause(False)
+        self.mode = "hang"
+        self.sup.tick()
+        self.assertEqual(self.state_of("repo/one#1"), "running")
+
     def test_a_commit_in_its_paths_resolves_the_ticket_and_the_next_one_starts(self):
+        self.resume()
         self.sup.tick()
         self.assertEqual((self.state_of("repo/one#1"), self.state_of("repo/one#2")), ("running", "queued"))
         self.until(lambda: self.state_of("repo/one#1") == "done")
@@ -206,6 +224,7 @@ class TicketLoopTest(RunnerCase):
     def test_a_commit_outside_its_paths_fails_leaves_the_commit_and_the_next_ticket_runs(self):
         self.sb("set", "repo/one", "001", "tier=opus", "--no-sync")
         self.modes = {"repo/one#1": "stray"}
+        self.resume()
         self.until(lambda: self.state_of("repo/one#1") == "failed")
         item = self.items()["repo/one#1"]
         self.assertIn("stray.txt", item["note"])
@@ -216,6 +235,7 @@ class TicketLoopTest(RunnerCase):
 
     def test_a_failing_check_leaves_the_ticket_open_with_its_commit_in_place(self):
         self.sb("set", "repo/one", "001", "tier=opus", "checks=test -f nope.txt", "--no-sync")
+        self.resume()
         self.until(lambda: self.state_of("repo/one#1") == "failed")
         item = self.items()["repo/one#1"]
         self.assertIn("check failed: test -f nope.txt", item["note"])
@@ -230,6 +250,7 @@ class TicketLoopTest(RunnerCase):
 
     def test_no_commit_on_sonnet_retries_once_on_opus_then_fails(self):
         self.modes = {"repo/one#1": "nothing", "repo/one#2": "hang"}
+        self.resume()
         self.until(lambda: self.state_of("repo/one#1") == "failed")
         runs = [x for x in self.launched if x["key"] == "repo/one#1"]
         self.assertEqual([x["model"] for x in runs], ["sonnet", "opus"])
@@ -248,6 +269,7 @@ class TicketLoopTest(RunnerCase):
 class StopsTest(RunnerCase):
     def test_a_usage_limit_waits_for_the_reset_and_releases_the_claim(self):
         self.mode = "limit"
+        self.resume()
         self.until(lambda: self.hub.state()["installed"]["main"]["limited_until"])
         reset = datetime(2026, 11, 13, 4, 40).timestamp()
         self.assertEqual(self.hub.state()["installed"]["main"]["limited_until"], reset)
@@ -266,6 +288,7 @@ class StopsTest(RunnerCase):
         self.sup.limit = 1
         self.sb("set", "repo/one", "001", "tier=opus", "--no-sync")
         self.mode = "hang"
+        self.resume()
         self.sup.tick()
         leader, child = self.pids()
         self.clock.t += 2
@@ -284,13 +307,14 @@ class StopsTest(RunnerCase):
         for n in ("001", "002", "003"):
             self.sb("set", "repo/one", n, "tier=opus", "--no-sync")
         self.mode = "nothing"
+        self.resume()
         self.until(lambda: self.hub.state()["queue"]["paused"])
         q = self.hub.state()["queue"]
         self.assertEqual([i["state"] for i in q["items"]], ["failed"] * 3)
         self.assertIn("no commit", q["note"])
 
     def test_a_ticket_resolved_or_claimed_while_queued_is_skipped_with_its_new_state(self):
-        self.hub.tickets()  # seeds the queue
+        self.resume()
         self.sb("resolve", "repo/one", "001", "--gist", "by hand", "--answer", "Done by hand.")
         self.sb("claim", "repo/one", "002", "--by", "a live session")
         self.sup.tick()
@@ -304,7 +328,7 @@ class StopsTest(RunnerCase):
     def test_a_reopened_blocker_skips_its_dependant(self):
         self.sb("block", "repo/one", "002", "1", "--no-sync")
         self.sb("resolve", "repo/one", "001", "--gist", "first", "--answer", "Done.")
-        self.hub.tickets()
+        self.resume()
         self.assertEqual(list(self.items()), ["repo/one#2"])
         self.sb("set", "repo/one", "001", "status=open", "--no-sync")
         self.sup.tick()
@@ -322,21 +346,26 @@ class StopsTest(RunnerCase):
         sup = Supervisor(hub)
         self.addCleanup(sup.stop)
         sup.tick()
-        self.assertEqual(hub.state()["queue"]["items"][0]["state"], "queued")
+        q = hub.state()["queue"]
+        self.assertEqual((q["items"][0]["state"], q["paused"]), ("queued", True))  # the saved pause stays
         self.assertEqual(self.open_tickets()[1]["status"], "open")
         self.assertEqual(self.launched, [])
 
     def test_a_worker_that_outlived_its_hub_is_killed_before_its_ticket_is_queued_again(self):
         self.mode = "hang"
+        self.resume()
         self.sup.tick()
         leader, child = self.pids()
+        Path(os.environ["FAKE_WORKER_PIDS"]).unlink()
         hub = Hub(self.root / "hub", now=self.clock, launcher=self.launcher)  # the hub died; a new one starts
-        hub.queue_pause(True)
         sup = Supervisor(hub)
         self.addCleanup(sup.stop)
         sup.tick()
-        self.assertEqual(hub.state()["queue"]["items"][0]["state"], "queued")
-        self.assertEqual(self.open_tickets()[1]["status"], "open")
+        q = hub.state()["queue"]
+        # the orphan is killed and its claim released, then the resumed queue (still resumed) starts it afresh
+        self.assertEqual((q["paused"], q["items"][0]["state"]), (False, "running"))
+        self.assertEqual([x["key"] for x in self.launched], ["repo/one#1", "repo/one#1"])
+        self.assertNotIn((leader, child), [self.pids()])
         end = time.time() + 5
         while (alive(leader) or alive(child)) and time.time() < end:
             time.sleep(0.02)
@@ -359,7 +388,7 @@ class ConcurrencyTest(RunnerCase):
 
     def test_one_ticket_per_repo_and_per_agent(self):
         self.mode = "hang"
-        self.hub.tickets()
+        self.resume()
         self.assertEqual(list(self.items()), ["repo/one#1", "repo/two#3", "repo/one#2"])
         self.sup.tick()
         self.sup.tick()
@@ -398,6 +427,9 @@ class LaunchAndHookTest(RunnerCase):
                              text=True, env=env)
         self.addCleanup(lambda: (p.kill(), p.wait(), p.stdout.close()))
         self.assertEqual(p.stdout.readline().strip(), "sb hub on http://127.0.0.1:{}".format(port))
+        r = subprocess.run([sys.executable, SCRIPT, "queue", "resume", "--port", str(port)], capture_output=True,
+                           text=True, env=env, timeout=30)  # a new queue waits for this
+        self.assertEqual(r.returncode, 0, r.stderr)
         leader, child = self.pids()
         state = json.loads(subprocess.run([sys.executable, SCRIPT, "state", "--port", str(port)], capture_output=True,
                                           text=True, env=env, timeout=20).stdout)

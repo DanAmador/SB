@@ -30,7 +30,8 @@ and never fail a session when it is down.
 
 Every command but `serve` also takes --port N.
 
-`serve` also runs tonight's queue (SB_HUB_QUEUE=0 serves the board only): every 5 s it starts the next
+`serve` also runs tonight's queue (SB_HUB_QUEUE=0 serves the board only). A new queue waits paused until
+the owner resumes it (`queue resume`); a resumed queue stays so across restarts. Every 5 s it starts the next
 queued ticket whose agent and repo are free as a headless worker (`claude -p` in auto mode, or `agy -p`),
 with SB_HUB_AGENT=<ticket key> and SB_HUB_PARENT=queue so `hook` reports it as that item's worker; when the
 worker exits it checks the commit, paths and checks in code, and resolves the ticket only when they pass.
@@ -78,9 +79,11 @@ class Hub:
         self.providers = {}
         self.queued = set()
         self.changed = threading.Event()
+        self.queue_kick = threading.Event()  # set by every queue write: the supervisor ticks at once
         # aliases: session id -> the agent id that session reports as (`report --agent X`)
         self._data = {"agents": {}, "locks": {}, "questions": {}, "aliases": {}, "messages": {},
-                      "queue": {"version": 0, "seeded": False, "paused": False, "agent": None, "items": []},
+                      # a new queue waits paused until the owner resumes it: nothing runs on its own
+                      "queue": {"version": 0, "seeded": False, "paused": True, "agent": None, "items": []},
                       "installed": {}}
         path = self.home / "state.json"
         try:
@@ -387,6 +390,7 @@ class Hub:
             ready = [sbqueue.key(t) for t in rows if sbqueue.classify(t, set(), rows)[0] == "ready"]
             self._apply_selection(q, ready, rows)
             q["seeded"] = True
+            q["paused"] = True  # the first seed ticks tonight's tickets; they wait for the owner's resume
             q["version"] += 1
             self._save()
 
@@ -416,6 +420,7 @@ class Hub:
             change(q, rows)
             q["version"] += 1
             self._save()
+            self.queue_kick.set()
             return {"ok": True, "queue": json.loads(json.dumps(q))}
 
     def queue_set(self, keys, version):
@@ -650,7 +655,8 @@ class Supervisor:
                 self.tick()
             except Exception as e:  # one bad pass never stops the queue
                 print("sb hub queue: {}: {}".format(type(e).__name__, e), file=sys.stderr, flush=True)
-            time.sleep(every)
+            self.hub.queue_kick.wait(every)  # or sooner, when the owner changes the queue (a resume)
+            self.hub.queue_kick.clear()
 
     def stop(self):
         """Kill every worker's process group; their items are queued again when the hub next starts."""
