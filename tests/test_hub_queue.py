@@ -32,7 +32,8 @@ class QueueTest(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.home = Path(self._tmp.name)
         self.h = Hub(self.home, run=lambda: json.dumps(TICKETS))
-        self.h.tickets()  # state() only reads the cache; this fills it and seeds the queue
+        self.h.tickets()  # state() only reads the cache; this fills it (and ticks nothing)
+        self.h.queue_set(["repo/one#1", "repo/one#4"], self.h.state()["queue"]["version"])  # the owner's ticks
 
     def tearDown(self):
         self._tmp.cleanup()
@@ -40,7 +41,10 @@ class QueueTest(unittest.TestCase):
     def keys(self, h=None):
         return [i["key"] for i in (h or self.h).state()["queue"]["items"]]
 
-    def test_default_selection_is_every_ready_ticket(self):
+    def test_nothing_is_ticked_until_the_owner_ticks_it(self):
+        fresh = Hub(self.home / "fresh", run=lambda: json.dumps(TICKETS))
+        fresh.tickets()
+        self.assertEqual(fresh.state()["queue"]["items"], [])  # reading the tickets never queues one
         q = self.h.state()["queue"]
         self.assertEqual(self.keys(), ["repo/one#4", "repo/one#1"])
         self.assertEqual((q["paused"], q["agent"]), (True, None))  # a new queue waits for the owner's resume
@@ -182,6 +186,8 @@ class QueueTest(unittest.TestCase):
             return json.dumps(TICKETS)
         now = [100.0]
         h = Hub(self.home / "x", now=lambda: now[0], run=run)
+        h.tickets()
+        h.queue_set(["repo/one#1", "repo/one#4"], h.state()["queue"]["version"])
         rows = {t["num"]: t for t in h.tickets()}
         self.assertEqual((rows[1]["state"], rows[1]["queued"]), ("ready", True))
         self.assertEqual((rows[2]["state"], rows[2]["queued"]), ("ready", False))  # its blocker is queued
@@ -201,7 +207,7 @@ class QueueTest(unittest.TestCase):
         self.assertEqual(h.state()["queue"]["items"], [])
         self.assertEqual(calls, [])
         h.tickets()
-        self.assertEqual(len(h.state()["queue"]["items"]), 2)
+        self.assertEqual(len(h.state()["queue"]["items"]), 0)
 
     def test_a_failed_sbmap_is_not_retried_at_once(self):
         calls = []
@@ -236,16 +242,17 @@ class QueueTest(unittest.TestCase):
         now = [100.0]
         h = Hub(self.home / "k", now=lambda: now[0], run=lambda: json.dumps(rows[0]))
         h.tickets()
+        h.queue_set(["repo/one#4", "repo/one#1"], h.state()["queue"]["version"])
         rows[0] = [t for t in TICKETS if t["num"] != 4]
         now[0] += 20
         h.queue_set(["repo/one#4", "repo/one#1"], h.state()["queue"]["version"])
         self.assertEqual([i["key"] for i in h.state()["queue"]["items"]], ["repo/one#1", "repo/one#4"])
 
-    def test_pause_does_not_stop_the_default_selection(self):
+    def test_a_resumed_fresh_queue_still_ticks_nothing(self):
         h = Hub(self.home / "p", run=lambda: json.dumps(TICKETS))
-        h.queue_pause(True)
+        h.queue_pause(False)
         h.tickets()
-        self.assertEqual(len(h.state()["queue"]["items"]), 2)
+        self.assertEqual(len(h.state()["queue"]["items"]), 0)
 
     def test_a_broken_sbmap_leaves_the_queue_unset(self):
         h = Hub(self.home / "y", run=lambda: "not json")
@@ -337,7 +344,8 @@ class QueueHttpTest(HubCase):
 
     def test_tickets_and_queue_over_http(self):
         rows = self.get("/api/tickets")
-        self.assertEqual([(r["num"], r["state"], r["queued"]) for r in rows], [(1, "ready", True), (2, "ready", True)])
+        self.assertEqual([(r["num"], r["state"], r["queued"]) for r in rows], [(1, "ready", False), (2, "ready", False)])
+        self.post("/api/queue/set", {"keys": ["repo/one#1", "repo/one#2"], "version": self.get("/api/state")["queue"]["version"]})
         q = self.get("/api/state")["queue"]
         self.assertEqual([i["key"] for i in q["items"]], ["repo/one#1", "repo/one#2"])
         code, out = self.post("/api/queue/set", {"keys": ["repo/one#2"], "version": q["version"]})
@@ -365,6 +373,9 @@ class QueueHttpTest(HubCase):
         r = self.hub("queue")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("repo/one#1", r.stdout)
+        self.assertEqual(self.hub("queue", "add", "repo/one", "2").returncode, 0)  # a fresh queue: only what is added
+        self.assertEqual([i["key"] for i in self.get("/api/state")["queue"]["items"]], ["repo/one#2"])
+        self.assertEqual(self.hub("queue", "add", "repo/one", "1").returncode, 0)
         self.assertEqual(self.hub("queue", "rm", "repo/one", "1").returncode, 0)
         self.assertEqual([i["key"] for i in self.get("/api/state")["queue"]["items"]], ["repo/one#2"])
         self.assertEqual(self.hub("queue", "add", "repo/one", "1").returncode, 0)

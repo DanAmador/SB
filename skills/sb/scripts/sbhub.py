@@ -21,7 +21,8 @@ and never fail a session when it is down.
   sbhub.py queue                      tonight's ticket queue in run order, with each ticket's state
   sbhub.py queue add|rm <map> <NNN>...   tick or untick tickets (running and finished items stay)
   sbhub.py queue pause|resume         hold or release the queue
-  sbhub.py queue job --project P --agent A [--model M] [--name N] (--prompt T | --prompt-file F)   queue a one-off job;
+  sbhub.py queue job --project P --agent A [--model M] [--name N] [--at HH:MM] (--prompt T | --prompt-file F)
+                                      queue a one-off job (never started before --at);
                                       P is a wayfinder project or the absolute path of a git checkout
   sbhub.py queue agent <name>         the agent that runs the night's items (an installed one)
   sbhub.py queue agents <name>...     the night's pool of agents: each item goes to the one where its likely
@@ -312,7 +313,6 @@ class Hub:
             return dict(self._data["questions"][qid])
 
     def state(self):
-        self._seed_queue(fetch=False)  # never waits on sbmap: it reads the cache
         with self._lock:
             self._settle()
             out = json.loads(json.dumps(self._data))
@@ -362,8 +362,8 @@ class Hub:
         return got
 
     def tickets(self, run=None, fresh=False):
-        """Open tickets with `state`/`reason` (sbqueue.classify) and `queued`."""
-        self._seed_queue(run)
+        """Open tickets with `state`/`reason` (sbqueue.classify) and `queued`. Reading them never ticks one:
+        only the owner's own ticks queue a ticket."""
         rows = self._open_tickets(run, fresh) or []
         with self._lock:
             live = self._live_keys()
@@ -379,28 +379,6 @@ class Hub:
     def _item(key):
         return {"key": key, "kind": "ticket", "agent": None, "state": "queued", "note": "", "commit": None,
                 "tries": 0, "started": None, "ended": None}
-
-    def _seed_queue(self, run=None, fetch=True):
-        """The first time the tickets can be read, tick every ready one; the owner unticks."""
-        if self._data["queue"]["seeded"]:
-            return
-        if fetch:
-            rows = self._open_tickets(run)
-        else:
-            with self._lock:
-                rows = self._tcache[1]
-        if not rows:
-            return
-        with self._lock:
-            q = self._data["queue"]
-            if q["seeded"]:
-                return
-            ready = [sbqueue.key(t) for t in rows if sbqueue.classify(t, set(), rows)[0] == "ready"]
-            self._apply_selection(q, ready, rows)
-            q["seeded"] = True
-            q["paused"] = True  # the first seed ticks tonight's tickets; they wait for the owner's resume
-            q["version"] += 1
-            self._save()
 
     def _apply_selection(self, q, keys, rows):
         """Queued tickets become `keys`, in run order; every other item stays where it was, in front. A
@@ -476,6 +454,59 @@ class Hub:
             q["items"].remove(item)
         return self._queue_write(version, change)
 
+    def queue_clear_finished(self, version):
+        """Take done, failed and skipped items off the queue list; they stay in `cleared` (the page's log) and
+        in the vault. Nothing running or queued is touched."""
+        def change(q, rows):
+            gone = [i for i in q["items"] if i["state"] in ("done", "failed", "skipped")]
+            q["items"] = [i for i in q["items"] if i["state"] not in ("done", "failed", "skipped")]
+            q["cleared"] = (q.get("cleared") or []) + gone
+            q["cleared"] = q["cleared"][-CLEARED_KEPT:]
+        return self._queue_write(version, change)
+
+    def agents_dismiss(self, agent):
+        """Take one session row (and its workers) off the board; the session itself is never stopped or told,
+        and its next hook event brings its row back."""
+        with self._lock:
+            agent = self._resolve(agent)
+            if agent not in self._data["agents"]:
+                raise ValueError("no such session")
+            self._remove(agent)
+            self._save()
+            return {"ok": True}
+
+    def agents_clear_quiet(self):
+        """Take off the board every row idle or waiting on "your turn" for over QUIET_FOR, and every finished
+        worker; display state only, like agents_dismiss."""
+        with self._lock:
+            now, agents = self.now(), self._data["agents"]
+            quiet = [k for k, a in agents.items()
+                     if a.get("role") == "worker" and a.get("state") == "done"
+                     or a.get("state") in ("idle", "your turn") and now - (a.get("since") or a.get("at") or now) > QUIET_FOR]
+            for k in quiet:
+                if k in agents:
+                    self._remove(k)
+            self._save()
+            return {"ok": True, "cleared": len(quiet)}
+
+    def item_file(self, key, what):
+        """(path, text) of a queue item's worker report (`report`) or log (`log`, its last LOG_SERVED bytes);
+        the path is the item's own, never one from the request. KeyError when it has none."""
+        with self._lock:
+            q = self._data["queue"]
+            item = next((i for i in q["items"] + (q.get("cleared") or []) if i["key"] == key), None)
+        if item is None:
+            raise KeyError(key)
+        if what == "log":
+            path = item.get("log")
+        elif item["kind"] == "job":
+            path = item.get("result")
+        else:
+            path = item.get("run") and str(Path(item["run"]) / "{}.md".format(key.rsplit("#", 1)[-1]))
+        if not path or not os.path.isfile(path):
+            raise KeyError(key)
+        return path, _tail(path, 0, LOG_SERVED) if what == "log" else Path(path).read_text(encoding="utf-8", errors="replace")
+
     def queue_pause(self, paused):
         def change(q, rows):
             q["paused"] = bool(paused)
@@ -523,11 +554,13 @@ class Hub:
             q["final_review"] = bool(final_review)
         return self._queue_write(version, change)
 
-    def queue_job(self, project, prompt, agent=None, model=None, name=None):
+    def queue_job(self, project, prompt, agent=None, model=None, name=None, at=None):
         """Queue a one-off job: `prompt` run headless in the repo of the wayfinder project folder `project`,
         or in `project` itself when it is an absolute path to a git checkout (its run folder is then a shared
         one, wayfinder/runs/). Refused as a duplicate (ValueError naming the earlier item) when the same
-        project and prompt were queued within the last day."""
+        project and prompt were queued within the last day. `at` ("HH:MM", local) holds it until the next
+        time the clock shows that."""
+        not_before = next_clock(at, self.now()) if at else None
         if not str(prompt or "").strip():
             raise ValueError("a job needs a prompt")
         project = str(project or "").strip()
@@ -541,9 +574,9 @@ class Hub:
             raise ValueError("unknown project (no map in wayfinder/{} names a repo folder): {}".format(project, project))
         if agent is not None and agent not in self._data["installed"]:
             raise ValueError("unknown agent: {}".format(agent))
-        return self._queue_job(project, repo, prompt, agent, model, name)
+        return self._queue_job(project, repo, prompt, agent, model, name, not_before=not_before)
 
-    def _queue_job(self, project, repo, prompt, agent, model, name):
+    def _queue_job(self, project, repo, prompt, agent, model, name, not_before=None, close_off=False):
         """The job item's key is `job:<first 12 of its hash>:<n>`, n counting the jobs with that hash so far."""
         digest = hashlib.sha256((project + "\n" + prompt.strip()).encode("utf-8")).hexdigest()
         made = []
@@ -560,7 +593,9 @@ class Hub:
             q["items"].append({"key": key, "kind": "job", "agent": agent, "model": model, "project": project,
                                "repo": repo, "prompt": prompt, "hash": digest, "name": slug, "title": slug,
                                "state": "queued", "note": "", "commit": None, "tries": 0, "created": now,
-                               "started": None, "ended": None})
+                               "started": None, "ended": None,
+                               **({"not_before": not_before} if not_before else {}),
+                               **({"close_off": True} if close_off else {})})
             made.append(key)
         out = self._queue_write(None, change)
         return {**out, "key": made[0]}
@@ -604,6 +639,62 @@ class Hub:
 
 SBMAP = Path(__file__).resolve().parent / "sbmap.py"
 JOB_DUPLICATE_WINDOW = 86400  # the same project and prompt is refused again for this long
+CLEARED_KEPT = 300  # finished items cleared off the queue list that the page's log still shows
+QUIET_FOR = 2 * 3600  # a row idle or on "your turn" this long is quiet (agents_clear_quiet)
+LOG_SERVED = 1 << 20  # the end of a worker's log the page can open
+CHECK_TAIL = 40  # output lines kept per check
+CLOSE_OFF_AT = (9, 0)  # the morning close-off job's local time
+CLOSE_OFF = Path(__file__).resolve().parents[1] / "templates" / "close-off.md"
+
+
+def next_clock(hhmm, now):
+    """The next epoch time (after `now`) the local clock shows "HH:MM"; ValueError for anything else."""
+    m = re.fullmatch(r"(\d{1,2}):(\d{2})", str(hhmm or "").strip())
+    if not m or int(m.group(1)) > 23 or int(m.group(2)) > 59:
+        raise ValueError("a time is HH:MM, e.g. 09:00")
+    at = datetime.fromtimestamp(now).replace(hour=int(m.group(1)), minute=int(m.group(2)), second=0, microsecond=0)
+    if at.timestamp() <= now:
+        at += timedelta(days=1)
+    return at.timestamp()
+
+
+def _recording(checks):
+    """A `run` for sbqueue.verdict that also keeps each check (the shell commands) as {cmd, code, secs, tail}:
+    code None when it timed out, tail its last CHECK_TAIL output lines."""
+    def run(cmd, **kw):
+        if not kw.get("shell"):
+            return subprocess.run(cmd, **kw)
+        began = time.time()
+        try:
+            r = subprocess.run(cmd, **kw)
+        except subprocess.TimeoutExpired:
+            checks.append({"cmd": cmd, "code": None, "secs": round(time.time() - began, 1),
+                           "tail": "timed out after 20 minutes"})
+            raise
+        out = ((r.stdout or "") + (r.stderr or "")).splitlines()[-CHECK_TAIL:]
+        checks.append({"cmd": cmd, "code": r.returncode, "secs": round(time.time() - began, 1),
+                       "tail": "\n".join(line[:300] for line in out)})
+        return r
+    return run
+
+
+def hub_checks_section(passed, reason, sha, checks, report_text, stamp):
+    """The `## Hub checks` section the hub appends to a worker's report: the verdict, each check, and the
+    worker's own `## Self-checks` section (or "none reported")."""
+    lines = ["", "## Hub checks", "", "Checked by the sb hub at {}: {}{}.".format(
+        stamp, "passed" if passed else "failed: " + firstline(reason), ", commit " + sha[:9] if sha else "")]
+    if not checks:
+        lines.append("No check ran (the verdict stopped before the checks).")
+    for c in checks:
+        lines += ["", "- `{}`: {}, {} s".format(c["cmd"], "timed out" if c["code"] is None else "exit {}".format(c["code"]),
+                                              c["secs"]), "", "  ```", *("  " + l for l in c["tail"].splitlines()), "  ```"]
+    m = re.search(r"^## Self-checks[^\n]*\n(.*?)(?=^## |\Z)", report_text or "", re.M | re.S)
+    lines += ["", "### The worker's self-checks", "", (m.group(1).strip() if m and m.group(1).strip() else "none reported"), ""]
+    return "\n".join(lines)
+
+
+def firstline(text):
+    return next((l.strip() for l in str(text or "").splitlines() if l.strip()), "")
 REFRESH_EVERY = 15
 TICKETS_CACHED_FOR = 15
 TICKETS_FAILED_FOR = 5  # after a failed sbmap, no new try for this long
@@ -969,6 +1060,8 @@ class Supervisor:
     def __init__(self, hub, port=None, limit=WORKER_LIMIT, probe=None):
         self.hub, self.port, self.limit = hub, port or default_port(), limit
         self.probe = probe or probe_usage  # (agent entry, cwd) -> its output; tests hand in their own
+        self.probe_async, self.probing = True, []  # probes run in their own thread (tests may run them inline)
+        self.close_off = True  # the daily morning close-off job (tests of other things turn it off)
         # item key -> {p, t (the ticket row it started from), agent, inst, base, log, start, pos (log read up to),
         # u0/u1 (its first and newest usage reading), alone (no other worker on its agent overlapped it), braked}
         self.procs = {}
@@ -992,6 +1085,8 @@ class Supervisor:
     def stop(self):
         """Kill every worker's process group; their items are queued again when the hub next starts."""
         self.stopped = True
+        for th in self.probing:
+            th.join(timeout=5)
         for run in list(self.procs.values()):
             if getattr(run["p"], "sure", True):  # an adopted pid ps could not confirm is never killed
                 _kill_group(run["p"], grace=1)
@@ -1010,6 +1105,7 @@ class Supervisor:
         self._watch()
         self._reap()
         self._final_review()
+        self._close_off()
         if not self.stopped:
             self._probe()
             self._start()
@@ -1109,7 +1205,7 @@ class Supervisor:
             q = self.hub._data["queue"]
             if q["paused"]:
                 return
-            queued = [i for i in q["items"] if i["state"] == "queued"]
+            queued = [i for i in q["items"] if i["state"] == "queued" and (i.get("not_before") or 0) <= now]
             names = dict.fromkeys(n for i in queued for n in ([i["agent"]] if i.get("agent") else pool(q)))
             busy = {i.get("runner") for i in q["items"] if i["state"] == "running"}
             todo = []
@@ -1125,14 +1221,29 @@ class Supervisor:
                 todo.append((n, dict(inst)))
             if todo:
                 self.hub._save()
+        if not todo:
+            return
+        if not self.probe_async:
+            self._probe_run(todo)
+            return
+        # off the tick: a slow probe never holds up starts, time limits or the brake (M6)
+        th = threading.Thread(target=self._probe_run, args=(todo,), daemon=True)
+        self.probing = [x for x in self.probing if x.is_alive()] + [th]
+        th.start()
+
+    def _probe_run(self, todo):
         for n, inst in todo:
-            text = self.probe(inst, str(self.hub.home / "probe"))
-            got = readings(text)
-            if logged_out(_said(text)):
-                self._signed_out(n)
-            elif got:
-                self._signed_in(n)
-            self._usage(n, got)
+            try:
+                text = self.probe(inst, str(self.hub.home / "probe"))
+                got = readings(text)
+                if logged_out(_said(text)):
+                    self._signed_out(n)
+                elif got:
+                    self._signed_in(n)
+                self._usage(n, got)
+            except Exception as e:  # a probe never takes the hub down
+                if not self.stopped:
+                    print("sb hub probe {}: {}: {}".format(n, type(e).__name__, e), file=sys.stderr, flush=True)
 
     def _signed_out(self, name):
         """Mark the agent signed out and, once per expiry, ask the owner to sign it in."""
@@ -1299,7 +1410,10 @@ class Supervisor:
         if over:
             passed, reason, sha = False, ran_past(self.limit), None
         else:
-            passed, reason, sha = sbqueue.verdict(t, t["repo"], run["base"])
+            checks = []
+            passed, reason, sha = sbqueue.verdict(t, t["repo"], run["base"], run=_recording(checks))
+            self._update(key, checks=checks)
+            self._report_checks(t, run, passed, reason, sha, checks)
         if passed:  # a worker that did the work is resolved, whatever it printed afterwards
             self._resolve(item, run, sha)
             return
@@ -1313,6 +1427,18 @@ class Supervisor:
                           note="retrying on opus: " + reason.splitlines()[0])
             return
         self._fail(item, run, reason, sha)
+
+    def _report_checks(self, t, run, passed, reason, sha, checks):
+        """Append the hub's verdict and every check to the worker's report in the run folder (a run file, not a
+        ticket: written directly), so the run itself shows what was tested."""
+        report = Path(run["log"]).parent / "{}.md".format(int(t["num"]))
+        try:
+            text = report.read_text(encoding="utf-8") if report.exists() else ""
+            stamp = datetime.fromtimestamp(self.hub.now()).strftime("%Y-%m-%d %H:%M")
+            with open(report, "a", encoding="utf-8") as f:
+                f.write(hub_checks_section(passed, reason, sha, checks, text, stamp))
+        except OSError as e:
+            print("sb hub queue: report for {}: {}".format(t["map"], e), file=sys.stderr, flush=True)
 
     def _resolve(self, item, run, sha):
         key, t = item["key"], run["t"]
@@ -1377,6 +1503,39 @@ class Supervisor:
             self._end(key, "done", result=str(result), note="done; result in " + str(result.parent))
         else:
             self._end(key, "failed", result=str(result), note="the worker exited {}".format(code))
+
+    def _close_off(self):
+        """Once a day, while the queue holds anything besides close-off jobs, queue the morning close-off for
+        the next CLOSE_OFF_AT: a job (the pool's agent, sonnet) that writes the morning note into the shared
+        run folder <date>-close-off, checks and summarises each map that had items, then clears finished
+        items. Its prompt is templates/close-off.md."""
+        if not self.close_off:
+            return
+        now = self.hub.now()
+        at = next_clock("{:02d}:{:02d}".format(*CLOSE_OFF_AT), now)
+        day = datetime.fromtimestamp(at).strftime("%Y-%m-%d")
+        with self.hub._lock:
+            q = self.hub._data["queue"]
+            others = [i for i in q["items"] if not i.get("close_off")]
+            if not others or q.get("close_off_day") == day:
+                return
+            q["close_off_day"] = day
+            maps = sorted({i.get("map") or i["key"].rsplit("#", 1)[0] for i in others if i["kind"] == "ticket"})
+            self.hub._save()
+        try:
+            template = CLOSE_OFF.read_text(encoding="utf-8")
+        except OSError as e:
+            print("sb hub queue: close-off template: {}".format(e), file=sys.stderr, flush=True)
+            return
+        prompt = (template.replace("{date}", day).replace("{port}", str(self.port))
+                  .replace("{maps}", "\n".join("- " + m for m in maps) or "- (none: only jobs ran)"))
+        folder = self.hub.home / "close-off"  # its working folder: it changes no repo
+        folder.mkdir(parents=True, exist_ok=True)
+        try:
+            self.hub._queue_job(str(folder), str(folder), prompt, None, "sonnet", "close-off", not_before=at,
+                                close_off=True)
+        except ValueError:
+            pass  # already queued
 
     def _final_review(self):
         """When the last ticket item has ended: with `final_review` on, one review job per touched repo."""
@@ -1495,6 +1654,11 @@ class Supervisor:
             for i in q["items"]:
                 if i["state"] != "queued":
                     continue
+                if (i.get("not_before") or 0) > now:  # a timed job: never before its time
+                    why = "waits until {}".format(_hm(i["not_before"]))
+                    if i.get("note") != why:
+                        i["note"], noted = why, True
+                    continue
                 name, inst, why = self._pick(q, i, cached.get(i["key"]), load, now)
                 if name:
                     startable.append(i)
@@ -1527,7 +1691,7 @@ class Supervisor:
                 l[0] += 1
                 l[1] += need
             for item in q["items"]:
-                if item["state"] != "queued":
+                if item["state"] != "queued" or (item.get("not_before") or 0) > now:
                     continue
                 if item["kind"] == "job":
                     if item.get("repo") in repos:
@@ -1555,7 +1719,9 @@ class Supervisor:
                 if t is None:
                     skip = "no longer open: resolved or out of scope since it was queued"
                 else:
-                    state, reason = sbqueue.classify(t, live, rows)
+                    # the hub's own claim left by a release that failed is no claim against its own queued item
+                    mine = {**t, "status": "open", "claimed_by": None} if _hub_holds(t) else t
+                    state, reason = sbqueue.classify(mine, live, rows)
                     if state != "ready":
                         skip = "{}: {}".format(state, reason)
                     elif not usable_project(t.get("repo")):
@@ -1616,6 +1782,8 @@ class Supervisor:
             self._end(key, "failed", note="could not start: " + ("sbmap run failed" if board is None else
                                                                  "the repo has no commit to start from"))
             return
+        if _hub_holds(t):  # a claim of the hub's own left from an earlier try: reopened, then claimed afresh
+            self.sbmap("set", t["map"], nnn, "status=open")
         rc, out, err = self.sbmap("claim", t["map"], nnn, "--by", "hub " + name)
         if rc != 0:
             self._end(key, "skipped", note="could not claim it: " + (err or out))
@@ -1900,6 +2068,14 @@ def make_handler(hub):
                 self.send(200, hub.state())
             elif path == "/api/tickets":
                 self.send(200, hub.tickets())
+            elif path in ("/api/item/report", "/api/item/log"):
+                from urllib.parse import parse_qs, urlsplit
+                key = (parse_qs(urlsplit(self.path).query).get("key") or [""])[0]
+                try:
+                    self.send(200, hub.item_file(key, path.rsplit("/", 1)[-1])[1].encode("utf-8"),
+                              "text/plain; charset=utf-8")
+                except KeyError:
+                    self.send(404, {"ok": False, "error": "no such file for that item"})
             elif path.startswith("/api/question/"):
                 try:
                     self.send(200, hub.question(path[len("/api/question/"):]))
@@ -1962,9 +2138,16 @@ def make_handler(hub):
                 elif path == "/api/queue/options":
                     out = hub.queue_options(d.get("stop_at"), d.get("final_review", False), d["version"])
                 elif path == "/api/queue/job":
-                    out = hub.queue_job(d["project"], d["prompt"], d.get("agent"), d.get("model"), d.get("name"))
+                    out = hub.queue_job(d["project"], d["prompt"], d.get("agent"), d.get("model"), d.get("name"),
+                                        d.get("at") or None)
                 elif path == "/api/queue/remove_job":
                     out = hub.queue_remove_job(d["key"], d["version"])
+                elif path == "/api/queue/clear-finished":
+                    out = hub.queue_clear_finished(d.get("version"))
+                elif path == "/api/agents/dismiss":
+                    out = hub.agents_dismiss(d["agent"])
+                elif path == "/api/agents/clear-quiet":
+                    out = hub.agents_clear_quiet()
                 elif path == "/api/queue/item_agent":
                     out = hub.queue_item_agent(d["key"], d.get("name"))
                 elif path == "/api/agents/scan":
@@ -2339,10 +2522,10 @@ def cmd_queue(a):
                 print("sbhub: cannot read the prompt file: {}".format(e), file=sys.stderr)
                 return 1
         if not a.project or not prompt:
-            print("usage: queue job --project P --agent A [--model M] [--name N] (--prompt TEXT | --prompt-file F)",
+            print("usage: queue job --project P --agent A [--model M] [--name N] [--at HH:MM] (--prompt TEXT | --prompt-file F)",
                   file=sys.stderr)
             return 1
-        code, out = call(port, "/api/queue/job", {"project": a.project, "prompt": prompt, "agent": a.agent,
+        code, out = call(port, "/api/queue/job", {"project": a.project, "prompt": prompt, "agent": a.agent, "at": a.at,
                                                   "model": a.model, "name": a.name})
         if out.get("ok"):
             print(out["key"])
@@ -2406,7 +2589,7 @@ def main(argv=None):
     add("send", ("--to", {"required": True}), ("text", {}))
     add("queue", ("action", {"nargs": "?", "default": "show"}), ("rest", {"nargs": "*"}),
         ("--project", {}), ("--agent", {}), ("--model", {}), ("--name", {}), ("--prompt", {}),
-        ("--prompt-file", {}))
+        ("--prompt-file", {}), ("--at", {}))
     add("agents", ("--scan", {"action": "store_true"}))
     add("trust", ("project", {}))
     add("untrust", ("project", {}))

@@ -119,6 +119,7 @@ class RunnerCase(unittest.TestCase):
                                                "limited_until": None} for n in ("main", "spare")}
             self.hub._data["queue"]["agent"] = "main"
         self.sup = Supervisor(self.hub, port=4321)
+        self.sup.close_off = False  # the morning close-off has its own tests (test_hub_pacing)
         self.addCleanup(self.sup.stop)
 
     def sb(self, *a, ok=True):
@@ -151,9 +152,15 @@ class RunnerCase(unittest.TestCase):
             time.sleep(0.03)
         self.fail("timed out; queue: {}".format(json.dumps(self.hub.state()["queue"], indent=1)))
 
+    def tick_all(self):
+        """The owner ticks every ready ticket (nothing is ever ticked on its own)."""
+        rows = self.hub.tickets()
+        ready = [t["map"] + "#" + str(t["num"]) for t in rows if t["state"] == "ready"]
+        self.hub.queue_set(ready, self.hub.state()["queue"]["version"])
+
     def resume(self):
-        """The owner's resume: the first read seeds tonight's queue, paused; nothing starts before this."""
-        self.hub.tickets()
+        """The owner's ticks, then the resume: nothing starts before this."""
+        self.tick_all()
         self.hub.queue_pause(False)
 
     def pids(self):
@@ -187,6 +194,9 @@ class LimitTextTest(unittest.TestCase):
 
 class TicketLoopTest(RunnerCase):
     def test_a_new_queue_starts_nothing_until_the_owner_resumes_it(self):
+        self.sup.tick()
+        self.assertEqual(self.hub.state()["queue"]["items"], [])  # nothing is ticked on its own
+        self.tick_all()
         for _ in range(2):
             self.sup.tick()
         q = self.hub.state()["queue"]
@@ -356,7 +366,7 @@ class StopsTest(RunnerCase):
         self.assertIn("blocked", self.items()["repo/one#2"]["note"])
 
     def test_a_restarted_hub_requeues_a_running_item_and_releases_its_claim(self):
-        self.hub.tickets()
+        self.tick_all()
         self.sb("claim", "repo/one", "001", "--by", "hub main")
         with self.hub._lock:
             self.hub._data["queue"]["items"][0].update(state="running", started=START)
@@ -397,7 +407,7 @@ class StopsTest(RunnerCase):
         self.assertNotIn(1, self.open_tickets())
 
     def test_a_restart_never_releases_a_claim_a_session_holds(self):
-        self.hub.tickets()
+        self.tick_all()
         self.sb("claim", "repo/one", "001", "--by", "a live session")
         with self.hub._lock:
             self.hub._data["queue"]["items"][0].update(state="running", started=START)
@@ -468,7 +478,7 @@ class JobsTest(RunnerCase):
 
     def test_a_queue_with_final_review_gets_one_review_job_per_touched_repo_after_its_last_ticket(self):
         bases = {r: git(self.repos[r], "rev-parse", "HEAD") for r in self.repos}
-        self.hub.tickets()
+        self.tick_all()
         v = self.hub.state()["queue"]["version"]
         self.assertTrue(self.hub.queue_options(None, True, v)["ok"])
         self.assertTrue(self.hub.queue_options(None, True, v)["stale"])
@@ -488,7 +498,7 @@ class JobsTest(RunnerCase):
         self.assertEqual(len(self.jobs()), 2)
 
     def test_past_the_stop_time_nothing_starts_and_the_rest_are_skipped(self):
-        self.hub.tickets()
+        self.tick_all()
         job = self.hub.queue_job("repo", "Audit it", "main")["key"]
         self.hub.queue_options(START + 60, False, self.hub.state()["queue"]["version"])
         self.resume()
@@ -547,7 +557,7 @@ class JobsTest(RunnerCase):
                 self.hub.queue_job(bad, "x", "main")
 
     def test_a_night_past_its_stop_time_drops_it_so_the_next_days_items_run(self):
-        self.hub.tickets()
+        self.tick_all()
         self.hub.queue_options(START + 60, False, self.hub.state()["queue"]["version"])
         self.resume()
         self.clock.t = START + 120
@@ -617,6 +627,9 @@ class LaunchAndHookTest(RunnerCase):
                              text=True, env=env)
         self.addCleanup(lambda: (p.kill(), p.wait(), p.stdout.close()))
         self.assertEqual(p.stdout.readline().strip(), "sb hub on http://127.0.0.1:{}".format(port))
+        r = subprocess.run([sys.executable, SCRIPT, "queue", "add", "repo/one", "1", "--port", str(port)],
+                           capture_output=True, text=True, env=env, timeout=70)  # nothing is ticked on its own
+        self.assertEqual(r.returncode, 0, r.stderr)
         r = subprocess.run([sys.executable, SCRIPT, "queue", "resume", "--port", str(port)], capture_output=True,
                            text=True, env=env, timeout=30)  # a new queue waits for this
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -635,7 +648,7 @@ class LaunchAndHookTest(RunnerCase):
         self.assertFalse(alive(leader) or alive(child))
 
     def test_the_hook_reports_a_hub_worker_under_its_ticket(self):
-        self.hub.tickets()
+        self.tick_all()
         server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), sbhub.make_handler(self.hub))
         threading.Thread(target=server.serve_forever, daemon=True).start()
         self.addCleanup(server.server_close)

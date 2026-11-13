@@ -142,7 +142,9 @@ class HubMcpQueueTest(McpBase):
         patcher.start()
         self.addCleanup(patcher.stop)
         super().setUp()
-        self.get("/api/tickets")  # seeds the queue with both
+        self.get("/api/tickets")
+        self.post("/api/queue/set", {"keys": ["repo/one#1", "repo/one#2"],
+                                     "version": self.get("/api/state")["queue"]["version"]})  # ticking is explicit
 
     def keys(self):
         return [i["key"] for i in self.get("/api/state")["queue"]["items"]]

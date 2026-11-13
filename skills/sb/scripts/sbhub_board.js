@@ -158,8 +158,15 @@ const STYLE = `
 .sb-job .wide{grid-column:1/-1}
 .sb-job textarea{resize:vertical;min-height:72px;line-height:1.4}
 .sb-job .go{grid-column:1/-1;display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.cks>summary{padding:2px 10px 2px 0;font-size:12px;color:var(--mute);cursor:pointer}
+.ck{display:flex;gap:6px;align-items:center;font-size:12px;min-width:0;flex-wrap:wrap}.ck code{overflow-wrap:anywhere;min-width:0}
+.cks pre{padding:0 0 4px 24px}
+.lk{display:inline-flex;gap:8px;font-size:12px}.lk a{color:var(--acc)}
+.pool{display:inline-flex;flex-wrap:wrap;align-items:center;gap:4px 10px;border:0;margin:0;padding:0;font-size:12px;color:var(--mute);min-width:0}
+.pool legend{float:left;padding:0;margin-right:4px}.pool label{display:inline-flex;align-items:center;gap:4px}
 @media(max-width:599px){
   .sb-stats{flex-basis:100%;order:3}.sb .sb-fold{margin-left:auto}
+  .pill{white-space:normal;max-width:100%;min-width:0;overflow-wrap:anywhere}
   .sb-cmp{grid-template-columns:minmax(0,1fr) auto}.sb-cmp select{grid-column:1/-1}
   .r{grid-template-columns:18px minmax(0,1fr) auto 28px;row-gap:1px;align-items:start;padding:5px 6px 5px 10px}
   .r .ic{grid-row:1/span 3}
@@ -281,6 +288,7 @@ window.SBBoard = function (root, io) {
 <label>Agent<select name="agent"></select></label>
 <label>Model<input name="model" maxlength="80" placeholder="optional, e.g. opus"></label>
 <label>Name<input name="name" maxlength="80" placeholder="optional; names its run folder"></label>
+<label>Not before<input name="at" type="time" title="optional: the job never starts before this time"></label>
 <div class="go"><button type="submit" class="def">Queue the job</button><span class="sb-jn mute" aria-live="polite"></span></div>
 </form></details>` : ''}</section>
 <div data-region="avail"></div><div data-region="log"></div></div>`;
@@ -314,6 +322,21 @@ window.SBBoard = function (root, io) {
   const projItem = i => { const t = tOf(i.key); return i.kind == 'job' ? proj(i.project) || String(i.project || '') : t ? projOf(t.map) : projOf(String(i.key).split('#')[0]); };
   const blockersOf = t => (Array.isArray(t.blocked_by_open) ? t.blocked_by_open : []).map(b => typeof b == 'number' ? String(t.map) + '#' + b : null);
   const bTitle = (t, b) => { const k = typeof b == 'number' ? String(t.map) + '#' + b : null, o = k && tOf(k); return o ? String(o.title) : typeof b == 'number' ? 'ticket ' + b : String(b); };
+  const cleared = () => { const q = Q(); return q && Array.isArray(q.cleared) ? q.cleared.filter(i => i && typeof i == 'object') : []; };
+  const poolOf = () => { const q = Q(); return !q ? [] : Array.isArray(q.agents) && q.agents.length ? q.agents.map(String) : q.agent ? [String(q.agent)] : []; };
+  const poolWord = () => { const p = poolOf(); return p.length ? `tonight's agents (${p.join(', ')})` : "tonight's agents"; };
+  const opened = new Set();  // the check lists the owner opened (kept across redraws)
+  // the worker's report and log, served read-only by the hub (relative: also right under the phone page's prefix)
+  const fileLinks = i => !io.page ? '' : [i.kind == 'ticket' ? i.run && 'report' : i.result && 'report', i.log && 'log'].filter(Boolean)
+    .map(w => `<a href="${esc('api/item/' + w + '?key=' + encodeURIComponent(i.key))}" target="_blank" rel="noopener">${w == 'log' ? "worker's log" : "worker's report"}</a>`).join('');
+  function checksOf(i) {
+    const cs = Array.isArray(i.checks) ? i.checks.filter(c => c && typeof c == 'object') : [], lk = fileLinks(i);
+    if (!cs.length) return lk ? `<div class="lk">${lk}</div>` : '';
+    const bad = cs.filter(c => c.code !== 0).length, k = 'ck:' + i.key;
+    return `<details class="cks" data-k="${esc(k)}"${opened.has(k) ? ' open' : ''}><summary data-key="${esc('d:' + k)}">${bad ? `${bad} of ${plural(cs.length, 'check')} failed` : `${plural(cs.length, 'check')} passed`}${lk ? ' · ' : ''}<span class="lk">${lk}</span></summary>`
+      + cs.map(c => `<div class="ck">${c.code === 0 ? icon('circle-check', 'passed', 'ok') : icon('x', 'failed', 'bad')}<code dir="ltr">${esc(c.cmd)}</code><span class="mute">${c.code == null ? 'timed out' : 'exit ' + esc(c.code)} · ${esc(num(c.secs))} s</span></div>${c.tail ? `<pre>${esc(c.tail)}</pre>` : ''}`).join('')
+      + '</details>';
+  }
   function agentState(name, e) {
     if (e.login == 'expired') return ['out', 'sign in'];
     const run = items().find(i => i.state == 'running' && i.runner === name);
@@ -324,11 +347,22 @@ window.SBBoard = function (root, io) {
   // an account's 5-hour use and reset, and what it learned a ticket costs, from the hub's readings
   const usageOf = e => { const u = e.usage && typeof e.usage == 'object' ? e.usage : null; return u && num(u.five_hour_resets) > S.now ? `${Math.round(100 * num(u.five_hour))}% · resets ${hm(u.five_hour_resets)}` : ''; };
   const costsOf = e => Object.entries(e.costs && typeof e.costs == 'object' ? e.costs : {}).filter(([, c]) => c && typeof c == 'object').map(([t, c]) => `${t} about ${Math.round(100 * num(c.avg))}%`).join(', ');
+  // when the queue should end: each repo runs its items one after another, repos side by side, and all of
+  // them share the accounts' worker slots (roughly: 2 for an account with a learned cost, else 1)
   function ends() {
-    const its = items(), run = its.filter(i => i.state == 'running'), wait = its.filter(i => i.state == 'queued');
-    if (!run.length && !wait.length) return 0;
-    const from = run.length ? Math.min(...run.map(i => num(i.started) || S.now)) : S.now;
-    return Math.max(from + EST * (run.length + wait.length), S.now + EST * wait.length);
+    const live = items().filter(i => i.state == 'running' || i.state == 'queued');
+    if (!live.length) return 0;
+    const by = new Map();
+    for (const i of live) { const t = tOf(i.key), r = i.repo || (t && t.repo) || projItem(i) || i.key; if (!by.has(r)) by.set(r, []); by.get(r).push(i); }
+    let end = S.now;
+    for (const list of by.values()) {
+      const run = list.filter(i => i.state == 'running'), from = run.length ? Math.min(...run.map(i => num(i.started) || S.now)) : S.now;
+      end = Math.max(end, from + EST * list.length);
+    }
+    const inst = S && S.installed && typeof S.installed == 'object' ? S.installed : {};
+    const slots = poolOf().map(n => inst[n]).filter(e => e && typeof e == 'object' && e.login != 'expired')
+      .reduce((n, e) => n + (e.costs && Object.keys(e.costs).length ? 2 : 1), 0);
+    return Math.max(end, S.now + EST * live.filter(i => i.state == 'queued').length / Math.max(1, slots));
   }
 
   function prog(d, t) {
@@ -430,11 +464,13 @@ window.SBBoard = function (root, io) {
     else if (i.agent) meta.push(`<span class="chip acc" title="this item's own agent">${svg('robot')} ${esc(i.agent)}</span>`);
     if (i.tries && !running) meta.push(`<span class="chip warn">second try</span>`);
     if (i.note && running) meta.push(`<span class="one" dir="auto" title="${esc(i.note)}">${esc(firstLine(i.note))}</span>`);
+    if (running && fileLinks(i)) meta.push(`<span class="lk">${fileLinks(i)}</span>`);
+    if (!running && i.not_before && num(i.not_before) > S.now) meta.push(`<span class="chip" title="a timed job">${svg('clock')} at ${esc(hm(i.not_before))}</span>`);
     meta.push(`<span title="the estimate">1.5 h</span>`);
     const lead = running ? icon('loader-2', 'running', 'acc spin')
       : isT ? `<input type="checkbox" checked data-tick="${esc(i.key)}" data-key="${esc('tick:' + i.key)}" aria-label="${esc('Run tonight: ' + title)}" title="Untick to leave it out tonight"${off ? ' disabled' : ''}>`
       : icon('terminal-2', 'a one-off job');
-    const pick = !running && canQ && installed().length ? `<span class="qa"><select data-ia="${esc(i.key)}" data-key="${esc('ia:' + i.key)}" aria-label="${esc('Agent for ' + title)}"${off ? ' disabled' : ''}>${agentOpts(i.agent, `<option value="">night's agent${q.agent ? ' (' + esc(q.agent) + ')' : ''}</option>`)}</select></span>` : '<span class="qa"></span>';
+    const pick = !running && canQ && installed().length ? `<span class="qa"><select data-ia="${esc(i.key)}" data-key="${esc('ia:' + i.key)}" aria-label="${esc('Agent for ' + title)}"${off ? ' disabled' : ''}>${agentOpts(i.agent, `<option value="">${esc(poolWord())}</option>`)}</select></span>` : '<span class="qa"></span>';
     const rm = !running && !isT && canQ ? `<span class="mv"><button type="button" data-rmjob="${esc(i.key)}" data-key="${esc('rm:' + i.key)}" aria-label="${esc('Remove the job: ' + title)}" title="Remove this job"${off ? ' disabled' : ''}>${svg('x')}</button></span>` : '';
     const mv = rm || (!running && isT && canQ ? `<span class="mv"><button type="button" data-up="${esc(i.key)}" data-key="${esc('up:' + i.key)}" aria-label="${esc('Move up: ' + title)}" title="Move up"${off || at <= 0 ? ' disabled' : ''}>${svg('chevron-up')}</button><button type="button" data-dn="${esc(i.key)}" data-key="${esc('dn:' + i.key)}" aria-label="${esc('Move down: ' + title)}" title="Move down"${off || at < 0 || at >= qt.length - 1 ? ' disabled' : ''}>${svg('chevron-down')}</button></span>` : '<span class="mv"></span>');
     return `<li class="qi${running ? ' running' : ''}" data-qk="${esc(i.key)}"${!running && isT && canQ && !off ? ' draggable="true"' : ''}>`
@@ -455,7 +491,7 @@ window.SBBoard = function (root, io) {
       const stopV = q.stop_at ? new Date(num(q.stop_at) * 1000).toTimeString().slice(0, 5) : '';
       h += `<div class="box qctl">`
         + `<button type="button" class="${q.paused ? 'def' : ''}" data-qact="pause" data-key="qp"${off ? ' disabled' : ''}>${q.paused ? svg('player-play') + ' Resume the queue' : svg('player-pause') + ' Pause the queue'}</button>`
-        + (agents.length ? `<label>Agent for tonight<select data-qa="1" data-key="qa"${off ? ' disabled' : ''}>${agentOpts(q.agent, q.agent ? '' : '<option value="" selected disabled>Pick an agent</option>')}</select></label>`
+        + (agents.length ? `<fieldset class="pool"><legend>Agents for tonight</legend>${agents.map(([n, e]) => `<label title="${esc(n + ': ' + agentState(n, e)[1])}"><input type="checkbox" data-pool="${esc(n)}" data-key="${esc('pool:' + n)}"${poolOf().includes(n) ? ' checked' : ''}${off ? ' disabled' : ''}> ${esc(n)}${e.kind == 'agy' ? ' (' + esc(agyWords) + ')' : ''}</label>`).join('')}</fieldset>`
           : '<span class="mute">No agents found yet.</span>')
         + `<button type="button" data-qact="scan" data-key="scan"${off ? ' disabled' : ''}>${svg('search')} Scan for agents</button>`
         + `<label>Stop at<input type="time" data-qs="1" data-key="qs" value="${esc(stopV)}"${off ? ' disabled' : ''}></label>`
@@ -524,11 +560,11 @@ window.SBBoard = function (root, io) {
     }).join('');
   }
   function logLines() {
-    return items().filter(i => ENDED[i.state] && S.now - num(i.ended) < NIGHT).sort((x, y) => num(y.ended) - num(x.ended)).map(i => {
+    return items().concat(cleared()).filter(i => ENDED[i.state] && S.now - num(i.ended) < NIGHT).sort((x, y) => num(y.ended) - num(x.ended)).map(i => {
       const [g, w, c] = ENDED[i.state], pj = projItem(i);
       const what = i.state == 'done' && i.commit ? `<span class="chip ok" title="${esc(i.commit)}">${svg('git-commit')} ${esc(String(i.commit).slice(0, 9))}</span>` : '';
       const note = i.state == 'done' && i.kind == 'job' && i.result ? 'result in ' + i.result : i.state != 'done' ? firstLine(i.note) || 'no reason recorded' : '';
-      return `<div class="ln">${icon(g, w, c)}<div class="lm"><div class="one" dir="auto" title="${esc(titleOf(i))}">${esc(titleOf(i))}</div><div class="mute" dir="auto">${esc(w)}${pj ? ' · ' + esc(pj) : ''} · ${esc(ago(S.now, i.ended))}${note ? ' · ' + esc(note) : ''}</div></div>${what}</div>`;
+      return `<div class="ln">${icon(g, w, c)}<div class="lm"><div class="one" dir="auto" title="${esc(titleOf(i))}">${esc(titleOf(i))}</div><div class="mute" dir="auto">${esc(w)}${pj ? ' · ' + esc(pj) : ''} · ${esc(ago(S.now, i.ended))}${note ? ' · ' + esc(note) : ''}</div>${checksOf(i)}</div>${what}</div>`;
     }).join('');
   }
 
@@ -557,7 +593,7 @@ window.SBBoard = function (root, io) {
     const a = job.elements.agent, dl = $('#sb-projects');
     if (document.activeElement !== a) {
       const v = a.value, q = Q();
-      a.innerHTML = agentOpts(null, `<option value="">night's agent${q && q.agent ? ' (' + esc(q.agent) + ')' : ''}</option>`);
+      a.innerHTML = agentOpts(null, `<option value="">${esc(poolWord())}</option>`);
       a.value = [...a.options].some(o => o.value === v) ? v : '';
     }
     const T = tickets(), ps = new Set(T ? T.map(t => projOf(t.map)) : []);
@@ -604,7 +640,7 @@ window.SBBoard = function (root, io) {
     if (io.changed) io.changed();
   }
   // one queue write: it carries the version; a stale answer redraws from the hub's queue
-  const CHECKED = new Set(['/api/queue/set', '/api/queue/move', '/api/queue/options', '/api/queue/remove_job']);
+  const CHECKED = new Set(['/api/queue/set', '/api/queue/move', '/api/queue/options', '/api/queue/remove_job', '/api/queue/agents']);
   async function qwrite(path, data, done) {
     const q = Q();
     if (!canQ || qbusy || O.down || !q) {  // not sent: undo what the click already changed (a disabled box)
@@ -645,10 +681,10 @@ window.SBBoard = function (root, io) {
     const f = job.elements, project = f.project.value.trim(), prompt = f.prompt.value;
     if (!project || !prompt.trim()) { jn.innerHTML = '<span class="err">A job needs a project and a prompt.</span>'; return; }
     const go = job.querySelector('button[type=submit]'); go.disabled = true; jn.textContent = 'Queueing…';
-    const out = await qwrite('/api/queue/job', {project, prompt, agent: f.agent.value || null, model: f.model.value.trim() || null, name: f.name.value.trim() || null});
+    const out = await qwrite('/api/queue/job', {project, prompt, agent: f.agent.value || null, model: f.model.value.trim() || null, name: f.name.value.trim() || null, at: f.at.value || null});
     go.disabled = false;
     if (!out) { jn.innerHTML = '<span class="err">Not queued: the hub is busy or not reachable.</span>'; return; }
-    if (out.ok) { f.prompt.value = ''; f.name.value = ''; jn.innerHTML = `<span class="okc">${svg('check')} Queued. It runs when the queue reaches it.</span>`; qnote = null; render(S, O, true); }
+    if (out.ok) { f.prompt.value = ''; f.name.value = ''; f.at.value = ''; jn.innerHTML = `<span class="okc">${svg('check')} Queued. It runs when the queue reaches it.</span>`; qnote = null; render(S, O, true); }
     else jn.innerHTML = `<span class="err" role="alert">Not queued: ${esc(out.stale ? 'the list changed, try again' : out.error || 'the hub refused it')}</span>`;
   });
   document.addEventListener('keydown', e => {
@@ -688,7 +724,11 @@ window.SBBoard = function (root, io) {
       qwrite('/api/queue/set', {keys: keys.concat(add)}, add.length > 1 ? `Added with ${plural(add.length - 1, 'ticket')} it waits on.` : 'Added to tonight.'); return;
     }
     if (d.ia) { qwrite('/api/queue/item_agent', {key: d.ia, name: el.value || null}, 'Agent set for this item.'); return; }
-    if (d.qa) { if (el.value) qwrite('/api/queue/agent', {name: el.value}, `Tonight runs on ${el.value}.`); return; }
+    if (d.pool) {  // the night's pool: checked agents in the order they were added
+      const now = poolOf(), names = el.checked ? now.filter(n => n !== d.pool).concat([d.pool]) : now.filter(n => n !== d.pool);
+      if (!names.length) { el.checked = true; qnote = '<span class="err" role="alert">Keep at least one agent for tonight.</span>'; render(S, O, true); return; }
+      qwrite('/api/queue/agents', {names}, `Tonight runs on ${names.join(', ')}.`); return;
+    }
     if (d.qs || d.qf) {
       const q = Q(); if (!q) return;
       const stop = d.qs ? stopEpoch(el.value) : q.stop_at ?? null, fin = d.qf ? el.checked : !!q.final_review;
@@ -714,6 +754,7 @@ window.SBBoard = function (root, io) {
   body.addEventListener('focusout', () => { if (deferred) setTimeout(() => { if (deferred && S && !holding()) render(S, O); }, 0); });
   body.addEventListener('toggle', e => {
     const d = e.target, k = d.dataset && d.dataset.k;
+    if (k && k.startsWith('ck:')) { if (d.open) opened.add(k); else opened.delete(k); return; }
     if (!k || !k.startsWith('p:')) return;
     if (d.open) collapsed.delete(k); else collapsed.add(k);
     saveSet('sbhub.collapsed', collapsed); foldLabel();
@@ -752,7 +793,7 @@ window.SBBoard = function (root, io) {
     const bad = []; for (const [path, list] of Object.entries(provs)) for (const p of Array.isArray(list) ? list : []) for (const w of wlist(p)) if (w.level == 'bad') bad.push([path, p, w]);
     const alerts = open.length + need.length + bad.length, msgs = Object.entries(s.messages || {}).filter(([, m]) => m && typeof m == 'object');
     const queued = msgs.filter(([, m]) => m.delivered == null && !m.lost).length, nw = agents.length - tops.length;
-    const its = items(), q = Q(), tonight = its.filter(i => ENDED[i.state] && s.now - num(i.ended) < NIGHT);
+    const its = items(), q = Q(), tonight = its.concat(cleared()).filter(i => ENDED[i.state] && s.now - num(i.ended) < NIGHT);
     const nRun = its.filter(i => i.state == 'running').length, nQ = its.filter(i => i.state == 'queued').length;
     const nDone = tonight.filter(i => i.state == 'done').length, nFail = tonight.filter(i => i.state == 'failed').length, end = q ? ends() : 0;
 

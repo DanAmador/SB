@@ -4,10 +4,13 @@ worker stands in for `claude -p`, a fake function for the probe: never a model, 
 the owner's vault or the real ~/.claude*."""
 import http.server
 import json
+import os
 import subprocess
 import sys
 import threading
 import unittest
+import urllib.error
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 from unittest import mock
@@ -40,6 +43,7 @@ class PacingCase(RunnerCase):
     def setUp(self):
         super().setUp()
         self.sup.probe = self.probe
+        self.sup.probe_async = False  # each tick's probe answers before its starts, so a test reads one order
         self.probes, self.probe_out = [], {}
         self.agent_modes, self.agent_env, self.partial = {}, {}, None
         self.hub.queue_agents(["main", "spare"], None)
@@ -107,7 +111,7 @@ class FitTest(PacingCase):
     def test_an_items_own_agent_wins_and_never_falls_back_to_the_pool(self):
         self.probe_out = {"main": ev(0.85), "spare": ev(0.10)}
         self.mode = "hang"
-        self.hub.tickets()
+        self.tick_all()
         self.hub.queue_item_agent("repo/one#1", "main")
         self.hub.queue_pause(False)
         self.sup.tick()
@@ -128,7 +132,7 @@ class FitTest(PacingCase):
         self.probe_out = {"main": ev(0.65)}
         self.agent_env = {"main": {"FAKE_WORKER_USAGE": "0.65>0.77", "FAKE_WORKER_RESET": str(int(R))}}
         self.mode = "hang"
-        self.hub.tickets()
+        self.tick_all()
         first = list(self.items())[0]
         self.modes = {first: "commit"}
         self.hub.queue_pause(False)
@@ -238,7 +242,7 @@ class StopsTest(PacingCase):
         self.probe_out = {"main": ev(0.10)}
         self.agent_env = {"main": {"FAKE_WORKER_USAGE": "0.10>0.18", "FAKE_WORKER_RESET": str(int(R))}}
         key = self.hub.queue_job("repo", "Audit it", None, "sonnet", "audit")["key"]
-        self.hub.tickets()
+        self.tick_all()
         self.hub.queue_set([], self.hub.state()["queue"]["version"])
         self.hub.queue_pause(False)
         self.until(lambda: self.state_of(key) == "done")
@@ -338,7 +342,7 @@ class FixRoundOneTest(PacingCase):
 
     def test_a_resumed_item_that_cannot_start_keeps_its_repo(self):
         self.probe_out = {"main": ev(0.10), "spare": ev(0.70)}
-        self.hub.tickets()
+        self.tick_all()
         with self.hub._lock:
             self.hub._data["installed"]["main"]["limited_until"] = R
             self.hub._data["queue"]["items"][0].update(
@@ -362,7 +366,7 @@ class FixRoundOneTest(PacingCase):
         self.agent_env = {"main": {"FAKE_WORKER_USAGE": "0.96>0.97", "FAKE_WORKER_RESET": str(int(R))}}
         self.mode = "hang"
         key = self.hub.queue_job("repo", "Audit it", None, "sonnet", "audit")["key"]
-        self.hub.tickets()
+        self.tick_all()
         self.hub.queue_set([], self.hub.state()["queue"]["version"])
         self.hub.queue_pause(False)
         self.sup.tick()
@@ -370,6 +374,137 @@ class FixRoundOneTest(PacingCase):
         sent = lambda: [m["text"] for m in self.hub.state()["messages"].values() if m["to"] == key]
         self.until(sent)
         self.assertEqual(sent(), ["Usage is at 95%: commit what passes now, write your result, and stop."])
+
+
+class Batch2Test(PacingCase):
+    def serve(self):
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), sbhub.make_handler(self.hub))
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return server.server_address[1]
+
+    def test_each_check_is_kept_on_the_item_and_in_the_runs_report_and_served(self):
+        self.hub.queue_agents(["main"], None)
+        self.sb("set", "repo/one", "001", "checks=echo checked-ok", "--no-sync")
+        self.modes = {"repo/one#1": "slow", "repo/one#2": "hang"}
+        os.environ["FAKE_WORKER_SLEEP"] = "1"
+        self.resume()
+        self.sup.tick()
+        report = Path(self.items()["repo/one#1"]["run"]) / "1.md"
+        report.write_text("# A\n\n## Self-checks\n\n- ran the greeting by hand: ok\n\n## Notes\n\nx\n")
+        self.until(lambda: self.state_of("repo/one#1") == "done")
+        checks = self.items()["repo/one#1"]["checks"]
+        self.assertEqual([(c["cmd"], c["code"], c["tail"]) for c in checks], [("echo checked-ok", 0, "checked-ok")])
+        self.assertIsInstance(checks[0]["secs"], float)
+        text = report.read_text()
+        self.assertIn("## Hub checks", text)
+        self.assertIn("passed, commit", text)
+        self.assertIn("- `echo checked-ok`: exit 0", text)
+        self.assertIn("### The worker's self-checks\n\n- ran the greeting by hand: ok", text)
+        port = self.serve()
+        get = lambda path: urllib.request.urlopen("http://127.0.0.1:{}{}".format(port, path), timeout=5).read().decode()
+        self.assertIn("## Hub checks", get("/api/item/report?key=repo/one%231"))
+        self.assertIn("argv:", get("/api/item/log?key=repo/one%231"))
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            get("/api/item/report?key=../../etc")
+        self.assertEqual(e.exception.code, 404)
+
+    def test_a_report_with_no_self_checks_says_none_reported(self):
+        self.assertIn("none reported", sbhub.hub_checks_section(False, "no commit after abc", None, [], "", "now"))
+        self.assertIn("No check ran", sbhub.hub_checks_section(False, "no commit after abc", None, [], "", "now"))
+
+    def test_clear_finished_dismiss_and_clear_quiet_change_only_what_the_board_shows(self):
+        self.tick_all()
+        log = self.root / "1.log"
+        log.write_text("argv: x\n")
+        with self.hub._lock:  # one finished item and one still running: no worker needed for a display change
+            first, second = self.hub._data["queue"]["items"]
+            first.update(state="done", ended=self.clock.t, log=str(log))
+            second.update(state="running", runner="main", started=self.clock.t)
+        out = self.hub.queue_clear_finished(self.hub.state()["queue"]["version"])
+        q = self.hub.state()["queue"]
+        self.assertEqual(([i["key"] for i in q["items"]], [i["key"] for i in q["cleared"]]), (["repo/one#2"], ["repo/one#1"]))
+        self.assertTrue(self.hub.queue_clear_finished(out["queue"]["version"] - 1)["stale"])
+        self.assertTrue(self.hub.item_file("repo/one#1", "log")[0].endswith("1.log"))  # still reachable
+        now = self.clock.t
+        rows = {"idle-old": ("idle", now - 3 * 3600, None), "turn-new": ("your turn", now - 3600, None),
+                "w-done": ("done", now, "worker"), "busy": ("working", now - 5 * 3600, None)}
+        for k, (state, since, role) in rows.items():
+            self.hub.report({"agent": k, "state": state, **({"role": role, "parent": "busy"} if role else {})})
+            with self.hub._lock:
+                self.hub._data["agents"][k]["since"] = since
+        self.assertEqual(self.hub.agents_clear_quiet()["cleared"], 2)
+        self.assertEqual(sorted(a for a in self.hub.state()["agents"] if a in rows), ["busy", "turn-new"])
+        self.hub.agents_dismiss("turn-new")
+        self.assertNotIn("turn-new", self.hub.state()["agents"])
+        with self.assertRaises(ValueError):
+            self.hub.agents_dismiss("nobody")
+        port = self.serve()
+        r = subprocess.run(["curl", "-s", "-X", "POST", "-H", "Content-Type: application/json", "-d", "{}",
+                            "http://127.0.0.1:{}/api/agents/clear-quiet".format(port)], capture_output=True, text=True)
+        self.assertEqual(json.loads(r.stdout)["ok"], True)
+
+    def test_a_timed_job_never_starts_before_its_time(self):
+        self.hub.queue_agents(["main"], None)
+        at = datetime(2026, 11, 13, 9, 0).timestamp()
+        key = self.hub.queue_job("repo", "Audit it", None, "sonnet", "audit", at="09:00")["key"]
+        self.assertEqual(self.items()[key]["not_before"], at)
+        with self.assertRaises(ValueError):
+            self.hub.queue_job("repo", "Other", None, None, None, at="25:00")
+        self.hub.queue_pause(False)
+        self.sup.tick()
+        self.assertEqual((self.launched, self.items()[key]["note"]), ([], "waits until 09:00"))
+        self.clock.t = at + 1
+        self.until(lambda: self.state_of(key) == "done")
+        port = self.serve()
+        r = subprocess.run([sys.executable, SCRIPT, "queue", "job", "--project", "repo", "--prompt", "Later",
+                            "--at", "10:30", "--port", str(port)], capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.items()[r.stdout.strip()]["not_before"], datetime(2026, 11, 13, 10, 30).timestamp())
+
+    def test_the_morning_close_off_is_queued_once_a_day_for_nine(self):
+        self.sup.close_off = True
+        self.sup.tick()
+        self.assertEqual(self.items(), {})  # an empty queue gets none
+        self.tick_all()
+        self.sup.tick()
+        self.sup.tick()
+        offs = [i for i in self.items().values() if i.get("close_off")]
+        self.assertEqual(len(offs), 1)
+        job = offs[0]
+        self.assertEqual((job["kind"], job["agent"], job["model"], job["not_before"]),
+                         ("job", None, "sonnet", datetime(2026, 11, 13, 9, 0).timestamp()))
+        self.assertIn("# Close off the night: 2026-11-13", job["prompt"])
+        self.assertIn("- repo/one", job["prompt"])
+        self.assertIn("http://127.0.0.1:4321/api/queue/clear-finished", job["prompt"])
+        self.assertNotIn("{port}", job["prompt"])
+        self.assertTrue(sbhub.CLOSE_OFF.is_file())
+
+    def test_a_slow_probe_never_holds_up_a_tick(self):
+        self.hub.queue_agents(["main"], None)
+        gate = threading.Event()
+        self.addCleanup(gate.set)
+        self.sup.probe_async = True
+        self.sup.probe = lambda agent, cwd: gate.wait(300) and ev(0.10)
+        self.mode = "hang"
+        self.resume()
+        self.sup.tick()
+        self.assertTrue(self.sup.probing[0].is_alive())  # the tick returned while its probe still waits
+        self.assertEqual(self.state_of("repo/one#1"), "running")  # no reading yet: one worker
+        gate.set()
+        self.sup.probing[0].join(5)
+        self.assertEqual(self.inst("main")["usage"]["five_hour"], 0.10)
+
+    def test_the_hubs_own_leftover_claim_never_skips_its_queued_ticket(self):
+        self.hub.queue_agents(["main"], None)
+        self.mode = "hang"
+        self.tick_all()
+        self.sb("claim", "repo/one", "001", "--by", "hub main")  # a release that failed earlier
+        self.hub.queue_pause(False)
+        self.sup.tick()
+        self.assertEqual(self.state_of("repo/one#1"), "running")
+        self.assertEqual([x["key"] for x in self.launched], ["repo/one#1"])
 
 
 class PoolTest(PacingCase):
