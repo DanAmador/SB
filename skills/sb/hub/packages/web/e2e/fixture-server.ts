@@ -26,6 +26,9 @@ const tickets = (): TicketRow[] => Tickets.parse(addLinks("GET /api/tickets", [
   ticket(5, "Run the board against the real hub", { status: "claimed", state: "claimed", reason: "claimed by hub main" }),
   ticket(6, "Fix the sheet's focus", { status: "claimed", state: "claimed", reason: "claimed by hub main" }),
   ticket(8, "Read the accounts' usage", { status: "claimed", state: "claimed", reason: "claimed by hub main" }),
+  ticket(1, "Draw the shop window", { map: "other/site", map_title: "The shop site", file: "/vault/other/site/issues/1.md" }),
+  ticket(2, "Pick the shop's fonts", { map: "other/site", map_title: "The shop site", state: "waits for you", type: "grilling", file: "/vault/other/site/issues/2.md" }),
+  ticket(3, "Write the shop's copy", { map: "other/site", map_title: "The shop site", status: "claimed", state: "claimed", reason: "claimed by hub main", file: "/vault/other/site/issues/3.md" }),
 ], ctx));
 
 const item = (key: string, state: QueueItem["state"]): Raw<QueueItem> => ({
@@ -44,6 +47,8 @@ const queue = {
       ...item("demo/board#7", "done"), title: "Show who runs what", ended: start - 1200, commit: "0123456789abcdef", run: RUN, log: `${RUN}/7.log`,
       checks: [{ cmd: "pnpm test", code: 0, secs: 12, tail: "" }],
     },
+    { ...item("other/site#3", "running"), runner: "main", started: start - 240, run: RUN, log: `${RUN}/s3.log` },
+    { ...item("other/site#4", "failed"), ended: start - 800, note: "check failed: pnpm test", run: RUN, log: `${RUN}/s4.log` },
     item("demo/board#3", "queued"),
   ] as Raw<QueueItem>[],
 };
@@ -55,6 +60,7 @@ function state(): State {
     agents: {
       "s-1": { agent: "s-1", title: "Charting the board", project: "/demo", state: "your turn", asked: "chart it", at: now() - 30 },
       "demo/board#5": { agent: "demo/board#5", role: "worker", parent: "queue", project: "/demo", state: "working", note: "running the tests", at: now() - 20 },
+      "other/site#3": { agent: "other/site#3", role: "worker", parent: "queue", project: "/other", state: "working", note: "writing the copy", at: now() - 15 },
       "demo/board#8": { agent: "demo/board#8", role: "worker", parent: "queue", project: "/demo", state: "working", note: "reading the usage file", at: start - 400 },
     },
     locks: {}, aliases: {}, messages, providers: {},

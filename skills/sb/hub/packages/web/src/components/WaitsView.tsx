@@ -6,7 +6,7 @@ import { IconAlertTriangle, IconBan, IconCheck, IconCircleCheck, IconGitCommit, 
 import type * as React from "react";
 import type { QueueItem, TicketRow } from "@sb-hub/contract";
 import { Button } from "@/components/ui/button";
-import { ago, canTickAgain, folder, hm, itemProject, itemTitle, mapTitle, plainReason, plural, projOf, seenKey, tkey, type Waits } from "@/lib/board.ts";
+import { scopeItems, ago, canTickAgain, folder, hm, itemProject, itemTitle, mapTitle, plainReason, plural, projOf, seenKey, tkey, type Waits } from "@/lib/board.ts";
 import { cn } from "@/lib/utils";
 import { markSeen } from "@/lib/seen.ts";
 import { QuestionCard } from "./QuestionCard.tsx";
@@ -14,7 +14,7 @@ import { Checks, Empty, FileLinks, Fold, MapName, Pictures, SectionTitle, Ticket
 import { useBoard } from "./context.tsx";
 
 export function WaitsView({ w }: { w: Waits }): React.JSX.Element {
-  const { state, qv, queueWrite, down, busy } = useBoard();
+  const { state, qv, scope, queueWrite, down, busy } = useBoard();
   const clear =
     qv.done.length + qv.failed.length > 0 ? (
       <Button
@@ -42,8 +42,8 @@ export function WaitsView({ w }: { w: Waits }): React.JSX.Element {
           </div>
         </Part>
       )}
-      <Ended title="Failed" id="failed" now={w.failed} old={qv.failedCleared} clear={clear} />
-      <Ended title="Done" id="done" now={w.done} old={qv.doneCleared} clear={w.failed.length === 0 ? clear : undefined} />
+      <Ended title="Failed" id="failed" now={w.failed} old={scopeItems(scope, qv.failedCleared)} clear={clear} />
+      <Ended title="Done" id="done" now={w.done} old={scopeItems(scope, qv.doneCleared)} clear={w.failed.length === 0 ? clear : undefined} />
       {w.tickets.length > 0 && (
         <Part id="decide" title="Tickets that need a decision">
           <ul className="flex flex-col divide-y rounded-xl border bg-card">

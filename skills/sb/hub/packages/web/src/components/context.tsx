@@ -1,13 +1,15 @@
 /** What every part of the board reads: the hub's state, the open tickets, the grouping rules' answers and the writes. */
 import { createContext, use } from "react";
 import type { RouteBody, State, TicketRow } from "@sb-hub/contract";
-import type { Agents, TicketIndex, QueueView } from "@/lib/board.ts";
+import type { Scope, Agents, TicketIndex, QueueView } from "@/lib/board.ts";
 import type { Outcome, Writes } from "@/lib/hub.ts";
 
 type QueueRoute = Parameters<Writes["queue"]>[0];
 
 export interface BoardData {
   readonly state: State;
+  /** The sidebar's pick; Runs, Up next and Waits narrow to it. Writes still use the whole queue. */
+  readonly scope: Scope;
   /** null while the maps are being read. */
   readonly tickets: readonly TicketRow[] | null;
   readonly ix: TicketIndex;

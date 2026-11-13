@@ -5,7 +5,7 @@
 import { IconBan, IconCircleCheck, IconMail, IconRobot, IconX } from "@tabler/icons-react";
 import type * as React from "react";
 import type { QueueItem } from "@sb-hub/contract";
-import { ago, dur, endedToday, mapTitle, plainReason, itemProject, itemTitle, plural, runRows, type RunRow, type RunTone } from "@/lib/board.ts";
+import { itemInScope, scopeItems, ago, dur, endedToday, mapTitle, plainReason, itemProject, itemTitle, plural, runRows, type RunRow, type RunTone } from "@/lib/board.ts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -19,10 +19,11 @@ const DOT: Readonly<Record<RunTone, [string, string]>> = {
 };
 
 export function RunsView(): React.JSX.Element {
-  const { state, ix, qv } = useBoard();
-  const rows = runRows(state, ix);
-  const ended = endedToday(state);
-  const nextWords = qv.next.length === 0 ? "Nothing is queued." : `${plural(qv.next.length, "item")} up next${state.queue.paused ? ", and the queue is paused" : ""}.`;
+  const { state, ix, qv, scope } = useBoard();
+  const rows = runRows(state, ix).filter((r) => itemInScope(scope, r.item));
+  const ended = scopeItems(scope, endedToday(state));
+  const next = scopeItems(scope, qv.next);
+  const nextWords = next.length === 0 ? "Nothing is queued." : `${plural(next.length, "item")} up next${state.queue.paused ? ", and the queue is paused" : ""}.`;
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-4">
       <h2 className="sr-only">Runs</h2>

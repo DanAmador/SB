@@ -8,9 +8,9 @@ import type * as React from "react";
 import type { QueueItem, TicketRow } from "@sb-hub/contract";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input, Select } from "@/components/ui/input";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { addable, blockerTitles, filterOptions, firstLine, hm, itemProject, itemTitle, mapTitle, plural, projOf, searchTickets, showCounts, tkey, type Show } from "@/lib/board.ts";
+import { addable, blockerTitles, isScoped, scopeItems, firstLine, hm, itemProject, itemTitle, mapTitle, plural, projOf, searchTickets, showCounts, tkey, type Show } from "@/lib/board.ts";
 import { setLink, useLink } from "@/lib/link.ts";
 import { cn } from "@/lib/utils";
 import { Empty, MapName, SectionTitle, TicketTitle } from "./bits.tsx";
@@ -48,10 +48,10 @@ function Search({ drag, setDrag }: { drag: Drag; setDrag: (d: Drag) => void }): 
   const link = useLink();
   const { tickets, ix } = useBoard();
   const all = tickets ?? [];
-  const hits = searchTickets(all, ix, link);
-  const counts = showCounts(all, ix, link);
-  const { projects, maps } = filterOptions(all, link);
-  const filtered = Boolean(link.q || link.p || link.m);
+  const find = { q: link.q, p: link.project, m: link.map };
+  const hits = searchTickets(all, ix, { ...find, s: link.s });
+  const counts = showCounts(all, ix, find);
+  const filtered = Boolean(link.q || link.project || link.map);
   const shown = hits.slice(0, filtered ? SHOWN : SHOWN_IDLE);
   return (
     <section aria-labelledby="find-title" className="flex flex-col gap-3">
@@ -73,38 +73,6 @@ function Search({ drag, setDrag }: { drag: Drag; setDrag: (d: Drag) => void }): 
               setLink({ q: ev.currentTarget.value.trim() });
             }}
           />
-        </div>
-        <div className="flex gap-2">
-          <Select
-            aria-label="Project"
-            className="h-9 min-w-0 flex-1 sm:w-40"
-            value={link.p}
-            onChange={(ev) => {
-              setLink({ p: ev.currentTarget.value });
-            }}
-          >
-            <option value="">Every project</option>
-            {projects.map((x) => (
-              <option key={x} value={x}>
-                {x}
-              </option>
-            ))}
-          </Select>
-          <Select
-            aria-label="Map"
-            className="h-9 min-w-0 flex-1 sm:w-48"
-            value={link.m}
-            onChange={(ev) => {
-              setLink({ m: ev.currentTarget.value });
-            }}
-          >
-            <option value="">Every map</option>
-            {maps.map(([m, title]) => (
-              <option key={m} value={m}>
-                {title}
-              </option>
-            ))}
-          </Select>
         </div>
       </div>
       <div role="radiogroup" aria-label="Which open tickets" className="flex flex-wrap gap-1.5">
@@ -186,11 +154,12 @@ function Found({ t, drag, setDrag }: { t: TicketRow; drag: Drag; setDrag: (d: Dr
 // ---- up next ----
 
 function UpNext({ drag, setDrag }: { drag: Drag; setDrag: (d: Drag) => void }): React.JSX.Element {
-  const { state, qv, enqueue, move, unqueue, queueWrite, down, busy } = useBoard();
+  const { state, qv, scope, enqueue, move, unqueue, queueWrite, down, busy } = useBoard();
   const [over, setOver] = useState<number | "end" | null>(null);
   const [all, setAll] = useState(false);
   const can = !down && !busy;
-  const list = all ? qv.next : qv.next.slice(0, NEXT);
+  const next = scopeItems(scope, qv.next);
+  const list = all ? next : next.slice(0, NEXT);
   const drop = (at: number | null): void => {
     setOver(null);
     const d = drag;
@@ -231,9 +200,9 @@ function UpNext({ drag, setDrag }: { drag: Drag; setDrag: (d: Drag) => void }): 
       >
         <span id="next-title">Up next</span>
       </SectionTitle>
-      {qv.next.length === 0 ? (
+      {next.length === 0 ? (
         <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
-          Nothing queued. Find a ticket above and queue it, or drag it here.
+          {isScoped(scope) && qv.next.length > 0 ? "Nothing queued here. " : "Nothing queued. "} Find a ticket above and queue it, or drag it here.
         </div>
       ) : (
         <ol className="flex flex-col divide-y rounded-lg border bg-card">
@@ -274,7 +243,7 @@ function UpNext({ drag, setDrag }: { drag: Drag; setDrag: (d: Drag) => void }): 
           })}
         </ol>
       )}
-      {qv.next.length > NEXT && (
+      {next.length > NEXT && (
         <Button
           variant="ghost"
           size="xs"
@@ -285,7 +254,7 @@ function UpNext({ drag, setDrag }: { drag: Drag; setDrag: (d: Drag) => void }): 
           }}
         >
           {all ? <IconChevronUp aria-hidden /> : <IconChevronDown aria-hidden />}
-          {all ? `Show the first ${String(NEXT)}` : `${String(qv.next.length - NEXT)} more after these`}
+          {all ? `Show the first ${String(NEXT)}` : `${String(next.length - NEXT)} more after these`}
         </Button>
       )}
     </section>

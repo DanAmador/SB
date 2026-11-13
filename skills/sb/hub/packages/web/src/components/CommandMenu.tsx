@@ -1,20 +1,21 @@
-/** Cmd-K: New job, Message, the views, the projects' panels; and the two forms it opens. */
-import { IconActivity, IconFolder, IconInbox, IconListNumbers, IconMail, IconMessage, IconTerminal2 } from "@tabler/icons-react";
+/** Cmd-K: jump to a project, map or ticket; New job, Message, the views, the projects' panels; and the two forms it opens. */
+import { IconActivity, IconFolder, IconInbox, IconListNumbers, IconMail, IconMap2, IconMessage, IconTerminal2, IconTicket } from "@tabler/icons-react";
 import { useState } from "react";
 import type * as React from "react";
 import { Button } from "@/components/ui/button";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
-import { agentLabel, agentOf, folder, poolOf, projOf, whenDelivered } from "@/lib/board.ts";
+import type { Sidebar } from "@/lib/board.ts";
+import { tkey, agentLabel, agentOf, folder, poolOf, projOf, whenDelivered } from "@/lib/board.ts";
 import { setLink } from "@/lib/link.ts";
 import { say } from "@/lib/notice.ts";
 import { useBoard } from "./context.tsx";
 
 export type Dialogs = { kind: "none" } | { kind: "command" } | { kind: "job" } | { kind: "message"; to: string };
 
-export function CommandMenu({ open, onClose, go }: { open: boolean; onClose: () => void; go: (d: Dialogs) => void }): React.JSX.Element {
-  const { state } = useBoard();
+export function CommandMenu({ open, onClose, go, tree }: { open: boolean; onClose: () => void; go: (d: Dialogs) => void; tree: Sidebar }): React.JSX.Element {
+  const { state, tickets } = useBoard();
   const run = (fn: () => void): void => {
     onClose();
     fn();
@@ -42,6 +43,35 @@ export function CommandMenu({ open, onClose, go }: { open: boolean; onClose: () 
                 Message a session or worker
               </CommandItem>
             </CommandGroup>
+            <CommandGroup heading="Filter by project or map">
+              <CommandItem value="everything clear the filter" onSelect={() => { run(() => { setLink({ project: "", map: "" }); }); }}>
+                <IconFolder aria-hidden />
+                Everything
+              </CommandItem>
+              {tree.projects.flatMap((p) => [
+                <CommandItem key={p.project} value={`project ${p.project}`} onSelect={() => { run(() => { setLink({ project: p.project, map: "" }); }); }}>
+                  <IconFolder aria-hidden />
+                  <span className="truncate">{p.project}</span>
+                </CommandItem>,
+                ...p.maps.map((m) => (
+                  <CommandItem key={m.map} value={`map ${m.map} ${m.title}`} onSelect={() => { run(() => { setLink({ project: p.project, map: m.map }); }); }}>
+                    <IconMap2 aria-hidden />
+                    <span className="truncate">{m.map}</span>
+                  </CommandItem>
+                )),
+              ])}
+            </CommandGroup>
+            {(tickets ?? []).length > 0 && (
+              <CommandGroup heading="Tickets">
+                {(tickets ?? []).map((t) => (
+                  <CommandItem key={tkey(t)} value={`ticket ${tkey(t)} ${t.title}`} onSelect={() => { run(() => { setLink({ t: tkey(t) }); }); }}>
+                    <IconTicket aria-hidden />
+                    <span className="truncate">{t.title}</span>
+                    <span className="ml-auto shrink-0 text-xs text-muted-foreground">{`${t.map} #${String(t.num)}`}</span>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            )}
             <CommandGroup heading="Go to">
               <CommandItem onSelect={() => { run(() => { setLink({ view: "runs" }); }); }}>
                 <IconActivity aria-hidden />

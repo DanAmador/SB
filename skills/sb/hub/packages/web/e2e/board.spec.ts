@@ -14,13 +14,13 @@ test("Runs is the landing page: one row per worker run, the silent one amber, ne
   await page.goto("/next/");
   await expect(page.getByRole("tab", { name: /Runs/ })).toHaveAttribute("aria-selected", "true");
   const runs = page.getByRole("list", { name: "Running now" });
-  await expect(runs.getByRole("listitem")).toHaveCount(2);
+  await expect(runs.getByRole("listitem")).toHaveCount(3);
   // the silent one first, amber, with its last action and when
   const silent = runs.getByRole("listitem").first();
   await expect(silent).toContainText("Read the accounts' usage");
   await expect(silent.getByRole("img", { name: "no report for 5 minutes or more" })).toBeVisible();
   await expect(silent).toContainText("reading the usage file");
-  const busy = runs.getByRole("listitem").nth(1);
+  const busy = runs.getByRole("listitem").filter({ hasText: "running the tests" });
   await expect(busy).toContainText("running the tests");
   await expect(busy).toContainText("12 min");
   await expect(busy).toContainText("opus");
@@ -29,7 +29,7 @@ test("Runs is the landing page: one row per worker run, the silent one amber, ne
   // your chat session is not a run
   await expect(page.getByText("Charting the board")).toHaveCount(0);
   // the Waits for you count is the page's alarm: a question, a failed run, a done run
-  await expect(page.getByRole("tab", { name: /Waits for you/ })).toContainText("3");
+  await expect(page.getByRole("tab", { name: /Waits for you/ })).toContainText("4");
   // a row opens the ticket's panel, with Message and Stop
   await busy.getByRole("button", { name: "Show details" }).click();
   const sheet = page.getByRole("dialog");
@@ -99,7 +99,7 @@ test("Waits for you: the question first, then the failed run in plain words, the
   await expect(done.getByText("1 check passed")).toBeVisible();
   await done.getByRole("button", { name: "Looks good" }).click();
   await expect(page.getByRole("region", { name: "Done" })).toHaveCount(0);
-  await expect(page.getByRole("tab", { name: /Waits for you/ })).toContainText("2");
+  await expect(page.getByRole("tab", { name: /Waits for you/ })).toContainText("3");
 });
 
 test("Cmd-K opens the command menu with New job and Message", async ({ page }) => {
@@ -110,6 +110,91 @@ test("Cmd-K opens the command menu with New job and Message", async ({ page }) =
   await expect(menu.getByRole("option", { name: "New job" })).toBeVisible();
   await menu.getByRole("option", { name: /Message/ }).click();
   await expect(page.getByRole("dialog").getByRole("heading", { name: "Message" })).toBeVisible();
+});
+
+test("the sidebar picks a map and every view narrows; the pick lives in the page link and the x clears it", async ({ page }) => {
+  await page.goto("/next/");
+  const side = page.getByRole("navigation", { name: "Projects and maps" });
+  // Everything, then each project with its maps and two counts each
+  await expect(side.getByRole("button", { name: "Everything" })).toHaveAttribute("aria-current", "page");
+  const shop = side.getByRole("button", { name: /^other/ });
+  await expect(shop.getByLabel("1 running")).toBeVisible();
+  await expect(shop.getByLabel("1 waiting for you")).toBeVisible();
+  await expect(page.getByRole("list", { name: "Running now" }).getByRole("listitem")).toHaveCount(3);
+
+  // collapse a project: its maps go
+  await side.getByRole("button", { name: "Collapse other" }).click();
+  await expect(side.getByRole("button", { name: /^site/ })).toHaveCount(0);
+  await side.getByRole("button", { name: "Expand other" }).click();
+
+  // pick a map: Runs narrows, and the link holds it
+  await side.getByRole("button", { name: /^site/ }).click();
+  await expect(page).toHaveURL(/project=other&map=other%2Fsite/);
+  const runs = page.getByRole("list", { name: "Running now" });
+  await expect(runs.getByRole("listitem")).toHaveCount(1);
+  await expect(runs).toContainText("Write the shop's copy");
+  const crumb = page.getByRole("navigation", { name: "Breadcrumb" });
+  await expect(crumb).toContainText("other");
+  await expect(crumb).toContainText("site");
+  await expect(page.getByRole("tab", { name: /Runs/ })).toContainText("1");
+
+  // Queue: its search finds only this map's open tickets; Up next has none of the other map's
+  await page.keyboard.press("2");
+  await expect(page).toHaveURL(/view=queue/);
+  const found = page.getByTestId("found");
+  await expect(found.getByRole("listitem")).toHaveCount(1);
+  await expect(found).toContainText("Draw the shop window");
+  await expect(found).not.toContainText("Draw the header");
+  await expect(page.getByTestId("up-next")).not.toContainText("Show the queue in order");
+
+  // Waits for you: the shop's failed run only, no question, no done run
+  await page.keyboard.press("3");
+  await expect(page.getByRole("region", { name: "Failed" }).getByRole("listitem")).toHaveCount(1);
+  await expect(page.getByRole("region", { name: "Failed" })).toContainText("pnpm test failed");
+  await expect(page.getByRole("region", { name: "Done" })).toHaveCount(0);
+  await expect(page.getByRole("article", { name: /Question from/ })).toHaveCount(0);
+  await expect(page.getByRole("tab", { name: /Waits for you/ })).toContainText("1");
+
+  // a reload opens the same pick; the x clears it
+  await page.reload();
+  await expect(page.getByRole("navigation", { name: "Breadcrumb" })).toBeVisible();
+  await page.getByRole("button", { name: "Clear the filter" }).click();
+  await expect(page).not.toHaveURL(/project=/);
+  await expect(page.getByRole("region", { name: "Done" })).toBeVisible();
+
+  // keys: 1 is Runs; j then Enter opens a row's panel; Esc closes it; / focuses the search
+  await page.keyboard.press("1");
+  await page.keyboard.press("j");
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await page.keyboard.press("2");
+  await page.keyboard.press("/");
+  await expect(page.getByRole("searchbox")).toBeFocused();
+});
+
+test("Cmd-K jumps to a map or a ticket", async ({ page }) => {
+  await page.goto("/next/");
+  await expect(page.getByRole("list", { name: "Running now" })).toBeVisible();
+  await page.keyboard.press("ControlOrMeta+k");
+  await page.getByRole("option", { name: "other/site", exact: true }).click();
+  await expect(page).toHaveURL(/map=other%2Fsite/);
+  await page.keyboard.press("ControlOrMeta+k");
+  await page.getByRole("option", { name: /Draw the header/ }).click();
+  await expect(page).toHaveURL(/t=demo%2Fboard%231/);
+});
+
+test("on a phone the sidebar is a sheet behind the menu button", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 800 });
+  await page.goto("/next/");
+  await expect(page.getByRole("navigation", { name: "Projects and maps" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Projects and maps" }).click();
+  const sheet = page.getByRole("dialog", { name: "Projects" });
+  await sheet.getByRole("button", { name: /^other/ }).click();
+  await expect(sheet).toHaveCount(0);
+  await expect(page).toHaveURL(/project=other/);
+  await expect(page.getByRole("list", { name: "Running now" }).getByRole("listitem")).toHaveCount(1);
 });
 
 for (const [view, scheme] of [["runs", "light"], ["queue", "dark"], ["waits", "light"], ["waits", "dark"]] as const) {

@@ -9,6 +9,10 @@ import {
   endedToday,
   endsAt,
   queueView,
+  scopeItems,
+  scopeWaits,
+  sidebarTree,
+  ticketInScope,
   runRows,
   filterOptions,
   plainReason,
@@ -306,10 +310,62 @@ describe("open tickets", () => {
 
 describe("the page link", () => {
   it("keeps the view, the search and the open ticket, and leaves the defaults out", () => {
-    const link = readLink("?view=queue&q=rope&p=sb&m=sb%2Fone&s=later&t=sb%2Fone%231");
-    expect(link).toEqual({ view: "queue", q: "rope", p: "sb", m: "sb/one", s: "later", t: "sb/one#1" });
+    const link = readLink("?view=queue&q=rope&project=sb&map=sb%2Fone&s=later&t=sb%2Fone%231");
+    expect(link).toEqual({ view: "queue", q: "rope", project: "sb", map: "sb/one", s: "later", t: "sb/one#1" });
     expect(readLink(writeLink(link))).toEqual(link);
     expect(readLink("").view).toBe("runs");
     expect(writeLink(readLink("?view=bogus"))).toBe("");
+  });
+});
+
+describe("the sidebar's scope", () => {
+  const tickets = [ticket("sb/one", 1), ticket("sb/two", 1), ticket("sk4te/main", 1)];
+  const s = state(
+    {
+      agents: { "sb/one#9": agent("sb/one#9", { role: "worker", parent: "queue" }), s1: agent("s1", { project: "/work/sk4te" }) },
+      questions: { a: question({ agent: "sb/one#9" }), b: question({ agent: "s1" }) },
+    },
+    {
+      items: [
+        item("sb/one#9", "running", { started: NOW - 60 }),
+        item("sk4te/main#2", "running", { started: NOW - 60 }),
+        item("sb/two#3", "failed", { ended: NOW - 10 }),
+        item("sb/one#4", "done", { ended: NOW - 20 }),
+        item("job-1", "queued", { kind: "job", project: "/work/sk4te", model: null, repo: "/work/sk4te", prompt: "p", hash: "h", name: "n", title: "t", created: NOW }),
+      ],
+    },
+  );
+  const ix = ticketIndex(tickets, s);
+  const waits = waitsFor(s, tickets, ix, new Set());
+
+  it("keeps what belongs to a project or one map, and everything when nothing is picked", () => {
+    const keys = (scope: { project: string; map: string }): string[] => scopeItems(scope, s.queue.items).map((i) => i.key);
+    expect(keys({ project: "", map: "" })).toHaveLength(5);
+    expect(keys({ project: "sb", map: "" })).toEqual(["sb/one#9", "sb/two#3", "sb/one#4"]);
+    expect(keys({ project: "sb", map: "sb/two" })).toEqual(["sb/two#3"]);
+    // a job has a project but no map
+    expect(keys({ project: "sk4te", map: "" })).toEqual(["sk4te/main#2", "job-1"]);
+    expect(keys({ project: "sk4te", map: "sk4te/main" })).toEqual(["sk4te/main#2"]);
+    expect(tickets.filter((t) => ticketInScope({ project: "sb", map: "" }, t))).toHaveLength(2);
+  });
+
+  it("narrows Waits for you, its count too; signed-out accounts show only unscoped", () => {
+    expect(waits.count).toBe(4);
+    const sb = scopeWaits(waits, { project: "sb", map: "" }, s);
+    expect(sb.questions.map(([id]) => id)).toEqual(["a"]);
+    expect(sb.failed.map((i) => i.key)).toEqual(["sb/two#3"]);
+    expect(sb.done.map((i) => i.key)).toEqual(["sb/one#4"]);
+    expect(sb.count).toBe(3);
+    const one = scopeWaits(waits, { project: "sb", map: "sb/one" }, s);
+    expect(one.count).toBe(2);
+    expect(scopeWaits(waits, { project: "sk4te", map: "" }, s).questions.map(([id]) => id)).toEqual(["b"]);
+  });
+
+  it("counts running and waiting for you on Everything, each project and each map", () => {
+    const tree = sidebarTree(s, tickets, waits);
+    expect(tree.all).toEqual({ running: 2, waiting: 4 });
+    expect(tree.projects.map((p) => [p.project, p.running, p.waiting])).toEqual([["sb", 1, 3], ["sk4te", 1, 1]]);
+    const sb = tree.projects[0];
+    expect(sb?.maps.map((m) => [m.map, m.running, m.waiting])).toEqual([["sb/one", 1, 2], ["sb/two", 0, 1]]);
   });
 });

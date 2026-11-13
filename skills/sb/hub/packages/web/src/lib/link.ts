@@ -3,23 +3,24 @@ import { useSyncExternalStore } from "react";
 import { SHOWS, type Show } from "./board.ts";
 import { Store } from "./store.ts";
 
-/** Runs is the landing view. A Sessions tab comes later (ticket 044). */
+/** Runs is the landing view. Sessions (ticket 044) and History come later: keys 4 and 5 are theirs. */
 export const VIEWS = ["runs", "queue", "waits"] as const;
 export type View = (typeof VIEWS)[number];
 export const DEFAULT_VIEW: View = "runs";
 
 export interface Link {
   readonly view: View;
-  /** The Queue's search: words, a project, a map, and which open tickets. */
+  /** The Queue's search words, and which open tickets. */
   readonly q: string;
-  readonly p: string;
-  readonly m: string;
+  /** The sidebar's pick: a project, and one of its maps. Both empty is Everything. */
+  readonly project: string;
+  readonly map: string;
   readonly s: Show;
   /** The open ticket's key, "p:<path>" for a project, or "". */
   readonly t: string;
 }
 
-const KEYS = ["view", "q", "p", "m", "s", "t"] as const;
+const KEYS = ["view", "q", "project", "map", "s", "t"] as const;
 
 export function readLink(search: string): Link {
   const s = new URLSearchParams(search);
@@ -28,8 +29,8 @@ export function readLink(search: string): Link {
   return {
     view: VIEWS.find((x) => x === v) ?? DEFAULT_VIEW,
     q: s.get("q") ?? "",
-    p: s.get("p") ?? "",
-    m: s.get("m") ?? "",
+    project: s.get("project") ?? "",
+    map: s.get("map") ?? "",
     s: SHOWS.find((x) => x === show) ?? "ready",
     t: s.get("t") ?? "",
   };
@@ -62,8 +63,8 @@ function subscribe(fn: () => void): () => void {
 export function setLink(change: Partial<Link>): void {
   const now = link.get();
   // a new project drops the map, which belonged to the old one
-  const pChanged = change.p !== undefined && change.p !== now.p && change.m === undefined;
-  const next: Link = { ...now, ...change, ...(pChanged ? { m: "" } : {}) };
+  const pChanged = change.project !== undefined && change.project !== now.project && change.map === undefined;
+  const next: Link = { ...now, ...change, ...(pChanged ? { map: "" } : {}) };
   history.replaceState(null, "", `${location.pathname}${writeLink(next)}${location.hash}`);
   link.set(next);
 }

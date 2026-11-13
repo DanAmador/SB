@@ -5,7 +5,7 @@ import type * as React from "react";
 import type { RouteBody, State } from "@sb-hub/contract";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { plural, queueView, splitAgents, ticketIndex, waitsFor, withBlockers } from "@/lib/board.ts";
+import { itemInScope, plural, projOf, queueView, scopeItems, scopeWaits, sidebarTree, splitAgents, ticketIndex, waitsFor, withBlockers } from "@/lib/board.ts";
 import { useHubState, useTickets, useWrites, type Outcome } from "@/lib/hub.ts";
 import { setLink, useLink, VIEWS, type View } from "@/lib/link.ts";
 import { say, useNotices } from "@/lib/notice.ts";
@@ -13,11 +13,35 @@ import { useSeen } from "@/lib/seen.ts";
 import { cn } from "@/lib/utils";
 import { CommandMenu, JobDialog, MessageDialog, type Dialogs } from "./CommandMenu.tsx";
 import { BoardContext, type BoardData } from "./context.tsx";
+import { Breadcrumb, MenuButton, SidebarColumn, SidebarSheet } from "./Sidebar.tsx";
 import { QueueView } from "./QueueView.tsx";
 import { RunsView } from "./RunsView.tsx";
 import { DetailSheet } from "./TicketSheet.tsx";
 import { Toolbar } from "./Toolbar.tsx";
 import { WaitsView } from "./WaitsView.tsx";
+
+/** The list rows of the view on screen, in reading order. */
+const rows = (): HTMLElement[] => [...document.querySelectorAll<HTMLElement>("main [role=tabpanel]:not([hidden]) li")].filter((li) => li.querySelector("a, button") !== null && li.closest("details:not([open])") === null);
+
+/** j and k: move the row cursor; it is real focus, so the page scrolls to it and the ring shows. */
+function stepRow(by: 1 | -1): void {
+  const list = rows();
+  if (list.length === 0) return;
+  const now = list.findIndex((li) => li === document.activeElement || li.contains(document.activeElement));
+  const next = list[Math.min(list.length - 1, Math.max(0, now < 0 ? (by === 1 ? 0 : list.length - 1) : now + by))];
+  if (!next) return;
+  next.tabIndex = -1;
+  next.focus();
+  next.scrollIntoView({ block: "nearest" });
+}
+
+/** Enter on a focused row opens its panel (the Show details button), else its first link or button. */
+function openRow(el: HTMLElement | null): void {
+  const li = el?.closest("li") ?? null;
+  if (li === null || el !== li) return;
+  const go = li.querySelector<HTMLElement>("button[aria-label='Show details']") ?? li.querySelector<HTMLElement>("a, button");
+  go?.click();
+}
 
 const VIEW_WORDS: Readonly<Record<View, string>> = { runs: "Runs", queue: "Queue", waits: "Waits for you" };
 
@@ -37,14 +61,22 @@ function Loaded({ state, tickets, down, lastOk }: { state: State; tickets: Board
   const writes = useWrites();
   const [busy, setBusy] = useState(false);
   const [dialog, setDialog] = useState<Dialogs>({ kind: "none" });
+  const [menu, setMenu] = useState(false);
+  const scope = { project: link.project || projOf(link.map), map: link.map };
 
   const agents = splitAgents(state);
   const qv = queueView(state);
   const ix = ticketIndex(tickets ?? [], state);
   const seen = useSeen();
-  const waits = waitsFor(state, tickets, ix, seen);
+  const allWaits = waitsFor(state, tickets, ix, seen);
+  const tree = sidebarTree(state, tickets, allWaits);
+  const waits = scopeWaits(allWaits, scope, state);
   const alerts = waits.count;
-  const counts: Readonly<Record<View, number>> = { runs: qv.running.length, queue: qv.next.length, waits: alerts };
+  const counts: Readonly<Record<View, number>> = {
+    runs: qv.running.filter((i) => itemInScope(scope, i)).length,
+    queue: scopeItems(scope, qv.next).length,
+    waits: alerts,
+  };
 
   const queueWrite: BoardData["queueWrite"] = async (route, body, done) => {
     setBusy(true);
@@ -57,6 +89,7 @@ function Loaded({ state, tickets, down, lastOk }: { state: State; tickets: Board
     queueWrite("POST /api/queue/set", { keys, version: state.queue.version } satisfies RouteBody<"POST /api/queue/set">, done);
   const data: BoardData = {
     state,
+    scope,
     tickets,
     ix,
     qv,
@@ -93,8 +126,8 @@ function Loaded({ state, tickets, down, lastOk }: { state: State; tickets: Board
   };
 
   useEffect(() => {
-    document.title = alerts > 0 ? `(${String(alerts)}) sb hub` : "sb hub";
-  }, [alerts]);
+    document.title = allWaits.count > 0 ? `(${String(allWaits.count)}) sb hub` : "sb hub";
+  }, [allWaits.count]);
 
   useEffect(() => {
     const onKey = (ev: KeyboardEvent): void => {
@@ -103,12 +136,22 @@ function Loaded({ state, tickets, down, lastOk }: { state: State; tickets: Board
       if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === "k") {
         ev.preventDefault();
         setDialog((d) => (d.kind === "command" ? { kind: "none" } : { kind: "command" }));
-      } else if (ev.key === "/" && !typing && !ev.metaKey && !ev.ctrlKey) {
+      } else if (typing || ev.metaKey || ev.ctrlKey || ev.altKey || document.querySelector("[role=dialog]")) {
+        return;
+      } else if (ev.key === "/") {
         const find = document.querySelector<HTMLInputElement>("input[data-find]");
         if (find) {
           ev.preventDefault();
           find.focus();
         }
+      } else if (ev.key >= "1" && ev.key <= "5") {
+        // 4 (Sessions) and 5 (History) are not built yet: their keys do nothing until they are
+        const view = VIEWS[Number(ev.key) - 1];
+        if (view) setLink({ view });
+      } else if (ev.key === "j" || ev.key === "k") {
+        stepRow(ev.key === "j" ? 1 : -1);
+      } else if (ev.key === "Enter") {
+        openRow(el);
       }
     };
     document.addEventListener("keydown", onKey);
@@ -133,6 +176,7 @@ function Loaded({ state, tickets, down, lastOk }: { state: State; tickets: Board
         <header className="sticky top-0 z-30 border-b bg-background/85 backdrop-blur supports-[backdrop-filter]:bg-background/70">
           <div className="mx-auto flex max-w-[1600px] flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2.5 sm:px-6">
             <div className="flex items-center gap-2">
+              <MenuButton onClick={() => { setMenu(true); }} />
               <span className="text-sm font-semibold tracking-tight">sb hub</span>
               <span
                 className={cn("size-2 rounded-full", down ? "bg-muted-foreground" : "bg-ok")}
@@ -171,7 +215,10 @@ function Loaded({ state, tickets, down, lastOk }: { state: State; tickets: Board
             </div>
           </div>
         </header>
-        <main className={cn("mx-auto flex max-w-[1600px] flex-col gap-6 px-4 py-5 sm:px-6", down && "opacity-60")}>
+        <div className="mx-auto flex max-w-[1600px]">
+        <SidebarColumn tree={tree} scope={scope} />
+        <main className={cn("flex min-w-0 flex-1 flex-col gap-6 px-4 py-5 sm:px-6", down && "opacity-60")}>
+          <Breadcrumb scope={scope} />
           {down && <Offline lastOk={lastOk} />}
           <TabsContent value="runs" className="outline-none">
             <RunsView />
@@ -183,9 +230,11 @@ function Loaded({ state, tickets, down, lastOk }: { state: State; tickets: Board
             <WaitsView w={waits} />
           </TabsContent>
         </main>
+        </div>
       </Tabs>
+      <SidebarSheet tree={tree} scope={scope} open={menu} onOpenChange={setMenu} />
       <DetailSheet />
-      <CommandMenu open={dialog.kind === "command"} onClose={close} go={setDialog} />
+      <CommandMenu open={dialog.kind === "command"} onClose={close} go={setDialog} tree={tree} />
       <JobDialog open={dialog.kind === "job"} onClose={close} />
       {dialog.kind === "message" && <MessageDialog key={dialog.to} to={dialog.to} onClose={close} />}
       <Notices />
