@@ -507,6 +507,37 @@ class Hub:
             raise KeyError(key)
         return path, _tail(path, 0, LOG_SERVED) if what == "log" else Path(path).read_text(encoding="utf-8", errors="replace")
 
+    def _media_dir(self, item):
+        """A ticket item's media folder, <run folder>/<num>-media, or None for a job or an item that never ran."""
+        if item.get("kind") == "job" or not item.get("run") or "#" not in item["key"]:
+            return None
+        return Path(item["run"]) / "{}-media".format(item["key"].rsplit("#", 1)[-1])
+
+    def media_of(self, key):
+        """The sorted names of the pictures and clips a worker left for this item: known kinds, at most
+        MEDIA_MAX, none over MEDIA_BYTES (the phone page forwards a file whole)."""
+        with self._lock:
+            item = next((i for i in self._data["queue"]["items"] if i["key"] == key), None)
+        d = item and self._media_dir(item)
+        if not d or not d.is_dir():
+            return []
+        return sorted(p.name for p in d.iterdir()
+                      if p.suffix.lower() in MEDIA_TYPES and p.is_file() and p.stat().st_size <= MEDIA_BYTES)[:MEDIA_MAX]
+
+    def media_file(self, key, name):
+        """(path, content type) of one of an item's recorded media; KeyError for a name it did not record, a name
+        with a path in it, or a file that now resolves outside its media folder."""
+        with self._lock:
+            q = self._data["queue"]
+            item = next((dict(i) for i in q["items"] + (q.get("cleared") or []) if i["key"] == key), None)
+        if item is None or not name or name not in (item.get("media") or []) or any(c in name for c in ("/", "\\", "..")):
+            raise KeyError(name)
+        d = self._media_dir(item)
+        f = d and (d / name).resolve()
+        if not f or f.parent != d.resolve() or f.suffix.lower() not in MEDIA_TYPES or not f.is_file():
+            raise KeyError(name)
+        return f, MEDIA_TYPES[f.suffix.lower()]
+
     # ---- the page's side panel: a ticket's details and actions; the vault is written only through sbmap ----
 
     def _ticket_file(self, key):
@@ -730,6 +761,10 @@ JOB_DUPLICATE_WINDOW = 86400  # the same project and prompt is refused again for
 CLEARED_KEPT = 300  # finished items cleared off the queue list that the page's log still shows
 QUIET_FOR = 2 * 3600  # a row idle or on "your turn" this long is quiet (agents_clear_quiet)
 LOG_SERVED = 1 << 20  # the end of a worker's log the page can open
+# a worker's pictures and clips, in <run folder>/<num>-media/: the kinds the board shows, how many, how big
+MEDIA_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif",
+               ".webp": "image/webp", ".mp4": "video/mp4", ".webm": "video/webm"}
+MEDIA_MAX, MEDIA_BYTES = 6, 8 << 20
 CHECK_TAIL = 40  # output lines kept per check
 CLOSE_OFF_AT = (9, 0)  # the morning close-off job's local time
 CLOSE_OFF = Path(__file__).resolve().parents[1] / "templates" / "close-off.md"
@@ -1408,6 +1443,8 @@ class Supervisor:
             self.hub._save()
 
     def _end(self, key, state, **fields):
+        if state in ("done", "failed"):
+            fields.setdefault("media", self.hub.media_of(key))
         self._update(key, state=state, ended=self.hub.now(), pid=None, pid_start=None, **fields)
 
     def _row(self, key):
@@ -2160,16 +2197,29 @@ def make_handler(hub):
         def log_message(self, *args):
             pass
 
-        def send(self, code, body, ctype="application/json"):
+        def send(self, code, body, ctype="application/json", headers=()):
             if not isinstance(body, bytes):
                 body = json.dumps(body).encode("utf-8")
             self.send_response(code)
             self.send_header("Content-Type", ctype)
+            for k, v in headers:
+                self.send_header(k, v)
             self.send_header("X-Frame-Options", "DENY")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+
+        def send_file(self, path, ctype):
+            """A whole file, or the one byte range asked for (a phone plays a video only from ranges)."""
+            data = path.read_bytes()  # ponytail: read whole, fine while media stay under MEDIA_BYTES
+            n, m = len(data), re.fullmatch(r"bytes=(\d*)-(\d*)", self.headers.get("Range", "").strip())
+            if not m or not (m[1] or m[2]):
+                return self.send(200, data, ctype, [("Accept-Ranges", "bytes")])
+            a, b = (int(m[1]), min(int(m[2] or n - 1), n - 1)) if m[1] else (max(0, n - int(m[2])), n - 1)
+            if a > b:
+                return self.send(416, b"", ctype, [("Content-Range", "bytes */{}".format(n))])
+            self.send(206, data[a:b + 1], ctype, [("Accept-Ranges", "bytes"), ("Content-Range", "bytes {}-{}/{}".format(a, b, n))])
 
         def for_this_hub(self):
             """The Host must name the hub itself: a page that rebinds its own name to 127.0.0.1 gets nothing."""
@@ -2205,6 +2255,13 @@ def make_handler(hub):
                               "text/plain; charset=utf-8")
                 except KeyError:
                     self.send(404, {"ok": False, "error": "no such file for that item"})
+            elif path == "/api/media":
+                from urllib.parse import parse_qs, urlsplit
+                qs = parse_qs(urlsplit(self.path).query)
+                try:
+                    self.send_file(*hub.media_file((qs.get("key") or [""])[0], (qs.get("name") or [""])[0]))
+                except (KeyError, OSError):
+                    self.send(404, b"", "text/plain")
             elif path.startswith("/api/question/"):
                 try:
                     self.send(200, hub.question(path[len("/api/question/"):]))

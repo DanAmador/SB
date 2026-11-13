@@ -83,6 +83,13 @@ the actions Done, Drop, Release, Comment, Tier and the map's Checks, each confir
 `sbmap` (`GET /api/ticket?key=`, `POST /api/ticket/<action>`); a ticket a queue worker is running refuses them,
 and a failed `sbmap` shows its own message.
 
+A worker whose change shows on screen looks at its own screenshots or short clips before it commits and
+leaves them in `<run folder>/<num>-media/` (the brief's rule: png, jpg, gif, webp, mp4 or webm, at most 6,
+each under 8 MB). When the item ends, done or failed, the hub records their names; its Done or Failed card
+shows up to 3 thumbnails and the side panel shows all of them, videos with controls. The files come only from
+`GET /api/media?key=<item>&name=<file>`, which serves a name the item recorded from that folder alone (with
+byte ranges, so a phone plays the clips) and answers anything else with an empty 404.
+
 **Phone page.** `python3 scripts/sbhub_lan.py serve` (port 8766, every interface; the `sb-hub-lan` entry in
 `.claude/launch.json`) serves the same page read-only to a phone on the WiFi: `sbhub_lan.py url` prints its
 address, `http://<the Mac's WiFi address>:8766/v/<token>/`. The token (32 characters, `$SB_HUB_HOME/lan-token`)

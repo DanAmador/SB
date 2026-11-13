@@ -140,6 +140,15 @@ const STYLE = `
 .ck{display:flex;gap:6px;align-items:center;font-size:12px;min-width:0;flex-wrap:wrap}.ck code{overflow-wrap:anywhere;min-width:0}
 .sb pre{margin:0 0 4px;padding:4px 6px;font:11px/1.4 var(--mono,ui-monospace,monospace);color:var(--mute);white-space:pre-wrap;overflow-wrap:anywhere;background:var(--hover);border-radius:6px;max-height:240px;overflow:auto}
 .lk{display:inline-flex;flex-wrap:wrap;gap:8px;font-size:11.5px}
+/* a worker's pictures and clips: small on a card, full width in the panel */
+.thumbs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;max-width:240px;margin-top:5px;font-size:11.5px}
+.thumbs>span{grid-column:1/-1}
+.thumbs a{position:relative;display:block;aspect-ratio:3/2;border-radius:5px;overflow:hidden;border:1px solid var(--line);background:var(--hover)}
+.thumbs img,.thumbs video{width:100%;height:100%;object-fit:cover;display:block}
+.thumbs .play{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;filter:drop-shadow(0 0 2px rgba(0,0,0,.8))}
+.pmedia figure{margin:0 0 10px;min-width:0}
+.pmedia img,.pmedia video{width:100%;height:auto;max-height:70vh;object-fit:contain;display:block;border-radius:6px;border:1px solid var(--line);background:var(--hover)}
+.pmedia figcaption{font-size:11.5px;color:var(--mute);overflow-wrap:anywhere;margin-top:2px}
 /* questions */
 .qq{overflow-wrap:anywhere;margin-top:2px}
 .opts{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
@@ -385,6 +394,22 @@ window.SBBoard = function (root, io) {
   // the worker's report and log, served read-only by the hub
   const fileLinks = i => [i.kind == 'ticket' ? i.run && 'report' : i.result && 'report', i.log && 'log'].filter(Boolean)
     .map(w => `<a href="${esc('api/item/' + w + '?key=' + encodeURIComponent(i.key))}" target="_blank" rel="noopener">${w == 'log' ? "worker's log" : "worker's report"}</a>`).join('');
+  // the pictures and clips a worker left, served by the hub only for this item: up to 3 on a card, all in the panel
+  const mediaUrl = (i, n) => 'api/media?key=' + encodeURIComponent(i.key) + '&name=' + encodeURIComponent(n);
+  const isClip = n => /\.(mp4|webm)$/i.test(n);
+  function mediaOf(i, open) {
+    const ms = Array.isArray(i.media) ? i.media.filter(n => typeof n == 'string' && /\.(png|jpe?g|gif|webp|mp4|webm)$/i.test(n)) : [];
+    if (!ms.length) return '';
+    if (open) return '<h3>Pictures</h3><div class="pmedia">' + ms.map(n => { const u = esc(mediaUrl(i, n));
+      return `<figure>${isClip(n) ? `<video src="${u}#t=0.1" controls preload="metadata" playsinline aria-label="${esc(n)}"></video>`
+        : `<a href="${u}" target="_blank" rel="noopener"><img loading="lazy" src="${u}" alt="${esc(n)}"></a>`}<figcaption dir="auto">${esc(n)}</figcaption></figure>`; }).join('') + '</div>';
+    const more = ms.length - 3;
+    return '<div class="thumbs">' + ms.slice(0, 3).map(n => { const u = esc(mediaUrl(i, n));
+      return `<a href="${u}" target="_blank" rel="noopener" title="${esc(n)}">${isClip(n)
+        ? `<video src="${u}#t=0.1" preload="metadata" muted playsinline aria-label="${esc(n)}"></video><span class="play">${svg('player-play')}</span>`
+        : `<img loading="lazy" src="${u}" alt="${esc(n)}">`}</a>`; }).join('')
+      + (more > 0 ? `<span class="mute">${esc(plural(more, 'more picture'))}</span>` : '') + '</div>';
+  }
   function checksOf(i, open) {
     const cs = Array.isArray(i.checks) ? i.checks.filter(c => c && typeof c == 'object') : [];
     if (!cs.length) return '';
@@ -540,7 +565,7 @@ window.SBBoard = function (root, io) {
     const lk = fileLinks(i);
     return cardOpen(i.key) + `<div class="top">${icon(g, w, c)}<span class="t" dir="auto">${esc(titleOf(i))}</span></div><div class="meta">${meta.join('')}</div>`
       + (why ? `<div class="why${i.state == 'done' ? ' mute' : ''}" dir="auto">${esc(why)}</div>` : '')
-      + checksOf(i) + selfOf(i) + (lk ? `<div class="lk">${lk}</div>` : '') + again + '</article>';
+      + checksOf(i) + selfOf(i) + mediaOf(i) + (lk ? `<div class="lk">${lk}</div>` : '') + again + '</article>';
   }
   function questionCard(id, q) {
     const decided = q.answer != null, left = num(q.deadline) - S.now, pending = !decided && left <= 0, busy = own(sending, id);
@@ -591,7 +616,7 @@ window.SBBoard = function (root, io) {
         : ENDED[i.state] ? `${ENDED[i.state][1]} ${ago(S.now, i.ended)}` + (i.commit ? `, commit ${String(i.commit).slice(0, 9)}` : '') : String(i.state);
       h += `<h3>In the queue</h3><p dir="auto">${esc(st)}</p>`
         + (i.state == 'failed' || i.state == 'skipped' ? `<p class="txt" dir="auto">${esc(i.note || 'no reason recorded')}</p>` : '')
-        + checksOf(i, true) + selfOf(i, true) + (fileLinks(i) ? `<div class="lk">${fileLinks(i)}</div>` : '');
+        + checksOf(i, true) + selfOf(i, true) + mediaOf(i, true) + (fileLinks(i) ? `<div class="lk">${fileLinks(i)}</div>` : '');
       if (isJob) h += `<h3>Prompt</h3><p class="txt" dir="auto">${esc(i.prompt)}</p>`;
     }
     if (t) {
@@ -976,7 +1001,10 @@ window.SBBoard = function (root, io) {
     const vals = [];
     el.querySelectorAll('input[data-key],textarea[data-key],select[data-key]').forEach(x => { if (dirty.has(x.dataset.key)) vals.push([x.dataset.key, x.value]); });
     const top = el.scrollTop;
+    const vids = new Map([...el.querySelectorAll('video')].map(v => [v.getAttribute('src'), v]));
     el.innerHTML = html; lastH[k] = html;
+    // a clip keeps playing across the rewrite: the same element goes back in its place
+    el.querySelectorAll('video').forEach(v => { const o = vids.get(v.getAttribute('src')); if (o) { vids.delete(o.getAttribute('src')); v.replaceWith(o); } });
     for (const [dk, v] of vals) { const x = el.querySelector(`[data-key="${CSS.escape(dk)}"]`); if (x) x.value = v; }
     if (top) el.scrollTop = top;
   }

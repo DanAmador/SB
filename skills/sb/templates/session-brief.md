@@ -18,6 +18,7 @@ These commands must all exit 0 when you finish:
 {checks}
 
 - Verify your own change before you commit, by this repo's own rules (the verification section of its AGENTS.md or CLAUDE.md): run the tests that cover what you changed, or add one that proves the Done when where the repo allows tests; where it forbids them, use the checks it names instead. Put each command you ran and its result (counts, exit code) in your report under `## Self-checks`.
+- When your change shows on screen, capture screenshots (or a short clip) with the repo's own tool named in its AGENTS.md or CLAUDE.md (a Unity screenshot command, Playwright), look at each one yourself and fix what looks wrong before you commit. Save them in {run_folder}/{num}-media/ under short names ending in .png, .jpg, .gif, .webp, .mp4 or .webm: at most 6 files, each under 8 MB, a clip at most 20 s. List each under `## Pictures` in your report with one line on what it shows; a change with nothing on screen says so there in one line.
 - Commit once by pathspec, with this as the last line of the message:
   Ticket: {map}/{num3}
   Do not resolve the ticket; the operator does.

@@ -77,6 +77,9 @@ class LanTest(HubCase):
         self.assertEqual(self.req(self.v("api/queue/clear-finished"), {}, {"Origin": "http://evil.example"})[0], 403)
         self.assertEqual(self.req(self.v("api/queue/clear-finished"), {}, {"Content-Type": "text/plain"})[0], 403)
 
+    def test_a_picture_the_hub_does_not_have_is_its_empty_404(self):
+        self.assertEqual(self.req(self.v("api/media?key=repo%2Fone%231&name=a.png"), headers={"Range": "bytes=0-1"}), (404, b""))
+
     def test_a_hub_that_is_down_is_a_502_not_a_hang(self):
         self.server.kill()
         self.server.wait()

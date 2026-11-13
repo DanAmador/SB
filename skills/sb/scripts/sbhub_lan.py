@@ -75,10 +75,13 @@ def make_handler(secret, hub_port):
         def log_message(self, *args):
             pass
 
-        def send(self, code, body=b"", ctype="application/json"):
+        def send(self, code, body=b"", ctype="application/json", ranges=None):
             self.send_response(code)
             if body:
                 self.send_header("Content-Type", ctype)
+            for k in ("Accept-Ranges", "Content-Range"):  # a video's byte ranges, passed through from the hub
+                if ranges is not None and ranges.get(k):
+                    self.send_header(k, ranges[k])
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
             self.send_header("Referrer-Policy", "no-referrer")  # the token is in the path
@@ -98,14 +101,16 @@ def make_handler(secret, hub_port):
             return None
 
         def forward(self, rest, body=None):
-            req = urllib.request.Request("http://127.0.0.1:{}{}".format(hub_port, rest), body,
-                                         {"Content-Type": "application/json"} if body is not None else {})
+            headers = {"Content-Type": "application/json"} if body is not None else {}
+            if body is None and self.headers.get("Range"):
+                headers["Range"] = self.headers["Range"]
+            req = urllib.request.Request("http://127.0.0.1:{}{}".format(hub_port, rest), body, headers)
             try:
                 with urllib.request.urlopen(req, timeout=10) as r:
-                    self.send(r.status, r.read(), r.headers.get("Content-Type", "application/json"))
+                    self.send(r.status, r.read(), r.headers.get("Content-Type", "application/json"), r.headers)
             except urllib.error.HTTPError as e:
                 with e:
-                    self.send(e.code, e.read(), e.headers.get("Content-Type", "application/json"))
+                    self.send(e.code, e.read(), e.headers.get("Content-Type", "application/json"), e.headers)
             except (OSError, ValueError):
                 self.send(502, b'{"ok": false, "error": "hub not reachable"}')
 

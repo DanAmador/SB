@@ -112,6 +112,14 @@ class BriefTest(unittest.TestCase):
         self.assertIn("Leave alone: Other things.", b)
         self.assertEqual(b.splitlines()[0], "Background: bg")
 
+    def test_the_brief_asks_for_pictures_the_worker_looks_at_itself(self):
+        b = brief(T(3), "bg", "/runs", "/repo", "main")
+        line = next(x for x in b.splitlines() if "/runs/3-media/" in x)
+        for s in ("shows on screen", "AGENTS.md or CLAUDE.md", "Playwright", "look at each one yourself",
+                  "fix what looks wrong before you commit", ".png", ".mp4", ".webm", "at most 6 files", "8 MB", "20 s",
+                  "`## Pictures`", "nothing on screen"):
+            self.assertIn(s, line)
+
 
 def git(repo, *a):
     return subprocess.run(["git", "-C", str(repo), *a], capture_output=True, text=True, check=True).stdout.strip()

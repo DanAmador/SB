@@ -79,8 +79,24 @@ class HubCliTest(HubCase):
     def test_the_page_has_no_inline_handlers_and_no_outside_resource(self):
         html = self.page()
         self.assertIsNone(re.search(r"\son[a-z]+\s*=\s*[\"'`]", html, re.I))  # event delegation only
-        for outside in ("http://", "https://", "//cdn", "@import", "url(", "<link", "<img"):
+        for outside in ("http://", "https://", "//cdn", "@import", "url(", "<link"):
             self.assertNotIn(outside, html)
+        # pictures and clips come only from the hub's own media route
+        self.assertEqual(re.findall(r"<(?:img|video)\b[^>]*", html), [
+            '<video src="${u}#t=0.1" controls preload="metadata" playsinline aria-label="${esc(n)}"',
+            '<img loading="lazy" src="${u}" alt="${esc(n)}"',
+            '<video src="${u}#t=0.1" preload="metadata" muted playsinline aria-label="${esc(n)}"',
+            '<img loading="lazy" src="${u}" alt="${esc(n)}"'])
+        self.assertIn("const mediaUrl = (i, n) => 'api/media?key=' + encodeURIComponent(i.key) + '&name=' + encodeURIComponent(n);", html)
+        self.assertIn("u = esc(mediaUrl(i, n))", html)
+
+    def test_done_and_failed_cards_show_the_workers_pictures_and_the_panel_all_of_them(self):
+        html = self.page()
+        self.assertIn("+ checksOf(i) + selfOf(i) + mediaOf(i) +", html)  # the ended card: up to 3
+        self.assertIn("ms.slice(0, 3)", html)
+        self.assertIn("+ mediaOf(i, true) +", html)  # the side panel: all, with their names
+        for words in ("<h3>Pictures</h3>", ".thumbs{", ".pmedia img,.pmedia video{width:100%", "more picture"):
+            self.assertIn(words, html)
 
     def test_the_page_draws_icons_not_emoji(self):
         html = self.page()

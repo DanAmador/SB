@@ -1,17 +1,20 @@
 """The hub's ticket queue and installed agents: Hub direct with fake tickets, then over HTTP and the CLI."""
+import http.server
 import json
 import os
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 import urllib.error
+import urllib.request
 from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills" / "sb" / "scripts"))
 from helpers import SBMAP, HubCase, free_port  # noqa: E402
-from sbhub import Hub  # noqa: E402
+from sbhub import Hub, Supervisor, make_handler  # noqa: E402
 
 
 def tk(num, blocked=(), priority="C", **kw):
@@ -259,6 +262,80 @@ class QueueTest(unittest.TestCase):
         h = Hub(self.home / "y", run=lambda: "not json")
         self.assertEqual(h.state()["queue"]["items"], [])
         self.assertEqual(h.tickets(), [])
+
+
+class MediaTest(unittest.TestCase):
+    """A worker's pictures and clips: recorded when its item ends, served only by name from its own media folder."""
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.home = Path(tmp.name)
+        self.h = Hub(self.home, run=lambda: json.dumps(TICKETS))
+        self.h.tickets()
+        self.h.queue_set(["repo/one#1", "repo/one#4"], self.h.state()["queue"]["version"])
+        self.run = self.home / "runs" / "night"
+        media = self.run / "4-media"
+        media.mkdir(parents=True)
+        for n in ("b.png", "a.png", "clip.mp4", "notes.txt", "c.JPG", "d.gif", "e.webp", "f.webm", "g.jpeg"):
+            (media / n).write_bytes(b"0123456789" + n.encode())
+        (self.run / "4.md").write_text("the report")
+        with self.h._lock:
+            for i in self.h._data["queue"]["items"]:
+                i.update(state="running", run=str(self.run))
+        sup = Supervisor(self.h, port=4321)
+        sup._end("repo/one#4", "done", commit="abc")
+        sup._end("repo/one#1", "failed", note="no commit")  # its run has no 1-media folder
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), make_handler(self.h))
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        self.port = server.server_address[1]
+
+    def get(self, key, name, headers=None):
+        """(status, content type, body, headers) of one GET /api/media."""
+        from urllib.parse import quote
+        url = "http://127.0.0.1:{}/api/media?key={}&name={}".format(self.port, quote(key, safe=""), quote(name, safe=""))
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, headers=headers or {}), timeout=5) as r:
+                return r.status, r.headers.get("Content-Type"), r.read(), r.headers
+        except urllib.error.HTTPError as e:
+            with e:
+                return e.code, None, e.read(), e.headers
+
+    def test_an_ended_item_records_its_media_sorted_known_kinds_only_at_most_six(self):
+        items = {i["key"]: i for i in self.h.state()["queue"]["items"]}
+        self.assertEqual(items["repo/one#4"]["media"], ["a.png", "b.png", "c.JPG", "clip.mp4", "d.gif", "e.webp"])
+        self.assertEqual(items["repo/one#1"]["media"], [])
+
+    def test_a_listed_file_is_served_with_its_type(self):
+        code, ctype, body, h = self.get("repo/one#4", "a.png")
+        self.assertEqual((code, ctype, body), (200, "image/png", b"0123456789a.png"))
+        self.assertEqual(self.get("repo/one#4", "clip.mp4")[1], "video/mp4")
+        self.assertEqual(self.get("repo/one#4", "c.JPG")[1], "image/jpeg")
+        self.assertEqual(h.get("Accept-Ranges"), "bytes")
+
+    def test_a_range_of_a_clip_is_a_206(self):
+        code, ctype, body, h = self.get("repo/one#4", "clip.mp4", {"Range": "bytes=2-5"})
+        self.assertEqual((code, body, h.get("Content-Range")), (206, b"2345", "bytes 2-5/18"))
+        self.assertEqual(self.get("repo/one#4", "clip.mp4", {"Range": "bytes=-3"})[2], b"mp4")
+        self.assertEqual(self.get("repo/one#4", "clip.mp4", {"Range": "bytes=99-"})[0], 416)
+
+    def test_anything_else_is_an_empty_404(self):
+        (self.run / "4-media" / "a.png").unlink()
+        for key, name in (("repo/one#4", "notes.txt"), ("repo/one#4", "f.webm"), ("repo/one#4", "../4.md"),
+                          ("repo/one#4", "..\\4.md"), ("repo/one#4", "4-media/b.png"), ("repo/one#4", ""),
+                          ("repo/one#4", "a.png"), ("repo/one#1", "a.png"), ("repo/one#9", "b.png"), ("", "b.png")):
+            code, _, body, _ = self.get(key, name)
+            self.assertEqual((code, body), (404, b""), (key, name))
+
+    def test_a_listed_name_that_now_leads_outside_its_folder_is_a_404(self):
+        b = self.run / "4-media" / "b.png"
+        b.unlink()
+        b.symlink_to(self.run / "4.md")
+        self.assertEqual(self.get("repo/one#4", "b.png")[:3:2], (404, b""))
+        with self.h._lock:  # a name planted in the saved state is still checked against the folder
+            self.h._data["queue"]["items"][0]["media"] = ["../4.md"]
+        self.assertEqual(self.get("repo/one#4", "../4.md")[0], 404)
 
 
 class TicketActionTest(unittest.TestCase):
