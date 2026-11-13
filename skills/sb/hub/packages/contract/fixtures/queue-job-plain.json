@@ -14,6 +14,7 @@
         {
           "agent": null,
           "base_sha": "3fea00e95453cf271189dc8924ebcd942426162f",
+          "branch": null,
           "checks": [
             {
               "cmd": "true",
@@ -35,6 +36,7 @@
           ],
           "model": "sonnet",
           "note": "resolved, commit d8d88e804",
+          "paths": null,
           "pid": null,
           "pid_start": null,
           "repo": "/fixture/repo",
@@ -43,6 +45,7 @@
           "started": 1794528000.0,
           "state": "done",
           "title": "A",
+          "tree": null,
           "tries": 0
         },
         {

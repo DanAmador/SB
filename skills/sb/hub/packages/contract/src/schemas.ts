@@ -129,6 +129,11 @@ export const TicketItem = z.strictObject({
   kind: z.literal("ticket"),
   map: z.string().optional(),
   model: z.string().nullable().optional(),
+  /** The ticket's own worktree and branch when its repo runs tickets side by side (`git config sb.parallel`). */
+  tree: z.string().nullable().optional(),
+  branch: z.string().nullable().optional(),
+  /** Its paths while it runs in a worktree: another ticket whose paths meet these waits. */
+  paths: z.array(z.string()).nullable().optional(),
 });
 export type TicketItem = z.infer<typeof TicketItem>;
 

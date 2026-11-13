@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Example project provider: this repo's test suite, as widgets.
 
-It reruns the suite only when HEAD or the working tree changed since its last run, and otherwise
+It reruns the suite only when HEAD or a tracked file's contents (or the list of changed files) changed since its last run, and otherwise
 prints the cached result (kept in the system temp dir, never in the repo). It never runs from
 inside its own run, so the suite cannot recurse."""
 import hashlib, json, os, re, subprocess, sys, tempfile
@@ -12,7 +12,8 @@ if os.environ.get(GUARD):
     sys.exit(0)
 repo = os.getcwd()
 git = lambda *a: subprocess.run(["git", "-C", repo, *a], capture_output=True, text=True, errors="replace").stdout
-key = git("rev-parse", "HEAD") + git("status", "--porcelain")
+# the files' contents, not only their names: a second edit to an already changed file reruns the suite
+key = hashlib.sha1((git("rev-parse", "HEAD") + git("diff", "HEAD") + git("status", "--porcelain")).encode()).hexdigest()
 cache = os.path.join(tempfile.gettempdir(), "sb-provider-tests-" + hashlib.sha1(repo.encode()).hexdigest()[:12] + ".json")
 try:
     with open(cache, encoding="utf-8") as f:

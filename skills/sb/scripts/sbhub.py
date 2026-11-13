@@ -88,6 +88,7 @@ class Hub:
         self._lock = threading.Lock()
         self.providers = {}
         self.queued = set()
+        self._roots = {}  # a folder an agent reported from -> the checkout it belongs to (see project_root)
         self.changed = threading.Event()
         self.queue_kick = threading.Event()  # set by every queue write: the supervisor ticks at once
         # aliases: session id -> the agent id that session reports as (`report --agent X`)
@@ -173,6 +174,11 @@ class Hub:
             self._save()
 
     def report(self, d):
+        if isinstance(d.get("project"), str) and d["project"]:  # outside the lock: it may ask git once
+            where = d["project"]
+            if where not in self._roots:
+                self._roots[where] = project_root(where)
+            d = {**d, "project": self._roots[where]}
         with self._lock:
             sid, alias = d["agent"], d.get("alias")
             if isinstance(alias, str) and alias and alias != sid:
@@ -1126,6 +1132,114 @@ def _git(repo, *args):
     return r.stdout.strip() if r.returncode == 0 else ""
 
 
+# ---- tickets side by side: a repo with `git config sb.parallel N` runs up to N tickets whose paths do not overlap,
+# each in its own worktree on its own branch; a passed one is rebased onto the checkout's branch, checked there and
+# fast-forwarded into the checkout ----
+
+PARALLEL_MAX = 8  # tickets at once in one repo, whatever its git config says
+LAND_TRIES = 3  # rebase, check and fast-forward again this often when the checkout gained commits meanwhile
+MOVED = "moved"
+
+
+def _git_run(repo, *args, timeout=120):
+    """(returncode, stdout, stderr) of one git command in `repo`; (1, '', why) when git could not run."""
+    try:
+        r = subprocess.run(["git", "-c", "core.fsmonitor=false", "-C", str(repo), *args], capture_output=True,
+                           text=True, timeout=timeout)
+    except (OSError, subprocess.SubprocessError) as e:
+        return 1, "", str(e)
+    return r.returncode, r.stdout.strip(), r.stderr.strip()
+
+
+def project_root(path):
+    """The checkout a folder belongs to: its repo's main checkout (a worktree's too), the folder itself outside git."""
+    rc, common, _ = _git_run(path, "rev-parse", "--path-format=absolute", "--git-common-dir", timeout=10)
+    root = str(Path(common).parent) if rc == 0 and common and Path(common).name == ".git" else \
+        _git(path, "rev-parse", "--show-toplevel")
+    if not root:
+        return path
+    try:  # inside the checkout itself: the reported spelling, cut back to it (macOS /var is /private/var to git)
+        rel = Path(path).resolve().relative_to(Path(root).resolve())
+    except (ValueError, OSError):
+        return root  # a worktree elsewhere: its main checkout, as git names it
+    up = Path(path)
+    for _ in rel.parts:
+        up = up.parent
+    return str(up)
+
+
+def parallel_of(repo):
+    """How many tickets may run at once in `repo`, each in its own worktree: `git config sb.parallel`, else 1."""
+    try:
+        n = int(_git(repo, "config", "--get", "sb.parallel") or 1)
+    except ValueError:
+        return 1
+    return max(1, min(n, PARALLEL_MAX))
+
+
+def paths_overlap(a, b):
+    """True when two tickets' path lists could touch the same file: either names none, or one path lies in another."""
+    a = [str(x).strip().strip("/") for x in a or []]
+    b = [str(y).strip().strip("/") for y in b or []]
+    if not a or not b:
+        return True
+    return any(not x or not y or x == y or x.startswith(y + "/") or y.startswith(x + "/") for x in a for y in b)
+
+
+def tree_of(home, repo, map_name, num):
+    """(folder, branch) of a ticket's own worktree: under the hub's home, one folder per repo."""
+    tag = hashlib.sha1(str(repo).encode()).hexdigest()[:6]
+    name = "{}-{:03d}".format(re.sub(r"[^A-Za-z0-9._-]+", "-", str(map_name)).strip("-"), int(num))
+    return str(Path(home) / "worktrees" / "{}-{}".format(Path(repo).name, tag) / name), "sb/" + name
+
+
+def make_tree(repo, tree, branch, base):
+    """A fresh worktree at `tree` on `branch`, reset to `base` (an old one there goes first): None, or why not."""
+    if Path(tree).exists():
+        _git_run(repo, "worktree", "remove", "--force", tree)
+        shutil.rmtree(tree, ignore_errors=True)
+    _git_run(repo, "worktree", "prune")
+    Path(tree).parent.mkdir(parents=True, exist_ok=True)
+    rc, out, err = _git_run(repo, "worktree", "add", "--quiet", "-B", branch, tree, base)
+    return None if rc == 0 else (err or out or "git worktree add failed")
+
+
+def drop_tree(repo, tree, branch):
+    """Remove a ticket's worktree and its branch once its work is on the checkout's branch."""
+    _git_run(repo, "worktree", "remove", "--force", tree)
+    shutil.rmtree(tree, ignore_errors=True)
+    _git_run(repo, "worktree", "prune")
+    _git_run(repo, "branch", "-D", branch)
+
+
+def rebase_tree(tree, onto):
+    """Replay the worktree's commits onto `onto`, the checkout's newest commit: None, or why not (the rebase is
+    undone, so the worktree stays as the worker left it)."""
+    if _git_run(tree, "merge-base", "--is-ancestor", onto, "HEAD")[0] == 0:
+        return None  # already on top of it
+    rc, out, err = _git_run(tree, "rebase", "--autostash", onto, timeout=300)
+    if rc == 0:
+        return None
+    clash = _git(tree, "diff", "--name-only", "--diff-filter=U").split()
+    _git_run(tree, "rebase", "--abort")
+    if clash:
+        return "its commits conflict with {} on the checkout's branch in {}".format(
+            onto[:9], ", ".join(clash[:5]) + (" and {} more".format(len(clash) - 5) if len(clash) > 5 else ""))
+    return "git rebase onto {} failed: {}".format(onto[:9], firstline(err or out))
+
+
+def land(repo, sha):
+    """Fast-forward the checkout's branch to `sha`: None when done, MOVED when the checkout gained commits since
+    the rebase (rebase again), else why not (the checkout is left as it was)."""
+    if not _git(repo, "symbolic-ref", "-q", "HEAD"):
+        return "the checkout is not on a branch"
+    head = _git(repo, "rev-parse", "HEAD")
+    if not head or _git_run(repo, "merge-base", "--is-ancestor", head, sha)[0] != 0:
+        return MOVED
+    rc, out, err = _git_run(repo, "merge", "--ff-only", "--quiet", sha, timeout=300)
+    return None if rc == 0 else "git merge --ff-only into the checkout failed: " + (err or out or "no reason given")
+
+
 def _tail(path, start=0, size=LOG_TAIL):
     """The end of a log from byte `start` on (whole lines only): one try's output, as tries of an item share its log."""
     try:
@@ -1549,12 +1663,16 @@ class Supervisor:
                 inst = dict(self.hub._data["installed"].get(item.get("runner")) or {})
             self.procs[item["key"]] = {"p": _Adopted(pid, started if sure else None), "t": None, "adopted": True,
                                        "agent": item.get("runner"), "inst": inst, "base": item.get("base_sha"),
-                                       "log": item.get("log"), "start": item.get("log_start") or 0, "alone": False}
+                                       "log": item.get("log"), "start": item.get("log_start") or 0, "alone": False,
+                                       "tree": item.get("tree"), "branch": item.get("branch")}
             self._update(item["key"], note="running on {}, started before the hub restarted".format(item.get("runner")))
             return
         if item["kind"] == "ticket":
             self._release(item["key"])
-        self._update(item["key"], state="queued", pid=None, pid_start=None, started=None,
+        # its work so far (committed or not, in its worktree or the checkout) is kept: the next try goes on from it
+        resume = {"agent": item.get("runner"), "log": item.get("log"), "why": "when the hub stopped"} \
+            if item["kind"] == "ticket" and item.get("base_sha") else item.get("resume")
+        self._update(item["key"], state="queued", pid=None, pid_start=None, started=None, resume=resume,
                      note="queued again: the hub stopped while it ran")
 
     def _finish(self, item, run, over):
@@ -1567,14 +1685,21 @@ class Supervisor:
                 return
             run["t"] = row
         t = run["t"]
+        tree, branch = run.get("tree"), run.get("branch")
         if over:
             passed, reason, sha = False, ran_past(self.limit), None
-        else:
+        elif not tree:
             checks = []
             report = Path(run["log"]).parent / "{}.md".format(int(t["num"])) if run.get("log") else None
             passed, reason, sha = sbqueue.verdict(t, t["repo"], run["base"], run=_recording(checks), report=report)
             self._update(key, checks=checks)
             self._report_checks(t, run, passed, reason, sha, checks)
+        else:
+            passed, reason, sha, checks = self._land(t, run, tree)
+            self._update(key, checks=checks)
+            self._report_checks(t, run, passed, reason, sha, checks)
+        if tree and not passed:
+            reason += "\nIts work stays on branch {} in {}.".format(branch, tree)
         if passed:  # a worker that did the work is resolved, whatever it printed afterwards
             self._resolve(item, run, sha, reason)
             return
@@ -1588,6 +1713,28 @@ class Supervisor:
                           note="retrying on opus: " + reason.splitlines()[0])
             return
         self._fail(item, run, reason, sha)
+
+    def _land(self, t, run, tree):
+        """(passed, reason, sha, checks) of a worktree ticket: its commits rebased onto the checkout's newest commit,
+        judged there, then fast-forwarded into the checkout; the worktree and branch go once it landed."""
+        report = Path(run["log"]).parent / "{}.md".format(int(t["num"])) if run.get("log") else None
+        for _ in range(LAND_TRIES):
+            checks = []
+            head = _git(t["repo"], "rev-parse", "HEAD")
+            why = rebase_tree(tree, head) if head else "the checkout has no commit"
+            if why:
+                return False, "could not land: " + why, None, checks
+            passed, reason, sha = sbqueue.verdict(t, tree, head, run=_recording(checks), report=report)
+            if not passed:
+                return passed, reason, sha, checks
+            why = land(t["repo"], sha) if sha else None
+            if why == MOVED:
+                continue  # someone committed on the checkout meanwhile: on top of that, and checked again
+            if why:
+                return False, "could not land: " + why, sha, checks
+            drop_tree(t["repo"], tree, run.get("branch") or "")
+            return passed, reason, sha, checks
+        return False, "could not land: the checkout kept gaining commits ({} tries)".format(LAND_TRIES), sha, checks
 
     def _report_checks(self, t, run, passed, reason, sha, checks):
         """Append the hub's verdict and every check to the worker's report in the run folder (a run file, not a
@@ -1854,8 +2001,20 @@ class Supervisor:
                 return
             live = self.hub._live_keys()
             running = [i for i in q["items"] if i["state"] == "running"]
-            load, repos = self._load(running), {i.get("repo") for i in running}
-            changed = False
+            load, changed, par = self._load(running), False, {}
+            busy = {}  # repo -> the paths of each worktree ticket running in it; None for one in the checkout itself
+            for i in running:
+                busy.setdefault(i.get("repo"), []).append(list(i.get("paths") or []) if i.get("tree") else None)
+
+            def parallel(repo):
+                if repo not in par:
+                    par[repo] = parallel_of(repo) if repo and usable_project(repo) else 1
+                return par[repo]
+
+            def room(repo, paths):  # a repo is free, or runs worktree tickets none of whose paths meet these
+                b = busy.get(repo) or []
+                return not b or (parallel(repo) > len(b) and None not in b
+                                 and not any(paths_overlap(paths, x) for x in b))
 
             def take(name, need):  # what this pass started counts against its agent at once
                 l = load.setdefault(name, [0, 0.0])
@@ -1865,26 +2024,26 @@ class Supervisor:
                 if item["state"] != "queued" or (item.get("not_before") or 0) > now:
                     continue
                 if item["kind"] == "job":
-                    if item.get("repo") in repos:
+                    if busy.get(item.get("repo")):
                         continue
                     name, inst, need = self._pick(q, item, None, load, now)
                     if name is None:
                         if item.get("resume"):  # its last try's work is in the tree: nothing else goes first
-                            repos.add(item.get("repo"))
+                            busy.setdefault(item.get("repo"), []).append(None)
                         continue
                     item.update(state="running", runner=name, started=now, ended=None, note="starting")
                     take(name, need)
-                    repos.add(item.get("repo"))
+                    busy.setdefault(item.get("repo"), []).append(None)
                     picks.append((dict(item), None, name, dict(inst)))
                     changed = True
                     continue
                 t = by.get(item["key"])
-                if t is not None and t.get("repo") in repos:
+                if t is not None and not room(t.get("repo"), t.get("paths")):
                     continue  # its repo is busy: it is not about to start, so it is not judged yet
                 name, inst, need = self._pick(q, item, t, load, now)
                 if name is None:
-                    if item.get("resume") and t is not None:  # its last try's work is in the tree: nothing else goes first
-                        repos.add(t.get("repo"))
+                    if item.get("resume") and t is not None and not item.get("tree"):
+                        busy.setdefault(t.get("repo"), []).append(None)  # its last try's work is in the checkout
                     continue  # no agent has room for it now (the first pass noted why)
                 skip = None
                 if t is None:
@@ -1905,10 +2064,17 @@ class Supervisor:
                     continue  # its blockers are queued ahead of it: it waits for them
                 model = (item.get("model") if item.get("tries") else
                          inst.get("model") if inst.get("kind") == "agy" else t.get("tier") or "sonnet")
+                if parallel(t["repo"]) > 1:  # its own worktree; a later try keeps the one it had
+                    tree, branch = ((item["tree"], item["branch"]) if item.get("tree") and item.get("branch")
+                                    else tree_of(self.hub.home, t["repo"], t["map"], t["num"]))
+                    paths = list(t.get("paths") or [])
+                else:
+                    tree, branch, paths = None, None, None
                 item.update(state="running", runner=name, repo=t["repo"], map=t["map"], title=t["title"],
-                            model=model, started=now, ended=None, note="starting")
+                            model=model, started=now, ended=None, note="starting", tree=tree, branch=branch,
+                            paths=paths)
                 take(name, need)
-                repos.add(t["repo"])
+                busy.setdefault(t["repo"], []).append(paths if tree else None)
                 picks.append((dict(item), t, name, dict(inst)))
                 changed = True
             if changed:
@@ -1947,12 +2113,21 @@ class Supervisor:
     def _launch(self, item, t, name, inst):
         key, nnn = item["key"], "{:03d}".format(int(t["num"]))
         board = self._board(t["map"])
+        tree, branch = item.get("tree"), item.get("branch")
+        # a later try (cut off by a limit, or retried on opus) goes on in the worktree it had
+        reuse = bool(tree) and bool(item.get("resume") or item.get("tries")) and Path(tree).is_dir()
+        where = tree if tree else t["repo"]
         # a try after one cut off by a limit or a logout keeps its base: the verdict sees all of the ticket's commits
-        base = item.get("resume") and item.get("base_sha") or _git(t["repo"], "rev-parse", "HEAD")
+        base = item.get("resume") and item.get("base_sha") or _git(where if reuse else t["repo"], "rev-parse", "HEAD")
         if board is None or not base:
             self._end(key, "failed", note="could not start: " + ("sbmap run failed" if board is None else
                                                                  "the repo has no commit to start from"))
             return
+        if tree and not reuse:
+            why = make_tree(t["repo"], tree, branch, base)
+            if why:
+                self._end(key, "failed", note="could not start: could not make its worktree: " + firstline(why))
+                return
         if _hub_holds(t):  # a claim of the hub's own left from an earlier try: reopened, then claimed afresh
             self.sbmap("set", t["map"], nnn, "status=open")
         rc, out, err = self.sbmap("claim", t["map"], nnn, "--by", "hub " + name)
@@ -1964,7 +2139,7 @@ class Supervisor:
                 t["repo"], {"sha": base, "project": _project_of(t["map"])})
             self.hub._save()
         folder = Path(board).parent
-        brief = sbqueue.brief(t, _plain_words(t), str(folder), t["repo"],
+        brief = sbqueue.brief(t, _plain_words(t), str(folder), where, branch or
                               _git(t["repo"], "rev-parse", "--abbrev-ref", "HEAD") or "the current branch")
         if item.get("retry"):
             brief += "\nThe first try failed; the hub's check said:\n" + item["retry"] + "\n"
@@ -1981,12 +2156,13 @@ class Supervisor:
         try:
             if self.stopped:
                 raise OSError("the hub is stopping")
-            p = self.hub.launcher(inst, brief, t["repo"], item["model"], env, log)
+            p = self.hub.launcher(inst, brief, where, item["model"], env, log)
         except (OSError, ValueError, subprocess.SubprocessError) as e:
             self._release(key)
             self._end(key, "failed", note="could not start the worker: {}".format(e))
             return
-        self._track(key, {"p": p, "t": t, "agent": name, "inst": inst, "base": base, "log": log, "start": start})
+        self._track(key, {"p": p, "t": t, "agent": name, "inst": inst, "base": base, "log": log, "start": start,
+                          "tree": tree, "branch": branch})
         self._update(key, base_sha=base, log=log, log_start=start, run=str(folder), pid=p.pid, pid_start=_proc_start(p.pid),
                      note="running on {} ({})".format(name, item["model"]))
 

@@ -5,6 +5,7 @@
 #   sbhub_service.sh install [--no-lan] [--take-over]
 #   sbhub_service.sh uninstall
 #   sbhub_service.sh status
+#   sbhub_service.sh restart
 #
 # install writes two LaunchAgents (com.sb.hub, com.sb.hub-lan) to ~/Library/LaunchAgents and starts
 # them. Each restarts within 10 s if it exits and starts again at login. The hub runs under
@@ -16,7 +17,9 @@
 # --take-over: then only the hub's own process is killed (SIGKILL, never its process group), its
 # workers keep running, and the new hub adopts them. Workers also survive later restarts
 # (AbandonProcessGroup), and re-running install on a live hub keeps them the same way. uninstall
-# stops the hub normally, which ends its running workers. Logs: $SB_HUB_HOME/com.sb.hub.log and com.sb.hub-lan.log.
+# stops the hub normally, which ends its running workers. restart loads new hub code and keeps the workers:
+# it SIGKILLs only the hub's own process and launchd starts it again; never `launchctl kickstart -k`, whose
+# SIGTERM makes the hub end its workers. Logs: $SB_HUB_HOME/com.sb.hub.log and com.sb.hub-lan.log.
 set -euo pipefail
 
 [ "$(uname)" = Darwin ] || { echo "sbhub_service: macOS only (launchd)"; exit 2; }
@@ -129,6 +132,18 @@ case "${1:-}" in
       rm -f "$LA/$l.plist"
     done
     ;;
+  restart)
+    loaded com.sb.hub || { echo "sbhub_service: com.sb.hub is not installed; run install"; exit 1; }
+    pid="$(listener $HUB_PORT)"
+    [ -n "$pid" ] && kill -9 "$pid"  # SIGKILL: the hub cannot end its workers; they live on and are adopted
+    for _ in $(seq 1 30); do
+      sleep 1
+      new="$(listener $HUB_PORT)"
+      [ -n "$new" ] && [ "$new" != "$pid" ] && { echo "hub restarted: pid $new (was ${pid:-none}); its workers keep running"; exit 0; }
+    done
+    echo "sbhub_service: the hub did not come back within 30 s; see $HUB_HOME/com.sb.hub.log"
+    exit 1
+    ;;
   status)
     for l in com.sb.hub com.sb.hub-lan; do
       if loaded $l; then
@@ -139,7 +154,7 @@ case "${1:-}" in
     done
     ;;
   *)
-    sed -n '5,8p' "$0" | sed 's/^# *//'
+    sed -n '5,9p' "$0" | sed 's/^# *//'
     exit 2
     ;;
 esac
