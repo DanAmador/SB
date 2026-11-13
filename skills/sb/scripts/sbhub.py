@@ -29,13 +29,20 @@ and never fail a session when it is down.
                                       always exits 0 (the hub-report mod runs this)
 
 Every command but `serve` also takes --port N.
+
+`serve` also runs tonight's queue (SB_HUB_QUEUE=0 serves the board only): every 5 s it starts the next
+queued ticket whose agent and repo are free as a headless worker (`claude -p` in auto mode, or `agy -p`),
+with SB_HUB_AGENT=<ticket key> and SB_HUB_PARENT=queue so `hook` reports it as that item's worker; when the
+worker exits it checks the commit, paths and checks in code, and resolves the ticket only when they pass.
 """
 import argparse
 import json
 import math
 import os
+import re
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import threading
@@ -43,6 +50,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -59,9 +67,10 @@ MESSAGE_MAX = 4000
 
 
 class Hub:
-    def __init__(self, home, now=time.time, run=None):
+    def __init__(self, home, now=time.time, run=None, launcher=None):
         self.home = Path(home)
         self._run = run  # () -> the open tickets (list or JSON); sbmap when None
+        self.launcher = launcher or launch  # starts one worker; tests hand in their own
         self._tcache = (0.0, None)
         self._tfailed = None  # when sbmap last failed
         self.now = now
@@ -170,6 +179,10 @@ class Hub:
                 boss = self._data["agents"].get(self._resolve(d.get("parent")), {})
                 if boss.get("spawns"):
                     d = {**d, "ticket": boss["spawns"].pop(0)}
+            if d.get("role") == "worker" and d.get("parent") == "queue" and not d.get("ticket"):
+                title = self._queue_title(agent)  # a worker the hub started: its id is its ticket's key
+                if title:
+                    d = {**d, "ticket": title}
             if usable_project(d.get("project")) and d["project"] not in self.providers and d["project"] not in self.queued:
                 self.queued.add(d["project"])
                 self.changed.set()
@@ -185,6 +198,12 @@ class Hub:
                 a["since"] = a["at"]  # when the agent entered its current state, for "working 14m"
             self._save()
             return {"ok": True, "needs_you": after in ALERT_STATES and after != before, "agent": agent}
+
+    def _queue_title(self, key):
+        item = next((i for i in self._data["queue"]["items"] if i["key"] == key), None)
+        if item and item.get("title"):
+            return item["title"]
+        return next((t.get("title") for t in self._tcache[1] or [] if sbqueue.key(t) == key), None)
 
     def lock(self, key, by):
         with self._lock:
@@ -321,6 +340,15 @@ class Hub:
                 self._tcache = (self.now(), got)
             self._tfailed = None if got is not None else self.now()
             return got if got is not None else self._tcache[1]
+
+    def _fresh_tickets(self):
+        """The open tickets read now, which also refreshes the cache; None when sbmap failed (never the cache)."""
+        got = self._fetch()
+        with self._lock:
+            if got is not None:
+                self._tcache = (self.now(), got)
+            self._tfailed = None if got is not None else self.now()
+        return got
 
     def tickets(self, run=None, fresh=False):
         """Open tickets with `state`/`reason` (sbqueue.classify) and `queued`."""
@@ -473,6 +501,474 @@ SBMAP = Path(__file__).resolve().parent / "sbmap.py"
 REFRESH_EVERY = 15
 TICKETS_CACHED_FOR = 15
 TICKETS_FAILED_FOR = 5  # after a failed sbmap, no new try for this long
+
+# ---- the runner: the hub starts a headless worker per queued ticket and checks it in code ----
+
+WORKER_LIMIT = 90 * 60  # a worker still running after this long has its process group killed
+TICK_EVERY = 5
+LOG_TAIL = 65536  # the end of a worker's log that is searched for a limit message
+# what an agent prints when its plan's usage runs out (case-insensitive); any other failure is just `failed`
+LIMIT_PATTERNS = ("usage limit reached", "hit your session limit", "hit your weekly limit", "spend limit")
+RESET = re.compile(r"\bresets\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*([ap]m)?", re.I)
+
+
+def limited_until(text, now):
+    """When an agent whose output is `text` may run again: None when it hit no limit; the next time the
+    message's reset clock time (`resets 4:40am`, `resets 23:10`) comes round; else an hour from now."""
+    if not any(p in text.lower() for p in LIMIT_PATTERNS):
+        return None
+    for m in RESET.finditer(text):
+        hour, minute, half = int(m.group(1)), int(m.group(2) or 0), (m.group(3) or "").lower()
+        if not (m.group(2) or half) or half and not 1 <= hour <= 12:
+            continue
+        hour = hour % 12 + (12 if half == "pm" else 0) if half else hour
+        if hour > 23 or minute > 59:
+            continue
+        at = datetime.fromtimestamp(now).replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if at.timestamp() <= now:
+            at += timedelta(days=1)
+        return at.timestamp()
+    return now + 3600
+
+
+def ran_past(limit):
+    n, unit = (round(limit / 60), "minute") if limit >= 60 else (round(limit), "second")
+    return "ran past {} {}{}".format(n, unit, "" if n == 1 else "s")
+
+
+def _exe(name, env):
+    found = shutil.which(name, path=env.get("PATH"))
+    local = Path.home() / ".local" / "bin" / name  # where the Claude installer puts it
+    return found or (str(local) if local.exists() else name)
+
+
+def launch(agent, brief, repo, model, env, log):
+    """Start one headless worker and return its Popen: the only place that knows the agents' commands.
+    Own process group, cwd the ticket's repo, stdout and stderr to `log`; `env` adds the hub's ids."""
+    full = {**os.environ, **env}
+    if agent.get("kind") == "agy":
+        cmd = [_exe("agy", full), "-p", brief] + (["--model", model] if model else []) + ["--output-format", "json"]
+    else:
+        if agent.get("dir"):
+            full["CLAUDE_CONFIG_DIR"] = agent["dir"]
+        cmd = [_exe("claude", full), "-p", brief, "--permission-mode", "auto", "--model", model,
+               "--output-format", "json"]
+    Path(log).parent.mkdir(parents=True, exist_ok=True)
+    with open(log, "ab") as out:
+        return subprocess.Popen(cmd, cwd=repo, env=full, stdin=subprocess.DEVNULL, stdout=out,
+                                stderr=subprocess.STDOUT, start_new_session=True)
+
+
+def _kill_group(p, grace=3.0):
+    """Kill a worker's whole process group: TERM, `grace` seconds, then KILL for whatever is left."""
+    for sig, wait in ((signal.SIGTERM, grace), (signal.SIGKILL, 5)):
+        try:
+            os.killpg(p.pid, sig)
+        except OSError:
+            pass
+        try:
+            p.wait(timeout=wait)
+        except subprocess.TimeoutExpired:
+            pass
+
+
+def _proc_start(pid):
+    """The process's start time as ps prints it: with the pid, it tells one process from a later reuse."""
+    try:
+        out = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return out.stdout.strip() or None
+
+
+def _git(repo, *args):
+    try:
+        r = subprocess.run(["git", "-c", "core.fsmonitor=false", "-C", str(repo), *args], capture_output=True,
+                           text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def _tail(path, size=LOG_TAIL):
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            f.seek(max(0, f.tell() - size))
+            return f.read().decode("utf-8", "replace")
+    except (OSError, TypeError):
+        return ""
+
+
+def _vault():
+    return Path(os.environ.get("SB_VAULT") or Path.home() / "Documents" / "Second Brain")
+
+
+def _plain_words(t):
+    """The map's `## In plain words`, read from the map.md beside the ticket's issues/ folder."""
+    try:
+        body = (Path(t["file"]).parents[1] / "map.md").read_text(encoding="utf-8")
+    except (OSError, KeyError, IndexError, TypeError):
+        body = ""
+    m = re.search(r"^## In plain words\s*\n(.*?)(?=^## |\Z)", body, re.M | re.S)
+    return (m.group(1).strip() if m else "") or t.get("map_title") or t["map"]
+
+
+def _fail_class(reason):
+    """`no commit`, or the failing check command: three in a row of one class pause the queue."""
+    first = reason.splitlines()[0] if reason else ""
+    if first.startswith("no commit"):
+        return "no commit"
+    for lead in ("check failed: ", "check timed out after 20 minutes: "):
+        if first.startswith(lead):
+            return "the check " + first[len(lead):]
+    return None
+
+
+class Supervisor:
+    """Runs tonight's queue, one pass per `tick()` (every TICK_EVERY s from `serve`; tests call it).
+
+    It owns each item's state from its worker's process and the verdict checked in code: nothing waits on
+    a worker reaching the hub. Every state change happens under the hub's lock; sbmap, git and the workers
+    run outside it. The workers' Popen handles live here, in memory: a `running` item with none (the hub
+    restarted) has its leftover process group killed, its claim released, and is queued again."""
+
+    def __init__(self, hub, port=None, limit=WORKER_LIMIT):
+        self.hub, self.port, self.limit = hub, port or default_port(), limit
+        self.procs = {}  # item key -> {p, t (the ticket row it started from), agent, inst, base, log}
+        self.streak = (None, 0)  # the failure class of the last failed items in a row, and how many
+        self.stopped = False
+
+    def run(self, every=TICK_EVERY):
+        """The daemon thread `serve` starts: find the agents once if none are known, then tick forever."""
+        with self.hub._lock:
+            scan = not self.hub._data["installed"]
+        if scan:
+            self.hub.agents_scan()
+        while not self.stopped:
+            try:
+                self.tick()
+            except Exception as e:  # one bad pass never stops the queue
+                print("sb hub queue: {}: {}".format(type(e).__name__, e), file=sys.stderr, flush=True)
+            time.sleep(every)
+
+    def stop(self):
+        """Kill every worker's process group; their items are queued again when the hub next starts."""
+        self.stopped = True
+        for run in list(self.procs.values()):
+            _kill_group(run["p"], grace=1)
+        self.procs.clear()
+
+    def sbmap(self, *args):
+        try:
+            r = subprocess.run([sys.executable, str(SBMAP), *args], capture_output=True, text=True,
+                               errors="replace", timeout=120)
+        except (OSError, subprocess.SubprocessError) as e:
+            return 1, "", str(e)
+        return r.returncode, r.stdout.strip(), r.stderr.strip()
+
+    def tick(self):
+        self.hub.tickets()  # keeps the page's ticket cache fresh and seeds the queue (both cached)
+        self._reap()
+        if not self.stopped:
+            self._start()
+        self._digest()
+
+    # ---- state, always under the hub's lock ----
+
+    def _update(self, key, front=False, **fields):
+        """Change one ticket item; `front` puts it first among the queued ones."""
+        with self.hub._lock:
+            q = self.hub._data["queue"]
+            item = next((i for i in q["items"] if i["key"] == key and i["kind"] == "ticket"), None)
+            if item is None:
+                return
+            item.update(fields)
+            if front:
+                q["items"].remove(item)
+                at = next((n for n, i in enumerate(q["items"]) if i["kind"] == "ticket" and i["state"] == "queued"),
+                          len(q["items"]))
+                q["items"].insert(at, item)
+            q["version"] += 1
+            self.hub._save()
+
+    def _end(self, key, state, **fields):
+        self._update(key, state=state, ended=self.hub.now(), pid=None, pid_start=None, **fields)
+
+    def _row(self, key):
+        """(found, row): the ticket read now; found is False when sbmap could not be read."""
+        rows = self.hub._fresh_tickets()
+        if rows is None:
+            return False, None
+        return True, next((t for t in rows if sbqueue.key(t) == key), None)
+
+    def _release(self, key):
+        """Reopen the ticket when the hub holds its claim (`hub <agent>`); a session's claim, or a ticket
+        resolved meanwhile, is left alone."""
+        found, t = self._row(key)
+        if t and t["status"] == "claimed" and str(t.get("claimed_by") or "").startswith("hub "):
+            self.sbmap("set", t["map"], "{:03d}".format(int(t["num"])), "status=open")
+
+    # ---- workers that ended, ran too long, or were lost with a restart ----
+
+    def _reap(self):
+        with self.hub._lock:
+            running = [dict(i) for i in self.hub._data["queue"]["items"]
+                       if i["kind"] == "ticket" and i["state"] == "running"]
+        for item in running:
+            run = self.procs.get(item["key"])
+            if run is None:
+                self._recover(item)
+                continue
+            ended = run["p"].poll() is not None
+            over = not ended and self.hub.now() - (item.get("started") or self.hub.now()) > self.limit
+            if not (ended or over):
+                continue
+            _kill_group(run["p"], grace=3 if over else 0)  # also whatever it left running
+            del self.procs[item["key"]]
+            try:
+                self._finish(item, run, over)
+            except Exception as e:  # the item still ends, never resolved
+                self._fail(item, run, "the hub could not check it: {}: {}".format(type(e).__name__, e), None)
+
+    def _recover(self, item):
+        pid, started = item.get("pid"), item.get("pid_start")
+        if pid and started and _proc_start(pid) == started:  # the same worker outlived its hub
+            try:
+                os.killpg(pid, signal.SIGKILL)
+            except OSError:
+                pass
+        self._release(item["key"])
+        self._update(item["key"], state="queued", pid=None, pid_start=None, started=None,
+                     note="queued again: the hub stopped while it ran")
+
+    def _finish(self, item, run, over):
+        key, t = item["key"], run["t"]
+        until = None if over else limited_until(_tail(run["log"]), self.hub.now())
+        if until is not None:
+            with self.hub._lock:
+                inst = self.hub._data["installed"].get(run["agent"])
+                if inst is not None:
+                    inst["limited_until"] = until
+                self.hub._save()
+            self._release(key)
+            self._update(key, state="queued", pid=None, pid_start=None, started=None,
+                         note="{} hit its usage limit; waits until {}".format(
+                             run["agent"], datetime.fromtimestamp(until).strftime("%H:%M")))
+            return
+        if over:
+            passed, reason, sha = False, ran_past(self.limit), None
+        else:
+            passed, reason, sha = sbqueue.verdict(t, t["repo"], run["base"])
+        if passed:
+            self._resolve(item, run, sha)
+            return
+        if not over and not item.get("tries") and t.get("tier", "sonnet") == "sonnet" and run["inst"].get("kind") == "claude":
+            self._release(key)
+            self._update(key, front=True, state="queued", tries=1, model="opus", retry=reason, commit=sha,
+                          pid=None, pid_start=None, started=None,
+                          note="retrying on opus: " + reason.splitlines()[0])
+            return
+        self._fail(item, run, reason, sha)
+
+    def _resolve(self, item, run, sha):
+        key, t = item["key"], run["t"]
+        found, now_t = self._row(key)
+        if found and not (now_t and now_t["status"] == "claimed" and str(now_t.get("claimed_by") or "").startswith("hub ")):
+            self._end(key, "skipped", commit=sha, note="passed its checks, but the ticket changed while it ran ({})".format(
+                "no longer open" if now_t is None else "claimed by " + str(now_t.get("claimed_by"))))
+            return
+        checks = "; ".join("`{}`".format(c) for c in t["checks"])
+        answer = ("Checked by the sb hub in code: commit {} carries `Ticket: {}/{:03d}`, stays inside the ticket's "
+                  "paths, and every check exited 0 ({n} of {n}): {}. Model: {} on agent {} (try {}). "
+                  "Worker's report: {}/{}.md; its log: {}.").format(
+            sha, t["map"], int(t["num"]), checks, item.get("model"), run["agent"], (item.get("tries") or 0) + 1,
+            Path(run["log"]).parent, int(t["num"]), run["log"], n=len(t["checks"]))
+        nnn = "{:03d}".format(int(t["num"]))
+        rc, out, err = self.sbmap("resolve", t["map"], nnn, "--gist", t["title"], "--answer", answer,
+                                  "--commit", sha, "--repo-root", t["repo"])
+        if rc != 0 and "remote" in err:  # sbmap stamps a commit only in a repo with an origin: name it in the gist
+            rc, out, err = self.sbmap("resolve", t["map"], nnn, "--gist", "{} ({})".format(t["title"], sha[:9]),
+                                      "--answer", answer)
+        if rc != 0:
+            self._fail(item, run, "checks passed, but sbmap resolve failed: " + (err or out), sha)
+            return
+        self.streak = (None, 0)
+        self._end(key, "done", commit=sha, note="resolved, commit " + sha[:9])
+
+    def _fail(self, item, run, reason, sha):
+        """Leave the ticket open with the reason as a comment, release the claim, and count the failure."""
+        key, t = item["key"], run["t"]
+        text = "The sb hub's run of this ticket failed ({} on agent {}): {}{}".format(
+            item.get("model"), run["agent"], reason.replace("\n", "\n  "),
+            "\n  The commit {} is left in place.".format(sha[:9]) if sha else "")
+        self.sbmap("comment", t["map"], "{:03d}".format(int(t["num"])), "--text", text)
+        self._release(key)
+        self._end(key, "failed", commit=sha, note=reason[:2000])
+        cls = _fail_class(reason)
+        n = self.streak[1] + 1 if cls is not None and self.streak[0] == cls else 1
+        self.streak = (cls, n if cls is not None else 0)
+        if cls is not None and n >= 3:
+            with self.hub._lock:
+                q = self.hub._data["queue"]
+                q["paused"] = True
+                q["note"] = "paused: three tickets in a row failed with {}".format(cls)
+                q["version"] += 1
+                self.hub._save()
+            self.streak = (None, 0)
+
+    # ---- starting the next tickets ----
+
+    def _free_agent(self, q, item, busy, now):
+        name = item.get("agent") or q["agent"]
+        inst = self.hub._data["installed"].get(name)
+        if inst is None or name in busy or (inst.get("limited_until") or 0) > now:
+            return None, None
+        return name, inst
+
+    def _start(self):
+        now = self.hub.now()
+        with self.hub._lock:
+            q = self.hub._data["queue"]
+            busy = {i.get("runner") for i in q["items"] if i["kind"] == "ticket" and i["state"] == "running"}
+            if q["paused"] or not any(i["kind"] == "ticket" and i["state"] == "queued"
+                                      and self._free_agent(q, i, busy, now)[0] for i in q["items"]):
+                return  # nothing could start: no need to read the tickets
+        rows = self.hub._fresh_tickets()  # re-read just before starting: the vault may have changed
+        if rows is None:
+            return
+        by = {sbqueue.key(t): t for t in rows}
+        picks = []
+        with self.hub._lock:
+            q = self.hub._data["queue"]
+            if q["paused"]:
+                return
+            live = self.hub._live_keys()
+            running = [i for i in q["items"] if i["kind"] == "ticket" and i["state"] == "running"]
+            busy, repos = {i.get("runner") for i in running}, {i.get("repo") for i in running}
+            changed = False
+            for item in q["items"]:
+                if item["kind"] != "ticket" or item["state"] != "queued":
+                    continue
+                t = by.get(item["key"])
+                name, inst = self._free_agent(q, item, busy, now)
+                if name is None or t is not None and t.get("repo") in repos:
+                    continue  # its agent or its repo is busy: it is not about to start, so it is not judged yet
+                skip = None
+                if t is None:
+                    skip = "no longer open: resolved or out of scope since it was queued"
+                else:
+                    state, reason = sbqueue.classify(t, live, rows)
+                    if state != "ready":
+                        skip = "{}: {}".format(state, reason)
+                    elif not usable_project(t.get("repo")):
+                        skip = "its map's repo is not a folder here: {}".format(t.get("repo") or "none")
+                if skip:
+                    item.update(state="skipped", note=skip, ended=now, **({"title": t["title"]} if t else {}))
+                    changed = True
+                    continue
+                if t["blocked_by_open"]:
+                    continue  # its blockers are queued ahead of it: it waits for them
+                model = (item.get("model") if item.get("tries") else
+                         inst.get("model") if inst.get("kind") == "agy" else t.get("tier") or "sonnet")
+                item.update(state="running", runner=name, repo=t["repo"], map=t["map"], title=t["title"],
+                            model=model, started=now, ended=None, note="starting")
+                busy.add(name)
+                repos.add(t["repo"])
+                picks.append((dict(item), t, name, dict(inst)))
+                changed = True
+            if changed:
+                q["version"] += 1
+                self.hub._save()
+        for item, t, name, inst in picks:
+            self._launch(item, t, name, inst)
+
+    def _board(self, map_name, remember=True):
+        """The map's run board for tonight (`sbmap run <map>` once a night), or None when sbmap failed."""
+        with self.hub._lock:
+            board = self.hub._data["queue"].get("runs", {}).get(map_name)
+        if board:
+            return board
+        rc, out, err = self.sbmap("run", map_name)
+        if rc != 0 or not out:
+            return None
+        board = str(_vault() / out.splitlines()[-1])  # sbmap prints it vault-relative (absolute outside the vault)
+        if remember:
+            with self.hub._lock:
+                self.hub._data["queue"].setdefault("runs", {})[map_name] = board
+                self.hub._save()
+        return board
+
+    def _launch(self, item, t, name, inst):
+        key, nnn = item["key"], "{:03d}".format(int(t["num"]))
+        board = self._board(t["map"])
+        base = _git(t["repo"], "rev-parse", "HEAD")
+        if board is None or not base:
+            self._end(key, "failed", note="could not start: " + ("sbmap run failed" if board is None else
+                                                                 "the repo has no commit to start from"))
+            return
+        rc, out, err = self.sbmap("claim", t["map"], nnn, "--by", "hub " + name)
+        if rc != 0:
+            self._end(key, "skipped", note="could not claim it: " + (err or out))
+            return
+        folder = Path(board).parent
+        brief = sbqueue.brief(t, _plain_words(t), str(folder), t["repo"],
+                              _git(t["repo"], "rev-parse", "--abbrev-ref", "HEAD") or "the current branch")
+        if item.get("retry"):
+            brief += "\nThe first try failed; the hub's check said:\n" + item["retry"] + "\n"
+        log = str(folder / "{}.log".format(int(t["num"])))
+        env = {"SB_HUB_AGENT": key, "SB_HUB_PARENT": "queue", "SB_HUB_PORT": str(self.port)}
+        try:
+            if self.stopped:
+                raise OSError("the hub is stopping")
+            p = self.hub.launcher(inst, brief, t["repo"], item["model"], env, log)
+        except (OSError, ValueError, subprocess.SubprocessError) as e:
+            self._release(key)
+            self._end(key, "failed", note="could not start the worker: {}".format(e))
+            return
+        self.procs[key] = {"p": p, "t": t, "agent": name, "inst": inst, "base": base, "log": log}
+        self._update(key, base_sha=base, log=log, run=str(folder), pid=p.pid, pid_start=_proc_start(p.pid),
+                     note="running on {} ({})".format(name, item["model"]))
+
+    # ---- the night's digest ----
+
+    def _digest(self):
+        """When the last ticket item has ended, append what happened to each touched map's run board."""
+        with self.hub._lock:
+            q = self.hub._data["queue"]
+            tickets = [i for i in q["items"] if i["kind"] == "ticket"]
+            if any(i["state"] in ("queued", "running") for i in tickets):
+                return
+            ended = [i for i in tickets if i["state"] in ("done", "failed", "skipped") and not i.get("digested")]
+            if not ended:
+                return
+            for i in ended:
+                i["digested"] = True
+            ended = [dict(i) for i in ended]
+            runs, q["runs"] = q.get("runs", {}), {}
+            q["version"] += 1
+            self.hub._save()
+        by_map = {}
+        for i in ended:
+            by_map.setdefault(i.get("map") or i["key"].rsplit("#", 1)[0], []).append(i)
+        stamp = datetime.fromtimestamp(self.hub.now()).strftime("%Y-%m-%d %H:%M")
+        for m, items in by_map.items():
+            board = runs.get(m) or self._board(m, remember=False)
+            if not board:
+                continue
+            lines = ["", "## The night's digest, {}".format(stamp), ""]
+            for state in ("done", "failed", "skipped"):
+                for i in items:
+                    if i["state"] != state:
+                        continue
+                    why = ("commit " + (i.get("commit") or "")[:9] if state == "done" else
+                           (i.get("note") or "").splitlines()[0] if i.get("note") else "no reason recorded")
+                    lines.append("- {}: {}, {}".format(i.get("title") or i["key"], state, why))
+            try:
+                with open(board, "a", encoding="utf-8") as f:
+                    f.write("\n".join(lines) + "\n")
+            except OSError as e:
+                print("sb hub queue: digest for {}: {}".format(m, e), file=sys.stderr, flush=True)
 
 
 def _signed_in(path):
@@ -734,11 +1230,20 @@ def make_handler(hub):
     return Handler
 
 
+def _interrupt(*_):
+    raise KeyboardInterrupt
+
+
 def serve(port):
     home = Path(os.environ.get("SB_HUB_HOME") or Path.home() / ".sb-hub")
     hub = Hub(home)
     server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(hub))
     threading.Thread(target=refresh_loop, args=(hub,), daemon=True).start()
+    supervisor = None
+    if os.environ.get("SB_HUB_QUEUE") != "0":
+        supervisor = Supervisor(hub, port=server.server_address[1])
+        threading.Thread(target=supervisor.run, daemon=True).start()
+    signal.signal(signal.SIGTERM, _interrupt)  # a stopped hub kills its workers, as Ctrl-C does
     print("sb hub on http://127.0.0.1:{}".format(server.server_address[1]), flush=True)
     try:
         server.serve_forever()
@@ -746,6 +1251,8 @@ def serve(port):
         pass
     finally:
         server.server_close()
+        if supervisor:
+            supervisor.stop()
 
 
 def call(port, path, data=None, timeout=2):
@@ -955,6 +1462,18 @@ def event_report(e, event=None):
     return None
 
 
+def worker_report(r, e, agent, parent):
+    """A hook event of a worker the hub started (SB_HUB_AGENT=<ticket key>): the session reports as that
+    queue item, a worker under `parent` whose ticket the hub fills in; its own subagents report under it;
+    its end leaves the row done rather than gone."""
+    if e.get("agent_id"):
+        return {**r, "parent": agent}
+    if r.get("state") == "gone":
+        return {"agent": agent, "role": "worker", "parent": parent, "state": "done", "note": "finished"}
+    mine = {k: v for k, v in r.items() if k not in ("alias", "name", "title", "spawn")}
+    return {**mine, "agent": agent, "role": "worker", "parent": parent}
+
+
 # Claude Code events whose hook output can hand the session text, and how it does so
 DELIVERS = {"UserPromptSubmit": "context", "PostToolUse": "context", "Stop": "block", "SubagentStop": "block"}
 
@@ -977,13 +1496,16 @@ def cmd_hook(port, event=None):
     try:
         e = json.load(sys.stdin)
         r = event_report(e, event=event) if isinstance(e, dict) else None
+        queued = os.environ.get("SB_HUB_AGENT")  # a worker the hub started for a queued ticket
+        if r and queued:
+            r = worker_report(r, e, queued, os.environ.get("SB_HUB_PARENT") or "queue")
         if r and r.get("role") != "worker" and not e.get("agent_id"):
             title = session_title(e.get("transcript_path"))
             if title:
                 r["title"] = title
         if r:
             call(port, "/api/report", r)
-        who = e.get("agent_id") or e.get("session_id") if isinstance(e, dict) and not event else None
+        who = e.get("agent_id") or queued or e.get("session_id") if isinstance(e, dict) and not event else None
         if isinstance(who, str) and who and e.get("hook_event_name") in DELIVERS:
             code, got = call(port, "/api/take", {"agent": who, "how": e["hook_event_name"]}, timeout=1)
             msgs = got.get("messages") if code == 200 else None

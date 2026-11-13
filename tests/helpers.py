@@ -122,7 +122,8 @@ class HubCase(unittest.TestCase):
     """A running sbhub on a free port with a temp home; subclass it for tests."""
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        self.env = {**os.environ, "SB_HUB_HOME": self._tmp.name, "SB_HUB_NOTIFY": "0"}
+        # SB_HUB_QUEUE=0: the board only; the queue runner never starts a worker or scans ~/.claude* in a test
+        self.env = {**os.environ, "SB_HUB_HOME": self._tmp.name, "SB_HUB_NOTIFY": "0", "SB_HUB_QUEUE": "0"}
         self.env.pop("SB_HUB_PORT", None)
         self.port = free_port()
         self.procs = []
