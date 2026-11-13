@@ -240,6 +240,39 @@ class VerdictTest(unittest.TestCase):
             self.assertIn(f, why)
         self.assertNotIn("plugin.ts", why)
 
+    def test_a_check_broken_only_by_others_uncommitted_work_passes_on_a_clean_copy(self):
+        (self.repo / "node_modules").mkdir()
+        (self.repo / "node_modules" / "marker").write_text("m")  # untracked, like an installed package
+        (self.repo / ".git" / "info" / "exclude").write_text("node_modules\n")
+        sha = self.commit(["src/a.py"])
+        (self.repo / "base.txt").write_text("bad")  # a peer's uncommitted change in the shared folder
+        check = "test -f node_modules/marker && ! grep -q bad base.txt"
+        ok, why, got = verdict(self.t(checks=[check]), self.repo, self.base)
+        self.assertEqual((ok, got), (True, sha), why)
+        self.assertIn("clean copy", why)
+        self.assertEqual((self.repo / "base.txt").read_text(), "bad")  # the shared folder is left as it was
+        listed = git(self.repo, "worktree", "list")
+        self.assertEqual(len(listed.splitlines()), 1, listed)  # the clean copy is gone
+
+    def test_a_check_that_fails_on_the_clean_copy_too_still_fails(self):
+        self.commit(["src/a.py"])
+        (self.repo / "base.txt").write_text("bad")
+        ok, why, _ = verdict(self.t(checks=["echo broken; exit 1"]), self.repo, self.base)
+        self.assertFalse(ok)
+        self.assertIn("broken", why)
+
+    def test_a_clean_folder_runs_each_check_once(self):
+        self.commit(["src/a.py"])
+        runs = []
+
+        def run(cmd, **k):
+            if isinstance(cmd, str):
+                runs.append(k.get("cwd"))
+            return subprocess.run(cmd, **k)
+        ok, _, _ = verdict(self.t(checks=["exit 1"]), self.repo, self.base, run=run)
+        self.assertFalse(ok)
+        self.assertEqual(runs, [str(self.repo)])
+
     def test_no_paths_allows_any_file(self):
         sha = self.commit(["anywhere/x.py"])
         ok, _, got = verdict(T(5, paths=[]), self.repo, self.base)

@@ -174,12 +174,61 @@ def verdict(t, repo, base_sha, run=subprocess.run):
         stray = [f for f in files if f and not _under(f, t["paths"]) and not _owned_test(f, t["paths"])]
         if stray:
             return False, "commits since the start touch files outside the ticket's paths: " + ", ".join(stray), sha
-    for cmd in t["checks"]:
+    failed = _run_checks(t["checks"], repo, run)
+    if not failed:
+        return True, "commit, paths and checks all good", sha
+    # Others' uncommitted work in the shared folder can break a check the commit itself passes: only then, try the
+    # checks once more on a clean copy of the commit. A clean folder never pays for this.
+    dirty = run(["git", "-C", str(repo), "status", "--porcelain", "--untracked-files=no"],
+                capture_output=True, text=True).stdout.split("\n")
+    dirty = [l[3:] for l in dirty if l.strip()]
+    if not dirty:
+        return False, failed, sha
+    clean = _clean_copy(repo, sha, run)
+    if clean is None:
+        return False, failed, sha
+    try:
+        again = _run_checks(t["checks"], clean, run)
+    finally:
+        _drop_clean_copy(repo, clean, run)
+    if again:
+        return False, again, sha
+    shown = ", ".join(dirty[:5]) + (f" and {len(dirty) - 5} more" if len(dirty) > 5 else "")
+    return True, ("commit, paths and checks all good; the checks passed on a clean copy of the commit, because "
+                  f"other uncommitted work in the shared folder breaks them there ({shown})"), sha
+
+
+def _run_checks(checks, cwd, run):
+    """None when every check exits 0, else the first failure in words."""
+    for cmd in checks:
         try:
-            r = run(cmd, shell=True, cwd=str(repo), capture_output=True, text=True, timeout=CHECK_TIMEOUT)
+            r = run(cmd, shell=True, cwd=str(cwd), capture_output=True, text=True, timeout=CHECK_TIMEOUT)
         except subprocess.TimeoutExpired:
-            return False, f"check timed out after 20 minutes: {cmd}", sha
+            return f"check timed out after 20 minutes: {cmd}"
         if r.returncode != 0:
             tail = "\n".join(((r.stdout or "") + (r.stderr or "")).splitlines()[-20:])
-            return False, f"check failed: {cmd}\n{tail}", sha
-    return True, "commit, paths and checks all good", sha
+            return f"check failed: {cmd}\n{tail}"
+    return None
+
+
+def _clean_copy(repo, sha, run):
+    """A detached worktree of sha beside nothing in the shared folder, with the folder's installed packages
+    (node_modules up to two levels down) linked in so the checks need no install. None when git refuses."""
+    import tempfile
+    d = Path(tempfile.mkdtemp(prefix="sb-clean-")) / "tree"
+    r = run(["git", "-C", str(repo), "worktree", "add", "--detach", "--quiet", str(d), sha],
+            capture_output=True, text=True)
+    if r.returncode != 0:
+        return None
+    repo = Path(repo)
+    for nm in [repo / "node_modules", *repo.glob("*/node_modules"), *repo.glob("*/*/node_modules")]:
+        target = d / nm.relative_to(repo)
+        if nm.is_dir() and target.parent.is_dir() and not target.exists():
+            target.symlink_to(nm, target_is_directory=True)
+    return d
+
+
+def _drop_clean_copy(repo, d, run):
+    run(["git", "-C", str(repo), "worktree", "remove", "--force", str(d)], capture_output=True, text=True)
+    import shutil
+    shutil.rmtree(d.parent, ignore_errors=True)
