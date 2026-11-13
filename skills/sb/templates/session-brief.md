@@ -16,6 +16,7 @@ Done when: {done_when}
 These commands must all exit 0 when you finish:
 {checks}
 
+- Verify your own change before you commit, by this repo's own rules (the verification section of its AGENTS.md or CLAUDE.md): run the tests that cover what you changed, or add one that proves the Done when where the repo allows tests; where it forbids them, use the checks it names instead. Put each command you ran and its result (counts, exit code) in your report under `## Self-checks`.
 - Commit once by pathspec, with this as the last line of the message:
   Ticket: {map}/{num3}
   Do not resolve the ticket; the operator does.
