@@ -26,7 +26,8 @@ the vault. Only the running hub writes the queue (`$SB_HUB_HOME/state.json`); CL
 - **Order**, fixed: after its blockers; then priority S→F; then the ticket that unblocks the most
   queued or available tickets; then map order.
 - **Verdict**, in code: a commit with the `Ticket:` trailer, every commit since the base inside the
-  ticket's paths, every check green. Then `sbmap resolve`. Anything else stays open with the reason
+  ticket's paths (tests beside them count: a test-named file in an owned file's folder, or any file in a
+  `test/`, `tests/` or `__tests__/` folder of the package holding them; a test config does not), every check green. Then `sbmap resolve`. Anything else stays open with the reason
   as a comment; the commit is left in place; the repo's next ticket still runs.
 - **Workers**: one per repo at a time; a worker past 90 minutes is killed and fails. A new queue
   starts **paused**: nothing runs until the owner (or `tonight`) resumes it.

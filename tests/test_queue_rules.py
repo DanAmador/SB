@@ -203,6 +203,35 @@ class VerdictTest(unittest.TestCase):
         sha = self.commit(["src/a.py"])
         self.assertEqual(verdict(self.t(checks=["true"]), self.repo, self.base)[::2], (True, sha))
 
+    def owned(self, paths, files):
+        sha = self.commit(files)
+        return verdict(T(5, paths=paths, checks=["true"]), self.repo, self.base)
+
+    def test_a_test_beside_an_owned_file_counts_as_owned(self):
+        ok, why, _ = self.owned(["pkg/src/dock/namedLayouts.ts"],
+                                ["pkg/src/dock/namedLayouts.ts", "pkg/src/dock/namedLayouts.recovery.test.tsx",
+                                 "pkg/src/dock/other.spec.ts"])
+        self.assertTrue(ok, why)
+
+    def test_a_test_in_the_packages_test_folder_counts_as_owned(self):
+        ok, why, _ = self.owned(["pkg/src/host/plugin.ts"],
+                                ["pkg/src/host/plugin.ts", "pkg/test/noSelfOpen.test.ts",
+                                 "pkg/src/host/__tests__/plugin.test.ts", "tests/test_plugin.py", "pkg/test/helpers.ts"])
+        self.assertTrue(ok, why)
+
+    def test_a_test_beside_a_file_in_an_owned_folder_counts_as_owned(self):
+        ok, why, _ = self.owned(["pkg/src/shared/host"], ["pkg/src/shared/host/a.ts", "pkg/src/shared/a.test.ts"])
+        self.assertTrue(ok, why)
+
+    def test_a_test_elsewhere_and_a_test_config_stay_outside(self):
+        ok, why, _ = self.owned(["pkg/src/host/plugin.ts"],
+                                ["pkg/src/host/plugin.ts", "other/src/x.test.ts", "pkg/src/ui/y.test.ts",
+                                 "pkg/vitest.config.mts"])
+        self.assertFalse(ok)
+        for f in ("other/src/x.test.ts", "pkg/src/ui/y.test.ts", "pkg/vitest.config.mts"):
+            self.assertIn(f, why)
+        self.assertNotIn("plugin.ts", why)
+
     def test_no_paths_allows_any_file(self):
         sha = self.commit(["anywhere/x.py"])
         ok, _, got = verdict(T(5, paths=[]), self.repo, self.base)

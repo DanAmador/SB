@@ -65,7 +65,7 @@ def main():
     mode = os.environ.get("FAKE_WORKER_MODE", "commit")
     found = re.search(r"^\s*Ticket: (\S+)\s*$", brief, re.M)
     ticket = found.group(1) if found else None
-    owned = re.search(r"^Files you own: (.+)\. Touch no other file\.$", brief, re.M)
+    owned = re.search(r"^Files you own: (.+?)\. Touch no other file\b", brief, re.M)
     paths = owned.group(1).split(", ") if owned else ["work/"]
     if mode in ("commit", "stray", "commit-limit", "slow"):
         target = "stray.txt" if mode == "stray" else paths[0] + ("done.txt" if paths[0].endswith("/") else "")

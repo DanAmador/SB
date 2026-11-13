@@ -131,6 +131,27 @@ def _under(f, paths):
     return any(f == p.rstrip("/") or f.startswith(p.rstrip("/") + "/") for p in paths)
 
 
+TEST_DIRS = {"test", "tests", "__tests__"}
+
+
+def _owned_test(f, paths):
+    """A test the ticket may add or change beside its own files: a test-named file in the folder of an owned
+    file (or of an owned folder), or any file in a test/, tests/ or __tests__/ folder that sits in a folder
+    holding an owned path. Configs and helpers outside such folders stay outside."""
+    parts = f.split("/")
+    owned = [p.rstrip("/") for p in paths]
+    name = parts[-1]
+    if ".test." in name or ".spec." in name or name.startswith("test_") or re.search(r"_test\.\w+$", name):
+        if "/".join(parts[:-1]) in {o.rpartition("/")[0] for o in owned}:
+            return True
+    for i, d in enumerate(parts[:-1]):
+        if d.lower() in TEST_DIRS:
+            parent = "/".join(parts[:i])
+            if not parent or any(o.startswith(parent + "/") for o in owned):
+                return True
+    return False
+
+
 def verdict(t, repo, base_sha, run=subprocess.run):
     """(passed, reason, sha): a trailered commit after base_sha, every file changed since base_sha up to it
     inside the ticket's paths (trailered or not), every check green."""
@@ -150,7 +171,7 @@ def verdict(t, repo, base_sha, run=subprocess.run):
     if t["paths"]:
         files = run(["git", "-C", str(repo), "diff", "--name-only", f"{base_sha}..{sha}"],
                     capture_output=True, text=True).stdout.split("\n")
-        stray = [f for f in files if f and not _under(f, t["paths"])]
+        stray = [f for f in files if f and not _under(f, t["paths"]) and not _owned_test(f, t["paths"])]
         if stray:
             return False, "commits since the start touch files outside the ticket's paths: " + ", ".join(stray), sha
     for cmd in t["checks"]:
