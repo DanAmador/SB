@@ -518,6 +518,52 @@ class JobsTest(RunnerCase):
         with self.assertRaises(ValueError):
             self.hub.queue_job("nowhere", "x", "main")
 
+    def test_a_duplicate_ignores_the_prompts_surrounding_whitespace(self):
+        first = self.hub.queue_job("repo", "Audit it", "main")["key"]
+        with self.assertRaises(ValueError) as e:
+            self.hub.queue_job("repo", "  Audit it\n\n", "main")
+        self.assertIn(first, str(e.exception))
+
+    def test_a_job_for_a_checkout_path_runs_in_it_with_a_shared_run_folder(self):
+        loose = self.root / "loose"
+        make_repo(loose)
+        key = self.hub.queue_job(str(loose), "Tidy the readme", "main", None, "tidy")["key"]
+        self.resume()
+        self.until(lambda: self.state_of(key) == "done")
+        item = self.items()[key]
+        folder = Path(item["run"])
+        self.assertEqual((folder.parent, folder.name.endswith("-tidy")), (self.vault / "wayfinder/runs", True))
+        self.assertEqual((item["repo"], self.launched[0]["repo"]), (str(loose), str(loose)))
+        self.assertEqual(Path(item["result"]).read_text(encoding="utf-8").strip(), "did: Tidy the readme")
+        plain = self.root / "plain"
+        plain.mkdir()
+        for bad in (str(plain), str(self.root / "missing"), "relative/path"):
+            with self.assertRaises(ValueError):
+                self.hub.queue_job(bad, "x", "main")
+
+    def test_a_night_past_its_stop_time_drops_it_so_the_next_days_items_run(self):
+        self.hub.tickets()
+        self.hub.queue_options(START + 60, False, self.hub.state()["queue"]["version"])
+        self.resume()
+        self.clock.t = START + 120
+        self.sup.tick()
+        q = self.hub.state()["queue"]
+        self.assertEqual({i["state"] for i in q["items"]}, {"skipped"})
+        self.assertIsNone(q.get("stop_at"))
+        self.clock.t = START + 86400
+        key = self.hub.queue_job("repo", "Audit it", "main")["key"]
+        self.until(lambda: self.state_of(key) == "done")
+
+    def test_a_stop_time_is_kept_while_a_worker_still_runs(self):
+        self.mode = "hang"
+        self.hub.queue_options(START + 60, False, self.hub.state()["queue"]["version"])
+        self.resume()
+        self.until(lambda: self.state_of("repo/one#1") == "running")
+        self.clock.t = START + 120
+        self.sup.tick()
+        self.assertEqual(self.hub.state()["queue"]["stop_at"], START + 60)
+        self.assertEqual(self.state_of("repo/one#1"), "running")
+
     def test_a_limited_agent_requeues_the_job_until_its_reset(self):
         self.mode = "limit"
         key = self.hub.queue_job("repo", "Audit it", "main", "sonnet", "audit")["key"]

@@ -2,6 +2,7 @@
 import http.server
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -60,16 +61,38 @@ class HubCliTest(HubCase):
         with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/", timeout=5) as r:
             self.assertEqual(r.status, 200)
 
+    def page(self):
+        """The page as the browser gets it: the html and the renderer it loads from /board.js."""
+        get = lambda path: urllib.request.urlopen(f"http://127.0.0.1:{self.port}{path}", timeout=5).read().decode()
+        return get("/") + "\n" + get("/board.js")
+
     def test_the_page_is_served_and_names_its_endpoints(self):
-        html = urllib.request.urlopen(f"http://127.0.0.1:{self.port}/").read().decode()
-        for needle in ("<title>sb hub</title>", "/api/state", "/api/answer", "prefers-color-scheme", "application/json"):
+        html = self.page()
+        for needle in ("<title>sb hub</title>", "/api/state", "/api/answer", "/api/send", "/api/unsend",
+                       "/api/tickets", "/api/queue/set", "/api/queue/move", "/api/queue/pause", "/api/queue/agent",
+                       "/api/queue/item_agent", "/api/queue/options", "/api/queue/job", "/api/agents/scan",
+                       "prefers-color-scheme", "application/json"):
             self.assertIn(needle, html)
 
     def test_the_page_has_no_inline_handlers_and_no_outside_resource(self):
-        html = urllib.request.urlopen(f"http://127.0.0.1:{self.port}/").read().decode()
-        self.assertNotIn("onclick", html.lower())
-        for outside in ("http://", "https://", "//cdn", "@import", "url("):
+        html = self.page()
+        self.assertIsNone(re.search(r"\son[a-z]+\s*=\s*[\"'`]", html, re.I))  # event delegation only
+        for outside in ("http://", "https://", "//cdn", "@import", "url(", "<link", "<img"):
             self.assertNotIn(outside, html)
+
+    def test_the_page_draws_icons_not_emoji(self):
+        html = self.page()
+        emoji = re.compile("[\U0001F000-\U0001FFFF\u2300-\u23FF\u2600-\u27BF\u2B00-\u2BFF\u21A9\uFE0E\uFE0F]")
+        self.assertEqual(emoji.findall(html), [])
+        self.assertIn("Tabler Icons", html)
+        self.assertIn('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"', html)
+
+    def test_the_page_is_a_command_office(self):
+        html = self.page()
+        for words in ("Tonight's queue", "Available", "Running now", "Log", "the list changed, try again",
+                      "emergencies and mechanical work", "Scan for agents", "New job", "ends about",
+                      "limited until", "1.5 h", "a wayfinder project or a path"):
+            self.assertIn(words, html)
 
     def test_state_command_prints_state(self):
         self.hub("report", "--agent", "a", "--state", "idle")
@@ -145,13 +168,13 @@ class HubCliTest(HubCase):
             self.assertEqual((headers["X-Frame-Options"], headers["X-Content-Type-Options"]), ("DENY", "nosniff"))
 
     def test_the_page_heads_the_needs_you_box_and_caps_a_long_title(self):
-        html = urllib.request.urlopen(f"http://127.0.0.1:{self.port}/").read().decode()
+        html = self.page()
         self.assertIn("<h2>Needs you</h2>", html)
         self.assertIn("-webkit-line-clamp:2", html)
         self.assertNotIn("body{margin:0;overflow-wrap:anywhere", html)  # it shrank titles to one letter wide
 
     def test_the_page_says_its_language_and_its_calm_and_offline_states(self):
-        html = urllib.request.urlopen(f"http://127.0.0.1:{self.port}/").read().decode()
+        html = self.page()
         self.assertTrue(html.startswith('<!doctype html><html lang="en">'))
         for words in ("Nothing needs you", "Waiting for you", "Hub not reachable", "quiet for", "You asked"):
             self.assertIn(words, html)

@@ -21,7 +21,8 @@ and never fail a session when it is down.
   sbhub.py queue                      tonight's ticket queue in run order, with each ticket's state
   sbhub.py queue add|rm <map> <NNN>...   tick or untick tickets (running and finished items stay)
   sbhub.py queue pause|resume         hold or release the queue
-  sbhub.py queue job --project P --agent A [--model M] [--name N] (--prompt T | --prompt-file F)   queue a one-off job
+  sbhub.py queue job --project P --agent A [--model M] [--name N] (--prompt T | --prompt-file F)   queue a one-off job;
+                                      P is a wayfinder project or the absolute path of a git checkout
   sbhub.py queue agent <name>         the agent that runs the night's items (an installed one)
   sbhub.py agents [--scan]            the installed agents; --scan finds ~/.claude* configs and agy
   sbhub.py trust  <project path>      let the hub run that project's own .sb/providers scripts
@@ -478,12 +479,19 @@ class Hub:
         return self._queue_write(version, change)
 
     def queue_job(self, project, prompt, agent=None, model=None, name=None):
-        """Queue a one-off job: `prompt` run headless in the repo of the wayfinder project folder `project`.
-        Refused as a duplicate (ValueError naming the earlier item) when the same project and prompt were
-        queued within the last day."""
+        """Queue a one-off job: `prompt` run headless in the repo of the wayfinder project folder `project`,
+        or in `project` itself when it is an absolute path to a git checkout (its run folder is then a shared
+        one, wayfinder/runs/). Refused as a duplicate (ValueError naming the earlier item) when the same
+        project and prompt were queued within the last day."""
         if not str(prompt or "").strip():
             raise ValueError("a job needs a prompt")
-        repo = project_repo(project)
+        project = str(project or "").strip()
+        if os.path.isabs(project):
+            repo = project = os.path.normpath(project)
+            if not os.path.isdir(repo) or not os.path.exists(os.path.join(repo, ".git")):
+                raise ValueError("not a git checkout (no .git in it): {}".format(project))
+        else:
+            repo = project_repo(project)
         if repo is None:
             raise ValueError("unknown project (no map in wayfinder/{} names a repo folder): {}".format(project, project))
         if agent is not None and agent not in self._data["installed"]:
@@ -492,7 +500,7 @@ class Hub:
 
     def _queue_job(self, project, repo, prompt, agent, model, name):
         """The job item's key is `job:<first 12 of its hash>:<n>`, n counting the jobs with that hash so far."""
-        digest = hashlib.sha256((project + "\n" + prompt).encode("utf-8")).hexdigest()
+        digest = hashlib.sha256((project + "\n" + prompt.strip()).encode("utf-8")).hexdigest()
         made = []
 
         def change(q, rows):
@@ -983,7 +991,10 @@ class Supervisor:
                 waiting = [i for i in q["items"] if i["state"] == "queued"]
                 for i in waiting:
                     i.update(state="skipped", note="past the stop time", ended=now)
-                if waiting:
+                ended = not any(i["state"] == "running" for i in q["items"])
+                if ended:  # the night is over: tomorrow's items are not skipped at once
+                    q["stop_at"] = None
+                if waiting or ended:
                     q["version"] += 1
                     self.hub._save()
                 return
@@ -1113,7 +1124,8 @@ class Supervisor:
         key = item["key"]
         folder = item.get("run")
         if not folder:  # a job queued again after a limit keeps its folder
-            rc, out, err = self.sbmap("run", item["project"], item["name"])
+            shared = os.path.isabs(item["project"])  # a checkout outside the wayfinder projects
+            rc, out, err = self.sbmap("run", *(("--shared", item["name"]) if shared else (item["project"], item["name"])))
             if rc != 0 or not out:
                 self._end(key, "failed", note="could not start: sbmap run failed: " + (err or out))
                 return
