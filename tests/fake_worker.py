@@ -9,9 +9,16 @@ its arguments (the log keeps them), and does what FAKE_WORKER_MODE says:
   stray    commit a file outside the ticket's paths, with the trailer, exit 0
   commit-limit  commit as `commit` does, then print a usage-limit line and exit 1
   nothing  commit nothing, exit 1
-  limit    print a usage-limit line, exit 1
+  limit    print a usage-limit line, exit 1 (with FAKE_WORKER_RESET set, first a rate_limit_event whose 5-hour
+           window is rejected until then)
+  auth     print the expired-login failure (an assistant message and an error result), exit 1
   job      a prompt, not a ticket: print a result naming the prompt's first line and the folder it was told, exit 0
   hang     start a child that sleeps, write both pids to FAKE_WORKER_PIDS, sleep past any limit
+
+Printed as `claude -p --output-format stream-json` does: the result is the last line. FAKE_WORKER_USAGE="0.30>0.45"
+adds a rate_limit_event with 5-hour use 0.30 at the start and 0.45 just before the result (resetsAt from
+FAKE_WORKER_RESET, weekly use from FAKE_WORKER_WEEK, default 0.1). The hub's usage probe (`-p "reply ok"`)
+answers at once, whatever the mode.
 """
 import json
 import os
@@ -22,6 +29,24 @@ import time
 
 
 LIMIT = "You've hit your session limit · resets 4:40am (Europe/Madrid)"
+AUTH = "Failed to authenticate: OAuth session expired and could not be refreshed"
+
+
+def event(five, status="allowed"):
+    reset = int(os.environ.get("FAKE_WORKER_RESET") or time.time() + 10800)
+    week = float(os.environ.get("FAKE_WORKER_WEEK") or 0.1)
+    print(json.dumps({"type": "rate_limit_event", "rate_limit_info": {
+        "status": status, "resetsAt": reset, "rateLimitType": "five_hour", "unifiedWindows": {
+            "five_hour": {"utilization": five, "resetsAt": reset, "status": status},
+            "seven_day": {"utilization": week, "resetsAt": reset + 4 * 86400, "status": "allowed"}}}}), flush=True)
+
+
+def result(obj):
+    """The stream's last line, after the closing usage reading when FAKE_WORKER_USAGE asks for one."""
+    usage = os.environ.get("FAKE_WORKER_USAGE")
+    if usage:
+        event(float(usage.split(">")[1]))
+    print(json.dumps(obj), flush=True)
 
 
 def main():
@@ -31,6 +56,11 @@ def main():
     print("env: " + json.dumps({k: os.environ.get(k) for k in
                                 ("CLAUDE_CONFIG_DIR", "SB_HUB_AGENT", "SB_HUB_PARENT", "SB_HUB_PORT")}), flush=True)
     print("cwd: " + os.getcwd(), flush=True)
+    if brief == "reply ok":  # the hub's usage probe
+        print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "result": "ok"}))
+        return 0
+    if os.environ.get("FAKE_WORKER_USAGE"):
+        event(float(os.environ["FAKE_WORKER_USAGE"].split(">")[0]))
     mode = os.environ.get("FAKE_WORKER_MODE", "commit")
     found = re.search(r"^\s*Ticket: (\S+)\s*$", brief, re.M)
     ticket = found.group(1) if found else None
@@ -44,19 +74,25 @@ def main():
         subprocess.run(["git", "add", target], check=True)
         subprocess.run(["git", "commit", "-q", "-m", "feat: work\n\nTicket: " + ticket], check=True)
         if mode == "commit-limit":
-            print(json.dumps({"type": "result", "is_error": True, "result": LIMIT}))
+            result({"type": "result", "is_error": True, "result": LIMIT})
             return 1
-        print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "result": "done"}))
+        result({"type": "result", "subtype": "success", "is_error": False, "result": "done"})
         return 0
     if mode == "job":
-        print(json.dumps({"type": "result", "subtype": "success", "is_error": False,
-                          "result": "did: " + brief.splitlines()[0]}))
+        result({"type": "result", "subtype": "success", "is_error": False, "result": "did: " + brief.splitlines()[0]})
         return 0
     if mode == "nothing":
-        print(json.dumps({"type": "result", "subtype": "success", "is_error": True, "result": "gave up"}))
+        result({"type": "result", "subtype": "success", "is_error": True, "result": "gave up"})
         return 1
     if mode == "limit":
+        if os.environ.get("FAKE_WORKER_RESET"):
+            event(1.0, "rejected")
         print(json.dumps({"type": "result", "is_error": True, "result": LIMIT}))
+        return 1
+    if mode == "auth":
+        print(json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "text", "text": AUTH}]}, "error": "authentication_failed"}))
+        print(json.dumps({"type": "result", "subtype": "success", "is_error": True, "result": AUTH}))
         return 1
     if mode == "hang":
         child = subprocess.Popen(["sleep", "60"])

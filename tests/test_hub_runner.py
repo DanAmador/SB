@@ -217,7 +217,7 @@ class TicketLoopTest(RunnerCase):
         self.assertIn(sha2, next(self.vault.glob("wayfinder/repo/one/issues/done/002*.md")).read_text(encoding="utf-8"))
         # the real launch: claude's flags, the agent's config dir, the item's id, the run folder's log
         log = Path(self.launched[0]["log"]).read_text(encoding="utf-8")
-        self.assertIn('argv: ["--permission-mode", "auto", "--model", "sonnet", "--output-format", "json"]', log)
+        self.assertIn('argv: ["--permission-mode", "auto", "--model", "sonnet", "--output-format", "stream-json", "--verbose"]', log)
         self.assertIn('"CLAUDE_CONFIG_DIR": "{}"'.format(self.root / ".claude-main"), log)
         self.assertIn('"SB_HUB_AGENT": "repo/one#1", "SB_HUB_PARENT": "queue", "SB_HUB_PORT": "4321"', log)
         self.assertIn("cwd: " + str(self.repos["repo/one"]), log)

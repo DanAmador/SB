@@ -38,7 +38,7 @@ const STYLE = `
 .pill.acc{background:var(--accbg);color:var(--acc);font-weight:600}
 .pill.warn{background:var(--warnbg);color:var(--warn);font-weight:600}
 .pill.ag{background:var(--panel);border:1px solid var(--line);color:var(--ink)}
-.pill.ag .w{color:var(--mute)}.pill.ag.run .w{color:var(--acc)}.pill.ag.lim{border-color:var(--warn)}.pill.ag.lim .w{color:var(--warn)}
+.pill.ag .w{color:var(--mute)}.pill.ag.run .w{color:var(--acc)}.pill.ag.lim{border-color:var(--warn)}.pill.ag.lim .w{color:var(--warn)}.pill.ag.out{border-color:var(--bad)}.pill.ag.out .w{color:var(--bad)}
 .sb-sep{width:1px;height:16px;background:var(--line);margin:0 2px}
 .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--mute);flex:none}
 .dot.ok{background:var(--ok)}.dot.warn{background:var(--warn)}.dot.bad{background:var(--bad)}
@@ -315,11 +315,15 @@ window.SBBoard = function (root, io) {
   const blockersOf = t => (Array.isArray(t.blocked_by_open) ? t.blocked_by_open : []).map(b => typeof b == 'number' ? String(t.map) + '#' + b : null);
   const bTitle = (t, b) => { const k = typeof b == 'number' ? String(t.map) + '#' + b : null, o = k && tOf(k); return o ? String(o.title) : typeof b == 'number' ? 'ticket ' + b : String(b); };
   function agentState(name, e) {
+    if (e.login == 'expired') return ['out', 'sign in'];
     const run = items().find(i => i.state == 'running' && i.runner === name);
     if (run) return ['run', 'running ' + titleOf(run)];
     if (num(e.limited_until) > S.now) return ['lim', 'limited until ' + hm(e.limited_until)];
     return ['', 'free'];
   }
+  // an account's 5-hour use and reset, and what it learned a ticket costs, from the hub's readings
+  const usageOf = e => { const u = e.usage && typeof e.usage == 'object' ? e.usage : null; return u && num(u.five_hour_resets) > S.now ? `${Math.round(100 * num(u.five_hour))}% · resets ${hm(u.five_hour_resets)}` : ''; };
+  const costsOf = e => Object.entries(e.costs && typeof e.costs == 'object' ? e.costs : {}).filter(([, c]) => c && typeof c == 'object').map(([t, c]) => `${t} about ${Math.round(100 * num(c.avg))}%`).join(', ');
   function ends() {
     const its = items(), run = its.filter(i => i.state == 'running'), wait = its.filter(i => i.state == 'queued');
     if (!run.length && !wait.length) return 0;
@@ -765,8 +769,9 @@ window.SBBoard = function (root, io) {
       + (locks.length ? `<span class="pill" title="locks held">${svg('lock')} ${locks.length}</span>` : '')
       + (queued ? `<span class="pill acc" title="messages waiting for their session's hook">${svg('mail')} ${queued} queued</span>` : '')
       + (installed().length ? '<span class="sb-sep" aria-hidden="true"></span>' + installed().map(([n, e]) => {
-        const [c, w] = agentState(n, e);
-        return `<span class="pill ag ${c}" title="${esc(n + (e.kind == 'agy' ? ' (' + agyWords + ')' : '') + ': ' + w)}">${svg('robot')} ${esc(n)} <span class="w">${esc(w.startsWith('running') ? 'running' : w)}</span></span>`;
+        const [c, w] = agentState(n, e), u = c == 'out' ? '' : usageOf(e), k = costsOf(e);
+        const tip = n + (e.kind == 'agy' ? ' (' + agyWords + ')' : '') + ': ' + w + (u ? ' · ' + u.split(' · ')[0] + ' of its 5-hour window used' : '') + (k ? ' · a ticket costs ' + k : '');
+        return `<span class="pill ag ${c}" title="${esc(tip)}">${svg('robot')} ${esc(n)}${u ? ' ' + esc(u) : ''} <span class="w">${esc(w.startsWith('running') ? 'running' : w)}</span></span>`;
       }).join('') : '');
 
     fillTo(tops, kids); fillJob();

@@ -24,6 +24,8 @@ and never fail a session when it is down.
   sbhub.py queue job --project P --agent A [--model M] [--name N] (--prompt T | --prompt-file F)   queue a one-off job;
                                       P is a wayfinder project or the absolute path of a git checkout
   sbhub.py queue agent <name>         the agent that runs the night's items (an installed one)
+  sbhub.py queue agents <name>...     the night's pool of agents: each item goes to the one where its likely
+                                      usage fits with the most room left (an item's own agent still wins)
   sbhub.py agents [--scan]            the installed agents; --scan finds ~/.claude* configs and agy
   sbhub.py trust  <project path>      let the hub run that project's own .sb/providers scripts
   sbhub.py untrust <project path>     stop doing so (both work with the hub stopped)
@@ -37,6 +39,10 @@ the owner resumes it (`queue resume`); a resumed queue stays so across restarts.
 queued ticket whose agent and repo are free as a headless worker (`claude -p` in auto mode, or `agy -p`),
 with SB_HUB_AGENT=<ticket key> and SB_HUB_PARENT=queue so `hook` reports it as that item's worker; when the
 worker exits it checks the commit, paths and checks in code, and resolves the ticket only when they pass.
+
+It paces each Claude account: workers print their account's 5-hour and weekly use (stream-json), a one-line
+Haiku probe reads an idle one, and an item starts only where its learned cost fits under GATE_5H (weekly under
+GATE_7D); one cut off by a limit or a logout goes back to the front for another account of the pool.
 """
 import argparse
 import hashlib
@@ -417,7 +423,7 @@ class Hub:
         """A failed or skipped item queued again: its last try's outcome is cleared; the owner's agent stays."""
         if item is None or item["state"] == "queued":
             return item
-        for f in ("retry", "digested", "runner", "pid", "pid_start", "result", "base_sha"):
+        for f in ("retry", "digested", "runner", "pid", "pid_start", "result", "base_sha", "resume"):
             item.pop(f, None)
         item.update(state="queued", note="", ended=None, tries=0, started=None, commit=None)
         return item
@@ -476,12 +482,25 @@ class Hub:
         return self._queue_write(None, change)
 
     def queue_agent(self, name):
-        """The agent that runs tonight's items unless an item names its own."""
+        """The one agent that runs tonight's items unless an item names its own (a pool of one)."""
         def change(q, rows):
             if name not in self._data["installed"]:
                 raise ValueError("unknown agent: {}".format(name))
-            q["agent"] = name
+            q["agent"], q["agents"] = name, [name]
         return self._queue_write(None, change)
+
+    def queue_agents(self, names, version):
+        """The night's pool, in order: each item goes to the one it fits on with the most room left; ties go
+        to the first. `agent` becomes the first, for what still reads one agent."""
+        def change(q, rows):
+            if not isinstance(names, list) or not names or not all(isinstance(n, str) for n in names):
+                raise ValueError("name one or more agents")
+            unknown = [n for n in names if n not in self._data["installed"]]
+            if unknown:
+                raise ValueError("unknown agent: {}".format(", ".join(unknown)))
+            q["agents"] = list(dict.fromkeys(names))
+            q["agent"] = q["agents"][0]
+        return self._queue_write(version, change)
 
     def queue_item_agent(self, key, name):
         def change(q, rows):
@@ -623,6 +642,131 @@ def ran_past(limit):
     return "ran past {} {}{}".format(n, unit, "" if n == 1 else "s")
 
 
+# ---- pacing: each Claude account's usage, read from its workers' stream-json and a one-line probe ----
+
+USAGE_STALE = 600  # a reading older than this is refreshed by a probe; at most one probe per agent this often
+GATE_5H = 0.90  # nothing starts that would take an account's 5-hour window past this
+GATE_7D = 0.80  # nothing starts on an account whose week is used past this
+BRAKE_5H = 0.95  # a running worker whose account passes this is told, once, to wrap up
+MAX_PER_AGENT = 2  # workers at once on one account (one while it has no learned cost)
+TICKET_SECONDS = 4500  # about how long a ticket runs: a window resetting sooner refills before it needs it all
+DEFAULT_COST = {"sonnet": 0.15, "opus": 0.30}  # share of a 5-hour window per ticket until one is learned
+WINDOW = 5 * 3600
+SAME_WINDOW = 600  # two readings whose reset times are this close belong to one window
+PROBE_TIMEOUT = 90
+BRAKE_TEXT = "Usage is at 95%: commit what passes now with the ticket's trailer, write your report, and stop."
+AUTH_PATTERNS = ("authentication_failed", "failed to authenticate", "oauth session expired")
+RESUME = ("\n## An earlier try stopped\n\nAn earlier try on {agent} stopped {why}. Its changes may already be in "
+          "the tree, committed or not: read `git log {base}..HEAD` and {diff} first, continue from there, do not "
+          "redo finished work. Its log: {log}.\n")
+
+
+def _num(v):
+    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) else None
+
+
+def readings(text):
+    """The usage readings in a stream-json log, oldest first: (usage, rejected_until) per `rate_limit_event`
+    line, usage = {five_hour, five_hour_resets, seven_day, seven_day_resets}; rejected_until is the latest
+    reset of a window the event marks `rejected`, else None."""
+    out = []
+    for line in text.splitlines():
+        if '"rate_limit_event"' not in line:
+            continue
+        try:
+            d = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(d, dict) or d.get("type") != "rate_limit_event":
+            continue
+        info = d.get("rate_limit_info") if isinstance(d.get("rate_limit_info"), dict) else {}
+        wins = info.get("unifiedWindows") if isinstance(info.get("unifiedWindows"), dict) else {
+            info.get("rateLimitType"): info}
+        five, week = (w if isinstance(w, dict) else {} for w in (wins.get("five_hour"), wins.get("seven_day")))
+        if _num(five.get("utilization")) is None:
+            continue
+        u = {"five_hour": _num(five["utilization"]), "five_hour_resets": _num(five.get("resetsAt")),
+             "seven_day": _num(week.get("utilization")), "seven_day_resets": _num(week.get("resetsAt"))}
+        rejected = [_num(w.get("resetsAt")) for w in (five, week, info)
+                    if w.get("status") == "rejected" and _num(w.get("resetsAt")) is not None]
+        out.append((u, max(rejected) if rejected else None))
+    return out
+
+
+def _said(text):
+    """What the agent itself printed: each JSON line's `result` or `error` text, and every line that is not
+    JSON (stderr, agy's output). Tool output inside the stream is left out: a worker that read a file
+    naming a usage limit has not hit one."""
+    out = []
+    for line in text.splitlines():
+        try:
+            d = json.loads(line)
+        except ValueError:
+            out.append(line)
+            continue
+        if not isinstance(d, dict):
+            out.append(line)
+            continue
+        out += [d[k] for k in ("result", "error") if isinstance(d.get(k), str)]
+    return "\n".join(out)
+
+
+def logged_out(said):
+    """The agent's own output (see _said) says its login expired."""
+    return any(p in said.lower() for p in AUTH_PATTERNS)
+
+
+def _tier(model):
+    return "opus" if "opus" in str(model or "") else "sonnet"
+
+
+def _same_window(a, b):
+    return abs((a.get("five_hour_resets") or 0) - (b.get("five_hour_resets") or 0)) <= SAME_WINDOW
+
+
+def _cost(inst, tier):
+    """(share of a 5-hour window one item of `tier` costs on this agent, whether it is learned): its own
+    average, else its other tier's (opus twice sonnet), else DEFAULT_COST."""
+    costs = inst.get("costs") or {}
+    if tier in costs:
+        return costs[tier]["avg"], True
+    other = "sonnet" if tier == "opus" else "opus"
+    if other in costs:
+        return costs[other]["avg"] * (2 if tier == "opus" else 0.5), True
+    return DEFAULT_COST[tier], False
+
+
+def _hm(ts, fmt="%H:%M"):
+    return datetime.fromtimestamp(ts).strftime(fmt) if ts else "unknown"
+
+
+def _pct(x):
+    return "{}%".format(round(100 * x))
+
+
+def pool(q):
+    """The night's agents in order: `agents`, or a state from before pools, its one `agent`."""
+    return list(q.get("agents") or ([q["agent"]] if q.get("agent") else []))
+
+
+def probe_usage(agent, cwd):
+    """One tiny Haiku call under the agent's config dir; its output carries a `rate_limit_event` (or the login
+    failure). '' when it could not run."""
+    env = {**os.environ, "SB_HUB_PORT": "1"}  # ponytail: its own hooks report to a closed port: never a board row
+    for k in ("SB_HUB_AGENT", "SB_HUB_PARENT"):
+        env.pop(k, None)
+    if agent.get("dir"):
+        env["CLAUDE_CONFIG_DIR"] = agent["dir"]
+    try:
+        Path(cwd).mkdir(parents=True, exist_ok=True)
+        r = subprocess.run([_exe("claude", env), "-p", "reply ok", "--model", "haiku", "--output-format",
+                            "stream-json", "--verbose"], cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+                           capture_output=True, text=True, errors="replace", timeout=PROBE_TIMEOUT)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return r.stdout + "\n" + r.stderr
+
+
 def _exe(name, env):
     found = shutil.which(name, path=env.get("PATH"))
     local = Path.home() / ".local" / "bin" / name  # where the Claude installer puts it
@@ -639,7 +783,7 @@ def launch(agent, brief, repo, model, env, log):
         if agent.get("dir"):
             full["CLAUDE_CONFIG_DIR"] = agent["dir"]
         cmd = [_exe("claude", full), "-p", brief, "--permission-mode", "auto", "--model", model,
-               "--output-format", "json"]
+               "--output-format", "stream-json", "--verbose"]  # stream-json carries the account's usage
     Path(log).parent.mkdir(parents=True, exist_ok=True)
     with open(log, "ab") as out:
         return subprocess.Popen(cmd, cwd=repo, env=full, stdin=subprocess.DEVNULL, stdout=out,
@@ -762,9 +906,12 @@ class Supervisor:
     run outside it. The workers' Popen handles live here, in memory: a `running` item with none (the hub
     restarted) has its leftover process group killed, its claim released, and is queued again."""
 
-    def __init__(self, hub, port=None, limit=WORKER_LIMIT):
+    def __init__(self, hub, port=None, limit=WORKER_LIMIT, probe=None):
         self.hub, self.port, self.limit = hub, port or default_port(), limit
-        self.procs = {}  # item key -> {p, t (the ticket row it started from), agent, inst, base, log}
+        self.probe = probe or probe_usage  # (agent entry, cwd) -> its output; tests hand in their own
+        # item key -> {p, t (the ticket row it started from), agent, inst, base, log, start, pos (log read up to),
+        # u0/u1 (its first and newest usage reading), alone (no other worker on its agent overlapped it), braked}
+        self.procs = {}
         self.streak = (None, 0)  # the failure class of the last failed items in a row, and how many
         self.stopped = False
 
@@ -799,11 +946,154 @@ class Supervisor:
 
     def tick(self):
         self.hub.tickets()  # keeps the page's ticket cache fresh and seeds the queue (both cached)
+        self._watch()
         self._reap()
         self._final_review()
         if not self.stopped:
+            self._probe()
             self._start()
         self._digest()
+
+    # ---- usage: each account's readings, its learned costs, the brake, the login ----
+
+    def _consume(self, run, final=False):
+        """Read what the worker printed since the last look: its usage readings and a login failure."""
+        pos = run.get("pos", run.get("start", 0))
+        try:
+            with open(run["log"], "rb") as f:
+                f.seek(pos)
+                data = f.read()
+        except OSError:
+            return
+        end = len(data) if final else data.rfind(b"\n") + 1  # a line still being written waits for the next look
+        if not end:
+            return
+        run["pos"] = pos + end
+        text = data[:end].decode("utf-8", "replace")
+        if logged_out(_said(text)):
+            run["auth"] = True
+        got = readings(text)
+        for u, _ in got:
+            run.setdefault("u0", u)
+            run["u1"] = u
+        self._usage(run["agent"], got)
+
+    def _usage(self, name, got):
+        """Store an agent's newest reading; a window marked rejected limits it until its exact reset; a cost
+        waiting for the reading after its ticket (see _learn) is learned from it."""
+        if not got:
+            return
+        now = self.hub.now()
+        with self.hub._lock:
+            inst = self.hub._data["installed"].get(name)
+            if inst is None:
+                return
+            u, rejected = got[-1]
+            inst["usage"] = {**u, "at": now}
+            if rejected and rejected > now:
+                inst["limited_until"] = rejected
+            wait = inst.pop("pending", None)
+            if wait and _same_window(wait["u0"], u):
+                self._add_cost(inst, wait["tier"], u["five_hour"] - wait["u0"]["five_hour"])
+            self.hub._save()
+
+    @staticmethod
+    def _add_cost(inst, tier, cost):
+        """One more measured cost into the agent's running average for `tier` (under the hub's lock)."""
+        c = inst.setdefault("costs", {}).get(tier) or {"avg": 0.0, "n": 0}
+        n = c["n"] + 1
+        inst["costs"][tier] = {"avg": round((c["avg"] * c["n"] + max(0.0, cost)) / n, 4), "n": n}
+
+    def _learn(self, run, model):
+        """A finished worker's cost: the rise of its agent's 5-hour use from its first reading to its last, when
+        both are in one window and no other worker of that agent overlapped it. With one reading only, the
+        next reading of the agent (the probe that follows) closes it."""
+        u0, u1 = run.get("u0"), run.get("u1")
+        if not run.get("alone") or u0 is None:
+            return
+        with self.hub._lock:
+            inst = self.hub._data["installed"].get(run["agent"])
+            if inst is None:
+                return
+            if u1 is u0:
+                inst["pending"] = {"tier": _tier(model), "u0": u0}
+            elif _same_window(u0, u1):
+                self._add_cost(inst, _tier(model), u1["five_hour"] - u0["five_hour"])
+            self.hub._save()
+
+    def _watch(self):
+        """Each running worker's new readings, and the brake: past BRAKE_5H its worker is told once to wrap up.
+        The message reaches it only through its own hooks; without them it is never delivered."""
+        now = self.hub.now()
+        for run in list(self.procs.values()):
+            self._consume(run)
+        with self.hub._lock:
+            usage = {n: e.get("usage") for n, e in self.hub._data["installed"].items()}
+        for key, run in list(self.procs.items()):
+            u = usage.get(run["agent"])
+            if run.get("braked") or not u or (u.get("five_hour_resets") or 0) <= now or u["five_hour"] < BRAKE_5H:
+                continue
+            try:
+                self.hub.send(key, BRAKE_TEXT)
+                run["braked"] = True
+            except ValueError:
+                pass  # its session has not reported yet: tried again next tick
+
+    def _probe(self):
+        """A one-line Haiku call for each Claude agent of the pool (or named by an item) that could take a queued
+        item, runs nothing, and has no reading newer than USAGE_STALE; at most one per agent per USAGE_STALE.
+        It is also how a signed-out agent is found signed in again."""
+        now = self.hub.now()
+        with self.hub._lock:
+            q = self.hub._data["queue"]
+            if q["paused"]:
+                return
+            queued = [i for i in q["items"] if i["state"] == "queued"]
+            names = dict.fromkeys(n for i in queued for n in ([i["agent"]] if i.get("agent") else pool(q)))
+            busy = {i.get("runner") for i in q["items"] if i["state"] == "running"}
+            todo = []
+            for n in names:
+                inst = self.hub._data["installed"].get(n)
+                if inst is None or inst.get("kind") != "claude" or n in busy or (inst.get("limited_until") or 0) > now:
+                    continue
+                u = inst.get("usage")
+                fresh = u and now - u.get("at", 0) < USAGE_STALE and not inst.get("pending")
+                if fresh and inst.get("login") != "expired" or now - (inst.get("probed") or 0) < USAGE_STALE:
+                    continue
+                inst["probed"] = now
+                todo.append((n, dict(inst)))
+            if todo:
+                self.hub._save()
+        for n, inst in todo:
+            text = self.probe(inst, str(self.hub.home / "probe"))
+            got = readings(text)
+            if logged_out(_said(text)):
+                self._signed_out(n)
+            elif got:
+                self._signed_in(n)
+            self._usage(n, got)
+
+    def _signed_out(self, name):
+        """Mark the agent signed out and, once per expiry, ask the owner to sign it in."""
+        with self.hub._lock:
+            inst = self.hub._data["installed"].get(name)
+            if inst is None or inst.get("login") == "expired":
+                return
+            inst["login"] = "expired"
+            self.hub._save()
+        text = "Sign in to {}: run `CLAUDE_CONFIG_DIR={} claude`, type /login".format(name, inst.get("dir") or "~/.claude")
+        self.hub.report({"agent": "sign-in:" + name, "name": "Sign in to " + name, "role": "orchestrator",
+                         "state": "needs you", "note": text})
+        notify("sb hub: needs you", text)
+
+    def _signed_in(self, name):
+        with self.hub._lock:
+            inst = self.hub._data["installed"].get(name)
+            if inst is None or inst.get("login") != "expired":
+                return
+            inst["login"] = None
+            self.hub._remove("sign-in:" + name)
+            self.hub._save()
 
     # ---- state, always under the hub's lock ----
 
@@ -817,8 +1107,7 @@ class Supervisor:
             item.update(fields)
             if front:
                 q["items"].remove(item)
-                at = next((n for n, i in enumerate(q["items"]) if i["kind"] == "ticket" and i["state"] == "queued"),
-                          len(q["items"]))
+                at = next((n for n, i in enumerate(q["items"]) if i["state"] == "queued"), len(q["items"]))
                 q["items"].insert(at, item)
             q["version"] += 1
             self.hub._save()
@@ -857,6 +1146,7 @@ class Supervisor:
                 continue
             _kill_group(run["p"], grace=3 if over else 0)  # also whatever it left running
             del self.procs[item["key"]]
+            self._consume(run, final=True)
             try:
                 (self._finish_job if item["kind"] == "job" else self._finish)(item, run, over)
             except Exception as e:  # the item still ends, never resolved
@@ -865,6 +1155,42 @@ class Supervisor:
                     self._end(item["key"], "failed", note=why)
                 else:
                     self._fail(item, run, why, None)
+            if not run.get("stopped"):  # a run cut off by a limit or a logout says nothing of what a ticket costs
+                self._learn(run, item.get("model") or "sonnet")
+
+    def _stopped(self, item, run):
+        """True when this try's own output shows a logout or a usage limit (a rejected window's exact reset,
+        else the reset its message names); the item is then queued again (see _stopped_early)."""
+        text, now = _tail(run["log"], run.get("start", 0)), self.hub.now()
+        said = _said(text)
+        auth = run.get("auth") or logged_out(said)
+        rejected = next((r for u, r in reversed(readings(text)) if r and r > now), None)
+        until = None if auth else rejected or limited_until(said, now)
+        if not auth and until is None:
+            return False
+        self._stopped_early(item, run, until, auth)
+        return True
+
+    def _stopped_early(self, item, run, until, auth):
+        """The worker stopped at its agent's usage limit or a logout: the agent waits (limited until `until`, or
+        signed out), the claim is released, and the item goes back to the front of the queue for any agent of
+        the pool that fits, keeping its base commit; its next brief says where the last try stopped."""
+        run["stopped"] = True
+        if until is not None:
+            with self.hub._lock:
+                inst = self.hub._data["installed"].get(run["agent"])
+                if inst is not None:
+                    inst["limited_until"] = until
+                self.hub._save()
+        if auth:
+            self._signed_out(run["agent"])
+        if item["kind"] == "ticket":
+            self._release(item["key"])
+        why = "when its login expired" if auth else "at its usage limit"
+        self._update(item["key"], front=True, state="queued", pid=None, pid_start=None, started=None,
+                     resume={"agent": run["agent"], "log": run["log"], "why": why},
+                     note="{} stopped {}{}; queued again at the front".format(
+                         run["agent"], why, "" if auth else " (until {})".format(_hm(until))))
 
     def _recover(self, item):
         pid, started = item.get("pid"), item.get("pid_start")
@@ -887,18 +1213,8 @@ class Supervisor:
         if passed:  # a worker that did the work is resolved, whatever it printed afterwards
             self._resolve(item, run, sha)
             return
-        # a failed run whose own output (not an earlier try's) names a usage limit waits for the reset
-        until = None if over else limited_until(_tail(run["log"], run.get("start", 0)), self.hub.now())
-        if until is not None:
-            with self.hub._lock:
-                inst = self.hub._data["installed"].get(run["agent"])
-                if inst is not None:
-                    inst["limited_until"] = until
-                self.hub._save()
-            self._release(key)
-            self._update(key, state="queued", pid=None, pid_start=None, started=None,
-                         note="{} hit its usage limit; waits until {}".format(
-                             run["agent"], datetime.fromtimestamp(until).strftime("%H:%M")))
+        # a failed run whose own output (not an earlier try's) names a usage limit or a logout is tried again
+        if not over and self._stopped(item, run):
             return
         if not item.get("tries") and t.get("tier", "sonnet") == "sonnet" and run["inst"].get("kind") == "claude":
             self._release(key)
@@ -959,16 +1275,7 @@ class Supervisor:
         which queues it again for the agent's reset. Its result text is saved in its run folder."""
         key, code = item["key"], run["p"].returncode
         text = _tail(run["log"], run.get("start", 0))
-        until = None if over or code == 0 else limited_until(text, self.hub.now())
-        if until is not None:
-            with self.hub._lock:
-                inst = self.hub._data["installed"].get(run["agent"])
-                if inst is not None:
-                    inst["limited_until"] = until
-                self.hub._save()
-            self._update(key, state="queued", pid=None, pid_start=None, started=None,
-                         note="{} hit its usage limit; waits until {}".format(
-                             run["agent"], datetime.fromtimestamp(until).strftime("%H:%M")))
+        if not over and code != 0 and self._stopped(item, run):
             return
         result = Path(run["log"]).parent / "result.md"
         result.write_text(_job_result(text) + "\n", encoding="utf-8")
@@ -988,7 +1295,8 @@ class Supervisor:
             bases, q["bases"] = q.get("bases") or {}, {}
             if not bases:
                 return
-            on, agent = q.get("final_review"), q["agent"]
+            # with a pool the review goes where it fits; with one agent, on it
+            on, agent = q.get("final_review"), q["agent"] if len(pool(q)) <= 1 else None
             q["version"] += 1
             self.hub._save()
         for repo, b in bases.items():
@@ -1002,12 +1310,72 @@ class Supervisor:
 
     # ---- starting the next tickets ----
 
-    def _free_agent(self, q, item, busy, now):
-        name = item.get("agent") or q["agent"]
-        inst = self.hub._data["installed"].get(name)
-        if inst is None or name in busy or (inst.get("limited_until") or 0) > now:
-            return None, None
-        return name, inst
+    def _load(self, running):
+        """agent -> [its running workers, the share of its 5-hour window they still need]: a worker's cost
+        less the rise its agent's use has already shown since it started, never below 0."""
+        load = {}
+        for i in running:
+            inst = self.hub._data["installed"].get(i.get("runner")) or {}
+            run = self.procs.get(i["key"]) or {}
+            u, u0 = inst.get("usage"), run.get("u0")
+            rise = u["five_hour"] - u0["five_hour"] if u and u0 and _same_window(u, u0) else 0.0
+            l = load.setdefault(i.get("runner"), [0, 0.0])
+            l[0] += 1
+            l[1] += max(0.0, _cost(inst, _tier(i.get("model")))[0] - rise)
+        return load
+
+    @staticmethod
+    def _fit(name, inst, tier, load, now):
+        """(score, need, why) for one more item of `tier` on agent `name`: score is None when it does not fit,
+        why then a plain reason (empty when the agent is only busy). With no reading (agy, or a probe not yet
+        answered) an agent runs one worker; measured agents rank first, then by the room left after it."""
+        if inst is None:
+            return None, 0.0, "{} is not an installed agent".format(name)
+        if inst.get("login") == "expired":
+            return None, 0.0, "{} is signed out until you sign in to it".format(name)
+        if (inst.get("limited_until") or 0) > now:
+            return None, 0.0, "{} is at its usage limit until {}".format(name, _hm(inst["limited_until"]))
+        n, owed = load.get(name, (0, 0.0))
+        u = inst.get("usage") if inst.get("kind") == "claude" else None
+        if not u:
+            return ((0, 0.0), 0.0, "") if n == 0 else (None, 0.0, "")
+        week_resets = u.get("seven_day_resets")
+        week = (u.get("seven_day") or 0.0) if not week_resets or week_resets > now else 0.0
+        if week >= GATE_7D:
+            return None, 0.0, "{} used {} of its week; resets {}".format(name, _pct(week), _hm(week_resets, "%a %H:%M"))
+        cost, learned = _cost(inst, tier)
+        if n >= (MAX_PER_AGENT if learned else 1):
+            return None, 0.0, ""
+        resets = u.get("five_hour_resets") or 0
+        five, left = (u["five_hour"], resets - now) if resets > now else (0.0, WINDOW)  # a reset window is empty
+        need = cost * min(1.0, left / TICKET_SECONDS)
+        room = GATE_5H - five - owed - need
+        if room < -1e-9:
+            return None, need, "{} {} used{}, needs about {}; resets {}".format(
+                name, _pct(five), ", {} more held by its running work".format(_pct(owed)) if owed >= 0.005 else "",
+                _pct(need), _hm(resets))
+        return (1, room), need, ""
+
+    def _pick(self, q, item, t, load, now):
+        """(agent, its entry, need) for the agent the item fits on with the most room left (ties: pool order),
+        or (None, None, why): why is a note naming each agent's use and reset when usage alone stops it,
+        empty when an agent is only busy. An item's own agent wins and never falls back to the pool."""
+        names = [item["agent"]] if item.get("agent") else pool(q)
+        model = item.get("model") if item.get("tries") or item["kind"] == "job" else (t or {}).get("tier")
+        best, whys, busy = None, [], False
+        for name in names:
+            inst = self.hub._data["installed"].get(name)
+            score, need, why = self._fit(name, inst, _tier(model), load, now)
+            if score is not None:
+                if best is None or score > best[0]:
+                    best = (score, name, inst, need)
+            elif why:
+                whys.append(why)
+            else:
+                busy = True
+        if best:
+            return best[1], best[2], best[3]
+        return None, None, "waits: " + " · ".join(whys) if whys and not busy else ""
 
     def _start(self):
         now = self.hub.now()
@@ -1024,8 +1392,22 @@ class Supervisor:
                     q["version"] += 1
                     self.hub._save()
                 return
-            busy = {i.get("runner") for i in q["items"] if i["state"] == "running"}
-            startable = [i for i in q["items"] if i["state"] == "queued" and self._free_agent(q, i, busy, now)[0]]
+            cached = {sbqueue.key(t): t for t in self.hub._tcache[1] or []}
+            load = self._load([i for i in q["items"] if i["state"] == "running"])
+            startable, noted = [], False
+            for i in q["items"]:
+                if i["state"] != "queued":
+                    continue
+                name, inst, why = self._pick(q, i, cached.get(i["key"]), load, now)
+                if name:
+                    startable.append(i)
+                elif why and i.get("note") != why:  # the owner reads why it waits
+                    i["note"], noted = why, True
+                elif not why and str(i.get("note") or "").startswith("waits: "):  # only busy now: the reason went
+                    i["note"], noted = "", True
+            if noted:
+                q["version"] += 1
+                self.hub._save()
             if q["paused"] or not startable:
                 return  # nothing could start: no need to read the tickets
             tickets = any(i["kind"] == "ticket" for i in startable)
@@ -1040,25 +1422,34 @@ class Supervisor:
                 return
             live = self.hub._live_keys()
             running = [i for i in q["items"] if i["state"] == "running"]
-            busy, repos = {i.get("runner") for i in running}, {i.get("repo") for i in running}
+            load, repos = self._load(running), {i.get("repo") for i in running}
             changed = False
+
+            def take(name, need):  # what this pass started counts against its agent at once
+                l = load.setdefault(name, [0, 0.0])
+                l[0] += 1
+                l[1] += need
             for item in q["items"]:
                 if item["state"] != "queued":
                     continue
                 if item["kind"] == "job":
-                    name, inst = self._free_agent(q, item, busy, now)
-                    if name is None or item.get("repo") in repos:
+                    if item.get("repo") in repos:
+                        continue
+                    name, inst, need = self._pick(q, item, None, load, now)
+                    if name is None:
                         continue
                     item.update(state="running", runner=name, started=now, ended=None, note="starting")
-                    busy.add(name)
+                    take(name, need)
                     repos.add(item.get("repo"))
                     picks.append((dict(item), None, name, dict(inst)))
                     changed = True
                     continue
                 t = by.get(item["key"])
-                name, inst = self._free_agent(q, item, busy, now)
-                if name is None or t is not None and t.get("repo") in repos:
-                    continue  # its agent or its repo is busy: it is not about to start, so it is not judged yet
+                if t is not None and t.get("repo") in repos:
+                    continue  # its repo is busy: it is not about to start, so it is not judged yet
+                name, inst, need = self._pick(q, item, t, load, now)
+                if name is None:
+                    continue  # no agent has room for it now (the first pass noted why)
                 skip = None
                 if t is None:
                     skip = "no longer open: resolved or out of scope since it was queued"
@@ -1078,7 +1469,7 @@ class Supervisor:
                          inst.get("model") if inst.get("kind") == "agy" else t.get("tier") or "sonnet")
                 item.update(state="running", runner=name, repo=t["repo"], map=t["map"], title=t["title"],
                             model=model, started=now, ended=None, note="starting")
-                busy.add(name)
+                take(name, need)
                 repos.add(t["repo"])
                 picks.append((dict(item), t, name, dict(inst)))
                 changed = True
@@ -1107,10 +1498,19 @@ class Supervisor:
                 self.hub._save()
         return board
 
+    def _track(self, key, run):
+        """Hold a started worker; a cost is learned only from a worker no other one of its agent overlapped."""
+        others = [r for r in self.procs.values() if r["agent"] == run["agent"]]
+        for r in others:
+            r["alone"] = False
+        run["alone"] = not others
+        self.procs[key] = run
+
     def _launch(self, item, t, name, inst):
         key, nnn = item["key"], "{:03d}".format(int(t["num"]))
         board = self._board(t["map"])
-        base = _git(t["repo"], "rev-parse", "HEAD")
+        # a try after one cut off by a limit or a logout keeps its base: the verdict sees all of the ticket's commits
+        base = item.get("resume") and item.get("base_sha") or _git(t["repo"], "rev-parse", "HEAD")
         if board is None or not base:
             self._end(key, "failed", note="could not start: " + ("sbmap run failed" if board is None else
                                                                  "the repo has no commit to start from"))
@@ -1129,6 +1529,10 @@ class Supervisor:
         if item.get("retry"):
             brief += "\nThe first try failed; the hub's check said:\n" + item["retry"] + "\n"
         log = str(folder / "{}.log".format(int(t["num"])))
+        if item.get("resume"):
+            r, paths = item["resume"], " ".join(t.get("paths") or [])
+            brief += RESUME.format(agent=r["agent"], why=r["why"], base=base, log=r.get("log") or log,
+                                   diff="`git diff -- {}`".format(paths) if paths else "`git diff`")
         env = {"SB_HUB_AGENT": key, "SB_HUB_PARENT": "queue", "SB_HUB_PORT": str(self.port)}
         try:
             start = os.path.getsize(log)  # launch appends: this try's output begins here
@@ -1142,7 +1546,7 @@ class Supervisor:
             self._release(key)
             self._end(key, "failed", note="could not start the worker: {}".format(e))
             return
-        self.procs[key] = {"p": p, "t": t, "agent": name, "inst": inst, "base": base, "log": log, "start": start}
+        self._track(key, {"p": p, "t": t, "agent": name, "inst": inst, "base": base, "log": log, "start": start})
         self._update(key, base_sha=base, log=log, run=str(folder), pid=p.pid, pid_start=_proc_start(p.pid),
                      note="running on {} ({})".format(name, item["model"]))
 
@@ -1158,6 +1562,10 @@ class Supervisor:
             folder = str((_vault() / out.splitlines()[-1]).parent)
         log = str(Path(folder) / "job.log")
         brief = "{}\n\nWrite any file this job produces to this folder: {}\n".format(item["prompt"], folder)
+        if item.get("resume"):
+            r = item["resume"]
+            brief += ("\nAn earlier try on {} stopped {}. What it wrote may already be in that folder; its log: {}. "
+                      "Continue from there, do not redo finished work.\n").format(r["agent"], r["why"], log)
         model = item.get("model") or (inst.get("model") if inst.get("kind") == "agy" else "sonnet")
         env = {"SB_HUB_AGENT": key, "SB_HUB_PARENT": "queue", "SB_HUB_PORT": str(self.port)}
         try:
@@ -1171,7 +1579,7 @@ class Supervisor:
         except (OSError, ValueError, subprocess.SubprocessError) as e:
             self._end(key, "failed", note="could not start the worker: {}".format(e))
             return
-        self.procs[key] = {"p": p, "agent": name, "inst": inst, "log": log, "start": start}
+        self._track(key, {"p": p, "agent": name, "inst": inst, "log": log, "start": start})
         self._update(key, log=log, run=folder, pid=p.pid, pid_start=_proc_start(p.pid),
                      note="running on {} ({})".format(name, model))
 
@@ -1448,6 +1856,8 @@ def make_handler(hub):
                     out = hub.queue_pause(d["paused"])
                 elif path == "/api/queue/agent":
                     out = hub.queue_agent(d["name"])
+                elif path == "/api/queue/agents":
+                    out = hub.queue_agents(d["names"], d["version"])
                 elif path == "/api/queue/options":
                     out = hub.queue_options(d.get("stop_at"), d.get("final_review", False), d["version"])
                 elif path == "/api/queue/job":
@@ -1798,7 +2208,9 @@ def cmd_queue(a):
     q = call(port, "/api/state")[1]["queue"]
     if act == "show":
         titles = {sbqueue.key(t): t for t in rows if isinstance(rows, list) and isinstance(t, dict)}
-        print("{}{}".format("paused, " if q["paused"] else "", "agent " + (q["agent"] or "none")))
+        names = pool(q)
+        print("{}{}".format("paused, " if q["paused"] else "", ("agents " if len(names) > 1 else "agent ")
+                            + (", ".join(names) or "none")))
         for n, i in enumerate(q["items"], 1):
             t = titles.get(i["key"], {})
             print("{:>2}. {}  {}  {}{}".format(n, i["key"], i["state"], t.get("title", ""),
@@ -1835,8 +2247,10 @@ def cmd_queue(a):
             print(out["key"])
     elif act == "agent" and rest:
         code, out = call(port, "/api/queue/agent", {"name": rest[0]})
+    elif act == "agents" and rest:
+        code, out = call(port, "/api/queue/agents", {"names": rest, "version": q["version"]})
     else:
-        print("usage: queue [add|rm <map> <NNN>...|pause|resume|agent <name>]", file=sys.stderr)
+        print("usage: queue [add|rm <map> <NNN>...|pause|resume|agent <name>|agents <name>...]", file=sys.stderr)
         return 1
     if out.get("ok"):
         return 0
