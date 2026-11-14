@@ -4,8 +4,15 @@
  */
 import { ROUTES, answerSchema, type RouteAnswer, type RouteBody, type RouteName } from "@sb-hub/contract";
 
-/** The hub's paths are absolute: the page lives under /next/, the API under /api/. */
-const BASE = "";
+/** The phone page lives under /v/<token>/ and the API under /v/<token>/api/; at /next/ the API is at /api/. */
+const phone = /^\/v\/[^/]+(?=\/)/.exec(typeof location === "undefined" ? "" : location.pathname);
+const BASE = phone?.[0] ?? "";
+
+/** True in the in-chat widget, whose host script sets the flag and answers /api/ reads itself (see sbhub_mcp.py). */
+export const IN_WIDGET = typeof window !== "undefined" && "__SB_WIDGET__" in window;
+/** The phone page and the widget change nothing on the hub; the widget alone may answer a question. */
+export const READONLY = phone !== null || IN_WIDGET;
+const mayPost = (route: string): boolean => !READONLY || (IN_WIDGET && route === "POST /api/answer");
 
 export class HubError extends Error {
   constructor(
@@ -51,6 +58,7 @@ export type PostResult<K extends PostRoute> =
   | { ok: false; status: number; data: unknown; error: string };
 
 export async function post<K extends PostRoute>(route: K, body: RouteBody<K>, path?: string): Promise<PostResult<K>> {
+  if (!mayPost(route)) return { ok: false, status: 403, data: null, error: "this page is read-only" };
   const url = `${BASE}${path ?? pathOf(route)}`;
   const init = { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
   const r = await fetch(url, init).catch(() => null);

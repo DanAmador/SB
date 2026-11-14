@@ -4,14 +4,14 @@
   sbhub_lan.py serve [--port 8766] [--hub-port P]   serve it on every interface, behind /v/<token>/
   sbhub_lan.py url [--port 8766]                    print http://<the Mac's WiFi address>:<port>/v/<token>/
 
-The hub itself only listens on 127.0.0.1. This server sits beside it: it serves the hub's page (switched to
-read-only) and board.js, forwards GET requests under /api/ to the hub, and forwards exactly three POSTs that
-change display state only (clear finished items, dismiss a session row, clear quiet rows). Every other POST
-answers 403. Every path without the token answers 404 with no body. The token is 32 random url-safe
+The hub itself only listens on 127.0.0.1. This server sits beside it: it serves the built board (the same page
+as /next/; it sees /v/<token>/ in its address and turns every control off) and its assets from
+packages/web/dist, and forwards GET requests under /api/ to the hub. Every POST answers 403. Every path without the token answers 404 with no body. The token is 32 random url-safe
 characters in $SB_HUB_HOME/lan-token (default ~/.sb-hub), made on the first run.
 """
 import argparse
 import hmac
+import mimetypes
 import os
 import secrets
 import socket
@@ -26,8 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import sbhub  # noqa: E402
 
 LAN_PORT = 8766
-WRITES = ("/api/queue/clear-finished", "/api/agents/dismiss", "/api/agents/clear-quiet")
-BODY_MAX = 65536
+DIST = Path(__file__).resolve().parents[1] / "hub" / "packages" / "web" / "dist"  # pnpm --dir skills/sb/hub build
 
 
 def home():
@@ -126,30 +125,32 @@ def make_handler(secret, hub_port):
                     self.send_header("Content-Length", "0")
                     self.end_headers()
                     return
-                page = sbhub.PAGE.read_bytes().replace(b'<div id="hq">', b'<div id="hq" data-readonly="1">', 1)
-                self.send(200, page, "text/html; charset=utf-8")
-            elif path == "/board.js":
-                self.send(200, sbhub.BOARD_JS.read_bytes(), "text/javascript; charset=utf-8")
+                self.asset("index.html")
             elif path.startswith("/api/"):
                 self.forward(rest)
             else:
+                self.asset(path.lstrip("/"))
+
+        def asset(self, name):
+            """A file of the built board; an empty 404 for anything outside dist, and a plain 503 when it is not built."""
+            if not (DIST / "index.html").is_file():
+                self.send(503, b"The board is not built: run pnpm --dir skills/sb/hub build\n", "text/plain; charset=utf-8")
+                return
+            root = DIST.resolve()
+            try:
+                f = (root / name).resolve()
+                ok = f.is_file() and f.is_relative_to(root)
+            except (OSError, ValueError):
+                ok = False
+            if not ok:
                 self.send(404)
+                return
+            ctype = mimetypes.guess_type(f.name)[0] or "application/octet-stream"
+            self.send(200, f.read_bytes(), ctype + ("; charset=utf-8" if ctype.startswith("text/") or ctype.endswith("javascript") else ""))
 
         def do_POST(self):
-            rest = self.rest()
-            if rest is None:
-                return
-            ctype = self.headers.get("Content-Type", "").split(";")[0].strip().lower()
-            origin = self.headers.get("Origin")
-            same = origin is None or origin == "http://" + str(self.headers.get("Host"))
-            try:
-                n = int(self.headers.get("Content-Length") or 0)
-            except ValueError:
-                n = BODY_MAX + 1
-            if rest.split("?", 1)[0] not in WRITES or ctype != "application/json" or not same or n > BODY_MAX:
+            if self.rest() is not None:
                 self.send(403, b'{"ok": false, "error": "this page is read-only"}')
-                return
-            self.forward(rest.split("?", 1)[0], self.rfile.read(n) or b"{}")
 
     return Handler
 

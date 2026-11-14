@@ -55,7 +55,7 @@ class TsServerTest(HubCase):
         self.assertEqual((held.returncode, held.stderr.strip()), (1, "held by a"))
         self.assertEqual(self.hub("unlock", "unity", "--by", "a").returncode, 0)
 
-    def test_the_root_opens_the_new_board_and_the_old_one_is_at_classic(self):
+    def test_the_root_opens_the_new_board_and_the_old_one_is_gone(self):
         get = lambda path: urllib.request.urlopen(f"http://127.0.0.1:{self.port}{path}", timeout=5)
         built = (ROOT / "skills" / "sb" / "hub" / "packages" / "web" / "dist" / "index.html").exists()
         try:
@@ -65,7 +65,11 @@ class TsServerTest(HubCase):
             self.assertFalse(built)
             with e:
                 self.assertIn(b"pnpm --dir skills/sb/hub build", e.read())
-        self.assertIn('<script src="board.js">', get("/classic").read().decode())
+        for gone in ("/classic", "/board.js"):
+            with self.assertRaises(urllib.error.HTTPError) as c:
+                get(gone)
+            c.exception.close()
+            self.assertEqual(c.exception.code, 404, gone)
 
     def test_its_python_hub_listens_elsewhere(self):
         pid = int(Path(self._tmp.name, "hub-python.pid").read_text())

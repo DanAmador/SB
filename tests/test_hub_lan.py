@@ -49,33 +49,36 @@ class LanTest(HubCase):
         self.assertEqual(os.stat(Path(self._tmp.name, "lan-token")).st_mode & 0o077, 0)
 
     def test_without_the_token_every_path_is_an_empty_404(self):
-        for path in ("/", "/board.js", "/api/state", "/v/", "/v/wrong/", "/v/wrong/api/state", f"/v/{self.token[:-1]}/"):
+        for path in ("/", "/assets/x.js", "/api/state", "/v/", "/v/wrong/", "/v/wrong/api/state", f"/v/{self.token[:-1]}/"):
             self.assertEqual(self.req(path), (404, b""), path)
         self.assertEqual(self.req("/v/wrong/api/queue/clear-finished", {}), (404, b""))
 
-    def test_it_serves_the_hubs_own_page_read_only_and_its_renderer(self):
+    def test_it_serves_the_built_board_under_the_token_and_nothing_outside_it(self):
+        dist = Path(LAN).parents[1] / "hub" / "packages" / "web" / "dist"
+        if not (dist / "index.html").exists():
+            code, body = self.req(self.v())
+            return self.assertEqual((code, b"pnpm --dir skills/sb/hub build" in body), (503, True))
         code, page = self.req(self.v())
         self.assertEqual(code, 200)
         self.assertIn(b"<title>sb hub</title>", page)
-        self.assertIn(b'data-readonly="1"', page)
-        code, js = self.req(self.v("board.js"))
-        self.assertEqual((code, js[:30]), (200, Path(LAN).with_name("sbhub_board.js").read_bytes()[:30]))
-        self.assertNotIn(b'data-readonly="1"', urllib.request.urlopen(f"http://127.0.0.1:{self.port}/").read())
+        self.assertIn(b'<div id="root">', page)
+        self.assertNotIn(b"/next/", page)  # relative assets: they resolve under /v/<token>/
+        asset = re.search(rb'src="\./(assets/[^"]+\.js)"', page)[1].decode()
+        code, js = self.req(self.v(asset))
+        self.assertEqual((code, js), (200, (dist / asset).read_bytes()))
+        for path in ("assets/nope.js", "../hub.py", "%2e%2e/%2e%2e/scripts/sbhub.py", "assets/"):
+            self.assertEqual(self.req(self.v(path))[0], 404, path)
+        self.assertEqual(self.req(f"/v/{self.token}"), (200, page))  # redirected to the slash
 
-    def test_reads_go_through_and_only_three_display_writes_do(self):
+    def test_reads_go_through_and_every_write_is_refused(self):
         self.hub("report", "--agent", "a", "--project", ".", "--state", "idle")
         code, body = self.req(self.v("api/state"))
         self.assertEqual(code, 200)
         self.assertIn("a", json.loads(body)["agents"])
-        for path in ("api/queue/set", "api/queue/pause", "api/send", "api/answer", "api/ticket/done", "api/report"):
+        for path in ("api/queue/set", "api/queue/pause", "api/send", "api/answer", "api/ticket/done", "api/report",
+                     "api/queue/clear-finished", "api/agents/dismiss", "api/agents/clear-quiet", "api/run/seen"):
             self.assertEqual(self.req(self.v(path), {"keys": [], "version": 0, "paused": False})[0], 403, path)
-        code, body = self.req(self.v("api/queue/clear-finished"), {})
-        self.assertEqual((code, json.loads(body)["ok"]), (200, True))
-        self.assertEqual(self.req(self.v("api/agents/clear-quiet"), {})[0], 200)
-        self.assertEqual(self.req(self.v("api/agents/dismiss"), {"agent": "a"})[0], 200)
-        self.assertNotIn("a", self.get("/api/state")["agents"])
-        self.assertEqual(self.req(self.v("api/queue/clear-finished"), {}, {"Origin": "http://evil.example"})[0], 403)
-        self.assertEqual(self.req(self.v("api/queue/clear-finished"), {}, {"Content-Type": "text/plain"})[0], 403)
+        self.assertIn("a", self.get("/api/state")["agents"])
 
     def test_a_picture_the_hub_does_not_have_is_its_empty_404(self):
         self.assertEqual(self.req(self.v("api/media?key=repo%2Fone%231&name=a.png"), headers={"Range": "bytes=0-1"}), (404, b""))

@@ -124,10 +124,6 @@ export function createApp(o: AppOptions): Hono {
     return forward(c, asked(c), Buffer.from(await c.req.arrayBuffer()));
   });
 
-  // The Python hub's own board, until the new board replaces it.
-  app.get("/classic", (c) => forward(c, "/", undefined, false));
-  app.get("/board.js", (c) => forward(c, "/board.js", undefined, false));
-
   // The board is built for /next/ (Vite's base), so it lives there; / sends you to it once it is built.
   app.get("/next", (c) => c.redirect("/next/"));
   app.use("/next/*", serveStatic({ root: o.webDir, index: "index.html", rewriteRequestPath: (p) => p.replace(/^\/next/, "") }));

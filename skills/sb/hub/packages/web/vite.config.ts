@@ -7,8 +7,9 @@ import { defineConfig } from "vitest/config";
 /** The hub the dev server's /api goes to: the Python hub by default, a fixture server in the Playwright test. */
 const hub = process.env.SB_HUB_URL ?? `http://127.0.0.1:${process.env.SB_HUB_PORT ?? "8765"}`;
 
-export default defineConfig({
-  base: "/next/",
+// Built with relative asset paths: the same files are served at /next/ by the hub and under /v/<token>/ on the phone page.
+export default defineConfig(({ command }) => ({
+  base: command === "build" ? "./" : "/next/",
   plugins: [
     react(),
     // the compiler on every component and hook of this package's source, and the build fails on anything it cannot
@@ -21,7 +22,8 @@ export default defineConfig({
     tailwindcss(),
   ],
   resolve: { alias: { "@": path.resolve(import.meta.dirname, "src") } },
-  build: { chunkSizeWarningLimit: 800 },
+  // one chunk: the in-chat widget inlines the build into a single html file
+  build: { chunkSizeWarningLimit: 800, rolldownOptions: { output: { codeSplitting: false } } },
   server: { proxy: { "/api": { target: hub, changeOrigin: true } } },
   test: { environment: "jsdom", setupFiles: ["./src/test-setup.ts"], include: ["src/**/*.test.{ts,tsx}"] },
-});
+}));

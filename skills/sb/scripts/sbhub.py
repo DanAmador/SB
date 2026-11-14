@@ -2734,8 +2734,6 @@ def refresh_loop(hub, every=REFRESH_EVERY):
 
 
 DEFAULT_PORT = 8765
-PAGE = Path(__file__).resolve().parent / "sbhub.html"
-BOARD_JS = Path(__file__).resolve().parent / "sbhub_board.js"  # the page's renderer
 
 
 def notify(title, text):
@@ -2798,11 +2796,7 @@ def make_handler(hub):
             if not self.for_this_hub():
                 return
             path = self.path.split("?", 1)[0]
-            if path == "/":
-                self.send(200, PAGE.read_bytes(), "text/html; charset=utf-8")
-            elif path == "/board.js":
-                self.send(200, BOARD_JS.read_bytes(), "text/javascript; charset=utf-8")
-            elif path == "/api/state":
+            if path == "/api/state":
                 self.send(200, hub.state())
             elif path == "/api/trail":
                 from urllib.parse import parse_qs, urlsplit

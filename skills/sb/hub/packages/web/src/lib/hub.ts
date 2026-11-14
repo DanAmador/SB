@@ -2,7 +2,7 @@
 import { keepPreviousData, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import type { Queue, RouteAnswer, RouteBody, State, TicketAction } from "@sb-hub/contract";
 import { QueueStale } from "@sb-hub/contract";
-import { get, HubError, post, ticketPath } from "./api.ts";
+import { get, HubError, post, READONLY, ticketPath } from "./api.ts";
 
 export const STATE_MS = 2000;
 export const TRAIL_MS = 2000;
@@ -128,6 +128,7 @@ export function useWrites(): Writes {
       return out.ok ? { ok: true, words: `Cleared ${String(out.data.cleared)} quiet sessions.` } : { ok: false, words: out.error };
     },
     async seen(keys) {
+      if (READONLY) return { ok: true, words: "Seen marks are kept on the Mac." };
       qc.setQueryData<State>(["state"], (s) => (s ? { ...s, seen: [...s.seen.filter((k) => !keys.includes(k)), ...keys] } : s));
       const outs = await Promise.all(keys.map((key) => post("POST /api/run/seen", { key })));
       refresh(false);

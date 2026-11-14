@@ -11,7 +11,7 @@ import unittest
 import urllib.error
 import urllib.request
 
-from helpers import HubCase, free_port, wait_for, SCRIPT, page_path
+from helpers import HubCase, free_port, wait_for, SCRIPT
 
 sys.path.insert(0, os.path.dirname(SCRIPT))
 import sbhub  # noqa: E402
@@ -56,80 +56,6 @@ class HubCliTest(HubCase):
         c.exception.close()
         self.assertEqual(c.exception.code, 404)
         self.assertEqual(self.post("/api/answer", {"qid": "nope", "answer": "x"})[0], 404)
-
-    def test_the_page_placeholder_is_served(self):
-        with urllib.request.urlopen(f"http://127.0.0.1:{self.port}{page_path()}", timeout=5) as r:
-            self.assertEqual(r.status, 200)
-
-    def page(self):
-        """The page as the browser gets it: the html and the renderer it loads from /board.js."""
-        get = lambda path: urllib.request.urlopen(f"http://127.0.0.1:{self.port}{path}", timeout=5).read().decode()
-        return get(page_path()) + "\n" + get("/board.js")
-
-    def test_the_page_is_served_and_names_its_endpoints(self):
-        html = self.page()
-        # relative paths: the phone page serves the same page under /v/<token>/
-        for needle in ("<title>sb hub</title>", "'api/state'", "'api/answer'", "'api/send'", "'api/unsend'",
-                       "'api/tickets'", "'api/queue/set'", "'api/queue/move'", "'api/queue/pause'", "api/queue/agent",
-                       "'api/queue/item_agent'", "'api/queue/options'", "'api/queue/job'", "'api/queue/remove_job'", "'api/agents/scan'",
-                       "'api/queue/clear-finished'", "'api/agents/dismiss'", "'api/agents/clear-quiet'", "'api/ticket/'",
-                       "'api/ticket?key='", "api/item/report", '<script src="board.js">', "prefers-color-scheme", "application/json"):
-            self.assertIn(needle, html)
-
-    def test_the_page_has_no_inline_handlers_and_no_outside_resource(self):
-        html = self.page()
-        self.assertIsNone(re.search(r"\son[a-z]+\s*=\s*[\"'`]", html, re.I))  # event delegation only
-        for outside in ("http://", "https://", "//cdn", "@import", "url(", "<link"):
-            self.assertNotIn(outside, html)
-        # pictures and clips come only from the hub's own media route
-        self.assertEqual(re.findall(r"<(?:img|video)\b[^>]*", html), [
-            '<video src="${u}#t=0.1" controls preload="metadata" playsinline aria-label="${esc(n)}"',
-            '<img loading="lazy" src="${u}" alt="${esc(n)}"',
-            '<video src="${u}#t=0.1" preload="metadata" muted playsinline aria-label="${esc(n)}"',
-            '<img loading="lazy" src="${u}" alt="${esc(n)}"'])
-        self.assertIn("const mediaUrl = (i, n) => 'api/media?key=' + encodeURIComponent(i.key) + '&name=' + encodeURIComponent(n);", html)
-        self.assertIn("u = esc(mediaUrl(i, n))", html)
-
-    def test_done_and_failed_cards_show_the_workers_pictures_and_the_panel_all_of_them(self):
-        html = self.page()
-        self.assertIn("+ checksOf(i) + selfOf(i) + mediaOf(i) +", html)  # the ended card: up to 3
-        self.assertIn("ms.slice(0, 3)", html)
-        self.assertIn("+ mediaOf(i, true) +", html)  # the side panel: all, with their names
-        for words in ("<h3>Pictures</h3>", ".thumbs{", ".pmedia img,.pmedia video{width:100%", "more picture"):
-            self.assertIn(words, html)
-
-    def test_the_page_draws_icons_not_emoji(self):
-        html = self.page()
-        emoji = re.compile("[\U0001F000-\U0001FFFF\u2300-\u23FF\u2600-\u27BF\u2B00-\u2BFF\u21A9\uFE0E\uFE0F]")
-        self.assertEqual(emoji.findall(html), [])
-        self.assertIn("Tabler Icons", html)
-        self.assertIn('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"', html)
-
-    def test_on_a_phone_the_board_is_one_column_at_a_time_under_tabs(self):
-        phone = self.page().rsplit("@media(max-width:699px){", 1)[1]  # the renderer's phone block
-        for rule in (".sb-stats{flex-basis:100%", ".sb-tabs{display:flex", ".sb .col{display:none", ".sb .col.on{display:flex",
-                     ".sb-cols{display:block}", ".sb-panel{width:100vw"):
-            self.assertIn(rule, phone)
-        self.assertIn("const TABS = ['needs', 'queued', 'running', 'done', 'failed', 'ready']", self.page())
-
-    def test_the_page_is_a_kanban_board(self):
-        html = self.page()
-        for words in ("['needs', 'Needs you'], ['ready', 'Ready'], ['queued', 'Queued'], ['running', 'Running'], ['done', 'Done'], ['failed', 'Failed']",
-                      "the list changed, try again", "emergencies and mechanical work", "Scan for agents", "New job", "ends about",
-                      "limited until", "1.5 h", "a wayfinder project or a path", "Clear finished", "Clear quiet sessions",
-                      "Dismiss", "Tick again", "Back to Ready", "Move up", "Move down", "draggable", "the last 7 days",
-                      "Open in Obsidian", "Handoff, checkpoint and newest run", "Self-checks", "yours", "signed out",
-                      "Drop…", "Release the claim…", "Comment…", "Set the tier…", "Set the map's checks…", "Cancel",
-                      "location.hash", "Every project", "Every map", "Find a ticket"):
-            self.assertIn(words, html)
-
-    def test_the_read_only_mode_hides_every_write_but_the_three_display_ones(self):
-        html = self.page()
-        self.assertIn("readonly=hq.dataset.readonly==='1'", html)
-        self.assertIn("canQ = hasQ && !RO", html)  # drag, menus, queue controls and the job form
-        self.assertIn("${RO ? '' : `\n<form class=\"sb-cmp\"", html)  # no message box
-        self.assertIn("if (RO || !canAct) return '';", html)  # no ticket actions
-        self.assertIn("read-only", html)
 
     def test_state_command_prints_state(self):
         self.hub("report", "--agent", "a", "--state", "idle")
@@ -200,21 +126,9 @@ class HubCliTest(HubCase):
         self.assertNotIn("a", self.get("/api/state")["agents"])
 
     def test_every_response_refuses_framing_and_sniffing(self):
-        for path in (page_path(), "/", "/api/state", "/nope"):
+        for path in ("/api/state", "/nope"):
             headers = self.raw_get({}, path)[1]
             self.assertEqual((headers["X-Frame-Options"], headers["X-Content-Type-Options"]), ("DENY", "nosniff"))
-
-    def test_the_page_heads_the_needs_you_box_and_caps_a_long_title(self):
-        html = self.page()
-        self.assertIn("<h2>Needs you</h2>", html)
-        self.assertIn("-webkit-line-clamp:2", html)
-        self.assertNotIn("body{margin:0;overflow-wrap:anywhere", html)  # it shrank titles to one letter wide
-
-    def test_the_page_says_its_language_and_its_calm_and_offline_states(self):
-        html = self.page()
-        self.assertTrue(html.startswith('<!doctype html><html lang="en">'))
-        for words in ("Nothing needs you", "Waiting for you", "Hub not reachable", "quiet for", "You asked"):
-            self.assertIn(words, html)
 
     def test_a_slow_notification_does_not_delay_the_answer(self):
         slow = []

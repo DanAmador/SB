@@ -152,10 +152,9 @@ describe("pages", () => {
     expect(await r.text()).toContain("pnpm --dir skills/sb/hub build");
   });
 
-  it("serves the Python hub's own board at /classic, unchecked", async () => {
-    const { call, sent } = setup(() => ({ status: 200, contentType: "text/html; charset=utf-8", body: Buffer.from("<html>"), headers: {} }));
-    const r = await call("/classic");
-    expect([r.status, await r.text(), sent[0]?.path]).toEqual([200, "<html>", "/"]);
+  it("no longer serves the old board", async () => {
+    const { call, sent } = setup(() => json(200, STATE));
+    expect([(await call("/classic")).status, (await call("/board.js")).status, sent.length]).toEqual([404, 404, 0]);
   });
 
   it("answers 404 for any other path", async () => {

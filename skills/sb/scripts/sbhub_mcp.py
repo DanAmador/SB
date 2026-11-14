@@ -11,16 +11,20 @@ when it is down. Run over stdio by Claude Code through the hub-report mod's .mcp
   uv run --script sbhub_mcp.py
 
 Tools the model sees:  sb_board, sb_ask, sb_queue, sb_report, sb_lock, sb_unlock
-Tools only the widget calls (no model tokens): sb_state, sb_answer
-The widget (ui://sbhub/board.html) polls sb_state through the host, so it stays live while
-nobody spends a token, and a click on an option answers the hub and tells the chat.
+Tools only the widget calls (no model tokens): sb_state, sb_api, sb_answer
+The widget (ui://sbhub/board.html) is the hub's new board (packages/web, built) with every /api/ read sent through
+sb_api by sbhub_widget_bridge.js, so it stays live while nobody spends a token; a click on a question's option
+answers the hub through sb_answer.
 """
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 from mcp.server.apps import Apps, client_supports_apps
@@ -33,10 +37,30 @@ sys.path.insert(0, str(HERE))
 import sbhub  # noqa: E402
 
 BOARD_URI = "ui://sbhub/board.html"
-BOARD_HTML = HERE / "sbhub_widget.html"
+DIST = HERE.parent / "hub" / "packages" / "web" / "dist"  # the new board's build: pnpm --dir skills/sb/hub build
+BRIDGE = HERE / "sbhub_widget_bridge.js"
 PORT = sbhub.default_port()
 ALERT = ("needs you", "blocked")
 EST = 5400  # a queue item's estimate, seconds: the hub page's 1.5 h
+
+
+NOT_BUILT = ("<!doctype html><meta charset=utf-8><body style='font:13px system-ui;padding:8px'>"
+             "The board is not built: run <code>pnpm --dir skills/sb/hub build</code>, then start a new session.")
+
+
+def board_html():
+    """The new board as one html file: its stylesheet and script inlined (a widget loads no files), the bridge first."""
+    try:
+        page = (DIST / "index.html").read_text(encoding="utf-8")
+        css = "".join("<style>{}</style>".format((DIST / m).read_text(encoding="utf-8"))
+                      for m in re.findall(r'<link rel="stylesheet"[^>]*href="\./([^"]+)"', page))
+        js = "".join("<script type=module>{}</script>".format((DIST / m).read_text(encoding="utf-8").replace("</script", "<\\/script"))
+                     for m in re.findall(r'<script type="module"[^>]*src="\./([^"]+)"', page))
+    except OSError:
+        return NOT_BUILT
+    page = re.sub(r'<script type="module"[^>]*></script>|<link rel="stylesheet"[^>]*>', "", page)
+    bridge = "<script>{}</script>".format(BRIDGE.read_text(encoding="utf-8"))
+    return page.replace("</head>", bridge + css + "</head>", 1).replace("</body>", js + "</body>", 1)
 
 
 def hub(path, data=None, timeout=2):
@@ -200,6 +224,23 @@ def build_server():
             return result("hub not reachable", {"down": True})
         return result("{} agents".format(len(s["agents"])), s)
 
+    @apps.tool(resource_uri=BOARD_URI, visibility=["app"], title="sb api",
+               description="One read-only GET of the hub's /api/ for the board widget.")
+    def sb_api(path: str) -> CallToolResult:
+        if not path.startswith("/api/") or ".." in path:
+            return result("only GET /api/ paths", error=True)
+        try:
+            with urllib.request.urlopen("http://127.0.0.1:{}{}".format(PORT, path), timeout=10) as r:
+                status, body, kind = r.status, r.read(), r.headers.get("Content-Type", "")
+        except urllib.error.HTTPError as e:
+            with e:
+                status, body, kind = e.code, e.read(), e.headers.get("Content-Type", "")
+        except (OSError, ValueError):
+            return result("hub not reachable", {"down": True})
+        if not kind.startswith("application/json"):
+            return result("not json", {"status": 415, "body": '{"ok": false, "error": "not json"}'})
+        return result("{} {}".format(status, path), {"status": status, "body": body.decode("utf-8")})
+
     @apps.tool(resource_uri=BOARD_URI, visibility=["app"], title="sb answer",
                description="Record the owner's choice for an open question.")
     def sb_answer(qid: str, answer: str) -> CallToolResult:
@@ -238,8 +279,8 @@ def build_server():
                       .format(qid, default_after / 60, default), snapshot(qid))
 
     # read at build time, so an edit to the widget lands with the next session
-    apps.add_html_resource(BOARD_URI, BOARD_HTML.read_text(encoding="utf-8"), title="sb board",
-                           description="Live board of agent sessions, questions and locks.")
+    apps.add_html_resource(BOARD_URI, board_html(), title="sb board",
+                           description="The sb hub board: runs, queue, what waits for you, sessions and history; read-only.")
     mcp = MCPServer("sbhub", extensions=[apps], instructions=(
         "The sb hub coordinates agent sessions. Show the owner the live board with sb_board instead of "
         "writing status in chat. Ask real questions with sb_ask, never in prose. Report progress with "

@@ -4,6 +4,7 @@ Needs the mcp package; skipped without it. Run it with:
   uv run --no-project --with 'mcp>=2.3,<3' python -m unittest tests.test_hub_mcp
 """
 import asyncio
+import json
 import os
 import subprocess
 import sys
@@ -222,13 +223,27 @@ class HubMcpQueueTest(McpBase):
             q = self.mod.snapshot()["queue"]
         self.assertEqual((q["queued"], q["running"], len(q["items"])), (11, 1, 5))
 
-    def test_the_widget_has_no_emoji_and_draws_the_queue(self):
-        html = self.mod.BOARD_HTML.read_text(encoding="utf-8")
-        emoji = [c for c in html if ord(c) >= 0x2190 and c not in "\u2026\u2192\u00b7\u201c\u201d\u25b8"]
-        self.assertEqual(emoji, [], "emoji or pictograph characters left in the widget")
-        self.assertIn("git-branch", html)
-        self.assertIn("s.queue", html)
+    def test_the_widget_is_the_new_board_in_one_file_and_reads_through_sb_api(self):
+        built = (self.mod.DIST / "index.html").exists()
+        html = self.mod.board_html()
+        if not built:
+            return self.assertIn("pnpm --dir skills/sb/hub build", html)
+        self.assertTrue(html.startswith("<!doctype html>"))
+        self.assertIn('<div id="root">', html)
+        self.assertLess(html.index("window.__SB_WIDGET__"), html.index("<script type=module>"))  # the bridge runs first
+        for outside in ('src="./', 'href="./', "<link rel=\"stylesheet\""):
+            self.assertNotIn(outside, html)
+        self.assertIn("sb_api", html)
+        self.assertIn("sb_answer", html)
+        self.assertFalse((self.mod.HERE / "sbhub_widget.html").exists())
 
+    def test_sb_api_reads_the_hub_and_only_its_api(self):
+        self.hub("report", "--agent", "a", "--state", "idle")
+        ok = self.run_client(lambda c: c.call_tool("sb_api", {"path": "/api/state"}))
+        self.assertEqual(ok.structured_content["status"], 200)
+        self.assertIn("a", json.loads(ok.structured_content["body"])["agents"])
+        for bad in ("/", "/api/../x", "http://evil/api/state"):
+            self.assertTrue(self.run_client(lambda c: c.call_tool("sb_api", {"path": bad})).is_error, bad)
 
 if __name__ == "__main__":
     unittest.main()

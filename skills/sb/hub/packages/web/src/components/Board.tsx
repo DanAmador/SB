@@ -7,6 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { itemInScope, plural, projOf, queueView, scopeItems, scopeWaits, sidebarTree, splitAgents, ticketIndex, waitsFor, withBlockers } from "@/lib/board.ts";
 import { sessionCards } from "@/lib/sessions.ts";
+import { READONLY } from "@/lib/api.ts";
 import { useHubState, useTickets, useWrites, type Outcome } from "@/lib/hub.ts";
 import { setLink, useLink, VIEWS, type View } from "@/lib/link.ts";
 import { say, useNotices } from "@/lib/notice.ts";
@@ -100,7 +101,8 @@ function Loaded({ state, tickets, down, lastOk }: { state: State; tickets: Board
     agents,
     writes,
     down,
-    busy,
+    // a read-only page (the phone, the chat widget) has every control off, as when a change is in flight
+    busy: busy || READONLY,
     queueWrite,
     async enqueue(key, at) {
       const keys = [...qv.queuedKeys];
@@ -181,6 +183,7 @@ function Loaded({ state, tickets, down, lastOk }: { state: State; tickets: Board
             <div className="flex items-center gap-2">
               <MenuButton onClick={() => { setMenu(true); }} />
               <span className="text-sm font-semibold tracking-tight">sb hub</span>
+              {READONLY && <span className="rounded-full border px-2 py-0.5 text-xs text-muted-foreground">read-only</span>}
               <span
                 className={cn("size-2 rounded-full", down ? "bg-muted-foreground" : "bg-ok")}
                 role="img"

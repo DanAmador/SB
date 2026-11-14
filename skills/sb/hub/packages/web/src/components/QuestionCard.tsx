@@ -1,4 +1,5 @@
 /** A question a session asked, answered with one click before its default applies. */
+import { IN_WIDGET, READONLY } from "@/lib/api.ts";
 import { IconCheck, IconClock, IconHelpCircle } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
 import type * as React from "react";
@@ -34,7 +35,7 @@ export function QuestionCard({ id, q }: { id: string; q: Question }): React.JSX.
   const pending = !decided && left <= 0;
   const asker = agentOf(state, q.agent);
   const ticket = ix.byKey.get(asker?.agent ?? q.agent) ?? ix.byKey.get(q.agent);
-  const off = decided || pending || down || sending !== null;
+  const off = decided || pending || down || sending !== null || (READONLY && !IN_WIDGET);
   const choose = async (o: string): Promise<void> => {
     setSending(o);
     const out = await writes.answer(id, o);

@@ -86,7 +86,11 @@ export function setLink(change: Partial<Link>): void {
   // a new project drops the map, which belonged to the old one
   const pChanged = change.project !== undefined && change.project !== now.project && change.map === undefined;
   const next: Link = { ...now, ...change, ...(pChanged ? { map: "" } : {}) };
-  history.replaceState(null, "", `${location.pathname}${writeLink(next)}${location.hash}`);
+  try {
+    history.replaceState(null, "", `${location.pathname}${writeLink(next)}${location.hash}`);
+  } catch {
+    // a widget's frame (about:srcdoc, a blob) has no address to change: the view still switches in memory
+  }
   link.set(next);
 }
 

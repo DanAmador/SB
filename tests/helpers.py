@@ -119,11 +119,6 @@ def serve_command(port, ts=None):
     return [sys.executable, SCRIPT, "serve", "--port", str(port)]
 
 
-# The old board: / on sbhub.py, /classic on the TypeScript server (its / is the new board)
-def page_path():
-    return "/classic" if ts_mode() else "/"
-
-
 def free_port():
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
