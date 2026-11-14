@@ -21,7 +21,7 @@ from test_hub_runner import RunnerCase, git  # noqa: E402
 
 FIXTURES = Path(__file__).resolve().parents[1] / "skills" / "sb" / "hub" / "packages" / "contract" / "fixtures" / "run-ticket"
 KEYS = {"key", "state", "note", "commit", "checks", "media", "retry", "stop", "agent", "model", "tries", "stops", "base",
-        "log", "report", "run", "tree", "branch"}
+        "log", "report", "run", "tree", "branch", "verdict", "review"}
 
 
 class RunTicketCase(RunnerCase):
@@ -74,6 +74,9 @@ class RunTicketTest(RunTicketCase):
         self.assertNotIn(1, self.open_tickets())
         # the hub's state is read, never written: its queue knows nothing of this run
         self.assertEqual(self.hub.state()["queue"]["items"], [])
+        # judged by the Opus review, run in the same call
+        self.assertEqual((res["verdict"], res["review"]), ("finished", str(Path(res["run"]) / "1-review.md")))
+        self.assertEqual([(x["key"], x["model"]) for x in self.reviewed], [("repo/one#1", "opus")])
         self.fixture("done", res)
 
     def test_no_commit_on_sonnet_answers_retry_on_opus_and_the_retry_fails_with_a_comment(self):
@@ -102,6 +105,36 @@ class RunTicketTest(RunTicketCase):
         self.assertNotIn("failed", self.ticket_text(1))
         self.assertIn("check could not run", Path(res["report"]).read_text(encoding="utf-8"))
         self.fixture("recheck", res)
+
+    def test_a_partly_verdict_fails_naming_it_and_leaves_the_ticket_open_with_the_findings(self):
+        self.verdicts["repo/one#1"] = "partly"
+        res = self.run_ticket()
+        self.assertResult(res, "failed")
+        self.assertEqual(res["verdict"], "partly")
+        self.assertTrue(res["note"].startswith("judged partly by the Opus review"), res["note"])
+        self.assertTrue(res["commit"])
+        self.assertEqual(self.open_tickets()[1]["status"], "open")
+        self.assertIn("- It works.: not met", self.ticket_text(1))
+        self.assertTrue(Path(res["review"]).is_file())
+        self.fixture("judged-partly", res)
+
+    def test_a_review_that_crashes_answers_recheck_and_keeps_the_commit_and_the_claim(self):
+        self.verdicts["repo/one#1"] = "crash"
+        res = self.run_ticket()
+        self.assertResult(res, "recheck")
+        self.assertEqual((res["verdict"], res["review"]), (None, None))
+        self.assertTrue(res["note"].startswith("review could not run: it exited 1"), res["note"])
+        self.assertTrue(res["commit"])
+        self.assertEqual(self.open_tickets()[1]["status"], "claimed")
+        self.fixture("review-recheck", res)
+
+    def test_no_change_needed_makes_no_commit_and_goes_to_the_review(self):
+        res = self.run_ticket(mode="no-change")
+        self.assertResult(res, "done")
+        self.assertEqual((res["commit"], res["verdict"], res["note"]),
+                         (None, "finished", "resolved: no change needed, findings in the report"))
+        self.assertIn("The worker made no commit", self.reviewed[0]["brief"])
+        self.assertIn("## No change needed", self.reviewed[0]["brief"])
 
     def test_a_failing_check_fails_with_the_checks_tail(self):
         self.sb("set", "repo/one", "001", "tier=opus", "checks=echo broke && false", "--no-sync")

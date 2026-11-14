@@ -13,6 +13,7 @@
           "agent": null,
           "base_sha": "3fea00e95453cf271189dc8924ebcd942426162f",
           "branch": null,
+          "checked": null,
           "checks": [
             {
               "cmd": "true",
@@ -38,14 +39,18 @@
           "paths": null,
           "pid": null,
           "pid_start": null,
+          "recheck_at": null,
+          "rechecks": null,
           "repo": "/fixture/repo",
+          "review": "/fixture/Vault/wayfinder/repo/runs/2026-11-13-one/1-review.md",
           "run": "/fixture/Vault/wayfinder/repo/runs/2026-11-13-one",
           "runner": "main",
           "started": 1794528000.0,
           "state": "done",
           "title": "A",
           "tree": null,
-          "tries": 0
+          "tries": 0,
+          "verdict": "finished"
         }
       ],
       "final_review": true,
@@ -97,12 +102,12 @@
       "runs": {},
       "seeded": true,
       "stop_at": 1794549600.0,
-      "version": 19
+      "version": 21
     }
   },
   "contentType": "application/json",
   "request": {
-    "version": 18
+    "version": 20
   },
   "route": "POST /api/queue/clear-finished",
   "status": 200

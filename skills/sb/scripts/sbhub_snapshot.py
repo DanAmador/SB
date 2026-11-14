@@ -45,20 +45,20 @@ def night_note(queue, rows, now, files=None, steps=None, reports=None):
         label = _one("{:03d} {}".format(int(num), title[key])) if title.get(key) else key
         return "[[{}|{}]]".format(files[key], label) if key in files else label
 
-    live = [i for i in items if i["state"] in ("queued", "running", "recheck")]
+    live = [i for i in items if i["state"] in ("queued", "running", "review", "recheck")]
     kind = "paused" if queue.get("paused") else "running" if live else "empty"
     out = ["---", "tags:", "  - wayfinder/run", "---",
            "Written {} \u00b7 queue {}".format(time.strftime("%Y-%m-%d %H:%M", time.localtime(now)), kind)]
     maps = {}
     for i in items:
         ended = i["state"] in ("done", "failed", "skipped") and (i.get("ended") or 0) >= day
-        if i["state"] in ("queued", "running", "recheck") or ended:
+        if i["state"] in ("queued", "running", "review", "recheck") or ended:
             maps.setdefault(i["key"].rsplit("#", 1)[0], []).append(i)
     for m, its in maps.items():
         by = lambda *s: [i for i in its if i["state"] in s]
-        run, nxt, rec = by("running"), by("queued"), by("recheck")
+        run, nxt, rec, rev = by("running"), by("queued"), by("recheck"), by("review")
         end = sorted(by("done", "failed", "skipped"), key=lambda i: -(i.get("ended") or 0))
-        counts = ["{} {}".format(n, w) for w, n in (("running", len(run)), ("queued", len(nxt)), ("rechecking", len(rec)),
+        counts = ["{} {}".format(n, w) for w, n in (("running", len(run)), ("in review", len(rev)), ("queued", len(nxt)), ("rechecking", len(rec)),
                   ("done", len(by("done"))), ("failed", len(by("failed"))), ("skipped", len(by("skipped")))) if n]
         out += ["", "## [[wayfinder/{}/map|{}]]".format(m, m), " \u00b7 ".join(counts)]
         if run:
@@ -66,6 +66,8 @@ def night_note(queue, rows, now, files=None, steps=None, reports=None):
             for i in run:
                 mins = max(0, int((now - i["started"]) // 60)) if i.get("started") else 0
                 out.append("- {} \u00b7 {} min \u00b7 {}".format(link(i["key"]), mins, _one(steps.get(i["key"]) or "no step yet", 80)))
+        if rev:
+            out += ["", "**In review**"] + ["- {} \u00b7 {}".format(link(i["key"]), _one(i.get("note"), 100)) for i in rev]
         if rec:
             out += ["", "**Checks to rerun**"] + ["- {} \u00b7 {}".format(link(i["key"]), _one(i.get("note"), 100)) for i in rec]
         if nxt:

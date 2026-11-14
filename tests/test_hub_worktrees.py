@@ -115,7 +115,7 @@ class WorktreeTest(RunnerCase):
         sup.close_off = False
         self.addCleanup(sup.stop)
         end = time.time() + 10
-        while time.time() < end and hub.state()["queue"]["items"][0]["state"] == "running":
+        while time.time() < end and hub.state()["queue"]["items"][0]["state"] in ("running", "review"):
             sup.tick()
             time.sleep(0.05)
         item = hub.state()["queue"]["items"][0]

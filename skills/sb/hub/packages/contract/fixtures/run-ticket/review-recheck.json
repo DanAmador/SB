@@ -1,0 +1,29 @@
+{
+ "agent": "main",
+ "base": "0000000000000000000000000000000000000000",
+ "branch": null,
+ "checks": [
+  {
+   "cmd": "true",
+   "code": 0,
+   "secs": 0.5,
+   "tail": ""
+  }
+ ],
+ "commit": "0000000000000000000000000000000000000000",
+ "key": "repo/one#1",
+ "log": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one/1.log",
+ "media": [],
+ "model": "sonnet",
+ "note": "review could not run: it exited 1 and wrote no review file",
+ "report": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one/1.md",
+ "retry": null,
+ "review": null,
+ "run": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one",
+ "state": "recheck",
+ "stop": null,
+ "stops": 0,
+ "tree": null,
+ "tries": 1,
+ "verdict": null
+}

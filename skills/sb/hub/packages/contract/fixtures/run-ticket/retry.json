@@ -14,10 +14,12 @@
   "model": "opus",
   "reason": "no commit after 000000000"
  },
+ "review": null,
  "run": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one",
  "state": "retry",
  "stop": null,
  "stops": 0,
  "tree": null,
- "tries": 1
+ "tries": 1,
+ "verdict": null
 }

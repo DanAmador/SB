@@ -89,8 +89,13 @@ export type Installed = z.infer<typeof Installed>;
 
 // ---- the queue ----
 
-export const ItemState = z.enum(["queued", "running", "recheck", "done", "failed", "skipped"]);
+/** review: its commit and checks passed and the Opus second pass judges it against its Done when. */
+export const ItemState = z.enum(["queued", "running", "review", "recheck", "done", "failed", "skipped"]);
 export type ItemState = z.infer<typeof ItemState>;
+
+/** The Opus second pass's judgement of a ticket against its Done when: only finished resolves it. */
+export const Verdict = z.enum(["finished", "partly", "not met"]);
+export type Verdict = z.infer<typeof Verdict>;
 
 export const CheckRun = z.strictObject({
   cmd: z.string(),
@@ -126,11 +131,18 @@ const itemFields = {
   resume: z.strictObject({ agent: z.string(), log: z.string(), why: z.string() }).optional(),
   stops: z.number().int().optional(),
   digested: z.boolean().optional(),
-  /** recheck: how many times its checks ran again, and when they next do (null: waiting for the Recheck button). */
-  rechecks: z.number().int().optional(),
+  /** recheck: how many times its checks (or its review) ran again, and when they next do (null: waiting for the
+   * Recheck button). rechecks is null once a review starts afresh. */
+  rechecks: z.number().int().nullable().optional(),
   recheck_at: Seconds.nullable().optional(),
   media: z.array(z.string()).optional(),
   checks: z.array(CheckRun).optional(),
+  /** The second pass's verdict once it gave one (null while none). */
+  verdict: Verdict.nullable().optional(),
+  /** Its review file, <run>/<num>-review.md, once the review started. */
+  review: z.string().nullable().optional(),
+  /** The hub's own check that passed, kept while the review runs (or waits to run again); null after. */
+  checked: z.string().nullable().optional(),
   /** obsidian:// links to its notes, added by the TypeScript server (links.ts). */
   links: Links,
 };

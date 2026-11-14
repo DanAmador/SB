@@ -116,17 +116,55 @@ def brief(t, map_plain_words, run_folder, repo, branch):
         "out": t["out"] or "anything outside the ticket", "paths": ", ".join(t["paths"]),
         "done_when": t["done_when"], "checks": "\n".join(f"- {c}" for c in t["checks"]), "run_folder": str(run_folder),
     }
-    text = re.sub(r"\A<!--.*?-->\n+", "", BRIEF_TEMPLATE.read_text(encoding="utf-8"), flags=re.S)
+    return _fill(BRIEF_TEMPLATE, values)
+
+
+REVIEW_TEMPLATE = Path(__file__).resolve().parent.parent / "templates" / "review-brief.md"
+VERDICTS = ("finished", "partly", "not met")
+DIFF_MAX = 60000  # characters of the commit's diff handed to the review inline; the rest it reads with git
+NO_CHANGE = re.compile(r"^#{1,6}\s*No change needed\s*$", re.M | re.I)
+
+
+def _fill(template, values):
+    """A brief template with each {name} filled; a line whose value is empty is dropped, an unknown name raises."""
+    text = re.sub(r"\A<!--.*?-->\n+", "", Path(template).read_text(encoding="utf-8"), flags=re.S)
     out = []
     for line in text.split("\n"):
         names = re.findall(r"\{(\w+)\}", line)
         unknown = [n for n in names if n not in values]
         if unknown:
-            raise KeyError(f"session-brief.md names {unknown[0]}, which the hub cannot fill")
+            raise KeyError(f"{Path(template).name} names {unknown[0]}, which the hub cannot fill")
         if any(not values[n] for n in names):
             continue
         out.append(re.sub(r"\{(\w+)\}", lambda m: values[m.group(1)], line))
     return "\n".join(out).rstrip("\n") + "\n"
+
+
+def review_brief(ticket_text, repo, sha, diff, report_path, report_text, review_file):
+    """The second pass's prompt: templates/review-brief.md filled with the ticket as `sbmap show` prints it, the
+    commit's diff (cut at DIFF_MAX; the review reads the rest itself) and the worker's report."""
+    if len(diff) > DIFF_MAX:
+        diff = diff[:DIFF_MAX] + f"\n... cut at {DIFF_MAX} characters: read the rest with git show"
+    values = {
+        "ticket": ticket_text.strip() or "(sbmap could not show the ticket)", "repo": str(repo),
+        "commit_line": f"Commit {sha}, in {repo}." if sha else
+        "The worker made no commit: its report says no change was needed, or it was research.",
+        "diff_cmd": f"`git -C {repo} show {sha}`" if sha else "",
+        "diff": diff.strip() or "(no change)", "report_path": str(report_path),
+        "report": report_text.strip() or "(the worker wrote no report)", "review_file": str(review_file),
+    }
+    return _fill(REVIEW_TEMPLATE, values)
+
+
+def review_verdict(text):
+    """The verdict a review file ends with (`Verdict: finished|partly|not met`, its last such line), else None."""
+    found = re.findall(r"^\W*verdict\W*:?\W*(finished|partly|not met)\W*$", text or "", re.M | re.I)
+    return found[-1].lower() if found else None
+
+
+def review_findings(text):
+    """The review's `- ` lines, one per Done-when item, for the ticket's comment."""
+    return [l.strip() for l in (text or "").splitlines() if l.strip().startswith("- ")]
 
 
 def _under(f, paths):
@@ -178,6 +216,9 @@ def verdict(t, repo, base_sha, run=subprocess.run, report=None, first_base=None)
             sha = next((s.strip() for s, body in es if wanted & {l.strip() for l in body.splitlines()}), None)
     if not sha and t.get("type") == "research" and report and Path(report).is_file() and Path(report).stat().st_size:
         return True, "research: no commit needed, the findings are in the worker's report", None
+    if not sha and report and Path(report).is_file() and NO_CHANGE.search(Path(report).read_text(encoding="utf-8",
+                                                                                                  errors="replace")):
+        return True, "no change needed: the worker made no commit and says why in its report", None
     if not entries and not sha:
         return False, f"no commit after {base_sha[:9]}", None
     if not sha:

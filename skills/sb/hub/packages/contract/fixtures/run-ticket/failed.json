@@ -11,10 +11,12 @@
  "note": "no commit after 000000000",
  "report": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one/1.md",
  "retry": null,
+ "review": null,
  "run": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one",
  "state": "failed",
  "stop": null,
  "stops": 0,
  "tree": null,
- "tries": 2
+ "tries": 2,
+ "verdict": null
 }

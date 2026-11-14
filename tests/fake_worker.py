@@ -9,12 +9,23 @@ its arguments (the log keeps them), and does what FAKE_WORKER_MODE says:
   stray    commit a file outside the ticket's paths, with the trailer, exit 0
   commit-limit  commit as `commit` does, then print a usage-limit line and exit 1
   nothing  commit nothing, exit 1
+  no-change  commit nothing, write the report the brief names with a `## No change needed` heading, exit 0
   limit    print a usage-limit line, exit 1 (with FAKE_WORKER_RESET set, first a rate_limit_event whose 5-hour
            window is rejected until then)
   slow     commit as `commit` does, then sleep FAKE_WORKER_SLEEP seconds (default 2) before its result, exit 0
   auth     print the expired-login failure (an assistant message and an error result), exit 1
   job      a prompt, not a ticket: print a result naming the prompt's first line and the folder it was told, exit 0
   hang     start a child that sleeps, write both pids to FAKE_WORKER_PIDS, sleep past any limit
+
+A brief that names a review file (`Write your review to: <path>`, templates/review-brief.md) makes it the fake
+reviewer instead, whatever the mode: FAKE_REVIEW says what it does (default finished):
+
+  finished | partly | not met   write one line per Done-when item and that verdict, exit 0
+  none     write the item lines but no verdict, exit 0
+  crash    write nothing, exit 1
+  slow     sleep FAKE_REVIEW_SLEEP seconds (default 2), then as finished
+
+Every review it runs appends a line to FAKE_REVIEW_CALLS when that is set.
 
 Printed as `claude -p --output-format stream-json` does: the result is the last line. FAKE_WORKER_USAGE="0.30>0.45"
 adds a rate_limit_event with 5-hour use 0.30 at the start and 0.45 just before the result (resetsAt from
@@ -50,6 +61,30 @@ def result(obj):
     print(json.dumps(obj), flush=True)
 
 
+def reviewer(path):
+    """The fake second pass: FAKE_REVIEW's verdict in the review file the brief names."""
+    mode = os.environ.get("FAKE_REVIEW", "finished")
+    if os.environ.get("FAKE_REVIEW_CALLS"):
+        with open(os.environ["FAKE_REVIEW_CALLS"], "a", encoding="utf-8") as f:
+            f.write(mode + "\n")
+    if mode == "crash":
+        print(json.dumps({"type": "result", "is_error": True, "result": "crashed"}), flush=True)
+        return 1
+    if mode == "slow":
+        time.sleep(float(os.environ.get("FAKE_REVIEW_SLEEP") or 2))
+        mode = "finished"
+    met = "met" if mode == "finished" else "not met: the fake reviewer found no test for it"
+    lines = ["# Review", "", "- It works.: " + met]
+    if mode == "partly":
+        lines.append("- The commit names the ticket: met")
+    if mode != "none":
+        lines += ["", "Verdict: " + mode]
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    result({"type": "result", "subtype": "success", "is_error": False, "result": "Verdict: {} {}".format(mode, path)})
+    return 0
+
+
 def main():
     argv = sys.argv[1:]
     brief = argv[argv.index("-p") + 1]
@@ -60,6 +95,9 @@ def main():
     if brief == "reply ok":  # the hub's usage probe
         print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "result": "ok"}))
         return 0
+    review = re.search(r"^Write your review to: (.+)$", brief, re.M)
+    if review:
+        return reviewer(review.group(1).strip())
     if os.environ.get("FAKE_WORKER_USAGE"):
         event(float(os.environ["FAKE_WORKER_USAGE"].split(">")[0]))
     mode = os.environ.get("FAKE_WORKER_MODE", "commit")
@@ -83,6 +121,12 @@ def main():
         return 0
     if mode == "job":
         result({"type": "result", "subtype": "success", "is_error": False, "result": "did: " + brief.splitlines()[0]})
+        return 0
+    if mode == "no-change":
+        report = re.search(r"^- Write your report to (\S+?):", brief, re.M).group(1)
+        with open(report, "w", encoding="utf-8") as f:
+            f.write("# {}\n\n## No change needed\n\nIt already works: the fake looked.\n".format(ticket))
+        result({"type": "result", "subtype": "success", "is_error": False, "result": "no change needed"})
         return 0
     if mode == "nothing":
         result({"type": "result", "subtype": "success", "is_error": True, "result": "gave up"})

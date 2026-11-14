@@ -20,10 +20,12 @@
  "note": "resolved, commit 000000000",
  "report": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one/1.md",
  "retry": null,
+ "review": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one/1-review.md",
  "run": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one",
  "state": "done",
  "stop": null,
  "stops": 0,
  "tree": null,
- "tries": 1
+ "tries": 1,
+ "verdict": "finished"
 }

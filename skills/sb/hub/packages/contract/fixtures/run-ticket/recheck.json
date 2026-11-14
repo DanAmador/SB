@@ -18,10 +18,12 @@
  "note": "check could not run: sh -c 'exit 75' exited 75 (the tool it needs did not answer)",
  "report": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one/1.md",
  "retry": null,
+ "review": null,
  "run": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one",
  "state": "recheck",
  "stop": null,
  "stops": 0,
  "tree": null,
- "tries": 1
+ "tries": 1,
+ "verdict": null
 }

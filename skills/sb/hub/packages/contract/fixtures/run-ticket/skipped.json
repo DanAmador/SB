@@ -11,10 +11,12 @@
  "note": "claimed: claimed by someone, 2026-11-13 01:00",
  "report": null,
  "retry": null,
+ "review": null,
  "run": null,
  "state": "skipped",
  "stop": null,
  "stops": 0,
  "tree": null,
- "tries": 1
+ "tries": 1,
+ "verdict": null
 }

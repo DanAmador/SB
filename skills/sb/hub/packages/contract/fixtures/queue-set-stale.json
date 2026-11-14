@@ -13,6 +13,7 @@
           "agent": null,
           "base_sha": "3fea00e95453cf271189dc8924ebcd942426162f",
           "branch": null,
+          "checked": null,
           "checks": [
             {
               "cmd": "true",
@@ -38,14 +39,18 @@
           "paths": null,
           "pid": null,
           "pid_start": null,
+          "recheck_at": null,
+          "rechecks": null,
           "repo": "/fixture/repo",
+          "review": "/fixture/Vault/wayfinder/repo/runs/2026-11-13-one/1-review.md",
           "run": "/fixture/Vault/wayfinder/repo/runs/2026-11-13-one",
           "runner": "main",
           "started": 1794528000.0,
           "state": "done",
           "title": "A",
           "tree": null,
-          "tries": 0
+          "tries": 0,
+          "verdict": "finished"
         },
         {
           "agent": null,
@@ -73,7 +78,7 @@
       "paused": true,
       "runs": {},
       "seeded": true,
-      "version": 12
+      "version": 14
     },
     "stale": true
   },
@@ -82,7 +87,7 @@
     "keys": [
       "repo/one#2"
     ],
-    "version": 11
+    "version": 13
   },
   "route": "POST /api/queue/set",
   "status": 409

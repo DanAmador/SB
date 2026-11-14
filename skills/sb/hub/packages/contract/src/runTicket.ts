@@ -4,12 +4,15 @@
  * decides what runs next; Python runs it and answers with these.
  */
 import { z } from "zod";
-import { CheckRun, Seconds } from "./schemas.ts";
+import { CheckRun, Seconds, Verdict } from "./schemas.ts";
 
 /**
  * done: resolved; failed: left open with a comment; skipped: never started (not ready, claimed, gone) or changed
  * while it ran; retry: run it again on `retry.model`; stopped: its agent hit a usage limit or a logout, run it
- * again on any agent that fits.
+ * again on any agent that fits; recheck: a check exited 75, or the review could not run (crashed, ran too long or
+ * wrote no verdict): the commit and the claim stay and only that runs again. A ticket whose checks passed is
+ * judged by the Opus review: finished resolves it (done), partly or not met leave it open (failed, `verdict` says
+ * which).
  */
 export const RunTicketState = z.enum(["done", "failed", "skipped", "retry", "stopped", "recheck"]);
 export type RunTicketState = z.infer<typeof RunTicketState>;
@@ -46,6 +49,10 @@ export const RunTicketResult = z.strictObject({
   run: z.string().nullable(),
   tree: z.string().nullable(),
   branch: z.string().nullable(),
+  /** The Opus review's verdict; null when none ran or it gave none. */
+  verdict: Verdict.nullable(),
+  /** Its review file in the run folder, when it wrote one. */
+  review: z.string().nullable(),
 });
 export type RunTicketResult = z.infer<typeof RunTicketResult>;
 

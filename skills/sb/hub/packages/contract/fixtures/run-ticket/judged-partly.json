@@ -1,0 +1,29 @@
+{
+ "agent": "main",
+ "base": "0000000000000000000000000000000000000000",
+ "branch": null,
+ "checks": [
+  {
+   "cmd": "true",
+   "code": 0,
+   "secs": 0.5,
+   "tail": ""
+  }
+ ],
+ "commit": "0000000000000000000000000000000000000000",
+ "key": "repo/one#1",
+ "log": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one/1.log",
+ "media": [],
+ "model": "sonnet",
+ "note": "judged partly by the Opus review: It works.: not met: the fake reviewer found no test for it",
+ "report": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one/1.md",
+ "retry": null,
+ "review": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one/1-review.md",
+ "run": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one",
+ "state": "failed",
+ "stop": null,
+ "stops": 0,
+ "tree": null,
+ "tries": 1,
+ "verdict": "partly"
+}

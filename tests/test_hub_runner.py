@@ -108,11 +108,13 @@ class RunnerCase(unittest.TestCase):
         patcher = mock.patch.dict(os.environ, env)
         patcher.start()
         self.addCleanup(patcher.stop)
-        for k in ("SB_HUB_PORT", "SB_HUB_AGENT", "SB_HUB_PARENT", "FAKE_WORKER_MODE", "CLAUDE_CONFIG_DIR"):
+        for k in ("SB_HUB_PORT", "SB_HUB_AGENT", "SB_HUB_PARENT", "FAKE_WORKER_MODE", "CLAUDE_CONFIG_DIR", "FAKE_REVIEW",
+                  "FAKE_REVIEW_CALLS"):
             os.environ.pop(k, None)
         self.repos = {folder: self.root / repo for folder, repo, *_ in self.MAPS}
         self.clock = Clock(START)
-        self.mode, self.modes, self.launched = "commit", {}, []
+        self.mode, self.modes, self.launched, self.reviewed = "commit", {}, [], []
+        self.verdicts = {}  # item key -> what its fake second pass does (FAKE_REVIEW), default finished
         self.hub = Hub(self.root / "hub", now=self.clock, launcher=self.launcher)
         with self.hub._lock:
             self.hub._data["installed"] = {n: {"kind": "claude", "dir": str(self.root / (".claude-" + n)), "model": None,
@@ -129,9 +131,15 @@ class RunnerCase(unittest.TestCase):
         return r
 
     def launcher(self, agent, brief, repo, model, env, log):
+        """Workers go to `launched`, second passes (a brief naming a review file) to `reviewed`."""
         key = env["SB_HUB_AGENT"]
-        self.launched.append({"key": key, "model": model, "brief": brief, "agent": agent, "log": log})
-        return sbhub.launch(agent, brief, repo, model, {**env, "FAKE_WORKER_MODE": self.modes.get(key, self.mode)}, log)
+        review = "\nWrite your review to: " in brief
+        (self.reviewed if review else self.launched).append(
+            {"key": key, "model": model, "brief": brief, "agent": agent, "log": log})
+        fake = {"FAKE_WORKER_MODE": self.modes.get(key, self.mode)}
+        if key in self.verdicts:
+            fake["FAKE_REVIEW"] = self.verdicts[key]
+        return sbhub.launch(agent, brief, repo, model, {**env, **fake}, log)
 
     # ---- reading the result ----
 
@@ -297,9 +305,10 @@ class TicketLoopTest(RunnerCase):
         # due: still no answer, so waiting again
         self.tick_later(61)
         self.assertEqual((self.calls(), self.state_of("repo/one#1"), self.items()["repo/one#1"]["rechecks"]), (2, "recheck", 1))
-        # due again: it answers, the ticket resolves with the same commit
+        # due again: it answers, the review judges it and the ticket resolves with the same commit
         self.tick_later(sbhub.RECHECK_EVERY + 1)
-        self.assertEqual((self.calls(), self.state_of("repo/one#1")), (3, "done"))
+        self.assertEqual((self.calls(), self.state_of("repo/one#1")), (3, "review"))
+        self.until(lambda: self.state_of("repo/one#1") == "done")
         self.assertEqual(self.items()["repo/one#1"]["commit"], item["commit"])
         self.assertNotIn(1, self.open_tickets())
         self.assertEqual([x["key"] for x in self.launched].count("repo/one#1"), 1)  # the worker ran once
@@ -338,6 +347,127 @@ class TicketLoopTest(RunnerCase):
     def ticket_text(self, num, folder="repo/one"):
         f = next((self.vault / "wayfinder" / folder / "issues").glob("{:03d}*.md".format(num)))
         return f.read_text(encoding="utf-8")
+
+
+class ReviewTest(RunnerCase):
+    """The second pass: once a ticket's commit and checks passed, an Opus session (the fake reviewer) judges it
+    against its Done when, and only `finished` resolves it."""
+
+    def ticket_text(self, num, folder="repo/one"):
+        f = next((self.vault / "wayfinder" / folder / "issues").glob("{:03d}*.md".format(num)))
+        return f.read_text(encoding="utf-8")
+
+    def tick_later(self, secs):
+        self.clock.t += secs
+        self.sup.tick()
+
+    def sha(self, num):
+        return git(self.repos["repo/one"], "log", "-1", "--format=%H", "--grep", "^Ticket: repo/one/{:03d}".format(num))
+
+    def test_a_finished_verdict_resolves_the_ticket_with_its_commit_and_the_review_file_is_on_the_item(self):
+        self.modes = {"repo/one#2": "hang"}
+        self.resume()
+        self.until(lambda: self.state_of("repo/one#1") == "done")
+        item, sha = self.items()["repo/one#1"], self.sha(1)
+        self.assertEqual((item["commit"], item["verdict"], item.get("checked")), (sha, "finished", None))
+        # (4) the review file is in the run folder and its path is on the item
+        self.assertEqual(item["review"], str(Path(item["run"]) / "1-review.md"))
+        self.assertIn("Verdict: finished", Path(item["review"]).read_text(encoding="utf-8"))
+        self.assertTrue((Path(item["run"]) / "1-review.log").is_file())
+        done = next(self.vault.glob("wayfinder/repo/one/issues/done/001*.md")).read_text(encoding="utf-8")
+        self.assertIn(sha, done)
+        self.assertIn("The Opus review judged it finished: " + item["review"], done)
+        # the review is briefed with the ticket, the commit's diff and the worker's report, and told to change nothing
+        brief = self.reviewed[0]["brief"]
+        self.assertIn("#1: A", brief)  # sbmap show
+        self.assertIn("work for repo/one/001", brief)  # the diff
+        self.assertIn("## Hub checks", brief)  # the worker's report, with the hub's checks appended
+        self.assertIn("Change no code, commit nothing", brief)
+        self.assertEqual(Path(self.reviewed[0]["log"]).name, "1-review.log")
+
+    def test_partly_and_not_met_leave_the_ticket_open_with_the_findings_and_name_the_verdict(self):
+        self.verdicts = {"repo/one#1": "partly", "repo/one#2": "not met"}
+        self.resume()
+        self.until(lambda: self.state_of("repo/one#1") == "failed" and self.state_of("repo/one#2") == "failed")
+        tickets = self.open_tickets()
+        for num, verdict in ((1, "partly"), (2, "not met")):
+            item, sha = self.items()["repo/one#{}".format(num)], self.sha(num)
+            self.assertEqual((item["verdict"], item["commit"]), (verdict, sha))
+            self.assertTrue(item["note"].startswith("judged {} by the Opus review: It works.".format(verdict)),
+                            item["note"])
+            self.assertEqual((tickets[num]["status"], tickets[num]["claimed_by"]), ("open", None))
+            text = self.ticket_text(num)
+            self.assertIn("Opus review judged this ticket {} against its Done when".format(verdict), text)
+            self.assertIn("- It works.: not met: the fake reviewer found no test for it", text)
+            self.assertIn("The commit {} is left where it landed.".format(sha[:9]), text)
+            self.assertIn(sha, git(self.repos["repo/one"], "log", "--format=%H"))  # the commit stays
+            self.assertEqual(item["review"], str(Path(item["run"]) / "{}-review.md".format(num)))
+        self.assertIn("A: failed, judged partly by the Opus review", self.board())
+        self.assertEqual(self.items()["repo/one#2"]["note"].count("not met"), 2)  # the verdict, and the item
+
+    def test_the_reviewer_runs_on_opus_for_a_sonnet_ticket_and_an_opus_ticket(self):
+        self.sb("set", "repo/one", "002", "tier=opus", "--no-sync")
+        self.resume()
+        self.until(lambda: self.state_of("repo/one#1") == "done" and self.state_of("repo/one#2") == "done")
+        self.assertEqual([(x["key"], x["model"]) for x in self.launched], [("repo/one#1", "sonnet"), ("repo/one#2", "opus")])
+        self.assertEqual([(x["key"], x["model"]) for x in self.reviewed], [("repo/one#1", "opus"), ("repo/one#2", "opus")])
+        log = Path(self.reviewed[0]["log"]).read_text(encoding="utf-8")
+        self.assertIn('"--model", "opus"', log)  # the real launch's flags
+        self.assertIn('"CLAUDE_CONFIG_DIR": "{}"'.format(self.root / ".claude-main"), log)  # the worker's own account
+
+    def counting_check(self):
+        script = self.root / "count.sh"
+        script.write_text('n=$(cat "{c}" 2>/dev/null || echo 0); echo $((n+1)) > "{c}"\n'.format(c=self.root / "calls"))
+        return "sh " + str(script)
+
+    def test_a_review_without_a_verdict_keeps_the_commit_and_the_claim_and_a_recheck_runs_the_review_only(self):
+        self.sb("set", "repo/one", "001", "tier=opus", "checks=" + self.counting_check(), "--no-sync")
+        self.modes, self.verdicts = {"repo/one#2": "hang"}, {"repo/one#1": "none"}
+        self.resume()
+        self.until(lambda: self.state_of("repo/one#1") == "recheck")
+        item, sha = self.items()["repo/one#1"], self.sha(1)
+        self.assertTrue(item["note"].startswith("review could not run: its review file names no verdict; "), item["note"])
+        self.assertIn("the review runs again at", item["note"])
+        self.assertEqual((item["commit"], item["verdict"], item["rechecks"]), (sha, None, 0))
+        self.assertEqual(self.open_tickets()[1]["status"], "claimed")  # neither resolved nor released
+        self.assertNotIn("Opus review judged", self.ticket_text(1))
+        self.assertEqual(int((self.root / "calls").read_text()), 1)
+        # a crash on the next look is the same: could not run, counted as a recheck
+        self.verdicts["repo/one#1"] = "crash"
+        self.tick_later(sbhub.RECHECK_EVERY + 1)
+        self.until(lambda: self.state_of("repo/one#1") == "recheck")
+        item = self.items()["repo/one#1"]
+        self.assertTrue(item["note"].startswith("review could not run: it exited 1 and wrote no review file"), item["note"])
+        self.assertEqual((item["commit"], item["rechecks"]), (sha, 1))
+        # the recheck that answers: the review runs again, never the worker or the checks, and the ticket resolves
+        self.verdicts["repo/one#1"] = "finished"
+        self.tick_later(sbhub.RECHECK_EVERY + 1)
+        self.until(lambda: self.state_of("repo/one#1") == "done")
+        self.assertEqual((self.items()["repo/one#1"]["commit"], self.items()["repo/one#1"]["verdict"]), (sha, "finished"))
+        self.assertEqual([x["key"] for x in self.launched].count("repo/one#1"), 1)
+        self.assertEqual([x["key"] for x in self.reviewed], ["repo/one#1"] * 3)
+        self.assertEqual(int((self.root / "calls").read_text()), 1)
+        self.assertNotIn(1, self.open_tickets())
+
+    def test_a_ticket_that_waits_on_one_judged_not_met_is_not_started(self):
+        self.sb("block", "repo/one", "002", "1", "--no-sync")
+        self.verdicts = {"repo/one#1": "not met"}
+        self.hub.queue_set(["repo/one#1", "repo/one#2"], self.hub.state()["queue"]["version"])
+        self.hub.queue_pause(False)
+        self.until(lambda: self.state_of("repo/one#1") in ("review", "failed"))
+        self.assertEqual(self.state_of("repo/one#2"), "queued")  # it waits for the verdict
+        self.until(lambda: self.state_of("repo/one#1") == "failed")
+        self.until(lambda: self.state_of("repo/one#2") == "skipped")
+        self.assertIn("blocked: after A", self.items()["repo/one#2"]["note"])
+        self.assertEqual([x["key"] for x in self.launched], ["repo/one#1"])
+
+    def test_a_review_holds_up_no_other_ticket(self):
+        self.verdicts, self.modes = {"repo/one#1": "slow"}, {"repo/one#2": "hang"}
+        os.environ["FAKE_REVIEW_SLEEP"] = "3"
+        self.addCleanup(os.environ.pop, "FAKE_REVIEW_SLEEP", None)
+        self.resume()
+        self.until(lambda: self.state_of("repo/one#1") == "review" and self.state_of("repo/one#2") == "running")
+        self.until(lambda: self.state_of("repo/one#1") == "done")
 
 
 class StopsTest(RunnerCase):
@@ -454,7 +584,7 @@ class StopsTest(RunnerCase):
         self.assertEqual([x["key"] for x in self.launched], ["repo/one#1"])
         self.assertTrue(alive(pid))
         end = time.time() + 10
-        while time.time() < end and hub.state()["queue"]["items"][0]["state"] == "running":
+        while time.time() < end and hub.state()["queue"]["items"][0]["state"] in ("running", "review"):
             sup.tick()
             time.sleep(0.05)
         item = hub.state()["queue"]["items"][0]
