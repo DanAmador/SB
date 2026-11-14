@@ -120,6 +120,16 @@ that ran install: run it again after those change.
 - To keep one account out of a night, set the pool without it (`sbhub queue agents assembio`); an
   item already running there finishes.
 
+## The night on the phone
+
+While `serve` runs the queue it keeps one note, `wayfinder/runs/hub-now.md`, in the vault: when it was written
+and whether the queue is running, paused or empty; then a block per map with something running, queued or
+ended today (counts, the running tickets with minutes and last step, the next ones, the ended ones with their
+outcome and reason, each a wikilink); last, what waits for you. It is rewritten whole (a hidden temp file,
+then a rename) on every start and end and at most every 5 minutes while something runs, and only when its
+text changed apart from the time, because Obsidian Sync uploads every change and keeps old versions against
+a 1 GB limit. Sync uploads only while Obsidian is open on the Mac.
+
 ## Chat widgets (MCP)
 
 When the `sbhub` MCP server is connected (`./install.sh --hub`):

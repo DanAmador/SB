@@ -73,6 +73,7 @@ from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+import sbhub_snapshot
 import sbqueue
 import sbruns
 
@@ -80,6 +81,7 @@ AGENT_FIELDS = ("name", "title", "asked", "project", "role", "parent", "ticket",
 ALERT_STATES = ("needs you", "blocked")
 SILENT_LIMIT = 86400
 ORPHAN_LOCK_LIMIT = 600
+NOTE_EVERY = 300  # hub-now.md is rewritten at most this often while something runs
 TRAIL_KEPT = 40  # actions kept per agent for the Sessions view
 TRAIL_LIMIT = 600  # an ended agent's trail goes this long after it ended
 DONE_WORKER_LIMIT = 600  # a finished worker stays on its session's row this long
@@ -1862,6 +1864,8 @@ class Supervisor:
         self.procs = {}
         self.streak = (None, 0)  # the failure class of the last failed items in a row, and how many
         self.stopped = False
+        self.note_path = None  # wayfinder/runs/hub-now.md: `serve` sets it; tests leave the vault alone
+        self.note_seen = (None, 0, "")  # (the queue's shape at the last write, when, the text written)
 
     @property
     def limit(self):
@@ -1915,6 +1919,61 @@ class Supervisor:
             self._probe()
             self._start()
         self._digest()
+        self._night_note()
+
+    def _night_note(self):
+        """Keep the vault's hub-now.md current: on a start or an end, and every NOTE_EVERY s while something
+        runs; written only when its text (not its time) changed. Never breaks a tick."""
+        if self.note_path is None:
+            return
+        try:
+            now = self.hub.now()
+            with self.hub._lock:
+                q = json.loads(json.dumps(self.hub._data["queue"]))
+            shape = (q["paused"], tuple((i["key"], i["state"]) for i in q["items"]))
+            old, at, text = self.note_seen
+            running = any(i["state"] == "running" for i in q["items"])
+            if shape == old and not (running and now - at >= NOTE_EVERY):
+                return
+            rows = self.hub._tcache[1] or []
+            files, steps, reports = {}, {}, {}
+            vault = _vault()
+            rel = lambda p: Path(p).resolve().relative_to(vault.resolve()).with_suffix("").as_posix()
+            for i in q["items"]:
+                if i["kind"] != "ticket" or "#" not in i["key"]:
+                    continue
+                try:
+                    _, _, row, path = self.hub._ticket_file(i["key"])
+                    files[i["key"]] = rel(path) if path else None
+                    if not files[i["key"]]:
+                        del files[i["key"]]
+                except (KeyError, ValueError):
+                    pass
+                if i.get("run"):
+                    r = Path(i["run"]) / "{}.md".format(i["key"].rsplit("#", 1)[-1])
+                    if r.is_file():
+                        try:
+                            reports[i["key"]] = rel(r)
+                        except ValueError:
+                            pass
+                if i["state"] == "running":
+                    try:
+                        acts = self.hub.trail(i["key"])["actions"]
+                        steps[i["key"]] = (acts[-1]["label"] or acts[-1]["tool"]) if acts else ""
+                    except KeyError:
+                        pass
+            new = sbhub_snapshot.night_note(q, rows, now, files, steps, reports)
+            self.note_seen = (shape, now, new)
+            if not sbhub_snapshot.same_note(text or self._note_on_disk(), new):
+                sbhub_snapshot.write_whole(self.note_path, new)
+        except Exception as e:  # the phone note is a convenience: a tick goes on without it
+            print("sbhub: hub-now.md not written: {}: {}".format(type(e).__name__, e), file=sys.stderr)
+
+    def _note_on_disk(self):
+        try:
+            return Path(self.note_path).read_text(encoding="utf-8")
+        except OSError:
+            return None
 
     # ---- usage: each account's readings, its learned costs, the brake, the login ----
 
@@ -3058,6 +3117,8 @@ def serve(port):
     supervisor = None
     if lock is not None and os.environ.get("SB_HUB_QUEUE") != "0":
         supervisor = Supervisor(hub, port=server.server_address[1])
+        if (_vault() / "wayfinder").is_dir():
+            supervisor.note_path = _vault() / "wayfinder" / "runs" / "hub-now.md"
         threading.Thread(target=supervisor.run, daemon=True).start()
     signal.signal(signal.SIGTERM, _interrupt)  # a stopped hub kills its workers, as Ctrl-C does
     print("sb hub on http://127.0.0.1:{}".format(server.server_address[1]), flush=True)
