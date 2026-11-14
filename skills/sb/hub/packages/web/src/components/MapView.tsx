@@ -2,8 +2,8 @@
  * A map's landing: its tickets as a graph, one box each, an arrow for every "after", the colour for the state. Below
  * 768 px the same tickets show as a plain list. A box opens the ticket panel; a blocker in another map opens that map.
  */
-import { IconCircleCheck, IconLayoutList, IconTopologyStar3, IconClock, IconListNumbers, IconLock, IconMessageQuestion, IconPlayerPlay, IconPlayerSkipForward, IconSquareCheck, IconTicket, IconAlertTriangle, IconBan } from "@tabler/icons-react";
-import { Background, Controls, Handle, MarkerType, Position, ReactFlow, type Edge, type Node, type NodeProps } from "@xyflow/react";
+import { IconFocusCentered, IconCircleCheck, IconLayoutList, IconTopologyStar3, IconClock, IconListNumbers, IconLock, IconMessageQuestion, IconPlayerPlay, IconPlayerSkipForward, IconSquareCheck, IconTicket, IconAlertTriangle, IconBan } from "@tabler/icons-react";
+import { Background, Controls, Handle, MarkerType, Panel, Position, ReactFlow, useReactFlow, type Edge, type Node, type NodeProps } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useSyncExternalStore } from "react";
 import type * as React from "react";
@@ -11,8 +11,9 @@ import type { MapTicket } from "@sb-hub/contract";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useMapRoute } from "@/lib/hub.ts";
 import { setLink, useLink } from "@/lib/link.ts";
-import { layoutMap, MAP_STATES, MAP_STATE_WORDS, type MapNode, type MapState } from "@/lib/map.ts";
+import { dimmed, layoutMap, MAP_STATES, MAP_STATE_WORDS, minutesOf, pickedState, stateCounts, type MapNode, type MapState } from "@/lib/map.ts";
 import { cn } from "@/lib/utils";
+import { useBoard } from "./context.tsx";
 import { TicketTable } from "./TicketTable.tsx";
 
 const WIDE = "(min-width: 768px)";
@@ -26,10 +27,10 @@ const subscribe = (fn: () => void): (() => void) => {
 const useWide = (): boolean => useSyncExternalStore(subscribe, () => matchMedia(WIDE).matches, () => true);
 
 const TONE: Readonly<Record<MapState, string>> = {
-  done: "border-ok/70 bg-ok/10",
-  running: "border-brand bg-brand-soft",
-  queued: "border-brand/60 bg-card",
-  "can run": "border-foreground/60 bg-card",
+  done: "border-ok/40 bg-ok/5 text-muted-foreground",
+  running: "border-brand bg-brand text-background ring-4 ring-brand/30",
+  queued: "border-brand bg-card",
+  "can run": "border-dashed border-muted-foreground/70 bg-card",
   stuck: "border-border bg-muted text-muted-foreground",
   decision: "border-warn bg-warn-soft",
   "no checks": "border-destructive/60 bg-destructive-soft",
@@ -48,12 +49,19 @@ const STATE_ICON: Readonly<Record<MapState, typeof IconTicket>> = {
 const TYPE_ICON: Readonly<Record<string, typeof IconTicket>> = { grilling: IconMessageQuestion, task: IconSquareCheck, other: IconPlayerSkipForward };
 
 const keyOf = (map: string, t: { num: number }): string => `${map}#${String(t.num)}`;
-const stateLine = (n: MapNode): string => {
-  const place = n.state === "queued" && n.ticket?.place != null ? ` ${String(n.ticket.place)}` : "";
-  return n.ticket === null ? n.other : `${MAP_STATE_WORDS[n.state]}${place}`;
+/** The state in words: a running ticket with its minutes so far. A queued one's place is its own badge. */
+const stateLine = (n: MapNode, mins: number | null): string => {
+  if (n.ticket === null) return n.other;
+  return n.state === "running" && mins !== null ? `${MAP_STATE_WORDS[n.state]} · ${String(mins)} min` : MAP_STATE_WORDS[n.state];
 };
 /** The box's second line. The box has no aria-label: its name is its visible words. */
-const footOf = (n: MapNode): string => (n.ticket === null ? n.other : `${String(n.ticket.num)} · ${stateLine(n)}`);
+const footOf = (n: MapNode, mins: number | null): string => (n.ticket === null ? n.other : `${String(n.ticket.num)} · ${stateLine(n, mins)}`);
+
+/** A queued ticket's place in the whole line. */
+function Place({ n }: { n: MapNode }): React.JSX.Element | null {
+  if (n.state !== "queued" || n.ticket?.place == null) return null;
+  return <span className="ml-auto shrink-0 rounded-full bg-brand px-1.5 py-0.5 text-[10px] leading-none font-semibold text-background">next {n.ticket.place}</span>;
+}
 
 function TypeGlyph({ type }: { type: string | null }): React.JSX.Element {
   const Glyph = TYPE_ICON[type ?? "other"] ?? IconTicket;
@@ -68,10 +76,14 @@ function StateGlyph({ s }: { s: MapState }): React.JSX.Element {
 interface Data extends Record<string, unknown> {
   n: MapNode;
   map: string;
+  /** Minutes its run has taken so far; null when it is not running. */
+  mins: number | null;
+  /** Another state is picked: the box steps back. */
+  dim: boolean;
 }
 
 function Box({ data }: NodeProps<Node<Data>>): React.JSX.Element {
-  const { n, map } = data;
+  const { n, map, mins, dim } = data;
   const t = n.ticket;
   const open = (): void => {
     if (t !== null) setLink({ t: keyOf(map, t) });
@@ -87,6 +99,7 @@ function Box({ data }: NodeProps<Node<Data>>): React.JSX.Element {
           "flex size-full flex-col justify-between rounded-lg border-2 px-2.5 py-1.5 text-left text-xs shadow-sm focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none",
           t === null ? "border-dashed border-border bg-background text-muted-foreground" : TONE[n.state],
           n.state === "running" && "motion-safe:animate-pulse",
+          dim && "opacity-25",
         )}
       >
         <span className="flex items-start gap-1.5">
@@ -95,7 +108,8 @@ function Box({ data }: NodeProps<Node<Data>>): React.JSX.Element {
         </span>
         <span className="flex items-center gap-1 text-[10px] leading-none">
           {t !== null && <StateGlyph s={n.state} />}
-          <span className="truncate">{footOf(n)}</span>
+          <span className={cn("truncate", n.state === "running" && "font-semibold")}>{footOf(n, mins)}</span>
+          <Place n={n} />
         </span>
       </button>
       <Handle type="source" position={Position.Bottom} isConnectable={false} className="!pointer-events-none !opacity-0" />
@@ -104,16 +118,29 @@ function Box({ data }: NodeProps<Node<Data>>): React.JSX.Element {
 }
 const nodeTypes = { box: Box };
 
-function Legend(): React.JSX.Element {
+/** The legend is the filter: one chip per state with its count; a pressed chip dims every other box. */
+function Legend({ counts, pick }: { counts: Readonly<Record<MapState, number>>; pick: MapState | null }): React.JSX.Element {
   return (
-    <ul aria-label="Legend" className="flex flex-wrap gap-x-3 gap-y-1.5 text-xs text-muted-foreground">
+    <ul aria-label="Legend" className="flex flex-wrap items-center gap-1.5 text-xs">
       {MAP_STATES.map((s) => (
-        <li key={s} className="flex items-center gap-1.5">
-          <span className={cn("size-3 rounded border-2", TONE[s].split(" ").filter((c) => c.startsWith("border") || c.startsWith("bg")).join(" "))} aria-hidden />
-          {MAP_STATE_WORDS[s]}
+        <li key={s}>
+          <button
+            type="button"
+            aria-pressed={pick === s}
+            disabled={counts[s] === 0}
+            onClick={() => { setLink({ ms: pick === s ? "" : s }); }}
+            className={cn(
+              "inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:opacity-40",
+              pick === s ? "border-foreground bg-foreground text-background" : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <span className={cn("size-3 rounded border-2", TONE[s].split(" ").filter((c) => c.startsWith("border") || c.startsWith("bg")).join(" "))} aria-hidden />
+            {MAP_STATE_WORDS[s]}
+            <span className="tabular-nums font-semibold">{counts[s]}</span>
+          </button>
         </li>
       ))}
-      <li className="flex items-center gap-1.5">
+      <li className="flex items-center gap-1.5 px-1 text-muted-foreground">
         <span className="size-3 rounded border-2 border-dashed border-border" aria-hidden />
         After a ticket in another map
       </li>
@@ -121,7 +148,7 @@ function Legend(): React.JSX.Element {
   );
 }
 
-function List({ map, tickets, states }: { map: string; tickets: readonly MapTicket[]; states: ReadonlyMap<number, MapNode> }): React.JSX.Element {
+function List({ map, tickets, states, pick, minsOf }: { map: string; tickets: readonly MapTicket[]; states: ReadonlyMap<number, MapNode>; pick: MapState | null; minsOf: (n: MapNode) => number | null }): React.JSX.Element {
   return (
     <ol aria-label="Tickets of the map" className="flex flex-col gap-1.5">
       {tickets.map((t) => {
@@ -132,19 +159,38 @@ function List({ map, tickets, states }: { map: string; tickets: readonly MapTick
             <button
               type="button"
               onClick={() => { setLink({ t: keyOf(map, t) }); }}
-              className={cn("flex w-full flex-col gap-0.5 rounded-lg border-2 px-3 py-2 text-left text-sm focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none", TONE[n.state])}
+              className={cn("flex w-full flex-col gap-0.5 rounded-lg border-2 px-3 py-2 text-left text-sm focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none", TONE[n.state], dimmed(n, pick) && "opacity-25")}
             >
               <span className="font-medium">{t.num} {t.title}</span>
               <span className="flex items-center gap-1 text-xs">
                 <StateGlyph s={n.state} />
-                {stateLine(n)}
+                <span className={cn(n.state === "running" && "font-semibold")}>{stateLine(n, minsOf(n))}</span>
                 {t.blocked_by.length > 0 && <span> · after {t.blocked_by.map((b) => (b.num === null ? b.title : b.map === map ? String(b.num) : `${b.map}#${String(b.num)}`)).join(", ")}</span>}
+                <Place n={n} />
               </span>
             </button>
           </li>
         );
       })}
     </ol>
+  );
+}
+
+/** A button inside the graph that brings the running boxes into view; nothing when none runs. */
+function ShowRunning({ ids }: { ids: readonly string[] }): React.JSX.Element | null {
+  const flow = useReactFlow();
+  if (ids.length === 0) return null;
+  return (
+    <Panel position="top-right">
+      <button
+        type="button"
+        onClick={() => { void flow.fitView({ nodes: ids.map((id) => ({ id })), padding: 0.4, maxZoom: 1, duration: 300 }); }}
+        className="inline-flex h-7 items-center gap-1.5 rounded-full border bg-card px-3 text-xs text-muted-foreground shadow-sm hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+      >
+        <IconFocusCentered className="size-3.5" aria-hidden />
+        Show running
+      </button>
+    </Panel>
   );
 }
 
@@ -172,8 +218,11 @@ function Switch({ table }: { table: boolean }): React.JSX.Element {
 
 export function MapView({ map }: { map: string }): React.JSX.Element {
   const q = useMapRoute(map);
-  const table = useLink().mv === "table";
+  const link = useLink();
+  const table = link.mv === "table";
+  const pick = pickedState(link.ms);
   const wide = useWide();
+  const { state } = useBoard();
   const route = q.data;
   if (route === undefined) {
     return q.isError ? (
@@ -184,13 +233,26 @@ export function MapView({ map }: { map: string }): React.JSX.Element {
   }
   const layout = layoutMap(route);
   const own = new Map(layout.nodes.filter((n) => n.ticket !== null).map((n) => [n.ticket?.num ?? 0, n]));
+  const counts = stateCounts(layout.nodes);
+  const minsOf = (n: MapNode): number | null => {
+    if (n.state !== "running" || n.ticket === null) return null;
+    const key = keyOf(map, n.ticket);
+    return minutesOf(state.queue.items.find((i) => i.key === key && i.state === "running")?.started, state.now);
+  };
+  const running = new Set(layout.nodes.filter((n) => n.state === "running" && n.ticket !== null).map((n) => n.id));
   const nodes: Node<Data>[] = layout.nodes.map((n) => ({
-    id: n.id, type: "box", position: { x: n.x, y: n.y }, width: n.w, height: n.h, data: { n, map }, draggable: false, connectable: false, focusable: false, style: { pointerEvents: "all" },
+    id: n.id, type: "box", position: { x: n.x, y: n.y }, width: n.w, height: n.h, data: { n, map, mins: minsOf(n), dim: dimmed(n, pick) }, draggable: false, connectable: false, focusable: false, style: { pointerEvents: "all" },
   }));
-  const edges: Edge[] = layout.edges.map((e) => ({
-    id: e.id, source: e.from, target: e.to, focusable: false, markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16 },
-    style: { stroke: "var(--muted-foreground)", strokeWidth: 1.5 }, ...(layout.nodes.find((n) => n.id === e.from)?.ticket === null ? { style: { stroke: "var(--muted-foreground)", strokeWidth: 1.5, strokeDasharray: "5 4" } } : {}),
-  }));
+  // an arrow into or out of a running box takes the accent, so the eye follows what the run feeds
+  const edges: Edge[] = layout.edges.map((e) => {
+    const hot = running.has(e.from) || running.has(e.to);
+    const stroke = hot ? "var(--brand)" : "var(--muted-foreground)";
+    const dashed = layout.nodes.find((n) => n.id === e.from)?.ticket === null;
+    return {
+      id: e.id, source: e.from, target: e.to, focusable: false, markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16, ...(hot ? { color: "var(--brand)" } : {}) },
+      style: { stroke, strokeWidth: hot ? 2.5 : 1.5, ...(dashed ? { strokeDasharray: "5 4" } : {}), ...(pick !== null && !hot ? { opacity: 0.3 } : {}) },
+    };
+  });
   return (
     <section aria-label={`Route of ${route.title}`} className="flex flex-col gap-2">
       <h2 className="flex items-center gap-2 text-sm font-semibold">
@@ -198,6 +260,7 @@ export function MapView({ map }: { map: string }): React.JSX.Element {
         Route of {route.title}
         <Switch table={table} />
       </h2>
+      {!table && <Legend counts={counts} pick={pick} />}
       {table ? (
         <TicketTable />
       ) : wide ? (
@@ -219,12 +282,12 @@ export function MapView({ map }: { map: string }): React.JSX.Element {
           >
             <Background gap={24} />
             <Controls showInteractive={false} />
+            <ShowRunning ids={[...running]} />
           </ReactFlow>
         </div>
       ) : (
-        <List map={map} tickets={route.tickets} states={own} />
+        <List map={map} tickets={route.tickets} states={own} pick={pick} minsOf={minsOf} />
       )}
-      {!table && <Legend />}
     </section>
   );
 }

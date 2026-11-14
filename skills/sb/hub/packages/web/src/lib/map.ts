@@ -10,7 +10,7 @@ export const MAP_STATE_WORDS: Readonly<Record<MapState, string>> = {
   done: "Done",
   running: "Running",
   queued: "Queued",
-  "can run": "Can run",
+  "can run": "Not queued",
   stuck: "Stuck behind another",
   decision: "Needs a decision",
   "no checks": "No checks",
@@ -27,6 +27,22 @@ export function mapState(t: Pick<MapTicket, "state" | "status" | "place">, hasCh
   if (t.state === "blocked" || t.state === "not ready") return "stuck";
   return hasChecks ? "can run" : "no checks";
 }
+
+/** How many tickets of the map show each state; a blocker in another map is not one of them. */
+export function stateCounts(nodes: readonly Pick<MapNode, "state" | "ticket">[]): Record<MapState, number> {
+  const out = Object.fromEntries(MAP_STATES.map((s) => [s, 0])) as Record<MapState, number>;
+  for (const n of nodes) if (n.ticket !== null) out[n.state] += 1;
+  return out;
+}
+
+/** The state picked in the page link, or null when the link names none. */
+export const pickedState = (ms: string): MapState | null => MAP_STATES.find((s) => s === ms) ?? null;
+
+/** A picked state dims every box of another state, and every blocker elsewhere; nothing picked dims nothing. */
+export const dimmed = (n: Pick<MapNode, "state" | "ticket">, pick: MapState | null): boolean => pick !== null && (n.ticket === null || n.state !== pick);
+
+/** Whole minutes a run has taken so far; null when it has no start. */
+export const minutesOf = (started: number | null | undefined, now: number): number | null => (started == null ? null : Math.max(0, Math.floor((now - started) / 60)));
 
 export const NODE_W = 220;
 export const NODE_H = 68;

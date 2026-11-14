@@ -32,6 +32,8 @@ export interface Link {
   readonly kind: string;
   /** A map's landing: "table" for the ticket table, else the graph. */
   readonly mv: string;
+  /** The map graph's picked state chip: boxes of another state dim. Empty picks none. */
+  readonly ms: string;
   /** The ticket table's chosen state, type and priority, its sort ("-title" is descending) and its page. */
   readonly ts: string;
   readonly tt: string;
@@ -40,7 +42,7 @@ export interface Link {
   readonly page: string;
 }
 
-const KEYS = ["view", "q", "project", "map", "s", "t", "run", "pic", "range", "out", "pics", "acct", "model", "sess", "kind", "mv", "ts", "tt", "tp", "sort", "page"] as const;
+const KEYS = ["view", "q", "project", "map", "s", "t", "run", "pic", "range", "out", "pics", "acct", "model", "sess", "kind", "mv", "ms", "ts", "tt", "tp", "sort", "page"] as const;
 
 export function readLink(search: string): Link {
   const s = new URLSearchParams(search);
@@ -63,6 +65,7 @@ export function readLink(search: string): Link {
     sess: s.get("sess") ?? "",
     kind: s.get("kind") ?? "",
     mv: s.get("mv") === "table" ? "table" : "",
+    ms: s.get("ms") ?? "",
     ts: s.get("ts") ?? "",
     tt: s.get("tt") ?? "",
     tp: s.get("tp") ?? "",

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MapRoute, MapTicket } from "@sb-hub/contract";
-import { layoutMap, mapState } from "./map.ts";
+import { dimmed, layoutMap, mapState, minutesOf, pickedState, stateCounts } from "./map.ts";
 
 const t = (num: number, after: number[] = [], more: Partial<MapTicket> = {}): MapTicket => ({
   num, title: `Ticket ${String(num)}`, type: "task", status: "open", state: "ready", why: "", priority: null, tier: "sonnet", place: null,
@@ -67,5 +67,36 @@ describe("mapState", () => {
     expect(mapState(t(1), true)).toBe("can run");
     expect(mapState(t(1), false)).toBe("no checks");
     expect(mapState(t(1, [], { state: "out of scope", status: "out-of-scope" }), true)).toBe("out of scope");
+  });
+});
+
+describe("the legend's counts and the picked state", () => {
+  const nodes = layoutMap(fixture).nodes;
+
+  it("counts the map's own tickets per state, not the blockers elsewhere", () => {
+    const c = stateCounts(nodes);
+    expect(c).toMatchObject({ done: 1, running: 1, queued: 1, "can run": 3, stuck: 1, decision: 0, "no checks": 0, "out of scope": 0 });
+    expect(Object.values(c).reduce((a, b) => a + b, 0)).toBe(7);
+  });
+
+  it("reads a state from the page link and ignores anything else", () => {
+    expect(pickedState("running")).toBe("running");
+    expect(pickedState("can run")).toBe("can run");
+    expect(pickedState("")).toBeNull();
+    expect(pickedState("nonsense")).toBeNull();
+  });
+
+  it("dims every box of another state and every blocker elsewhere; nothing picked dims nothing", () => {
+    expect(nodes.some((n) => dimmed(n, null))).toBe(false);
+    const lit = nodes.filter((n) => !dimmed(n, "running"));
+    expect(lit.map((n) => n.id)).toEqual(["2"]);
+    expect(nodes.filter((n) => n.ticket === null).every((n) => dimmed(n, "stuck"))).toBe(true);
+  });
+
+  it("gives a run's whole minutes so far, and none without a start", () => {
+    expect(minutesOf(1000, 1000 + 12 * 60 + 59)).toBe(12);
+    expect(minutesOf(1000, 990)).toBe(0);
+    expect(minutesOf(null, 1000)).toBeNull();
+    expect(minutesOf(undefined, 1000)).toBeNull();
   });
 });
