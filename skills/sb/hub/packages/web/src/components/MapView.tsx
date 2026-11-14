@@ -2,7 +2,7 @@
  * A map's landing: its tickets as a graph, one box each, an arrow for every "after", the colour for the state. Below
  * 768 px the same tickets show as a plain list. A box opens the ticket panel; a blocker in another map opens that map.
  */
-import { IconCircleCheck, IconClock, IconListNumbers, IconLock, IconMessageQuestion, IconPlayerPlay, IconPlayerSkipForward, IconSquareCheck, IconTicket, IconAlertTriangle, IconBan } from "@tabler/icons-react";
+import { IconCircleCheck, IconLayoutList, IconTopologyStar3, IconClock, IconListNumbers, IconLock, IconMessageQuestion, IconPlayerPlay, IconPlayerSkipForward, IconSquareCheck, IconTicket, IconAlertTriangle, IconBan } from "@tabler/icons-react";
 import { Background, Controls, Handle, MarkerType, Position, ReactFlow, type Edge, type Node, type NodeProps } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useSyncExternalStore } from "react";
@@ -10,9 +10,10 @@ import type * as React from "react";
 import type { MapTicket } from "@sb-hub/contract";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useMapRoute } from "@/lib/hub.ts";
-import { setLink } from "@/lib/link.ts";
+import { setLink, useLink } from "@/lib/link.ts";
 import { layoutMap, MAP_STATES, MAP_STATE_WORDS, type MapNode, type MapState } from "@/lib/map.ts";
 import { cn } from "@/lib/utils";
+import { TicketTable } from "./TicketTable.tsx";
 
 const WIDE = "(min-width: 768px)";
 const subscribe = (fn: () => void): (() => void) => {
@@ -147,8 +148,31 @@ function List({ map, tickets, states }: { map: string; tickets: readonly MapTick
   );
 }
 
+/** Graph | Table: which the map shows, kept in the page link. */
+function Switch({ table }: { table: boolean }): React.JSX.Element {
+  const one = (on: boolean, words: string, Glyph: typeof IconTicket, mv: string): React.JSX.Element => (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={on}
+      onClick={() => { setLink({ mv }); }}
+      className={cn("inline-flex h-7 items-center gap-1.5 rounded-full px-3 text-xs transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none", on ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground")}
+    >
+      <Glyph className="size-3.5" aria-hidden />
+      {words}
+    </button>
+  );
+  return (
+    <div role="radiogroup" aria-label="Show the map as" className="ml-auto inline-flex rounded-full border p-0.5">
+      {one(!table, "Graph", IconTopologyStar3, "")}
+      {one(table, "Table", IconLayoutList, "table")}
+    </div>
+  );
+}
+
 export function MapView({ map }: { map: string }): React.JSX.Element {
   const q = useMapRoute(map);
+  const table = useLink().mv === "table";
   const wide = useWide();
   const route = q.data;
   if (route === undefined) {
@@ -172,8 +196,11 @@ export function MapView({ map }: { map: string }): React.JSX.Element {
       <h2 className="flex items-center gap-2 text-sm font-semibold">
         <IconClock className="size-4 text-muted-foreground" aria-hidden />
         Route of {route.title}
+        <Switch table={table} />
       </h2>
-      {wide ? (
+      {table ? (
+        <TicketTable />
+      ) : wide ? (
         <div data-testid="map-graph" className="h-[min(70dvh,720px)] min-h-80 w-full rounded-lg border bg-card">
           <ReactFlow
             nodes={nodes}
@@ -197,7 +224,7 @@ export function MapView({ map }: { map: string }): React.JSX.Element {
       ) : (
         <List map={map} tickets={route.tickets} states={own} />
       )}
-      <Legend />
+      {!table && <Legend />}
     </section>
   );
 }

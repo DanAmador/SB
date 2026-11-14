@@ -1,28 +1,22 @@
 /**
- * Queue: a search on top that finds open tickets by project, map or title and queues them in one click (or a drag
- * into Up next); below it Up next in order, dragged to reorder, each with its account and a remove button.
+ * Queue: a table of tickets on top, filtered, sorted and ticked, with a bar that queues or acts on the ticked (a row
+ * also drags into Up next); below it Up next in order, dragged to reorder, each with its account and a remove button.
  */
-import { IconArrowBackUp, IconChevronDown, IconChevronUp, IconClock, IconGripVertical, IconSearch, IconX } from "@tabler/icons-react";
+import { IconArrowBackUp, IconChevronDown, IconChevronUp, IconClock, IconGripVertical, IconX } from "@tabler/icons-react";
 import { useState } from "react";
 import type * as React from "react";
-import type { QueueItem, TicketRow } from "@sb-hub/contract";
+import type { QueueItem } from "@sb-hub/contract";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Skeleton } from "@/components/ui/skeleton";
-import { addable, blockerTitles, isScoped, scopeItems, firstLine, hm, itemProject, itemTitle, mapTitle, plural, projOf, searchTickets, showCounts, tkey, type Show } from "@/lib/board.ts";
-import { setLink, useLink } from "@/lib/link.ts";
+import { blockerTitles, isScoped, scopeItems, firstLine, hm, itemProject, itemTitle } from "@/lib/board.ts";
 import { cn } from "@/lib/utils";
-import { Empty, MapName, SectionTitle, TicketTitle } from "./bits.tsx";
-import { AccountPicker, QueueButton } from "./AccountPicker.tsx";
+import { SectionTitle, TicketTitle } from "./bits.tsx";
+import { AccountPicker } from "./AccountPicker.tsx";
+import { DRAG_TYPE, TicketTable } from "./TicketTable.tsx";
 import { useBoard } from "./context.tsx";
 
 /** What is being dragged: a found ticket to add, or a queued one to move. */
 type Drag = { kind: "add" | "move"; key: string } | null;
-const DRAG_TYPE = "application/x-sb-ticket";
-/** The search shows this many tickets, fewer before anything is typed so Up next stays in view; more means narrow it. */
-const SHOWN = 12;
-const SHOWN_IDLE = 5;
 /** Up next shows this many; the rest fold. */
 const NEXT = 10;
 
@@ -30,124 +24,9 @@ export function QueueView(): React.JSX.Element {
   const [drag, setDrag] = useState<Drag>(null);
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-8">
-      <Search drag={drag} setDrag={setDrag} />
+      <TicketTable drag={{ key: drag?.key, start: (key) => { setDrag({ kind: "add", key }); }, end: () => { setDrag(null); } }} />
       <UpNext drag={drag} setDrag={setDrag} />
     </div>
-  );
-}
-
-// ---- the search ----
-
-const SHOW_WORDS: readonly [Show, string][] = [
-  ["ready", "Can run"],
-  ["waits", "Needs a decision"],
-  ["later", "Not yet"],
-];
-
-function Search({ drag, setDrag }: { drag: Drag; setDrag: (d: Drag) => void }): React.JSX.Element {
-  const link = useLink();
-  const { tickets, ix } = useBoard();
-  const all = tickets ?? [];
-  const find = { q: link.q, p: link.project, m: link.map };
-  const hits = searchTickets(all, ix, { ...find, s: link.s });
-  const counts = showCounts(all, ix, find);
-  const filtered = Boolean(link.q || link.project || link.map);
-  const shown = hits.slice(0, filtered ? SHOWN : SHOWN_IDLE);
-  return (
-    <section aria-labelledby="find-title" className="flex flex-col gap-3">
-      <h2 id="find-title" className="sr-only">
-        Find a ticket to queue
-      </h2>
-      <div className="flex flex-col gap-2 sm:flex-row">
-        <div className="relative min-w-0 flex-1">
-          <IconSearch className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-          <Input
-            type="search"
-            data-find
-            className="h-9 w-full pl-9"
-            placeholder="Find an open ticket by project, map or title"
-            aria-label="Find an open ticket by project, map or title"
-            maxLength={200}
-            defaultValue={link.q}
-            onChange={(ev) => {
-              setLink({ q: ev.currentTarget.value.trim() });
-            }}
-          />
-        </div>
-      </div>
-      <div role="radiogroup" aria-label="Which open tickets" className="flex flex-wrap gap-1.5">
-        {SHOW_WORDS.map(([v, words]) => (
-          <button
-            key={v}
-            type="button"
-            role="radio"
-            aria-checked={link.s === v}
-            onClick={() => {
-              setLink({ s: v });
-            }}
-            className={cn(
-              "inline-flex h-7 items-center gap-1.5 rounded-full border px-3 text-xs transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-              link.s === v ? "border-foreground bg-foreground text-background" : "text-muted-foreground hover:border-foreground/40 hover:text-foreground",
-            )}
-          >
-            {words}
-            <span className="tabular-nums opacity-70">{counts[v]}</span>
-          </button>
-        ))}
-      </div>
-      {tickets === null ? (
-        <Skeleton className="h-11 w-full" />
-      ) : hits.length === 0 ? (
-        <Empty>{filtered ? "No open ticket here matches." : link.s === "ready" ? "Nothing can run yet: every open ticket waits on something." : "None."}</Empty>
-      ) : (
-        <ul aria-label="Found tickets" data-testid="found" className="flex flex-col divide-y rounded-xl border bg-card">
-          {shown.map((t) => (
-            <Found key={tkey(t)} t={t} drag={drag} setDrag={setDrag} />
-          ))}
-          {hits.length > shown.length && <li className="px-4 py-2 text-xs text-muted-foreground">{`${plural(hits.length - shown.length, "more ticket")}: type, or pick a project or map, to narrow it.`}</li>}
-        </ul>
-      )}
-    </section>
-  );
-}
-
-function Found({ t, drag, setDrag }: { t: TicketRow; drag: Drag; setDrag: (d: Drag) => void }): React.JSX.Element {
-  const { ix, qv, state, down, busy } = useBoard();
-  const key = tkey(t);
-  const item = state.queue.items.find((i) => i.key === key && (i.state === "queued" || i.state === "running"));
-  const can = item === undefined && addable(t, ix);
-  const after = blockerTitles(t, ix);
-  const why = item?.state === "running" ? "running now" : item ? `number ${String(qv.queuedKeys.indexOf(key) + 1)} in line` : after.length > 0 ? `after ${after.join(", ")}` : t.state === "waits for you" ? t.type : can ? "" : t.reason;
-  const draggable = can && !down && !busy;
-  return (
-    <li
-      draggable={draggable}
-      data-key={key}
-      onDragStart={(ev) => {
-        ev.dataTransfer.setData(DRAG_TYPE, key);
-        ev.dataTransfer.setData("text/plain", key);
-        ev.dataTransfer.effectAllowed = "move";
-        setDrag({ kind: "add", key });
-      }}
-      onDragEnd={() => {
-        setDrag(null);
-      }}
-      className={cn("flex items-center gap-3 px-4 py-2.5 first:rounded-t-xl last:rounded-b-xl", draggable && "cursor-grab", drag?.key === key && "opacity-40")}
-    >
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1">
-          <TicketTitle itemKey={key} links={t.links} className="line-clamp-2">
-            {t.title}
-          </TicketTitle>
-        </div>
-        <p className="truncate text-xs text-muted-foreground">
-          {`${projOf(t.map)} · `}
-          <MapName links={t.links} name={t.map.split("/").pop() ?? ""} title={mapTitle(t)} />
-          {why && ` · ${why}`}
-        </p>
-      </div>
-      {can && <QueueButton itemKey={key} title={t.title} />}
-    </li>
   );
 }
 
@@ -202,7 +81,7 @@ function UpNext({ drag, setDrag }: { drag: Drag; setDrag: (d: Drag) => void }): 
       </SectionTitle>
       {next.length === 0 ? (
         <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
-          {isScoped(scope) && qv.next.length > 0 ? "Nothing queued here. " : "Nothing queued. "} Find a ticket above and queue it, or drag it here.
+          {isScoped(scope) && qv.next.length > 0 ? "Nothing queued here. " : "Nothing queued. "} Tick tickets above and queue them, or drag one here.
         </div>
       ) : (
         <ol className="flex flex-col divide-y rounded-lg border bg-card">

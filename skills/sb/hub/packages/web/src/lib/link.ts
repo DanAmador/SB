@@ -30,9 +30,17 @@ export interface Link {
   /** Sessions: the open session's id, and the filter (workers or chats; empty is all). */
   readonly sess: string;
   readonly kind: string;
+  /** A map's landing: "table" for the ticket table, else the graph. */
+  readonly mv: string;
+  /** The ticket table's chosen state, type and priority, its sort ("-title" is descending) and its page. */
+  readonly ts: string;
+  readonly tt: string;
+  readonly tp: string;
+  readonly sort: string;
+  readonly page: string;
 }
 
-const KEYS = ["view", "q", "project", "map", "s", "t", "run", "pic", "range", "out", "pics", "acct", "model", "sess", "kind"] as const;
+const KEYS = ["view", "q", "project", "map", "s", "t", "run", "pic", "range", "out", "pics", "acct", "model", "sess", "kind", "mv", "ts", "tt", "tp", "sort", "page"] as const;
 
 export function readLink(search: string): Link {
   const s = new URLSearchParams(search);
@@ -54,6 +62,12 @@ export function readLink(search: string): Link {
     model: s.get("model") ?? "",
     sess: s.get("sess") ?? "",
     kind: s.get("kind") ?? "",
+    mv: s.get("mv") === "table" ? "table" : "",
+    ts: s.get("ts") ?? "",
+    tt: s.get("tt") ?? "",
+    tp: s.get("tp") ?? "",
+    sort: s.get("sort") ?? "",
+    page: s.get("page") ?? "",
   };
 }
 

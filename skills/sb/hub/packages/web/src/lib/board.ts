@@ -2,7 +2,7 @@
  * The board's grouping rules, pure: what goes in Questions, which sessions are yours, what is ready, queued,
  * running, done and failed. The views only draw what these return; board.test.ts pins every rule.
  */
-import type { AgentRow, Installed, Message, Question, QueueItem, State, TicketRow } from "@sb-hub/contract";
+import type { AgentRow, Installed, Links, MapTicket, Message, Question, QueueItem, State, TicketRow } from "@sb-hub/contract";
 
 /** A ticket's estimate when the queue's end is reckoned: 1.5 h. */
 export const ESTIMATE = 5400;
@@ -215,6 +215,149 @@ export function filterOptions(tickets: readonly TicketRow[], f: Pick<Find, "p" |
   for (const t of tickets) if (!f.p || projOf(t.map) === f.p) maps.set(t.map, mapTitle(t));
   if (f.m && !maps.has(f.m)) maps.set(f.m, f.m);
   return { projects: [...projects].sort(), maps: [...maps].sort((x, y) => x[1].localeCompare(y[1])) };
+}
+
+// ---- the ticket table ----
+
+/** The words a row's state shows, in the order the chips and the state sort use. */
+export const ROW_STATES = ["can run now", "can run after another", "queued", "running", "needs a decision", "no checks", "claimed", "stuck behind another", "done", "out of scope"] as const;
+export type RowState = (typeof ROW_STATES)[number];
+/** A page of the table holds this many rows; more are paged. */
+export const PAGE = 200;
+
+/** One ticket as the table shows it: a map's ticket, finished or not, or an open ticket from any map. */
+export interface TableRow {
+  readonly key: string;
+  readonly map: string;
+  readonly mapTitle: string;
+  readonly num: number;
+  readonly title: string;
+  readonly type: string;
+  readonly state: RowState;
+  /** 1-based place among the queued tickets, or null. */
+  readonly place: number | null;
+  readonly priority: string | null;
+  readonly tier: string;
+  readonly links: Links | undefined;
+}
+
+/** The queued keys in order and the running ones: what a row's state is read against. */
+export interface Live {
+  readonly queued: readonly string[];
+  readonly running: ReadonlySet<string>;
+}
+export const liveOf = (state: Pick<State, "queue">): Live => ({
+  queued: state.queue.items.filter((i) => i.state === "queued").map((i) => i.key),
+  running: new Set(state.queue.items.filter((i) => i.state === "running").map((i) => i.key)),
+});
+
+/** The one state an open ticket shows. "Can run" is split: now (nothing it waits on) and after another. */
+export function openState(t: TicketRow, ix: TicketIndex, live: Live): { state: RowState; place: number | null } {
+  const key = tkey(t);
+  if (live.running.has(key)) return { state: "running", place: null };
+  const at = live.queued.indexOf(key);
+  if (at >= 0) return { state: "queued", place: at + 1 };
+  if (ix.doneKeys.has(key)) return { state: "done", place: null };
+  if (t.state === "waits for you") return { state: "needs a decision", place: null };
+  if (t.status === "claimed" || t.state === "claimed") return { state: "claimed", place: null };
+  if (!addable(t, ix)) return { state: "stuck behind another", place: null };
+  if (t.checks.length === 0) return { state: "no checks", place: null };
+  return { state: t.state === "ready" ? "can run now" : "can run after another", place: null };
+}
+
+export function rowOfTicket(t: TicketRow, ix: TicketIndex, live: Live): TableRow {
+  const { state, place } = openState(t, ix, live);
+  return { key: tkey(t), map: t.map, mapTitle: mapTitle(t), num: t.num, title: t.title, type: t.type, state, place, priority: t.priority, tier: t.tier, links: t.links };
+}
+
+/** A ticket of one map's route: finished and left-out ones from their status, open ones as the board reads them. */
+export function rowOfMapTicket(map: string, title: string, hasChecks: boolean, t: MapTicket, ix: TicketIndex, live: Live): TableRow {
+  const key = `${map}#${String(t.num)}`;
+  const open = ix.byKey.get(key);
+  const base = { key, map, mapTitle: title === "" ? map : title, num: t.num, title: t.title, type: t.type, priority: t.priority, tier: t.tier, links: t.links };
+  if (t.status === "resolved" || t.state === "done") return { ...base, state: "done", place: null };
+  if (t.status === "out-of-scope" || t.state === "out of scope") return { ...base, state: "out of scope", place: null };
+  if (open) return { ...rowOfTicket(open, ix, live), links: t.links };
+  const state: RowState = t.status === "claimed" ? "claimed" : t.place !== null ? "queued" : t.state === "waits for you" ? "needs a decision" : t.state === "ready" ? (hasChecks ? "can run now" : "no checks") : "stuck behind another";
+  return { ...base, state, place: t.place };
+}
+
+export interface TableFilter {
+  readonly q: string;
+  readonly state: string;
+  readonly type: string;
+  readonly priority: string;
+}
+export type Facet = "state" | "type" | "priority";
+/** A priority is a letter; a ticket without one shows as this. */
+export const NO_PRIORITY = "none";
+const facetOf = (r: TableRow, f: Facet): string => (f === "priority" ? (r.priority ?? NO_PRIORITY) : r[f]);
+
+/** Rows that match every word typed (over map, title and number) and every chosen state, type and priority; `skip` leaves one facet out. */
+export function filterRows(rows: readonly TableRow[], f: TableFilter, skip?: Facet): TableRow[] {
+  const words = f.q.toLowerCase().split(/\s+/).filter(Boolean);
+  return rows.filter((r) => {
+    for (const k of ["state", "type", "priority"] as const) if (k !== skip && f[k] !== "" && facetOf(r, k) !== f[k]) return false;
+    const hay = `${r.map} ${r.mapTitle} ${r.title} ${String(r.num)}`.toLowerCase();
+    return words.every((w) => hay.includes(w));
+  });
+}
+
+/** How many rows each chip holds: a facet counts under the words and the other two facets, never its own choice. */
+export function chipCounts(rows: readonly TableRow[], f: TableFilter): Readonly<Record<Facet, ReadonlyMap<string, number>>> {
+  const one = (facet: Facet): Map<string, number> => {
+    const m = new Map<string, number>();
+    for (const r of filterRows(rows, f, facet)) m.set(facetOf(r, facet), (m.get(facetOf(r, facet)) ?? 0) + 1);
+    return m;
+  };
+  return { state: one("state"), type: one("type"), priority: one("priority") };
+}
+
+export const SORTS = ["title", "map", "type", "state", "priority", "tier"] as const;
+export type Sort = (typeof SORTS)[number];
+/** A sort as the link holds it: a column, "-" before it for descending, "" for the map's own order. */
+export function parseSort(v: string): { by: Sort; desc: boolean } | null {
+  const desc = v.startsWith("-");
+  const by = SORTS.find((s) => s === (desc ? v.slice(1) : v));
+  return by === undefined ? null : { by, desc };
+}
+/** A click on a column: ascending, then descending, then the map's own order. */
+export function nextSort(now: string, by: Sort): string {
+  const cur = parseSort(now);
+  if (cur?.by !== by) return by;
+  return cur.desc ? "" : `-${by}`;
+}
+const sortKey = (r: TableRow, by: Sort): string | number => {
+  switch (by) {
+    case "title": return r.title.toLowerCase();
+    case "map": return r.mapTitle.toLowerCase();
+    case "type": return r.type;
+    case "state": return ROW_STATES.indexOf(r.state) * 1000 + (r.place ?? 0);
+    case "priority": return r.priority === null ? "zzzz" : r.priority.toLowerCase();
+    case "tier": return r.tier;
+  }
+};
+/** A sorted copy; a stable sort, so equal rows keep the map's order. */
+export function sortRows(rows: readonly TableRow[], sort: string): TableRow[] {
+  const s = parseSort(sort);
+  if (s === null) return [...rows];
+  const sign = s.desc ? -1 : 1;
+  return rows
+    .map((r, n) => [r, n] as const)
+    .sort(([a, i], [b, j]) => {
+      const x = sortKey(a, s.by);
+      const y = sortKey(b, s.by);
+      const c = typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y), undefined, { numeric: true });
+      return c !== 0 ? c * sign : i - j;
+    })
+    .map(([r]) => r);
+}
+
+/** The rows of one page, and how many pages there are; a page past the end is the last. */
+export function pageOf<T>(rows: readonly T[], page: number): { rows: T[]; page: number; pages: number } {
+  const pages = Math.max(1, Math.ceil(rows.length / PAGE));
+  const at = Math.min(Math.max(1, page), pages);
+  return { rows: rows.slice((at - 1) * PAGE, at * PAGE), page: at, pages };
 }
 
 // ---- queue items ----

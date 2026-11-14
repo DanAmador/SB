@@ -3,7 +3,7 @@
  * against the contract before it leaves. Run with `node e2e/fixture-server.ts` (Node strips the types).
  */
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { QueueMoveBody, QueueSetBody, RunDetail, RunSeenBody, MapRoute, RunsPage, SendBody, State, Tickets, Trail, addLinks, type LinkContext, type Message, type QueueItem, type TicketRow } from "@sb-hub/contract";
+import { QueueMoveBody, QueueSetBody, TicketActionBody, RunDetail, RunSeenBody, MapRoute, RunsPage, SendBody, State, Tickets, Trail, addLinks, type LinkContext, type Message, type QueueItem, type TicketRow } from "@sb-hub/contract";
 
 /** Every file the fixtures name exists; the server's own vault lookup is covered by the server's tests. */
 const ctx: LinkContext = { exists: () => true, real: (p) => p, findTicket: (map, num) => `/vault/${map}/issues/${String(num)}.md`, runs: {} };
@@ -29,6 +29,8 @@ const tickets = (): TicketRow[] => Tickets.parse(addLinks("GET /api/tickets", [
   ticket(1, "Draw the shop window", { map: "other/site", map_title: "The shop site", file: "/vault/other/site/issues/1.md" }),
   ticket(2, "Pick the shop's fonts", { map: "other/site", map_title: "The shop site", state: "waits for you", type: "grilling", file: "/vault/other/site/issues/2.md" }),
   ticket(3, "Write the shop's copy", { map: "other/site", map_title: "The shop site", status: "claimed", state: "claimed", reason: "claimed by hub main", file: "/vault/other/site/issues/3.md" }),
+  // a map of five tickets that can run, for the table's batch actions
+  ...["A", "B", "C", "D", "E"].map((l, n) => ticket(n + 1, `Batch ${l}`, { map: "demo/batch", map_title: "The batch map", priority: n < 2 ? "A" : null, file: `/vault/demo/batch/issues/${String(n + 1)}.md` })),
   ticket(1, "Sweep the old attic", { map: "other/old", map_title: "The old attic", status: "claimed", state: "claimed", reason: "claimed by hub main", file: "/vault/other/old/issues/1.md" }),
 ], ctx));
 
@@ -57,6 +59,8 @@ const item = (key: string, state: QueueItem["state"]): Raw<QueueItem> => ({
 });
 const RUN = "/vault/runs/2026-11-13-board";
 const start = now();
+/** Every ticket action the page posted, for the test to read. */
+const actions: { action: string; key: string; text: string }[] = [];
 const queue = {
   version: 1, seeded: true, paused: false, agent: "main", agents: ["main"],
   runs: { "demo/board": `${RUN}/2026-11-13-board.md` },
@@ -202,6 +206,14 @@ createServer((req, res) => {
       queue.items = [...queue.items.filter((i) => i.state !== "queued"), ...queued];
       queue.version += 1;
       { send(res, 200, addLinks("POST /api/queue/set", { ok: true, queue }, ctx)); return; }
+    }
+    if (req.method === "GET" && path === "/api/__actions") { send(res, 200, actions); return; }
+    if (req.method === "POST" && path?.startsWith("/api/ticket/") === true) {
+      const b = TicketActionBody.parse(await body(req));
+      if (b.text === "fail") { send(res, 400, { ok: false, error: "refused for the test" }); return; }
+      actions.push({ action: path.slice("/api/ticket/".length), key: b.key, text: b.text ?? "" });
+      send(res, 200, { ok: true });
+      return;
     }
     if (req.method === "POST" && path === "/api/__reset-seen") {
       seen.length = 0;

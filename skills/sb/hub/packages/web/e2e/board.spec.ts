@@ -52,11 +52,11 @@ test("a ticket found by the Queue's search and dragged into Up next lands at tha
   await page.goto("/next/?view=queue");
   const next = page.getByTestId("up-next");
   await expect(next.getByText("Show the queue in order")).toBeVisible();
-  await page.getByRole("searchbox", { name: /Find an open ticket/ }).fill("drag");
+  await page.getByRole("searchbox", { name: "Search the tickets" }).fill("drag");
   await expect(page).toHaveURL(/q=drag/);
-  const found = page.getByTestId("found");
-  await expect(found.getByRole("listitem")).toHaveCount(1);
-  await found.locator("li", { hasText: "Drag a ticket into the queue" }).dragTo(next.locator("li", { hasText: "Show the queue in order" }));
+  const found = page.getByTestId("ticket-rows");
+  await expect(found.getByRole("row")).toHaveCount(1);
+  await found.locator("tr", { hasText: "Drag a ticket into the queue" }).dragTo(next.locator("li", { hasText: "Show the queue in order" }));
   await expect(next.locator("li").first()).toContainText("Drag a ticket into the queue");
   await expect(next.locator("li").nth(1)).toContainText("Show the queue in order");
   await expect(page.getByRole("status")).toContainText("Queued.");
@@ -68,15 +68,16 @@ test("a ticket found by the Queue's search and dragged into Up next lands at tha
   expect(await queuedKeys(page)).toEqual(["demo/board#3", "demo/board#2"]);
 });
 
-test("the search's filters live in the page link; one click queues; the panel opens as a sheet", async ({ page }) => {
+test("the table's filters live in the page link; the panel opens as a sheet; one tick and Queue queues", async ({ page }) => {
   await page.goto("/next/?view=queue&q=header");
-  const found = page.getByTestId("found");
+  const found = page.getByTestId("ticket-rows");
   // the title opens the ticket in Obsidian
   await expect(found.getByRole("link", { name: "Draw the header", exact: true })).toHaveAttribute("href", "obsidian://open?path=%2Fvault%2Fdemo%2Fboard%2Fissues%2F1.md");
-  await page.getByRole("radio", { name: /Needs a decision/ }).click();
-  await expect(page).toHaveURL(/s=waits/);
-  await expect(page.getByText("No open ticket here matches.")).toBeVisible();
-  await page.getByRole("radio", { name: /Can run/ }).click();
+  await page.getByRole("button", { name: /^can run now/ }).click();
+  await expect(page).toHaveURL(/ts=can\+run\+now/);
+  await expect(found.getByRole("row")).toHaveCount(1);
+  await page.getByRole("button", { name: /^can run now/ }).click();
+  await expect(page).not.toHaveURL(/ts=/);
   await found.getByRole("button", { name: "Show details" }).click();
   await expect(page).toHaveURL(/t=demo%2Fboard%231/);
   const sheet = page.getByRole("dialog");
@@ -88,8 +89,11 @@ test("the search's filters live in the page link; one click queues; the panel op
   await page.keyboard.press("Escape");
   await expect(sheet).toHaveCount(0);
   await expect(page).not.toHaveURL(/t=/);
-  await found.getByRole("button", { name: "Queue Draw the header", exact: true }).click();
+  await found.getByRole("checkbox", { name: "Tick Draw the header" }).check();
+  await page.getByTestId("selection-bar").getByRole("button", { name: /^Queue 1/ }).click();
   await expect(page.getByTestId("up-next").getByText("Draw the header")).toBeVisible();
+  // queued, so no longer ticked: the bar is gone
+  await expect(page.getByTestId("selection-bar")).toHaveCount(0);
 });
 
 test("Waits for you: the question first, then the failed run in plain words, then the done run with its checks", async ({ page }) => {
@@ -155,8 +159,8 @@ test("the sidebar picks a map and every view narrows; the pick lives in the page
   // Queue: its search finds only this map's open tickets; Up next has none of the other map's
   await page.keyboard.press("2");
   await expect(page).toHaveURL(/view=queue/);
-  const found = page.getByTestId("found");
-  await expect(found.getByRole("listitem")).toHaveCount(1);
+  const found = page.getByTestId("ticket-rows");
+  await expect(found.getByRole("row")).toHaveCount(3);
   await expect(found).toContainText("Draw the shop window");
   await expect(found).not.toContainText("Draw the header");
   await expect(page.getByTestId("up-next")).not.toContainText("Show the queue in order");
@@ -532,6 +536,143 @@ test.describe("Map view", () => {
       await page.waitForTimeout(800);
       const dir = process.env.SB_SHOTS;
       if (dir !== undefined) await page.screenshot({ path: `${dir}/map-${scheme}-1440.png` });
+      const r = await new AxeBuilder({ page }).analyze();
+      const bad = r.violations.filter((v) => v.impact === "serious" || v.impact === "critical");
+      expect(bad.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`)).toEqual([]);
+    });
+  }
+});
+
+test.describe("Ticket table", () => {
+  const rowsOf = (page: Page) => page.getByTestId("ticket-rows").getByRole("row");
+  const bar = (page: Page) => page.getByTestId("selection-bar");
+  const tick = (page: Page, title: string) => page.getByRole("checkbox", { name: `Tick ${title}`, exact: true });
+
+  test("tick three tickets that can run, press Queue, and all three are queued", async ({ page }) => {
+    await page.goto("/next/?view=queue&project=demo&map=demo%2Fbatch");
+    await expect(rowsOf(page)).toHaveCount(5);
+    await expect(bar(page)).toHaveCount(0);
+    for (const l of ["A", "B", "C"]) await tick(page, `Batch ${l}`).check();
+    await expect(bar(page)).toContainText("3 tickets ticked");
+    await expect(bar(page).getByRole("button", { name: /^Queue 3/ })).toBeVisible();
+    // nothing ticked is queued yet, so Unqueue has nothing to do
+    await expect(bar(page).getByRole("button", { name: /^Unqueue 0/ })).toBeDisabled();
+    await bar(page).getByRole("button", { name: /^Queue 3/ }).click();
+    await expect(page.getByRole("status")).toContainText("Queued 3 tickets.");
+    expect(await queuedKeys(page)).toEqual(expect.arrayContaining(["demo/batch#1", "demo/batch#2", "demo/batch#3"]));
+    await expect(rowsOf(page).filter({ hasText: "Batch A" })).toContainText("queued, number");
+  });
+
+  test("tick two, Comment, and both notes carry the comment; a refusal is named by its title", async ({ page }) => {
+    await page.goto("/next/?view=queue&project=demo&map=demo%2Fbatch");
+    await tick(page, "Batch D").check();
+    await tick(page, "Batch E").check();
+    // Queue skips what is already queued: here none of the two, so it applies to both and Unqueue to none
+    await bar(page).getByRole("button", { name: /^Comment 2/ }).click();
+    await page.getByRole("textbox", { name: "Comment" }).fill("fail");
+    await page.getByRole("button", { name: "Comment on 2 tickets" }).click();
+    await expect(page.getByRole("alert").last()).toContainText("Commented on 0 of 2. Failed: Batch D (refused for the test); Batch E (refused for the test)");
+    await page.getByRole("textbox", { name: "Comment" }).fill("Checked by hand");
+    await page.getByRole("button", { name: "Comment on 2 tickets" }).click();
+    await expect(page.getByRole("status").last()).toContainText("Commented on 2 tickets.");
+    const actions = (await (await page.request.get("/api/__actions")).json()) as { action: string; key: string; text: string }[];
+    expect(actions.filter((a) => a.action === "comment" && a.text === "Checked by hand").map((a) => a.key).sort()).toEqual(["demo/batch#4", "demo/batch#5"]);
+    await expect(bar(page)).toHaveCount(0);
+  });
+
+  test("a button says how many it applies to and skips; Drop asks once and confirms with the count", async ({ page }) => {
+    await page.goto("/next/?view=queue&project=demo&map=demo%2Fbatch");
+    await tick(page, "Batch A").check(); // queued by the first test
+    await tick(page, "Batch D").check();
+    await expect(bar(page).getByRole("button", { name: /^Queue 1\s*skips 1/ })).toBeVisible();
+    await expect(bar(page).getByRole("button", { name: /^Unqueue 1\s*skips 1/ })).toBeVisible();
+    await expect(bar(page).getByRole("button", { name: /^Drop 1\s*skips 1/ })).toBeVisible();
+    await bar(page).getByRole("button", { name: /^Drop/ }).click();
+    await page.getByRole("textbox", { name: "Reason for dropping" }).fill("Not needed");
+    await page.getByRole("button", { name: "Drop 1 ticket", exact: true }).click();
+    await expect(page.getByRole("status").last()).toContainText("Dropped 1 ticket, skipped 1.");
+    const actions = (await (await page.request.get("/api/__actions")).json()) as { action: string; key: string }[];
+    expect(actions.filter((a) => a.action === "drop").map((a) => a.key)).toEqual(["demo/batch#4"]);
+  });
+
+  test("the 'can run now' chip's count is the fixture's ready count, apart from 'can run after another'", async ({ page }) => {
+    const state = (await (await page.request.get("/api/state")).json()) as { queue: { items: { key: string; state: string; kind: string }[] } };
+    const tickets = (await (await page.request.get("/api/tickets")).json()) as { map: string; num: number; state: string }[];
+    const busy = new Set(state.queue.items.filter((i) => ["queued", "running", "done"].includes(i.state)).map((i) => i.key));
+    const ready = tickets.filter((t) => t.map.startsWith("demo/") && t.state === "ready" && !busy.has(`${t.map}#${String(t.num)}`)).length;
+    expect(ready).toBeGreaterThan(0);
+    await page.goto("/next/?view=queue&project=demo");
+    const chip = page.getByRole("group", { name: "State" }).getByRole("button", { name: /^can run now/ });
+    await expect(chip).toContainText(String(ready));
+    await expect(page.getByRole("group", { name: "State" }).getByRole("button", { name: /^can run after another/ })).toHaveCount(0);
+    await chip.click();
+    await expect(rowsOf(page)).toHaveCount(ready);
+    await expect(page).toHaveURL(/ts=can\+run\+now/);
+    // a sort by a column header is kept in the link too
+    await page.getByRole("button", { name: "Title", exact: true }).click();
+    await expect(page).toHaveURL(/sort=title/);
+    const titles = await rowsOf(page).locator("td:nth-child(2) > div > a").allInnerTexts();
+    expect(titles).toEqual([...titles].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase())));
+  });
+
+  test("Space ticks the focused row, Shift-click a range, the header box every row shown", async ({ page }) => {
+    await page.goto("/next/?view=queue&project=demo&map=demo%2Fbatch&sort=title");
+    await expect(rowsOf(page)).toHaveCount(5);
+    await rowsOf(page).first().focus();
+    await page.keyboard.press("Space");
+    await expect(tick(page, "Batch A")).toBeChecked();
+    await expect(bar(page)).toContainText("1 ticket ticked");
+    await tick(page, "Batch D").click({ modifiers: ["Shift"] });
+    for (const l of ["A", "B", "C", "D"]) await expect(tick(page, `Batch ${l}`)).toBeChecked();
+    await expect(tick(page, "Batch E")).not.toBeChecked();
+    await expect(bar(page)).toContainText("4 tickets ticked");
+    await page.keyboard.press("Space");
+    await page.getByRole("checkbox", { name: "Tick every ticket shown" }).check();
+    await expect(bar(page)).toContainText("5 tickets ticked");
+    await page.getByRole("checkbox", { name: "Tick every ticket shown" }).uncheck();
+    await expect(bar(page)).toHaveCount(0);
+  });
+
+  test("a map shows Graph | Table, kept in the link, with finished tickets in the table", async ({ page }) => {
+    await page.goto("/next/?project=demo&map=demo%2Fboard");
+    await expect(page.getByTestId("map-graph")).toBeVisible();
+    await page.getByRole("radio", { name: "Table" }).click();
+    await expect(page).toHaveURL(/mv=table/);
+    await expect(page.getByTestId("map-graph")).toHaveCount(0);
+    await expect(rowsOf(page)).toHaveCount(8);
+    await expect(rowsOf(page).filter({ hasText: "Draw the header" })).toContainText("done");
+    await expect(rowsOf(page).filter({ hasText: "Show the queue in order" })).toContainText("queued");
+    await page.reload();
+    await expect(page.getByRole("radio", { name: "Table" })).toHaveAttribute("aria-checked", "true");
+    await page.getByRole("radio", { name: "Graph" }).click();
+    await expect(page.getByTestId("map-graph")).toBeVisible();
+    await expect(page).not.toHaveURL(/mv=/);
+  });
+
+  test("at 375 px the table is one column and nothing scrolls sideways", async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 800 });
+    await page.goto("/next/?view=queue&project=demo");
+    await expect(rowsOf(page).first()).toBeVisible();
+    await tick(page, "Batch A").check();
+    await expect(bar(page)).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    const dir = process.env.SB_SHOTS;
+    if (dir !== undefined) await page.screenshot({ path: `${dir}/table-375.png` });
+    await bar(page).getByRole("button", { name: /^Comment/ }).click();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  });
+
+  for (const [scheme, url] of [["light", "/next/?view=queue&project=demo"], ["dark", "/next/?project=demo&map=demo%2Fboard&mv=table"]] as const) {
+    test(`axe finds no serious or critical issue on the table (${scheme}); screenshot`, async ({ page }) => {
+      const { default: AxeBuilder } = await import("@axe-core/playwright");
+      await page.emulateMedia({ colorScheme: scheme });
+      await page.goto(url);
+      await expect(rowsOf(page).first()).toBeVisible();
+      await tick(page, scheme === "light" ? "Batch B" : "Show the queue in order").check();
+      await tick(page, scheme === "light" ? "Batch C" : "Fix the sheet's focus").check();
+      await page.waitForTimeout(500);
+      const dir = process.env.SB_SHOTS;
+      if (dir !== undefined) await page.screenshot({ path: `${dir}/table-${scheme}-1440.png` });
       const r = await new AxeBuilder({ page }).analyze();
       const bad = r.violations.filter((v) => v.impact === "serious" || v.impact === "critical");
       expect(bad.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`)).toEqual([]);
