@@ -158,7 +158,9 @@ class ContractFixturesTest(unittest.TestCase):
 
     def test_every_route_answers_in_its_contract_shape(self):
         self.subs.update({str(self.root): "/fixture", quote(str(self.root), safe=""): quote("/fixture", safe=""),
-                          date.today().isoformat(): DAY})
+                          date.today().isoformat(): DAY,
+                          # the git guard hook in a worker's argv names this machine's python and checkout
+                          str(sbhub.GUARD): "/fixture/sb/hooks/guard_git.py", sys.executable: "python3"})
         r = lambda name, data, status=200: self.record(name.replace("_", "-"), "/api/" + name.replace("_", "/", 1), data, status)
 
         # agents: a session, its alias, a worker it spawned, one that needs you

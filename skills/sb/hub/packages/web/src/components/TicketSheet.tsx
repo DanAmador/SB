@@ -126,7 +126,7 @@ function QueueActions({ itemKey }: { itemKey: string }): React.JSX.Element | nul
   const i = state.queue.items.find((x) => x.key === itemKey);
   const off = down || busy;
   if (i?.state === "running") return <RunningActions itemKey={itemKey} />;
-  if (i?.kind === "job" || t === undefined) return null;
+  if (i?.kind === "job" || i?.state === "recheck" || t === undefined) return null; // waiting checks: queuing would rerun the worker
   const queued = i?.state === "queued";
   const at = qv.queuedKeys.indexOf(itemKey);
   if (!queued && (qv.live.has(itemKey) || !addable(t, ix))) return null;

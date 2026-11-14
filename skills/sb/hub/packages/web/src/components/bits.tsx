@@ -98,14 +98,20 @@ export function Fold({
   );
 }
 
+/** A check exits 75 (EX_TEMPFAIL) when the tool it needs did not answer: it could not run, it did not fail. */
+const EX_TEMPFAIL = 75;
+
 export function Checks({ checks }: { checks: readonly CheckRun[] }): React.JSX.Element | null {
   if (checks.length === 0) return null;
-  const bad = checks.filter((c) => c.code !== 0).length;
+  const notRun = checks.filter((c) => c.code === EX_TEMPFAIL).length;
+  const bad = checks.filter((c) => c.code !== 0 && c.code !== EX_TEMPFAIL).length;
   return (
     <Fold
       summary={
         bad > 0 ? (
           <span className="font-medium text-destructive">{`${String(bad)} of ${plural(checks.length, "check")} failed`}</span>
+        ) : notRun > 0 ? (
+          <span className="font-medium text-warn">{`${String(notRun)} of ${plural(checks.length, "check")} could not run`}</span>
         ) : (
           <span className="text-ok">{`${plural(checks.length, "check")} passed`}</span>
         )
@@ -115,7 +121,7 @@ export function Checks({ checks }: { checks: readonly CheckRun[] }): React.JSX.E
         {checks.map((c, n) => (
           <li key={`${c.cmd}-${String(n)}`} className="flex flex-col gap-1 text-xs">
             <div className="flex flex-wrap items-center gap-1.5">
-              {c.code === 0 ? <ToneIcon icon={IconCircleCheck} tone="ok" label="passed" /> : <ToneIcon icon={IconX} tone="bad" label="failed" />}
+              {c.code === 0 ? <ToneIcon icon={IconCircleCheck} tone="ok" label="passed" /> : c.code === EX_TEMPFAIL ? <ToneIcon icon={IconBan} tone="warn" label="could not run" /> : <ToneIcon icon={IconX} tone="bad" label="failed" />}
               <code className="font-mono break-all">{c.cmd}</code>
               <span className="text-muted-foreground">
                 {c.code === null ? "timed out" : `exit ${String(c.code)}`} · {String(Math.round(c.secs))} s
