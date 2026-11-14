@@ -3,7 +3,7 @@
  * against the contract before it leaves. Run with `node e2e/fixture-server.ts` (Node strips the types).
  */
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { QueueMoveBody, QueueSetBody, RunDetail, RunSeenBody, RunsPage, SendBody, State, Tickets, addLinks, type LinkContext, type Message, type QueueItem, type TicketRow } from "@sb-hub/contract";
+import { QueueMoveBody, QueueSetBody, RunDetail, RunSeenBody, RunsPage, SendBody, State, Tickets, Trail, addLinks, type LinkContext, type Message, type QueueItem, type TicketRow } from "@sb-hub/contract";
 
 /** Every file the fixtures name exists; the server's own vault lookup is covered by the server's tests. */
 const ctx: LinkContext = { exists: () => true, real: (p) => p, findTicket: (map, num) => `/vault/${map}/issues/${String(num)}.md`, runs: {} };
@@ -114,10 +114,28 @@ async function body(req: IncomingMessage): Promise<unknown> {
   return raw ? JSON.parse(raw) : {};
 }
 
+// ---- Sessions: a trail per live agent, newest action last ----
+const act = (tool: string, label: string, ago: number, ok: boolean | null = true, sub = false): Record<string, unknown> => ({
+  tool, label, start: now() - ago, end: ok === null ? null : now() - ago + 1, ok, sub,
+});
+const TRAILS: Record<string, Record<string, unknown>[]> = {
+  "s-1": [act("prompt", "chart it", 40), act("Read", "docs/plan.md", 30), act("Bash", "git status", 20), act("WebSearch", "lot-map", 10), act("Edit", "src/App.tsx", 4, null)],
+  "demo/board#5": [act("Read", "src/Board.tsx", 60), act("Edit", "src/Header.tsx", 45), act("Bash", "pnpm test", 30, false), act("Agent", "check the tests", 20, true, true), act("Bash", "pnpm test", 3, null)],
+  "other/site#3": [act("Read", "copy/home.md", 50), act("Write", "copy/shop.md", 20), act("Skill", "wikibrain", 6)],
+  "demo/board#8": [act("Read", "usage.json", 500), act("Grep", "usage", 450)],
+};
+
 createServer((req, res) => {
   void (async () => {
     const path = (req.url ?? "").split("?")[0];
     if (req.method === "GET" && path === "/api/state") { send(res, 200, state()); return; }
+    if (req.method === "GET" && path === "/api/trail") {
+      const agent = new URL(req.url ?? "", "http://x").searchParams.get("agent") ?? "";
+      const actions = TRAILS[agent];
+      if (actions === undefined) send(res, 404, { ok: false, error: "no trail for that agent" });
+      else send(res, 200, Trail.parse({ agent, ctx: agent === "demo/board#5" ? 72 : null, ended: null, actions }));
+      return;
+    }
     if (req.method === "GET" && path === "/api/runs") {
       const u = new URL(req.url ?? "", "http://x").searchParams;
       const since = Number(u.get("since") ?? "0");

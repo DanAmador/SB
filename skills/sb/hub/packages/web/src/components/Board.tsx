@@ -1,11 +1,12 @@
 /** The board: the header with the views and the toolbar, what needs you, one view at a time, the panel and the dialogs. */
 import { IconCircleCheck, IconCircleX, IconWifiOff } from "@tabler/icons-react";
-import { Fragment, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import type * as React from "react";
 import type { RouteBody, State } from "@sb-hub/contract";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { itemInScope, plural, projOf, queueView, scopeItems, scopeWaits, sidebarTree, splitAgents, ticketIndex, waitsFor, withBlockers } from "@/lib/board.ts";
+import { sessionCards } from "@/lib/sessions.ts";
 import { useHubState, useTickets, useWrites, type Outcome } from "@/lib/hub.ts";
 import { setLink, useLink, VIEWS, type View } from "@/lib/link.ts";
 import { say, useNotices } from "@/lib/notice.ts";
@@ -15,6 +16,7 @@ import { BoardContext, type BoardData } from "./context.tsx";
 import { Breadcrumb, MenuButton, SidebarColumn, SidebarSheet } from "./Sidebar.tsx";
 import { HistoryView } from "./HistoryView.tsx";
 import { QueueView } from "./QueueView.tsx";
+import { SessionsView } from "./SessionsView.tsx";
 import { RunsView } from "./RunsView.tsx";
 import { DetailSheet } from "./TicketSheet.tsx";
 import { Toolbar } from "./Toolbar.tsx";
@@ -43,7 +45,7 @@ function openRow(el: HTMLElement | null): void {
   go?.click();
 }
 
-const VIEW_WORDS: Readonly<Record<View, string>> = { runs: "Runs", queue: "Queue", waits: "Waits for you", history: "History" };
+const VIEW_WORDS: Readonly<Record<View, string>> = { runs: "Runs", queue: "Queue", waits: "Waits for you", sessions: "Sessions", history: "History" };
 
 export function Board(): React.JSX.Element {
   const stateQ = useHubState();
@@ -71,10 +73,12 @@ function Loaded({ state, tickets, down, lastOk }: { state: State; tickets: Board
   const tree = sidebarTree(state, tickets, allWaits);
   const waits = scopeWaits(allWaits, scope, state);
   const alerts = waits.count;
+  const sessions = sessionCards(state, ix, agents).filter((c) => !c.idle);
   const counts: Readonly<Record<View, number>> = {
     runs: qv.running.filter((i) => itemInScope(scope, i)).length,
     queue: scopeItems(scope, qv.next).length,
     waits: alerts,
+    sessions: sessions.length,
     history: 0,
   };
 
@@ -145,9 +149,8 @@ function Loaded({ state, tickets, down, lastOk }: { state: State; tickets: Board
           find.focus();
         }
       } else if (ev.key >= "1" && ev.key <= "5") {
-        // 4 (Sessions) is not built yet: its key does nothing until it is
-        const view = ev.key === "5" ? "history" : VIEWS[Number(ev.key) - 1];
-        if (view && ev.key !== "4") setLink({ view });
+        const view = VIEWS[Number(ev.key) - 1];
+        if (view) setLink({ view });
       } else if (ev.key === "j" || ev.key === "k") {
         stepRow(ev.key === "j" ? 1 : -1);
       } else if (ev.key === "Enter") {
@@ -187,14 +190,7 @@ function Loaded({ state, tickets, down, lastOk }: { state: State; tickets: Board
             </div>
             <TabsList aria-label="Views" className="order-3 w-full sm:order-none sm:w-auto">
               {VIEWS.map((v) => (
-                <Fragment key={v}>
-                {/* a slot for Sessions, every live session (ticket 044): view 4, before History */}
-                {v === "history" && (
-                  <TabsTrigger value="sessions" disabled title="Sessions: coming with its own ticket" className="hidden md:inline-flex">
-                    Sessions
-                  </TabsTrigger>
-                )}
-                <TabsTrigger value={v}>
+                <TabsTrigger key={v} value={v}>
                   {VIEW_WORDS[v]}
                   {v === "waits" ? (
                     alerts > 0 && (
@@ -206,7 +202,6 @@ function Loaded({ state, tickets, down, lastOk }: { state: State; tickets: Board
                     counts[v] > 0 && <span className="text-xs text-muted-foreground tabular-nums">{counts[v]}</span>
                   )}
                 </TabsTrigger>
-                </Fragment>
               ))}
             </TabsList>
             <div className="ml-auto">
@@ -232,6 +227,9 @@ function Loaded({ state, tickets, down, lastOk }: { state: State; tickets: Board
           </TabsContent>
           <TabsContent value="waits" className="outline-none">
             <WaitsView w={waits} />
+          </TabsContent>
+          <TabsContent value="sessions" className="outline-none">
+            <SessionsView />
           </TabsContent>
           <TabsContent value="history" className="outline-none">
             <HistoryView />

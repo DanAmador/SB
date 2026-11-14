@@ -320,7 +320,7 @@ describe("open tickets", () => {
 describe("the page link", () => {
   it("keeps the view, the search and the open ticket, and leaves the defaults out", () => {
     const link = readLink("?view=queue&q=rope&project=sb&map=sb%2Fone&s=later&t=sb%2Fone%231");
-    expect(link).toEqual({ view: "queue", q: "rope", project: "sb", map: "sb/one", s: "later", t: "sb/one#1", run: "", pic: "", range: "", out: "", pics: "", acct: "", model: "" });
+    expect(link).toEqual({ view: "queue", q: "rope", project: "sb", map: "sb/one", s: "later", t: "sb/one#1", run: "", pic: "", range: "", out: "", pics: "", acct: "", model: "", sess: "", kind: "" });
     expect(readLink(writeLink(link))).toEqual(link);
     expect(readLink("").view).toBe("runs");
     expect(writeLink(readLink("?view=bogus"))).toBe("");

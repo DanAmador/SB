@@ -2,9 +2,10 @@
 import { keepPreviousData, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import type { Queue, RouteAnswer, RouteBody, State, TicketAction } from "@sb-hub/contract";
 import { QueueStale } from "@sb-hub/contract";
-import { get, post, ticketPath } from "./api.ts";
+import { get, HubError, post, ticketPath } from "./api.ts";
 
 export const STATE_MS = 2000;
+export const TRAIL_MS = 2000;
 export const TICKETS_MS = 15000;
 
 export const useHubState = () =>
@@ -17,6 +18,15 @@ export const useTicketDetail = (key: string | null) =>
     queryFn: () => get("GET /api/ticket", { key: key ?? "" }),
     enabled: key !== null && /#\d+$/.test(key),
     refetchInterval: TICKETS_MS,
+  });
+
+/** One session's last actions, every 2 s; null when the hub has none for it (a session that has not acted yet). */
+export const useTrail = (agent: string) =>
+  useQuery({
+    queryKey: ["trail", agent],
+    queryFn: () => get("GET /api/trail", { agent }).catch((e: unknown) => (e instanceof HubError && e.status === 404 ? null : Promise.reject(e as Error))),
+    refetchInterval: TRAIL_MS,
+    retry: false,
   });
 
 /** History's runs from `since` on, newest first, the newest `limit` of them. */

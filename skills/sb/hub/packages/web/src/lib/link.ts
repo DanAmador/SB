@@ -3,8 +3,8 @@ import { useSyncExternalStore } from "react";
 import { SHOWS, type Show } from "./board.ts";
 import { Store } from "./store.ts";
 
-/** Runs is the landing view. Sessions (ticket 044) is key 4 and comes later; History is key 5. */
-export const VIEWS = ["runs", "queue", "waits", "history"] as const;
+/** Runs is the landing view. Sessions is key 4; History is key 5. */
+export const VIEWS = ["runs", "queue", "waits", "sessions", "history"] as const;
 export type View = (typeof VIEWS)[number];
 export const DEFAULT_VIEW: View = "runs";
 
@@ -27,9 +27,12 @@ export interface Link {
   readonly pics: string;
   readonly acct: string;
   readonly model: string;
+  /** Sessions: the open session's id, and the filter (workers or chats; empty is all). */
+  readonly sess: string;
+  readonly kind: string;
 }
 
-const KEYS = ["view", "q", "project", "map", "s", "t", "run", "pic", "range", "out", "pics", "acct", "model"] as const;
+const KEYS = ["view", "q", "project", "map", "s", "t", "run", "pic", "range", "out", "pics", "acct", "model", "sess", "kind"] as const;
 
 export function readLink(search: string): Link {
   const s = new URLSearchParams(search);
@@ -49,6 +52,8 @@ export function readLink(search: string): Link {
     pics: s.get("pics") ?? "",
     acct: s.get("acct") ?? "",
     model: s.get("model") ?? "",
+    sess: s.get("sess") ?? "",
+    kind: s.get("kind") ?? "",
   };
 }
 

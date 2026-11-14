@@ -334,7 +334,7 @@ test("screenshots of Waits for you", async ({ page }) => {
   await page.screenshot({ path: to("waits-after.png") });
 });
 
-for (const [view, scheme] of [["runs", "light"], ["queue", "dark"], ["waits", "light"], ["waits", "dark"], ["history", "light"], ["history", "dark"]] as const) {
+for (const [view, scheme] of [["runs", "light"], ["queue", "dark"], ["waits", "light"], ["waits", "dark"], ["history", "light"], ["history", "dark"], ["sessions", "light"], ["sessions", "dark"]] as const) {
   test(`axe finds no serious or critical issue on ${view} (${scheme})`, async ({ page }) => {
     const { default: AxeBuilder } = await import("@axe-core/playwright");
     await page.emulateMedia({ colorScheme: scheme });
@@ -346,3 +346,59 @@ for (const [view, scheme] of [["runs", "light"], ["queue", "dark"], ["waits", "l
     expect(bad.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`)).toEqual([]);
   });
 }
+
+test("Sessions: one card per live session with its map, flags, and a Sheet with the feed", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(String(e)));
+  await page.goto("/next/");
+  await page.keyboard.press("4");
+  await expect(page.getByRole("tab", { name: /Sessions/ })).toHaveAttribute("aria-selected", "true");
+  const cards = page.getByRole("list", { name: "Live sessions" }).getByRole("listitem");
+  // three workers and the owner's chat
+  await expect(cards).toHaveCount(4);
+  await expect(cards.first().getByRole("img", { name: "What the session is doing, as a map" }).locator("svg")).toBeVisible();
+  // a failure shows the red dot; a session silent 5+ minutes wears the amber ring
+  const failing = cards.filter({ hasText: "Run the board against the real hub" });
+  await expect(failing.getByRole("img", { name: "a failure in the last 5 minutes" })).toBeVisible();
+  await expect(cards.filter({ hasText: "Read the accounts' usage" })).toHaveClass(/ring-warn/);
+  await expect(cards.filter({ hasText: "Write the shop's copy" }).getByRole("img", { name: /failure/ })).toHaveCount(0);
+  // project and account on the card
+  await expect(failing).toContainText("demo · main");
+  // the filter
+  await page.getByRole("button", { name: /^Chats/ }).click();
+  await expect(cards).toHaveCount(1);
+  await expect(cards.first()).toContainText("Charting the board");
+  await page.getByRole("button", { name: /^All/ }).click();
+  // a card opens the Sheet: the big map and the last actions
+  await failing.getByRole("button", { name: "What the session is doing, as a map" }).click();
+  const sheet = page.getByRole("dialog");
+  await expect(sheet.getByRole("img", { name: "What the session is doing, as a map" }).locator("svg")).toBeVisible();
+  const feed = sheet.getByRole("list", { name: "Last actions" });
+  await expect(feed.getByRole("listitem")).toHaveCount(5);
+  await expect(feed.getByRole("listitem").first()).toContainText("pnpm test");
+  await expect(feed.getByRole("img", { name: "failed" })).toHaveCount(1);
+  await expect(sheet).toContainText("context 72%");
+  await page.keyboard.press("Escape");
+  await expect(sheet).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+test("screenshots of Sessions", async ({ page }) => {
+  const dir = process.env.SB_SHOTS;
+  test.skip(dir === undefined, "SB_SHOTS names the folder to write to");
+  const to = (n: string): string => `${dir ?? ""}/${n}`;
+  const shoot = async (scheme: "light" | "dark", name: string, sheet: boolean): Promise<void> => {
+    await page.emulateMedia({ colorScheme: scheme });
+    await page.goto(sheet ? "/next/?view=sessions&sess=demo%2Fboard%235" : "/next/?view=sessions");
+    if (sheet) await expect(page.getByRole("dialog").getByRole("list", { name: "Last actions" })).toBeVisible();
+    else await expect(page.getByRole("list", { name: "Live sessions" }).getByRole("listitem")).toHaveCount(4);
+    await page.waitForTimeout(600);
+    await page.screenshot({ path: to(name) });
+  };
+  await shoot("light", "sessions-1440.png", false);
+  await shoot("dark", "sessions-dark-1440.png", false);
+  await shoot("light", "sessions-sheet-1440.png", true);
+  await page.setViewportSize({ width: 390, height: 800 });
+  await shoot("light", "sessions-phone.png", false);
+  await shoot("dark", "sessions-sheet-phone.png", true);
+});
