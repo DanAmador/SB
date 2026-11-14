@@ -59,7 +59,7 @@ const seen: string[] = [];
 // ---- History: runs the queue and the vault's run folders know of, and the pictures of two of them ----
 const run = (key: string, title: string, ago: number, more: Record<string, unknown> = {}): Record<string, unknown> => ({
   key, title, project: key.split("/")[0], map: key.replace(/#\d+$/, ""), outcome: "done", reason: "", account: "main", model: "sonnet",
-  started: start - ago - 600, ended: start - ago, commit: "0123456789abcdef", tries: 1, pictures: [],
+  started: start - ago - 600, ended: start - ago, commit: "0123456789abcdef", tries: 1, refused: 0, refused_lines: [], pictures: [],
   links: { ticket: `obsidian://open?path=%2Fvault%2F${key.replace(/[#/]/g, "-")}.md`, map: null, board: null, report: `obsidian://open?path=%2Fvault%2Frun-${key.replace(/[#/]/g, "-")}.md`, log: null }, ...more,
 });
 const PICS = ["board-1440.png", "board-phone.png", "sheet-open.png"];

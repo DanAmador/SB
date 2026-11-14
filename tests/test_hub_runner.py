@@ -334,6 +334,16 @@ class TicketLoopTest(RunnerCase):
         with self.assertRaises(ValueError):
             self.hub.ticket_action("recheck", "repo/one#2")
 
+    def test_a_worker_that_tries_sbmap_resolve_is_refused_and_the_ticket_stays_open(self):
+        self.modes = {"repo/one#1": "resolve", "repo/one#2": "hang"}
+        self.resume()
+        self.until(lambda: self.state_of("repo/one#1") == "failed")
+        log = Path(self.items()["repo/one#1"]["log"]).read_text(encoding="utf-8")
+        self.assertIn('"permissionDecision": "deny"', log)
+        self.assertIn("write a comment instead", log)
+        self.assertEqual(self.open_tickets()[1]["status"], "open")
+        self.assertFalse(list(self.vault.glob("wayfinder/repo/one/issues/done/001*.md")))
+
     def test_no_commit_on_sonnet_retries_once_on_opus_then_fails(self):
         self.modes = {"repo/one#1": "nothing", "repo/one#2": "hang"}
         self.resume()

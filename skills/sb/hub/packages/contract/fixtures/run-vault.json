@@ -31,6 +31,8 @@
       ],
       "project": "repo",
       "reason": "pnpm test failed",
+      "refused": 0,
+      "refused_lines": [],
       "started": null,
       "title": "An older run",
       "tries": 1

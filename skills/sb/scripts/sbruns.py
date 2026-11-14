@@ -142,6 +142,7 @@ def _run(vault, key, item, vr):
             "project": map_.split("/")[0] if "/" in map_ else map_.split("-")[0], "map": map_,
             "outcome": outcome, "reason": plain_reason(note, outcome) if outcome in ("failed", "skipped") or (outcome == "unknown" and note) else "",
             "account": item.get("agent"), "model": item.get("model"), "started": started, "ended": ended,
+            "refused": item.get("refused", 0), "refused_lines": item.get("refused_lines", []),
             "commit": item.get("commit") or vr.get("commit"), "tries": item.get("tries") or (1 if vr else 0),
             "pictures": item.get("media") or (media_in(folder, num) if folder and num else []),
             "links": _links(vault, key, folder, log)}

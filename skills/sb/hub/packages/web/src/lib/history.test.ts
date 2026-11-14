@@ -11,7 +11,7 @@ const none: Filters = { q: "", outcome: "", pictures: false, account: "", model:
 const links = { ticket: null, map: null, board: null, report: null, log: null };
 const run = (key: string, more: Partial<Run> = {}): Run => ({
   key, title: `Ticket ${key}`, project: key.split("/")[0] ?? "", map: key.replace(/#\d+$/, ""), outcome: "done", reason: "", account: "main", model: "sonnet",
-  started: NOW - 3600, ended: NOW - 3000, commit: "abc1234def", tries: 1, pictures: [], links, ...more,
+  started: NOW - 3600, ended: NOW - 3000, commit: "abc1234def", tries: 1, refused: 0, refused_lines: [], pictures: [], links, ...more,
 });
 const runs = [
   run("a/one#1", { title: "Draw the header", pictures: ["x.png"] }),

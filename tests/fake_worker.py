@@ -15,6 +15,8 @@ its arguments (the log keeps them), and does what FAKE_WORKER_MODE says:
   slow     commit as `commit` does, then sleep FAKE_WORKER_SLEEP seconds (default 2) before its result, exit 0
   auth     print the expired-login failure (an assistant message and an error result), exit 1
   job      a prompt, not a ticket: print a result naming the prompt's first line and the folder it was told, exit 0
+  resolve  try `sbmap resolve` on its ticket the way the worker's PreToolUse hook (the launch's --settings) sees it:
+           run only if the hook allows it, commit nothing, exit 1
   hang     start a child that sleeps, write both pids to FAKE_WORKER_PIDS, sleep past any limit
 
 A brief that names a review file (`Write your review to: <path>`, templates/review-brief.md) makes it the fake
@@ -119,6 +121,18 @@ def main():
             return 1
         result({"type": "result", "subtype": "success", "is_error": False, "result": "done"})
         return 0
+    if mode == "resolve":
+        found = re.search(r"^Read the ticket first: (.+?) show (\S+) (\d+)$", brief, re.M)
+        sbmap, map_, num = found.groups()
+        cmd = "python3 {} resolve {} {} --commit abc".format(sbmap, map_, num)
+        hook = json.loads(argv[argv.index("--settings") + 1])["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        tool_event = {"tool_name": "Bash", "tool_input": {"command": cmd}, "cwd": os.getcwd()}
+        out = subprocess.run(hook, shell=True, input=json.dumps(tool_event), capture_output=True, text=True).stdout
+        print("hook: " + out.strip(), flush=True)
+        if "deny" not in out:
+            subprocess.run(cmd, shell=True, check=False)
+        result({"type": "result", "subtype": "success", "is_error": True, "result": "tried to resolve"})
+        return 1
     if mode == "job":
         result({"type": "result", "subtype": "success", "is_error": False, "result": "did: " + brief.splitlines()[0]})
         return 0

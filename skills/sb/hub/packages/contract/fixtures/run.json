@@ -8,7 +8,7 @@
         "tail": ""
       }
     ],
-    "log": "argv: [\"--permission-mode\", \"auto\", \"--model\", \"sonnet\", \"--settings\", \"{\\\"hooks\\\": {\\\"PreToolUse\\\": [{\\\"matcher\\\": \\\"Bash\\\", \\\"hooks\\\": [{\\\"type\\\": \\\"command\\\", \\\"command\\\": \\\"python3 /fixture/sb/hooks/guard_git.py\\\"}]}]}}\", \"--output-format\", \"stream-json\", \"--verbose\"]\nenv: {\"CLAUDE_CONFIG_DIR\": \"/fixture/.claude-main\", \"SB_HUB_AGENT\": \"repo/one#1\", \"SB_HUB_PARENT\": \"queue\", \"SB_HUB_PORT\": \"4321\"}\ncwd: /fixture/repo\nresult: done",
+    "log": "argv: [\"--permission-mode\", \"auto\", \"--model\", \"sonnet\", \"--settings\", \"{\\\"hooks\\\": {\\\"PreToolUse\\\": [{\\\"matcher\\\": \\\"Bash|Write|Edit|MultiEdit|NotebookEdit\\\", \\\"hooks\\\": [{\\\"type\\\": \\\"command\\\", \\\"command\\\": \\\"python3 /fixture/sb/hooks/guard_git.py\\\"}]}]}}\", \"--output-format\", \"stream-json\", \"--verbose\"]\nenv: {\"CLAUDE_CONFIG_DIR\": \"/fixture/.claude-main\", \"SB_HUB_AGENT\": \"repo/one#1\", \"SB_HUB_PARENT\": \"queue\", \"SB_HUB_PORT\": \"4321\"}\ncwd: /fixture/repo\nresult: done",
     "report": "# A\n\n## Self-checks\n\n- `true`: exit 0\n\n## Hub checks\n\nChecked by the sb hub at 2026-11-13 01:00: passed, commit d8d88e804.\n\n- `true`: exit 0, 0.0 s\n\n  ```\n  ```\n\n### The worker's self-checks\n\n- `true`: exit 0\n",
     "run": {
       "account": null,
@@ -30,6 +30,8 @@
       ],
       "project": "repo",
       "reason": "",
+      "refused": 0,
+      "refused_lines": [],
       "started": 1794528000.0,
       "title": "A",
       "tries": 1

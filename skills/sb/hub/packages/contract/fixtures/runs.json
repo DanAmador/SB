@@ -23,6 +23,8 @@
         ],
         "project": "repo",
         "reason": "",
+        "refused": 0,
+        "refused_lines": [],
         "started": 1794528000.0,
         "title": "A",
         "tries": 1
@@ -48,6 +50,8 @@
         ],
         "project": "repo",
         "reason": "pnpm test failed",
+        "refused": 0,
+        "refused_lines": [],
         "started": null,
         "title": "An older run",
         "tries": 1

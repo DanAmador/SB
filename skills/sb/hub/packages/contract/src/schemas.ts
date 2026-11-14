@@ -286,6 +286,9 @@ export const Run = z.strictObject({
   ended: Seconds.nullable(),
   commit: z.string().nullable(),
   tries: z.number().int(),
+  /** How many actions the worker's hook refused, and the last few ("refused: Bash: ..."). */
+  refused: z.number().int(),
+  refused_lines: z.array(z.string()),
   /** File names in its <number>-media folder, served by api/media?key=&name=. */
   pictures: z.array(z.string()),
   links: Links,
@@ -405,7 +408,7 @@ export const ReportBody = z.strictObject({
   /** One hook event for the trail (GET /api/trail). */
   trail: z
     .strictObject({
-      kind: z.enum(["pre", "post", "fail", "substart", "substop", "prompt", "stop"]),
+      kind: z.enum(["pre", "post", "fail", "substart", "substop", "prompt", "stop", "refused"]),
       tool: z.string(),
       label: z.string(),
     })

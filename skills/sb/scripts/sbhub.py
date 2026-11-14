@@ -237,6 +237,8 @@ class Hub:
             a = open_one(True)
             if a:
                 a["end"], a["ok"] = now, True
+        elif kind == "refused":
+            action(end=now, ok=False)
         elif kind in ("prompt", "stop"):
             if kind == "stop":
                 for a in ring:
@@ -244,6 +246,15 @@ class Hub:
                         a["end"], a["ok"] = now, True
             action(end=now, ok=True)
         del ring[:-TRAIL_KEPT]
+
+    def _refused(self, agent, tr):
+        """A refusal of the guard hook lands on the queue item of that worker: a count and the last few lines."""
+        item = next((i for i in self._data["queue"]["items"] if i["key"] == agent), None)
+        if item is not None:
+            line = "refused: {}: {}".format(tr.get("tool") or "", tr.get("label") or "")[:140]
+            item["refused"] = item.get("refused", 0) + 1
+            item["refused_lines"] = (item.get("refused_lines", []) + [line])[-5:]
+            self._data["queue"]["version"] += 1
 
     def trail(self, agent):
         """The last actions of one agent, oldest first; KeyError when it has none."""
@@ -272,6 +283,8 @@ class Hub:
             a = self._data["agents"].setdefault(agent, {})
             before = a.get("state")
             tr = d.get("trail")
+            if isinstance(tr, dict) and tr.get("kind") == "refused":
+                self._refused(agent, tr)
             if isinstance(tr, dict):
                 boss = self._resolve(d.get("parent")) if tr.get("kind") in ("substart", "substop") else agent
                 self._trail_add(boss, tr, d.get("ctx"))
@@ -1192,11 +1205,13 @@ def _exe(name, env):
 
 
 GUARD = Path(__file__).resolve().parent.parent / "hooks" / "guard_git.py"
-# every Claude worker gets this PreToolUse hook: no git stash, no rewriting of the main checkout
-GUARD_SETTINGS = {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [
+# every Claude worker gets this PreToolUse hook: it refuses what a worker must never do (see hooks/guard_git.py)
+GUARD_SETTINGS = {"hooks": {"PreToolUse": [{"matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit", "hooks": [
     {"type": "command", "command": "{} {}".format(shlex.quote(sys.executable), shlex.quote(str(GUARD)))}]}]}}
 GIT_RULE = ("\n\nGit rule: never run git stash, stash pop/apply, checkout or restore of tracked files, reset --hard, "
-            "switch or rebase in a shared checkout; a hook refuses them. To compare with a clean tree, make a "
+            "switch or rebase in a shared checkout; a hook refuses them, as it refuses sbmap resolve/close/new/set/claim and the "
+            "like, an empty or amended commit, push, tag, reset, rm or mv inside .git, and a Write or Edit outside the repo, "
+            "the run folder and temp. To compare with a clean tree, make a "
             "throwaway worktree (git worktree add --detach /tmp/clean-tree HEAD), run there, then remove it.\n")
 
 
@@ -1725,7 +1740,8 @@ class TicketRun:
             r, paths = item["resume"], " ".join(t.get("paths") or [])
             brief += RESUME.format(agent=r["agent"], why=r["why"], base=base, log=r.get("log") or log,
                                    diff="`git diff -- {}`".format(paths) if paths else "`git diff`")
-        env = {"SB_HUB_AGENT": key, "SB_HUB_PARENT": "queue", "SB_HUB_PORT": str(self.port)}
+        env = {"SB_HUB_AGENT": key, "SB_HUB_PARENT": "queue", "SB_HUB_PORT": str(self.port),
+               "SB_HUB_RUN": str(folder)}
         try:
             start = os.path.getsize(log)  # launch appends: this try's output begins here
         except OSError:
@@ -1938,7 +1954,8 @@ class TicketRun:
         name, inst = self._review_agent(run)
         if self.stopping():
             raise OSError("the hub is stopping")
-        env = {"SB_HUB_AGENT": item["key"], "SB_HUB_PARENT": "queue", "SB_HUB_PORT": str(self.port)}
+        env = {"SB_HUB_AGENT": item["key"], "SB_HUB_PARENT": "queue", "SB_HUB_PORT": str(self.port),
+               "SB_HUB_RUN": str(Path(log).parent)}
         p = self.hub.launcher(inst, brief, t["repo"], REVIEW_MODEL, env, log)
         return {"p": p, "agent": name, "inst": inst, "log": log, "start": start, "file": str(review)}
 
@@ -2944,7 +2961,8 @@ class Supervisor:
             brief += ("\nAn earlier try on {} stopped {}. What it wrote may already be in that folder; its log: {}. "
                       "Continue from there, do not redo finished work.\n").format(r["agent"], r["why"], log)
         model = item.get("model") or (inst.get("model") if inst.get("kind") == "agy" else "sonnet")
-        env = {"SB_HUB_AGENT": key, "SB_HUB_PARENT": "queue", "SB_HUB_PORT": str(self.port)}
+        env = {"SB_HUB_AGENT": key, "SB_HUB_PARENT": "queue", "SB_HUB_PORT": str(self.port),
+               "SB_HUB_RUN": str(folder)}
         try:
             start = os.path.getsize(log)  # launch appends: this try's output begins here
         except OSError:

@@ -71,8 +71,8 @@ class GuardTest(unittest.TestCase):
                   "git switch other", "git rebase main", "git -C /repo stash apply", "FOO=1 git stash"):
             self.assertEqual(self.run_hook(c)["permissionDecision"], "deny", c)
 
-    def test_allows_soft_reset_and_staged_restore(self):
-        self.assertIsNone(self.run_hook("git reset --soft HEAD~1"))
+    def test_allows_staged_restore_but_a_reset_of_any_kind_is_refused_in_main(self):
+        self.assertEqual(self.run_hook("git reset --soft HEAD~1")["permissionDecision"], "deny")  # the ticket: any reset
         self.assertIsNone(self.run_hook("git restore --staged a.py"))
 
     def test_a_linked_worktree_may_check_out_but_never_stash(self):
