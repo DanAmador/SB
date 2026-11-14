@@ -287,10 +287,10 @@ def build_server():
         "sb_report and take shared resources (the Unity editor, a port) with sb_lock / sb_unlock."))
 
     @mcp.tool(description="Tonight's ticket queue on the hub: add or remove tickets by key '<map>#<num>' "
-                          "(for example 'wayfinder/foo#3'), then it lists the queue. With no arguments it only "
+                          "(for example 'wayfinder/foo#3'), then it lists the queue. Pass your own agent id as `agent` when adding, so the hub knows you are in charge of those maps. With no arguments it only "
                           "lists. A new queue starts paused: nothing runs until the owner resumes it on the hub "
                           "page. Tell the owner the count and the end time it returns.")
-    def sb_queue(add: list[str] = [], remove: list[str] = []) -> CallToolResult:  # noqa: B006 (never mutated)
+    def sb_queue(add: list[str] = [], remove: list[str] = [], agent: str = "") -> CallToolResult:  # noqa: B006 (never mutated)
         code, s = hub("/api/state")
         if code != 200:
             return result("The sb hub is not running and could not be started; start it with "
@@ -300,7 +300,8 @@ def build_server():
             for attempt in (0, 1):
                 have = [i["key"] for i in q["items"] if i["kind"] == "ticket" and i["state"] == "queued"]
                 want = [k for k in have if k not in remove] + [k for k in dict.fromkeys(add) if k not in have and k not in remove]
-                code, out = hub("/api/queue/set", {"keys": want, "version": q["version"]}, timeout=75)
+                code, out = hub("/api/queue/set", {"keys": want, "version": q["version"],
+                                              **({"agent": agent} if agent and add else {})}, timeout=75)
                 if code == 409 and out.get("queue") and attempt == 0:
                     q = out["queue"]  # someone wrote first: once more, from what they left
                     continue
@@ -321,12 +322,12 @@ def build_server():
 
     @mcp.tool(description="Tell the hub what this agent is doing. Hooks report tool use already; use this for "
                           "what they cannot know: the ticket, a run's progress (done of total), a parent run, "
-                          "or state 'blocked' / 'needs you' / 'done'.")
+                          "the map this session is in charge of ('<project>/<map>'), or state 'blocked' / 'needs you' / 'done'.")
     def sb_report(agent: str, state: str = "", note: str = "", ticket: str = "", done: int | None = None,
                   total: int | None = None, parent: str = "", name: str = "", project: str = "",
-                  role: str = "") -> str:
+                  role: str = "", map: str = "") -> str:  # noqa: A002 (the field's name)
         d = {"agent": agent, "state": state, "note": note, "ticket": ticket, "parent": parent, "name": name,
-             "role": role, "project": os.path.abspath(project) if project else ""}
+             "role": role, "map": map, "project": os.path.abspath(project) if project else ""}
         d.update({k: str(v) for k, v in (("done", done), ("total", total)) if v is not None})
         code, _ = hub("/api/report", {k: v for k, v in d.items() if v not in ("", None)})
         return "reported" if code == 200 else "hub not reachable; carry on"

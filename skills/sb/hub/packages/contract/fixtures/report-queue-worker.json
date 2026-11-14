@@ -1,0 +1,16 @@
+{
+  "body": {
+    "agent": "repo/one#1",
+    "needs_you": false,
+    "ok": true
+  },
+  "contentType": "application/json",
+  "request": {
+    "agent": "repo/one#1",
+    "parent": "queue",
+    "role": "worker",
+    "state": "working"
+  },
+  "route": "POST /api/report",
+  "status": 200
+}

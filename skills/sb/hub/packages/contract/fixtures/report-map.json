@@ -1,0 +1,14 @@
+{
+  "body": {
+    "agent": "sess-1",
+    "needs_you": false,
+    "ok": true
+  },
+  "contentType": "application/json",
+  "request": {
+    "agent": "sess-1",
+    "map": "fixture/map"
+  },
+  "route": "POST /api/report",
+  "status": 200
+}

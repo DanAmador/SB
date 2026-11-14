@@ -54,7 +54,7 @@ Commands (`scripts/sbhub.py`):
 | command | does |
 |---|---|
 | `queue` | the queue in run order, each item with its state |
-| `queue add\|rm <map> <NNN>...` | tick or untick tickets (running and finished items stay) |
+| `queue add\|rm <map> <NNN>... [--by <agent id>]` | tick or untick tickets (running and finished items stay); `add --by` puts that session in charge of the map unless another live session is |
 | `queue pause\|resume` | hold or release the queue |
 | `queue agents <name>...` | the night's pool, in preference order |
 | `queue job --project P --agent A [--model M] [--name N] (--prompt T \| --prompt-file F)` | a one-off job |
@@ -150,7 +150,7 @@ unlocked.
 
 - **`report`**: with the `hub-report` mod (`./install.sh --hub`) a session's state reaches the hub
   on its own. `report` adds what hooks cannot know: a run's progress (`--done`, `--total`), the
-  ticket a worker is on (`--ticket`), a ticket session's run (`--parent`). Queue workers need
+  ticket a worker is on (`--ticket`), a ticket session's run (`--parent`), and the map this session is in charge of (`--map <project>/<map>`; `sb_report` takes `map`). The operator reports its map and queues with `--by` (`sb_queue` `agent`) so the page can say who runs a map; the hub drops the charge when the session ends or is dismissed, and a queue worker's row shows its `map` and `in_charge`. Queue workers need
   none of it: the hub knows what it started. An operator without the hub runs it at each ticket
   boundary ([tonight](../verbs/tonight.md), *No hub*).
 - **`ask`**: see [output.md](output.md), *Unattended*.

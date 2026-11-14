@@ -6,7 +6,7 @@ saves them to $SB_HUB_HOME/state.json (default ~/.sb-hub/). `serve` puts it on
 and never fail a session when it is down.
 
   sbhub.py serve  [--port N]          run the hub
-  sbhub.py report --agent A [--name N] [--project PATH] [--role R] [--parent A]
+  sbhub.py report --agent A [--name N] [--project PATH] [--role R] [--parent A] [--map PROJECT/MAP]
                   [--ticket T] [--state S] [--note N] [--done N] [--total N]
                                       tell the hub what a session is doing; always exits 0
   sbhub.py lock   <key> --by A        take a lock: prints ok, or exits 1 "held by <who>";
@@ -81,7 +81,7 @@ import sbhub_snapshot
 import sbqueue
 import sbruns
 
-AGENT_FIELDS = ("name", "title", "asked", "project", "role", "parent", "ticket", "state", "note", "done", "total")
+AGENT_FIELDS = ("name", "title", "asked", "project", "role", "parent", "ticket", "map", "state", "note", "done", "total")
 ALERT_STATES = ("needs you", "blocked")
 SILENT_LIMIT = 86400
 ORPHAN_LOCK_LIMIT = 600
@@ -120,6 +120,8 @@ class Hub:
                                 # the queued maps in run order: a repo finishes its first one before the next
                                 "maps": []},
                       "installed": {},
+                      # map ("<project>/<map>") -> the live session that queued it: who is in charge of it
+                      "charge": {},
                       # runs the owner has opened ("<key>@<ended>"), oldest first; Waits for you leaves them out
                       "seen": []}
         path = self.home / "state.json"
@@ -148,6 +150,9 @@ class Hub:
         for k in [k for k, v in agents.items() if v.get("parent") == agent]:
             self._trail_ended(k)
             del agents[k]
+        charge = self._data.setdefault("charge", {})
+        for m in [m for m, who in charge.items() if who not in agents]:
+            del charge[m]  # a session that ends or is dismissed is no longer in charge
         for k in [k for k, v in aliases.items() if agent in (k, v)]:
             del aliases[k]
 
@@ -429,8 +434,13 @@ class Hub:
         with self._lock:
             self._settle()
             out = json.loads(json.dumps(self._data))
+            charge = out.setdefault("charge", {})
             for k, v in out["agents"].items():
                 v["agent"] = k
+                if v.get("role") == "worker" and v.get("parent") == "queue":
+                    v["map"] = sbqueue.map_of(k)
+                    if charge.get(v["map"]) in out["agents"]:
+                        v["in_charge"] = charge[v["map"]]
             out = {**out, "now": self.now(), "providers": dict(self.providers)}
             if self.queue_lock is not None:
                 out["queue_lock"] = dict(self.queue_lock)
@@ -605,11 +615,24 @@ class Hub:
             self.queue_kick.set()
             return {"ok": True, "queue": json.loads(json.dumps(q))}
 
-    def queue_set(self, keys, version):
-        """Replace the ticket selection (jobs, running and finished items untouched)."""
+    def _take_charge(self, agent, maps):
+        """Session `agent` is in charge of each of `maps` that no other live session is in charge of."""
+        agent = self._resolve(agent) if isinstance(agent, str) and agent else None
+        if agent is None or agent not in self._data["agents"]:
+            return
+        charge = self._data.setdefault("charge", {})
+        for m in maps:
+            if charge.get(m) not in self._data["agents"]:
+                charge[m] = agent
+
+    def queue_set(self, keys, version, agent=None):
+        """Replace the ticket selection (jobs, running and finished items untouched). A live session `agent`
+        that adds tickets is in charge of their maps, unless another live session already is."""
         def change(q, rows):
+            queued = {i["key"] for i in q["items"] if i["kind"] == "ticket" and i["state"] == "queued"}
             self._apply_selection(q, list(keys), rows)
             q["seeded"] = True
+            self._take_charge(agent, {sbqueue.map_of(k) for k in keys if k not in queued})
         return self._queue_write(version, change, needs_tickets=True)
 
     def queue_move(self, key, to_index, version):
@@ -624,7 +647,7 @@ class Hub:
             q["items"] = others + [by[k] for k in moved]
         return self._queue_write(version, change, needs_tickets=True)
 
-    def queue_map(self, name, version):
+    def queue_map(self, name, version, agent=None):
         """Queue every open ticket of map `name` that can run, in order, at the map's place (last when it is new):
         what waits on an earlier ticket of the map comes too and starts when that one lands. The answer's
         `left_out` names each ticket left out with why (it needs the owner, has no done-when or checks, is claimed,
@@ -640,6 +663,8 @@ class Hub:
             q["maps"] = sbqueue.map_list(q.get("maps"), queued + keys)
             self._apply_selection(q, queued + keys, rows)
             q["seeded"] = True
+            if keys:
+                self._take_charge(agent, {name})
         out = self._queue_write(version, change, needs_tickets=True)
         return {**out, "left_out": left} if out["ok"] else out
 
@@ -3430,11 +3455,11 @@ def make_handler(hub):
                 elif path == "/api/take":
                     out = hub.take(d["agent"], d.get("how"))
                 elif path == "/api/queue/set":
-                    out = hub.queue_set(d["keys"], d["version"])
+                    out = hub.queue_set(d["keys"], d["version"], d.get("agent"))
                 elif path == "/api/queue/move":
                     out = hub.queue_move(d["key"], d["to"], d["version"])
                 elif path == "/api/queue/map":
-                    out = hub.queue_map(d["map"], d["version"])
+                    out = hub.queue_map(d["map"], d["version"], d.get("agent"))
                 elif path == "/api/queue/move_map":
                     out = hub.queue_move_map(d["map"], d["to"], d["version"])
                 elif path == "/api/queue/pause":
@@ -3866,7 +3891,8 @@ def cmd_queue(a):
         keys = {"{}#{}".format(rest[0], int(n)) for n in rest[1:]}
         have = [i["key"] for i in q["items"] if i["kind"] == "ticket" and i["state"] == "queued"]
         want = have + [k for k in sorted(keys) if k not in have] if act == "add" else [k for k in have if k not in keys]
-        code, out = call(port, "/api/queue/set", {"keys": want, "version": q["version"]})
+        code, out = call(port, "/api/queue/set", {"keys": want, "version": q["version"],
+                                                  **({"agent": a.by} if act == "add" and a.by else {})})
     elif act in ("pause", "resume"):
         code, out = call(port, "/api/queue/pause", {"paused": act == "pause"})
     elif act == "job":
@@ -4125,7 +4151,7 @@ def main(argv=None):
     add("send", ("--to", {"required": True}), ("text", {}))
     add("queue", ("action", {"nargs": "?", "default": "show"}), ("rest", {"nargs": "*"}),
         ("--project", {}), ("--agent", {}), ("--model", {}), ("--name", {}), ("--prompt", {}),
-        ("--prompt-file", {}), ("--at", {}))
+        ("--prompt-file", {}), ("--at", {}), ("--by", {}))
     add("agents", ("--scan", {"action": "store_true"}))
     add("trust", ("project", {}))
     add("untrust", ("project", {}))

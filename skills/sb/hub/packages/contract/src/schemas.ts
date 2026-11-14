@@ -22,6 +22,10 @@ export const AgentRow = z.strictObject({
   role: z.string().optional(),
   parent: z.string().optional(),
   ticket: z.string().optional(),
+  /** The map ("<project>/<map>") the session is in charge of, or the map of a queue worker's ticket. */
+  map: z.string().optional(),
+  /** A queue worker's row: the id of the live session in charge of its map, when there is one. */
+  in_charge: z.string().optional(),
   state: z.string().optional(),
   note: z.string().optional(),
   done: Count.optional(),
@@ -312,6 +316,8 @@ export const State = z.strictObject({
   questions: z.record(z.string(), Question),
   /** Session id -> the agent id it reports as. */
   aliases: z.record(z.string(), z.string()),
+  /** Map -> the live session in charge of it. Absent from a state saved before this. */
+  charge: z.record(z.string(), z.string()).optional(),
   messages: z.record(z.string(), Message),
   queue: Queue,
   installed: z.record(z.string(), Installed),
@@ -446,6 +452,8 @@ export const ReportBody = z.strictObject({
   role: z.string().optional(),
   parent: z.string().optional(),
   ticket: z.string().optional(),
+  /** The map ("<project>/<map>") this session is in charge of. */
+  map: z.string().optional(),
   /** "gone" removes the agent. */
   state: z.string().optional(),
   note: z.string().optional(),
@@ -475,10 +483,11 @@ export const AnswerBody = z.strictObject({ qid: z.string(), answer: z.string(), 
 export const SendBody = z.strictObject({ to: z.string().min(1), text: z.string().min(1).max(4000) });
 export const UnsendBody = z.strictObject({ id: z.string() });
 export const TakeBody = z.strictObject({ agent: z.string(), how: z.string().nullable().optional() });
-export const QueueSetBody = z.strictObject({ keys: z.array(z.string()), version: z.number().int().nullable() });
+/** `agent`: the session adding the tickets; it is put in charge of their maps unless another live session is. */
+export const QueueSetBody = z.strictObject({ keys: z.array(z.string()), version: z.number().int().nullable(), agent: z.string().optional() });
 export const QueueMoveBody = z.strictObject({ key: z.string(), to: z.number().int(), version: z.number().int().nullable() });
 /** Queue every open ticket of a map that can run, in order, at the map's place (last when it is new). */
-export const QueueMapBody = z.strictObject({ map: z.string().min(1), version: z.number().int().nullable() });
+export const QueueMapBody = z.strictObject({ map: z.string().min(1), version: z.number().int().nullable(), agent: z.string().optional() });
 /** Move a queued map to place `to` among the queued maps. */
 export const QueueMoveMapBody = z.strictObject({ map: z.string().min(1), to: z.number().int(), version: z.number().int().nullable() });
 export const QueuePauseBody = z.strictObject({ paused: z.boolean() });

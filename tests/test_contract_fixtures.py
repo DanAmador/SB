@@ -178,6 +178,7 @@ class ContractFixturesTest(unittest.TestCase):
         self.record("report-spawn", "/api/report", {"agent": "sess-1", "spawn": "Read the routes"})
         self.record("report-worker", "/api/report", {"agent": "w-1", "role": "worker", "parent": "sess-1",
                                                        "state": "working", "project": project})
+        self.record("report-map", "/api/report", {"agent": "sess-1", "map": "fixture/map"})
         self.record("report-needs-you", "/api/report", {"agent": "sess-3", "name": "other", "state": "needs you",
                                                           "note": "which port?"})
         self.hub.providers[project] = [sbhub.generic_provider(project)]
@@ -223,7 +224,9 @@ class ContractFixturesTest(unittest.TestCase):
 
         # ticket A runs on the fake worker to done, leaving a report, a log and a picture
         v = self.hub.state()["queue"]["version"]
-        r("queue_set", {"keys": ["repo/one#1"], "version": v})
+        r("queue_set", {"keys": ["repo/one#1"], "version": v, "agent": "sess-1"})
+        self.record("report-queue-worker", "/api/report", {"agent": "repo/one#1", "role": "worker", "parent": "queue",
+                                                            "state": "working"})
         r("queue_pause", {"paused": False})
         self.sup.tick()
         item = self.hub.state()["queue"]["items"][0]
