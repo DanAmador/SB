@@ -1,5 +1,5 @@
 /** The board: the header with the views and the toolbar, what needs you, one view at a time, the panel and the dialogs. */
-import { IconCircleCheck, IconCircleX, IconWifiOff } from "@tabler/icons-react";
+import { IconAlertTriangle, IconCircleCheck, IconCircleX, IconWifiOff } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
 import type * as React from "react";
 import type { RouteBody, State } from "@sb-hub/contract";
@@ -219,6 +219,12 @@ function Loaded({ state, tickets, down, lastOk }: { state: State; tickets: Board
         <main className={cn("flex min-w-0 flex-1 flex-col gap-6 px-4 py-5 sm:px-6", down && "opacity-60")}>
           <Breadcrumb scope={scope} />
           {down && <Offline lastOk={lastOk} />}
+          {state.queue_lock?.mine === false && (
+            <div role="alert" className="flex items-center gap-2 rounded-lg border border-warn/40 bg-warn-soft px-3 py-2 text-sm text-warn">
+              <IconAlertTriangle className="size-4 shrink-0" aria-hidden />
+              This hub is read-only: {state.queue_lock.holder} holds the queue lock and runs the queue, not the server answering here.
+            </div>
+          )}
           <TabsContent value="runs" className="outline-none">
             <RunsView />
           </TabsContent>

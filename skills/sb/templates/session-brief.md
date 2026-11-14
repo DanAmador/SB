@@ -14,6 +14,7 @@ Files you own: {paths}. Start there, and change another file when the ticket tru
 a registry, a shared type, a test): name each one under `## Files` in your report with why. Do not stop
 only because a file is not on the list.
 Test in this checkout and with the editor or dev server already running for it: never open a second copy.
+To compare with a clean tree (before and after, say), never `git stash`, `checkout`, `restore`, `reset --hard`, `switch` or `rebase`: add a throwaway worktree (`git worktree add --detach /tmp/clean-tree HEAD`), run there, and `git worktree remove --force` it after.
 
 Done when: {done_when}
 These commands must all exit 0 when you finish:

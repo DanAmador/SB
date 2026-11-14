@@ -53,6 +53,7 @@ Haiku probe reads an idle one, and an item starts only where its learned cost fi
 GATE_7D); one cut off by a limit or a logout goes back to the front for another account of the pool.
 """
 import argparse
+import fcntl
 import hashlib
 import json
 import math
@@ -90,6 +91,7 @@ MESSAGE_MAX = 4000
 class Hub:
     def __init__(self, home, now=time.time, run=None, launcher=None):
         self.home = Path(home)
+        self.queue_lock = None  # {mine, holder}: set by serve; None outside it
         self._run = run  # () -> the open tickets (list or JSON); sbmap when None
         self.launcher = launcher or launch  # starts one worker; tests hand in their own
         self._tcache = (0.0, None)
@@ -406,7 +408,10 @@ class Hub:
             out = json.loads(json.dumps(self._data))
             for k, v in out["agents"].items():
                 v["agent"] = k
-            return {**out, "now": self.now(), "providers": dict(self.providers)}
+            out = {**out, "now": self.now(), "providers": dict(self.providers)}
+            if self.queue_lock is not None:
+                out["queue_lock"] = dict(self.queue_lock)
+            return out
 
     # ---- tonight's queue and the installed agents ----
 
@@ -1139,16 +1144,27 @@ def _exe(name, env):
     return found or (str(local) if local.exists() else name)
 
 
+GUARD = Path(__file__).resolve().parent.parent / "hooks" / "guard_git.py"
+# every Claude worker gets this PreToolUse hook: no git stash, no rewriting of the main checkout
+GUARD_SETTINGS = {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [
+    {"type": "command", "command": "{} {}".format(shlex.quote(sys.executable), shlex.quote(str(GUARD)))}]}]}}
+GIT_RULE = ("\n\nGit rule: never run git stash, stash pop/apply, checkout or restore of tracked files, reset --hard, "
+            "switch or rebase in a shared checkout; a hook refuses them. To compare with a clean tree, make a "
+            "throwaway worktree (git worktree add --detach /tmp/clean-tree HEAD), run there, then remove it.\n")
+
+
 def launch(agent, brief, repo, model, env, log):
     """Start one headless worker and return its Popen: the only place that knows the agents' commands.
     Own process group, cwd the ticket's repo, stdout and stderr to `log`; `env` adds the hub's ids."""
     full = {**os.environ, **env}
+    brief += GIT_RULE
     if agent.get("kind") == "agy":
         cmd = [_exe("agy", full), "-p", brief] + (["--model", model] if model else []) + ["--output-format", "json"]
     else:
         if agent.get("dir"):
             full["CLAUDE_CONFIG_DIR"] = agent["dir"]
         cmd = [_exe("claude", full), "-p", brief, "--permission-mode", "auto", "--model", model,
+               "--settings", json.dumps(GUARD_SETTINGS),
                "--output-format", "stream-json", "--verbose"]  # stream-json carries the account's usage
     Path(log).parent.mkdir(parents=True, exist_ok=True)
     with open(log, "ab") as out:
@@ -2861,6 +2877,10 @@ def make_handler(hub):
             if not self.from_the_page_or_a_program():
                 self.send(403, {"ok": False, "error": "forbidden"})
                 return
+            if path.startswith("/api/queue/") and hub.queue_lock and not hub.queue_lock["mine"]:
+                self.send(409, {"ok": False, "error": "this hub is read-only: {} holds the queue lock".format(
+                    hub.queue_lock["holder"])})
+                return
             try:
                 n = int(self.headers.get("Content-Length") or 0)
                 d = json.loads(self.rfile.read(n) or b"{}")
@@ -2945,13 +2965,38 @@ def _interrupt(*_):
     raise KeyboardInterrupt
 
 
+def take_queue_lock(home):
+    """Take the exclusive flock on <home>/queue.lock for this process. Returns (fd, None) when it is ours (the
+    file then names this pid), or (None, holder) when another hub holds it; holder is what that hub wrote."""
+    home = Path(home)
+    home.mkdir(parents=True, exist_ok=True)
+    f = open(home / "queue.lock", "a+")
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        f.seek(0)
+        who = f.read().strip() or "unknown"
+        f.close()
+        return None, who
+    f.seek(0)
+    f.truncate()
+    f.write("pid {} since {}\n".format(os.getpid(), datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+    f.flush()
+    return f, None
+
+
 def serve(port):
     home = Path(os.environ.get("SB_HUB_HOME") or Path.home() / ".sb-hub")
+    lock, holder = take_queue_lock(home)
     hub = Hub(home)
+    hub.queue_lock = {"mine": lock is not None, "holder": ("pid {}".format(os.getpid()) if lock else holder)}
+    if lock is None:
+        print("sb hub: {} holds {} - this hub serves read-only and starts no run".format(
+            holder, home / "queue.lock"), file=sys.stderr, flush=True)
     server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(hub))
     threading.Thread(target=refresh_loop, args=(hub,), daemon=True).start()
     supervisor = None
-    if os.environ.get("SB_HUB_QUEUE") != "0":
+    if lock is not None and os.environ.get("SB_HUB_QUEUE") != "0":
         supervisor = Supervisor(hub, port=server.server_address[1])
         threading.Thread(target=supervisor.run, daemon=True).start()
     signal.signal(signal.SIGTERM, _interrupt)  # a stopped hub kills its workers, as Ctrl-C does

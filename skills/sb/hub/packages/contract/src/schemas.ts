@@ -281,6 +281,8 @@ export const State = z.strictObject({
   now: Seconds,
   /** Project path -> its panels. */
   providers: z.record(z.string(), z.array(ProviderPanel)),
+  /** Who holds ~/.sb-hub/queue.lock: `mine` is false on a hub that serves read-only beside another that runs the queue. */
+  queue_lock: z.strictObject({ mine: z.boolean(), holder: z.string() }).optional(),
 });
 export type State = z.infer<typeof State>;
 
