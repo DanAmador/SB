@@ -135,6 +135,14 @@ export const CheckRun = z.strictObject({
 });
 export type CheckRun = z.infer<typeof CheckRun>;
 
+/** What a queued item waits for. `with` names the ticket (files, after) or map (after) it waits on. */
+export const Waits = z.strictObject({
+  kind: z.enum(["files", "limit", "after", "account", "paused", "time"]),
+  with: z.string().nullable(),
+  text: z.string(),
+});
+export type Waits = z.infer<typeof Waits>;
+
 const itemFields = {
   key: z.string(),
   agent: z.string().nullable(),
@@ -175,6 +183,8 @@ const itemFields = {
   redo: Redo.optional(),
   /** The hub's own check that passed, kept while the review runs (or waits to run again); null after. */
   checked: z.string().nullable().optional(),
+  /** Set each time the hub looks for work, on a queued item only. */
+  waits: Waits.optional(),
   /** obsidian:// links to its notes, added by the TypeScript server (links.ts). */
   links: Links,
 };
@@ -212,6 +222,16 @@ export type JobItem = z.infer<typeof JobItem>;
 export const QueueItem = z.discriminatedUnion("kind", [TicketItem, JobItem]);
 export type QueueItem = z.infer<typeof QueueItem>;
 
+/** One repo with something queued or running. */
+export const RepoLoad = z.strictObject({
+  /** `git config sb.parallel`, 1 to 8. */
+  at_once: z.number().int(),
+  running: z.number().int(),
+  /** The most of its queued tickets that could run side by side given their files. */
+  side_by_side: z.number().int(),
+});
+export type RepoLoad = z.infer<typeof RepoLoad>;
+
 export const Queue = z.strictObject({
   version: z.number().int(),
   seeded: z.boolean(),
@@ -231,6 +251,8 @@ export const Queue = z.strictObject({
   /** Repo -> the night's first base, for the final review. */
   bases: z.record(z.string(), z.strictObject({ sha: z.string().nullable(), project: z.string().nullable() })).optional(),
   close_off_day: z.string().optional(),
+  /** Repo -> its load, for each repo with anything queued or running. */
+  repos: z.record(z.string(), RepoLoad).optional(),
 });
 export type Queue = z.infer<typeof Queue>;
 
@@ -502,6 +524,11 @@ export const QueueMapBody = z.strictObject({ map: z.string().min(1), version: z.
 /** Move a queued map to place `to` among the queued maps. */
 export const QueueMoveMapBody = z.strictObject({ map: z.string().min(1), to: z.number().int(), version: z.number().int().nullable() });
 export const QueuePauseBody = z.strictObject({ paused: z.boolean() });
+export const QueueParallelBody = z.strictObject({
+  repo: z.string(),
+  n: z.number().int().min(1).max(8),
+  version: z.number().int().nullable(),
+});
 export const QueueAgentBody = z.strictObject({ name: z.string() });
 export const QueueAgentsBody = z.strictObject({ names: z.array(z.string()).min(1), version: z.number().int().nullable() });
 export const QueueOptionsBody = z.strictObject({

@@ -79,6 +79,7 @@
         "repo/one"
       ],
       "paused": true,
+      "repos": {},
       "runs": {},
       "seeded": true,
       "version": 15

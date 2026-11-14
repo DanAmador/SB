@@ -108,6 +108,7 @@
         "repo/two"
       ],
       "paused": true,
+      "repos": {},
       "runs": {},
       "seeded": true,
       "version": 16

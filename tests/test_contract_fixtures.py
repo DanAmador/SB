@@ -261,6 +261,10 @@ class ContractFixturesTest(unittest.TestCase):
         v = self.hub.state()["queue"]["version"]
         r("queue_options", {"stop_at": START + 6 * 3600, "final_review": True, "version": v})
         r("queue_item_agent", {"key": "repo/one#2", "name": "spare"})
+        v = self.hub.state()["queue"]["version"]
+        r("queue_parallel", {"repo": str(self.repo), "n": 2, "version": v})
+        self.record("queue-parallel-refused", "/api/queue/parallel", {"repo": str(self.repo), "n": 9, "version": v + 1}, 400)
+        self.sup._set_waits()  # each queued item says what it waits for (the queue is paused)
         for prompt in ("Audit the hub", "Tidy the README"):
             digest = hashlib.sha256((project + "\n" + prompt).encode("utf-8")).hexdigest()
             self.subs.update({digest: prompt[0].lower() * 64, digest[:12]: prompt[0].lower() * 12,

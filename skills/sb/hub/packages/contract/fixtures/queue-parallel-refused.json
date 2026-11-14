@@ -1,0 +1,14 @@
+{
+  "body": {
+    "error": "n must be a whole number from 1 to 8",
+    "ok": false
+  },
+  "contentType": "application/json",
+  "request": {
+    "n": 9,
+    "repo": "/fixture/repo",
+    "version": 20
+  },
+  "route": "POST /api/queue/parallel",
+  "status": 400
+}

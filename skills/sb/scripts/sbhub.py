@@ -923,6 +923,20 @@ class Hub:
             q["paused"] = bool(paused)
         return self._queue_write(None, change)
 
+    def queue_parallel(self, repo, n, version):
+        """Set how many tickets run at once in `repo` (git config sb.parallel, 1 to 8); the queue looks again."""
+        if isinstance(n, bool) or not isinstance(n, int) or not 1 <= n <= PARALLEL_MAX:
+            raise ValueError("n must be a whole number from 1 to {}".format(PARALLEL_MAX))
+        if not usable_project(repo):
+            raise ValueError("repo is not a folder here: {}".format(repo))
+
+        def change(q, rows):
+            rc, _, err = _git_run(repo, "config", "sb.parallel", str(n), timeout=10)
+            if rc != 0:
+                raise ValueError("could not write git config sb.parallel: {}".format(err))
+            q.setdefault("repos", {}).setdefault(repo, {"running": 0, "side_by_side": 0})["at_once"] = n
+        return self._queue_write(version, change)
+
     def queue_agent(self, name):
         """The one agent that runs tonight's items unless an item names its own (a pool of one)."""
         def change(q, rows):
@@ -1468,6 +1482,7 @@ def _git(repo, *args):
 # each in its own worktree on its own branch; a passed one is rebased onto the checkout's branch, checked there and
 # fast-forwarded into the checkout ----
 
+QUEUE_TRIES = 4  # `queue add` / `queue rm` write this often while the queue keeps changing under them
 PARALLEL_MAX = 8  # tickets at once in one repo, whatever its git config says
 LAND_TRIES = 3  # rebase, check and fast-forward again this often when the checkout gained commits meanwhile
 MOVED = "moved"
@@ -1516,6 +1531,37 @@ def paths_overlap(a, b):
     if not a or not b:
         return True
     return any(not x or not y or x == y or x.startswith(y + "/") or y.startswith(x + "/") for x in a for y in b)
+
+
+def shared_path(a, b):
+    """The first path of `a` that meets one of `b` (their overlap rule), or None; a ticket naming no path meets all."""
+    a = [str(x).strip().strip("/") for x in a or []]
+    b = [str(y).strip().strip("/") for y in b or []]
+    for x in a:
+        for y in b:
+            if not x or not y or x == y or x.startswith(y + "/") or y.startswith(x + "/"):
+                return max(x, y, key=len) or "/"
+    return "any path" if not a or not b else None
+
+
+def side_by_side(paths):
+    """The most tickets (each a list of paths) of which no two overlap: exact up to 24 of them, else a greedy count."""
+    n = len(paths)
+    clash = [sum(1 << j for j in range(n) if j != i and paths_overlap(paths[i], paths[j])) for i in range(n)]
+    if n > 24:
+        left, count = (1 << n) - 1, 0
+        while left:
+            i = min((i for i in range(n) if left >> i & 1), key=lambda i: bin(clash[i] & left).count("1"))
+            left &= ~(clash[i] | 1 << i)
+            count += 1
+        return count
+
+    def best(left):
+        if not left:
+            return 0
+        i = (left & -left).bit_length() - 1
+        return max(best(left & ~(1 << i)), 1 + best(left & ~(1 << i) & ~clash[i]))
+    return best((1 << n) - 1)
 
 
 def tree_of(home, repo, map_name, num):
@@ -2265,6 +2311,7 @@ class Supervisor:
             self._reviews()  # and one a recheck asked for starts at once
             self._probe()
             self._start()
+        self._set_waits()
         self._digest()
         self._night_note()
 
@@ -3125,6 +3172,92 @@ class Supervisor:
             else:
                 self._launch(item, t, name, inst)
 
+    def _set_waits(self):
+        """Say on each queued item what it waits for (item["waits"] = {kind, with, text}, gone once it does not) and
+        keep queue["repos"]: per repo with anything queued or running, how many run at once, run now, and the most
+        queued tickets that could run side by side. Read from the cached ticket list; never starts anything."""
+        now = self.hub.now()
+        with self.hub._lock:
+            q = self.hub._data["queue"]
+            by = {sbqueue.key(t): t for t in self.hub._tcache[1] or []}
+            items = q["items"]
+            running = [i for i in items if i["state"] == "running"]
+            landed = {i["key"] for i in items if i["state"] == "landed"}
+            load, par, repos = self._load(running), {}, {}
+
+            def at_once(repo):
+                if repo not in par:
+                    par[repo] = parallel_of(repo) if repo and usable_project(repo) else 1
+                return par[repo]
+            try:
+                current, _ = sbqueue.current_maps(items, by, q.get("maps") or [], self.hub._live_keys())
+            except (KeyError, TypeError, ValueError):
+                current = {}
+            queued_paths = {}
+            changed = False
+            keys = {x["key"] for x in items}
+
+            def ahead(t):  # a blocker still in the queue that has not landed
+                return next((k for k in (sbqueue._blocker_key(t, b) for b in t["blocked_by_open"])
+                             if k in keys and k not in landed), None)
+            for i in items:
+                if i["state"] != "queued":
+                    if i.pop("waits", None) is not None:
+                        changed = True
+                    continue
+                t = by.get(i["key"])
+                repo = (t or {}).get("repo") or i.get("repo")
+                if i["kind"] == "ticket" and t is not None:
+                    queued_paths.setdefault(repo, []).append(list(t.get("paths") or []))
+                w = None
+                here = [r for r in running if r.get("repo") == repo]
+                if q["paused"]:
+                    w = ("paused", None, "the queue is paused: nothing new starts")
+                elif (i.get("not_before") or 0) > now:
+                    w = ("time", None, "starts at {}".format(_hm(i["not_before"])))
+                elif t is not None and ahead(t):
+                    w = ("after", ahead(t), "comes after {}, which has not landed".format(ahead(t)))
+                elif repo in current and current[repo] != sbqueue.map_of(i["key"]):
+                    w = ("after", current[repo], "comes after the map {}".format(current[repo]))
+                elif here and i["kind"] == "ticket":
+                    for r in here:
+                        shared = shared_path(r.get("paths"), (t or {}).get("paths")) if r.get("tree") else None
+                        if shared:
+                            w = ("files", r["key"], "shares {} with {}, which is running".format(shared, r["key"]))
+                            break
+                    if w is None and (None in [r.get("paths") if r.get("tree") else None for r in here]
+                                      or len(here) >= at_once(repo)):
+                        w = ("limit", None, "{} already runs its {} at once".format(Path(repo or "").name or "the repo",
+                                                                                   at_once(repo)))
+                elif here:  # a job waits for its repo to be empty
+                    w = ("limit", None, "{} already runs {} at once".format(Path(repo or "").name or "the repo", len(here)))
+                if w is None:
+                    name, _, why = self._pick(q, i, t, load, now)
+                    if name is None:
+                        w = ("account", None, why[len("waits: "):] if why.startswith("waits: ") else
+                             "no account has room right now")
+                new = {"kind": w[0], "with": w[1], "text": w[2]} if w else None
+                if i.get("waits") != new:
+                    if new:
+                        i["waits"] = new
+                    else:
+                        i.pop("waits", None)
+                    changed = True
+            for i in running:
+                if i.get("repo"):
+                    repos.setdefault(i["repo"], 0)
+            for repo in queued_paths:
+                repos.setdefault(repo, 0)
+            out = {}
+            for repo in repos:
+                out[repo] = {"at_once": at_once(repo),
+                             "running": sum(1 for r in running if r.get("repo") == repo),
+                             "side_by_side": side_by_side(queued_paths.get(repo, []))}
+            if q.get("repos") != out:
+                q["repos"], changed = out, True
+            if changed:
+                self.hub._save()
+
     def _board(self, map_name, remember=True):
         """The map's run board for tonight (`sbmap run <map>` once a night), or None when sbmap failed."""
         with self.hub._lock:
@@ -3540,6 +3673,8 @@ def make_handler(hub):
                     out = hub.queue_move_map(d["map"], d["to"], d["version"])
                 elif path == "/api/queue/pause":
                     out = hub.queue_pause(d["paused"])
+                elif path == "/api/queue/parallel":
+                    out = hub.queue_parallel(d["repo"], d["n"], d["version"])
                 elif path == "/api/queue/agent":
                     out = hub.queue_agent(d["name"])
                 elif path == "/api/queue/agents":
@@ -3965,10 +4100,18 @@ def cmd_queue(a):
             print("usage: queue {} <map> <NNN>...".format(act), file=sys.stderr)
             return 1
         keys = {"{}#{}".format(rest[0], int(n)) for n in rest[1:]}
-        have = [i["key"] for i in q["items"] if i["kind"] == "ticket" and i["state"] == "queued"]
-        want = have + [k for k in sorted(keys) if k not in have] if act == "add" else [k for k in have if k not in keys]
-        code, out = call(port, "/api/queue/set", {"keys": want, "version": q["version"],
-                                                  **({"agent": a.by} if act == "add" and a.by else {})})
+        for _ in range(QUEUE_TRIES):  # a write on a stale version is read again and tried again
+            have = [i["key"] for i in q["items"] if i["kind"] == "ticket" and i["state"] == "queued"]
+            want = (have + [k for k in sorted(keys) if k not in have] if act == "add"
+                    else [k for k in have if k not in keys])
+            code, out = call(port, "/api/queue/set", {"keys": want, "version": q["version"],
+                                                      **({"agent": a.by} if act == "add" and a.by else {})})
+            if not out.get("stale"):
+                break
+            q = out.get("queue") or call(port, "/api/state")[1]["queue"]
+        if out.get("ok"):
+            moved = sorted(set(want) - set(have)) if act == "add" else sorted(set(have) - set(want))
+            print("{} {}".format("queued" if act == "add" else "unqueued", ", ".join(moved) or "nothing new (already so)"))
     elif act in ("pause", "resume"):
         code, out = call(port, "/api/queue/pause", {"paused": act == "pause"})
     elif act == "job":
@@ -3996,7 +4139,8 @@ def cmd_queue(a):
         return 1
     if out.get("ok"):
         return 0
-    print("the queue changed meanwhile, try again" if out.get("stale") else out.get("error", "not done"), file=sys.stderr)
+    print("the queue kept changing, {} tries failed: try again".format(QUEUE_TRIES) if out.get("stale")
+          else out.get("error") or "not done (hub answered {})".format(code), file=sys.stderr)
     return 1
 
 

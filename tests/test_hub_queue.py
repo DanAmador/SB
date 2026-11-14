@@ -14,6 +14,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills" / "sb" / "scripts"))
 from helpers import SBMAP, HubCase, free_port  # noqa: E402
+import sbhub  # noqa: E402
 from sbhub import Hub, Supervisor, make_handler  # noqa: E402
 
 
@@ -575,6 +576,144 @@ class QueueHttpTest(HubCase):
                      ["queue", "resume"], ["queue", "agent", "x"], ["agents"], ["agents", "--scan"]):
             r = self.hub(*args, port=down)
             self.assertEqual((r.returncode, r.stderr.strip()), (2, "sbhub: not running"), args)
+
+
+class WaitsTest(unittest.TestCase):
+    """Each queued item says what it waits for; the repo's figures; the route that sets how many run at once."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.repo = Path(tmp.name) / "r1"
+        self.repo.mkdir()
+        subprocess.run(["git", "init", "-q", str(self.repo)], check=True)
+        self.rows = [tk(1, map="r/a", repo=str(self.repo), paths=["one/"]),
+                     tk(2, map="r/a", repo=str(self.repo), paths=["one/sub/x.py"]),
+                     tk(3, map="r/a", repo=str(self.repo), paths=["two/"])]
+        self.h = Hub(Path(tmp.name) / "home", run=lambda: json.dumps(self.rows))
+        with self.h._lock:
+            self.h._data["installed"] = {n: {"kind": "claude", "dir": "/x", "model": None, "limited_until": None}
+                                         for n in ("main", "spare", "third")}
+            self.h._data["queue"].update(agents=["main", "spare", "third"], paused=False)
+        self.h.tickets()
+        self.started = []
+        self.sup = Supervisor(self.h, port=4321)
+        self.sup._launch = lambda item, t, name, inst: self.started.append(item["key"])
+
+    def queue(self, *nums):
+        self.h.tickets(fresh=True)  # the rows were edited since the cache was filled
+        self.h.queue_set(["r/a#{}".format(n) for n in nums], self.h.state()["queue"]["version"])
+
+    def waits(self):
+        self.sup._set_waits()
+        return {i["key"]: i.get("waits") for i in self.h.state()["queue"]["items"]}
+
+    def parallel(self, n):
+        subprocess.run(["git", "-C", str(self.repo), "config", "sb.parallel", str(n)], check=True)
+
+    def test_a_ticket_sharing_a_path_with_a_running_one_waits_on_files_and_names_both(self):
+        self.parallel(3)
+        self.queue(1, 2, 3)
+        self.sup._start()
+        self.assertEqual(self.started, ["r/a#1", "r/a#3"])
+        w = self.waits()
+        self.assertEqual((w["r/a#1"], w["r/a#3"]), (None, None))  # running: waiting for nothing
+        self.assertEqual((w["r/a#2"]["kind"], w["r/a#2"]["with"]), ("files", "r/a#1"))
+        self.assertIn("one/sub/x.py", w["r/a#2"]["text"])
+
+    def test_a_repo_at_its_limit_gives_limit(self):
+        self.parallel(2)
+        self.rows[1]["paths"] = ["three/"]
+        self.queue(1, 2, 3)
+        self.sup._start()
+        self.assertEqual(self.started, ["r/a#1", "r/a#2"])
+        w = self.waits()["r/a#3"]
+        self.assertEqual((w["kind"], w["with"]), ("limit", None))
+        self.assertIn("2 at once", w["text"])
+
+    def test_a_ticket_after_one_not_yet_landed_gives_after(self):
+        self.rows[1]["blocked_by_open"] = [1]
+        self.queue(1, 2)
+        w = self.waits()["r/a#2"]
+        self.assertEqual((w["kind"], w["with"]), ("after", "r/a#1"))
+        self.assertIsNone(self.waits()["r/a#1"])  # nothing holds the first: it is about to start
+
+    def test_no_room_on_any_account_gives_account_with_the_reset_time(self):
+        now = self.h.now()
+        with self.h._lock:
+            for inst in self.h._data["installed"].values():
+                inst["usage"] = {"at": now, "five_hour": 0.98, "five_hour_resets": now + 3600,
+                                 "seven_day": 0.1, "seven_day_resets": now + 86400}
+        self.queue(1)
+        w = self.waits()["r/a#1"]
+        self.assertEqual(w["kind"], "account")
+        self.assertIn("resets {}".format(sbhub._hm(now + 3600)), w["text"])
+
+    def test_a_paused_queue_gives_paused_and_a_resumed_one_clears_it(self):
+        self.queue(1, 3)
+        self.h.queue_pause(True)
+        self.assertEqual({k: v["kind"] for k, v in self.waits().items()}, {"r/a#1": "paused", "r/a#3": "paused"})
+        self.h.queue_pause(False)
+        self.assertEqual(self.waits(), {"r/a#1": None, "r/a#3": None})
+
+    def test_a_job_with_a_start_time_gives_time(self):
+        self.queue(1)
+        with self.h._lock:
+            self.h._data["queue"]["items"][0]["not_before"] = self.h.now() + 600
+        w = self.waits()["r/a#1"]
+        self.assertEqual((w["kind"], w["with"]), ("time", None))
+        self.assertIn(sbhub._hm(self.h.now() + 600), w["text"])
+
+    def test_repo_figures_for_three_tickets_two_sharing_a_file(self):
+        self.parallel(3)
+        self.queue(1, 2, 3)
+        self.sup._set_waits()
+        self.assertEqual(self.h.state()["queue"]["repos"],
+                         {str(self.repo): {"at_once": 3, "running": 0, "side_by_side": 2}})
+        self.sup._start()
+        self.sup._set_waits()
+        self.assertEqual(self.h.state()["queue"]["repos"],
+                         {str(self.repo): {"at_once": 3, "running": 2, "side_by_side": 1}})  # one queued ticket left
+
+    def test_the_parallel_route_changes_how_many_start_and_refuses_0_and_9(self):
+        self.rows[0]["paths"], self.rows[1]["paths"] = ["one/"], ["three/"]
+        self.parallel(2)
+        self.queue(1, 2, 3)
+        self.sup._start()
+        self.assertEqual(self.started, ["r/a#1", "r/a#2"])  # the repo runs two at a time
+        for bad in (0, 9, True, "2"):
+            with self.assertRaises(ValueError):
+                self.h.queue_parallel(str(self.repo), bad, None)
+        with self.assertRaises(ValueError):
+            self.h.queue_parallel(str(self.repo) + "-nope", 2, None)
+        out = self.h.queue_parallel(str(self.repo), 3, self.h.state()["queue"]["version"])
+        self.assertTrue(out["ok"])
+        self.assertEqual(sbhub.parallel_of(str(self.repo)), 3)
+        self.assertEqual(out["queue"]["repos"][str(self.repo)]["at_once"], 3)
+        self.assertTrue(self.h.queue_kick.is_set())  # the queue looks for work again
+        self.sup._start()
+        self.assertEqual(self.started, ["r/a#1", "r/a#2", "r/a#3"])
+        self.assertTrue(self.h.queue_parallel(str(self.repo), 1, 0)["stale"])  # an old version writes nothing
+        self.assertEqual(sbhub.parallel_of(str(self.repo)), 3)
+
+    def test_queue_add_reads_again_after_a_stale_version_and_says_what_it_queued(self):
+        q = {"version": 1, "items": [], "paused": True, "agents": []}
+        fresh = {**q, "version": 2, "items": [{"key": "r/a#1", "kind": "ticket", "state": "queued", "agent": None}]}
+        sent = []
+
+        def call(port, path, data=None, timeout=2):
+            if path == "/api/tickets":
+                return 200, []
+            if path == "/api/queue/set":
+                sent.append(data)
+                return (409, {"ok": False, "stale": True, "queue": fresh}) if data["version"] == 1 else (200, {"ok": True})
+            return 200, {"queue": q}
+        args = mock.Mock(port=1, action="add", rest=["r/a", "3"], by=None)
+        out = mock.Mock()
+        with mock.patch.object(sbhub, "call", call), mock.patch("builtins.print", out):
+            self.assertEqual(sbhub.cmd_queue(args), 0)
+        self.assertEqual([(d["version"], d["keys"]) for d in sent], [(1, ["r/a#3"]), (2, ["r/a#1", "r/a#3"])])
+        out.assert_called_with("queued r/a#3")
 
 
 class WholeMapsTest(unittest.TestCase):

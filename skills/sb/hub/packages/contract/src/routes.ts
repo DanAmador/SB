@@ -41,6 +41,7 @@ export const ROUTES = {
   "POST /api/queue/map": post(s.QueueMapBody, { 200: s.QueueMapAnswer, 409: s.QueueStale }),
   "POST /api/queue/move_map": post(s.QueueMoveMapBody, { 200: s.QueueAnswer, 409: s.QueueStale }),
   "POST /api/queue/pause": post(s.QueuePauseBody, { 200: s.QueueAnswer }),
+  "POST /api/queue/parallel": post(s.QueueParallelBody, { 200: s.QueueAnswer, 409: s.QueueStale }),
   "POST /api/queue/agent": post(s.QueueAgentBody, { 200: s.QueueAnswer }),
   "POST /api/queue/agents": post(s.QueueAgentsBody, { 200: s.QueueAnswer, 409: s.QueueStale }),
   "POST /api/queue/options": post(s.QueueOptionsBody, { 200: s.QueueAnswer, 409: s.QueueStale }),

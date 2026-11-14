@@ -228,7 +228,12 @@
           "note": "",
           "started": null,
           "state": "queued",
-          "tries": 0
+          "tries": 0,
+          "waits": {
+            "kind": "paused",
+            "text": "the queue is paused: nothing new starts",
+            "with": null
+          }
         },
         {
           "agent": null,
@@ -239,7 +244,12 @@
           "note": "",
           "started": null,
           "state": "queued",
-          "tries": 0
+          "tries": 0,
+          "waits": {
+            "kind": "paused",
+            "text": "the queue is paused: nothing new starts",
+            "with": null
+          }
         },
         {
           "agent": null,
@@ -250,7 +260,12 @@
           "note": "",
           "started": null,
           "state": "queued",
-          "tries": 0
+          "tries": 0,
+          "waits": {
+            "kind": "paused",
+            "text": "the queue is paused: nothing new starts",
+            "with": null
+          }
         },
         {
           "agent": "spare",
@@ -261,7 +276,12 @@
           "note": "",
           "started": null,
           "state": "queued",
-          "tries": 0
+          "tries": 0,
+          "waits": {
+            "kind": "paused",
+            "text": "the queue is paused: nothing new starts",
+            "with": null
+          }
         },
         {
           "agent": "main",
@@ -308,10 +328,17 @@
         "repo/one"
       ],
       "paused": true,
+      "repos": {
+        "/fixture/repo": {
+          "at_once": 2,
+          "running": 0,
+          "side_by_side": 3
+        }
+      },
       "runs": {},
       "seeded": true,
       "stop_at": 1794549600.0,
-      "version": 21
+      "version": 22
     },
     "seen": []
   },
