@@ -9,6 +9,7 @@
  "media": [],
  "model": "sonnet",
  "note": "main stopped at its usage limit (until 04:40); queued again at the front",
+ "redo": null,
  "report": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one/1.md",
  "retry": null,
  "review": null,

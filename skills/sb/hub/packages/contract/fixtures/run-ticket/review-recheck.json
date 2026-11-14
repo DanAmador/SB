@@ -16,6 +16,7 @@
  "media": [],
  "model": "sonnet",
  "note": "review could not run: it exited 1 and wrote no review file",
+ "redo": null,
  "report": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one/1.md",
  "retry": null,
  "review": null,

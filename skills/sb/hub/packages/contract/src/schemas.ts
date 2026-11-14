@@ -97,6 +97,20 @@ export type ItemState = z.infer<typeof ItemState>;
 export const Verdict = z.enum(["finished", "partly", "not met"]);
 export type Verdict = z.infer<typeof Verdict>;
 
+/** The one more try a first review that was not finished asks for: the first try's commit, verdict and findings. */
+export const Redo = z.strictObject({
+  /** null: the first try made no commit (its report said no change was needed). */
+  commit: z.string().nullable(),
+  verdict: z.enum(["partly", "not met"]),
+  /** The review's not-met lines (all its lines when none says not met), each starting "- ". */
+  findings: z.array(z.string()),
+  /** The first review's file, kept as <num>-review-1.md. */
+  review: z.string().nullable(),
+  /** The first try's base commit. */
+  base: z.string().nullable(),
+});
+export type Redo = z.infer<typeof Redo>;
+
 export const CheckRun = z.strictObject({
   cmd: z.string(),
   /** null when it timed out. */
@@ -141,6 +155,9 @@ const itemFields = {
   verdict: Verdict.nullable().optional(),
   /** Its review file, <run>/<num>-review.md, once the review started. */
   review: z.string().nullable().optional(),
+  /** The one more try its first review asked for (partly or not met): set once, there is no other. Dropped when
+   * the owner queues it again. */
+  redo: Redo.optional(),
   /** The hub's own check that passed, kept while the review runs (or waits to run again); null after. */
   checked: z.string().nullable().optional(),
   /** obsidian:// links to its notes, added by the TypeScript server (links.ts). */

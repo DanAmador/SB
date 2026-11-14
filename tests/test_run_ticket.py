@@ -21,7 +21,7 @@ from test_hub_runner import RunnerCase, git  # noqa: E402
 
 FIXTURES = Path(__file__).resolve().parents[1] / "skills" / "sb" / "hub" / "packages" / "contract" / "fixtures" / "run-ticket"
 KEYS = {"key", "state", "note", "commit", "checks", "media", "retry", "stop", "agent", "model", "tries", "stops", "base",
-        "log", "report", "run", "tree", "branch", "verdict", "review"}
+        "log", "report", "run", "tree", "branch", "verdict", "review", "redo"}
 
 
 class RunTicketCase(RunnerCase):
@@ -106,17 +106,26 @@ class RunTicketTest(RunTicketCase):
         self.assertIn("check could not run", Path(res["report"]).read_text(encoding="utf-8"))
         self.fixture("recheck", res)
 
-    def test_a_partly_verdict_fails_naming_it_and_leaves_the_ticket_open_with_the_findings(self):
+    def test_a_partly_verdict_answers_redo_with_the_findings_and_the_second_partly_fails(self):
         self.verdicts["repo/one#1"] = "partly"
         res = self.run_ticket()
-        self.assertResult(res, "failed")
-        self.assertEqual(res["verdict"], "partly")
-        self.assertTrue(res["note"].startswith("judged partly by the Opus review"), res["note"])
-        self.assertTrue(res["commit"])
+        self.assertResult(res, "redo")
+        self.assertEqual((res["verdict"], res["redo"]["verdict"], res["redo"]["commit"]), ("partly", "partly", res["commit"]))
+        self.assertEqual(res["redo"]["findings"], ["- It works.: not met: the fake reviewer found no test for it"])
+        self.assertTrue(res["note"].startswith("judged partly by the Opus review; one more try"), res["note"])
         self.assertEqual(self.open_tickets()[1]["status"], "open")
-        self.assertIn("- It works.: not met", self.ticket_text(1))
+        self.assertIn("It gets one more try with these findings.", self.ticket_text(1))
         self.assertTrue(Path(res["review"]).is_file())
-        self.fixture("judged-partly", res)
+        self.fixture("redo", res)
+        # the caller runs it again with the redo it was given: the second partly fails, open with both findings
+        again = self.run_ticket(item={"tries": res["tries"], "redo": res["redo"]}, model=res["model"])
+        self.assertResult(again, "failed")
+        self.assertEqual((again["verdict"], again["redo"]), ("partly", res["redo"]))
+        self.assertTrue(again["note"].startswith("judged partly by the Opus review after its second try"), again["note"])
+        self.assertIn(res["commit"], self.launched[-1]["brief"])
+        self.assertEqual(self.open_tickets()[1]["status"], "open")
+        self.assertEqual(self.ticket_text(1).count("- It works.: not met"), 2)
+        self.fixture("judged-partly", again)
 
     def test_a_review_that_crashes_answers_recheck_and_keeps_the_commit_and_the_claim(self):
         self.verdicts["repo/one#1"] = "crash"

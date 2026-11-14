@@ -140,16 +140,31 @@ def _fill(template, values):
     return "\n".join(out).rstrip("\n") + "\n"
 
 
-def review_brief(ticket_text, repo, sha, diff, report_path, report_text, review_file):
+def review_brief(ticket_text, repo, shas, diff, report_path, report_text, review_file, redo=None, second=None):
     """The second pass's prompt: templates/review-brief.md filled with the ticket as `sbmap show` prints it, the
-    commit's diff (cut at DIFF_MAX; the review reads the rest itself) and the worker's report."""
+    diff of its commits `shas` (oldest first; cut at DIFF_MAX, the review reads the rest itself) and the worker's
+    report. `redo`: the item's review-driven try (its first try's commit, verdict and review), whose second try made
+    `second` (None: no commit): both tries are judged together."""
+    shas = [s for s in ([shas] if isinstance(shas, str) else shas or []) if s]
     if len(diff) > DIFF_MAX:
         diff = diff[:DIFF_MAX] + f"\n... cut at {DIFF_MAX} characters: read the rest with git show"
+    first = (redo or {}).get("commit")
+    if len(shas) > 1:
+        commit_line = f"Commits {first} (the first try) and {second} (the second try), in {repo}."
+    elif shas:
+        commit_line = f"Commit {shas[0]}, in {repo}."
+        if redo:
+            commit_line += (" It is the first try's: the second try made no commit." if shas[0] == first else
+                            " The first try made no commit.")
+    else:
+        commit_line = "The worker made no commit: its report says no change was needed, or it was research."
     values = {
         "ticket": ticket_text.strip() or "(sbmap could not show the ticket)", "repo": str(repo),
-        "commit_line": f"Commit {sha}, in {repo}." if sha else
-        "The worker made no commit: its report says no change was needed, or it was research.",
-        "diff_cmd": f"`git -C {repo} show {sha}`" if sha else "",
+        "second_try": (f"This is the ticket's second and last try. The first was judged {redo.get('verdict')} by an "
+                       f"earlier review ({redo.get('review') or 'not kept'}) and the second built on it: judge both "
+                       f"tries' commits together, as one piece of work, against the Done when.") if redo else "",
+        "commit_line": commit_line,
+        "diff_cmd": "`git -C {} show {}`".format(repo, " ".join(shas)) if shas else "",
         "diff": diff.strip() or "(no change)", "report_path": str(report_path),
         "report": report_text.strip() or "(the worker wrote no report)", "review_file": str(review_file),
     }

@@ -9,6 +9,7 @@
  "media": [],
  "model": "sonnet",
  "note": "spare stopped when its login expired; queued again at the front",
+ "redo": null,
  "report": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one/1.md",
  "retry": null,
  "review": null,

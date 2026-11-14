@@ -34,7 +34,7 @@ and never fail a session when it is down.
                                       run one ticket to its end, as the queue does (claim, worker, checks,
                                       Opus review, resolve or comment, release) and print one JSON result (the contract's
                                       RunTicketResult); exit 0 when done. --item carries an earlier try's queue
-                                      fields (tries, stops, retry, resume, base_sha, tree, branch)
+                                      fields (tries, stops, retry, resume, base_sha, tree, branch, redo)
   sbhub.py run-ticket <map>#<num> ... --detach   start it in the background: prints its pid and files
   sbhub.py run-ticket --status <pid>  a detached run: running, its worker, and its result once it ended
   sbhub.py hook                       read one Claude Code hook event on stdin and report it;
@@ -48,7 +48,9 @@ queued ticket whose agent and repo are free as a headless worker (`claude -p` in
 with SB_HUB_AGENT=<ticket key> and SB_HUB_PARENT=queue so `hook` reports it as that item's worker; when the
 worker exits it checks the commit, paths and checks in code; when they pass, a second pass on Opus (`claude -p`
 from templates/review-brief.md) judges the work against the ticket's Done when and writes <run>/<num>-review.md,
-and only its `finished` verdict resolves the ticket (partly or not met leave it open with the findings).
+and only its `finished` verdict resolves the ticket. Partly or not met queue it once more at the front, its brief
+naming the first commit and the review's not-met lines; a second verdict short of finished leaves it open with
+both findings, failed, for the owner. The hub never reverts a commit.
 
 It paces each Claude account: workers print their account's 5-hour and weekly use (stream-json), a one-line
 Haiku probe reads an idle one, and an item starts only where its learned cost fits under GATE_5H (weekly under
@@ -499,7 +501,7 @@ class Hub:
         if item is None or item["state"] == "queued":
             return item
         for f in ("retry", "digested", "runner", "pid", "pid_start", "result", "base_sha", "first_base", "resume", "stops",
-                  "log_start", "checked", "verdict", "review"):
+                  "log_start", "checked", "verdict", "review", "redo"):
             item.pop(f, None)
         item.update(state="queued", note="", ended=None, tries=0, started=None, commit=None)
         return item
@@ -999,6 +1001,13 @@ RECHECK_EVERY = 10 * 60  # a ticket whose check could not run (exit 75): its che
 RECHECKS_MAX = 6  # ...this many times, then it waits for the Recheck button
 REVIEW_LIMIT = 30 * 60  # a second pass still running after this long is killed: the review could not run
 REVIEW_MODEL = "opus"  # the second pass runs on Opus, whichever model did the work
+# A ticket's tries, each with its own counter on its queue item, none of which spends another's:
+#   tries     worker runs that ended (a sonnet first try whose checks failed runs once more on opus: `retry`)
+#   stops     runs cut off by a usage limit or a logout, queued again at the front (STOPS_MAX)
+#   rechecks  a check that exited 75, or a review that could not run, run again alone (RECHECKS_MAX)
+#   redo      the one more try the Opus review asks for: its first verdict was partly or not met. The field holds the
+#             first try's commit and findings; once it is set there is no other, and a second verdict that is not
+#             finished leaves the ticket open, waiting for the owner. No commit is ever reverted.
 LOG_TAIL = 65536  # the end of a worker's log that is searched for a limit message
 # what an agent prints when its plan's usage runs out (case-insensitive); any other failure is just `failed`
 LIMIT_PATTERNS = ("usage limit reached", "hit your session limit", "hit your weekly limit", "spend limit")
@@ -1051,6 +1060,20 @@ AUTH_PATTERNS = ("authentication_failed", "failed to authenticate", "oauth sessi
 RESUME = ("\n## An earlier try stopped\n\nAn earlier try on {agent} stopped {why}. Its changes may already be in "
           "the tree, committed or not: read `git log {base}..HEAD` and {diff} first, continue from there, do not "
           "redo finished work. Its log: {log}.\n")
+REDO = ("\n## This is the ticket's second try\n\n{work} The Opus review judged that try {verdict} against the Done "
+        "when (its review: {review}). Fix what it found not met:\n{findings}\nThe next review judges both tries' "
+        "commits together; there is no third try.\n")
+
+
+def redo_brief(redo):
+    """What a review-driven second try's worker is told beyond its usual brief: the first try's commit, named as work
+    to build on, and the review's not-met lines."""
+    sha = redo.get("commit")
+    work = ("The first try made commit {}, which is already in this branch: build on it, do not redo or revert it."
+            .format(sha) if sha else "The first try made no commit (its report said no change was needed).")
+    findings = "\n".join(redo.get("findings") or []) or "(the review named no line not met: read it)"
+    return REDO.format(work=work, verdict=redo.get("verdict") or "not met", review=redo.get("review") or "none kept",
+                       findings=findings)
 
 
 def _num(v):
@@ -1478,7 +1501,7 @@ def media_in(run_folder, num):
 # through TicketRun, so there is one way to run a ticket. Its answer is one result (the contract's
 # RunTicketResult): what happened, and what the queue does next (retry on another model, or wait for a limit) ----
 
-RESULT_STATES = ("done", "failed", "skipped", "retry", "stopped", "recheck")
+RESULT_STATES = ("done", "failed", "skipped", "retry", "stopped", "recheck", "redo")
 STOP_WHY = {"auth": "when its login expired", "limit": "at its usage limit"}
 
 
@@ -1615,9 +1638,11 @@ class TicketRun:
 
     @staticmethod
     def result(item, state, note, run=None, commit=None, checks=None, retry=None, stop=None, model=None, verdict=None,
-               review=None):
+               review=None, redo=None):
         """The one answer of a ticket's run (see RESULT_STATES). `verdict` is the second pass's (finished, partly or
-        not met; None when none ran or it printed none) and `review` its file in the run folder."""
+        not met; None when none ran or it printed none) and `review` its file in the run folder. `redo`: the
+        review-driven try, {commit, verdict, findings, review, base} of the first try; on a `redo` result it is the
+        one just asked for, else the item's (None when it had none)."""
         run = run or {}
         t = run.get("t") or {}
         folder = run.get("folder") or (str(Path(run["log"]).parent) if run.get("log") else None)
@@ -1630,7 +1655,8 @@ class TicketRun:
                 "base": run.get("base"), "log": run.get("log"),
                 "report": report if report and os.path.isfile(report) else None, "run": folder,
                 "tree": run.get("tree"), "branch": run.get("branch"), "verdict": verdict,
-                "review": review if review and os.path.isfile(review) else None}
+                "review": review if review and os.path.isfile(review) else None,
+                "redo": redo if redo is not None else item.get("redo")}
 
     def rebuild_after(self, repo, base, sha):
         """A resolved ticket's commit: rebuild (and restart) when it touched the hub's own code."""
@@ -1692,6 +1718,8 @@ class TicketRun:
                               _git(t["repo"], "rev-parse", "--abbrev-ref", "HEAD") or "the current branch")
         if item.get("retry"):
             brief += "\nThe first try failed; the hub's check said:\n" + item["retry"] + "\n"
+        if item.get("redo"):
+            brief += redo_brief(item["redo"])
         log = str(folder / "{}.log".format(int(t["num"])))
         if item.get("resume"):
             r, paths = item["resume"], " ".join(t.get("paths") or [])
@@ -1883,11 +1911,15 @@ class TicketRun:
             raise ValueError("the run folder is not recorded")
         nnn = "{:03d}".format(int(t["num"]))
         rc, shown, err = self.sbmap("show", t["map"], nnn)
+        # a review-driven second try is judged with the first try's commit: both, oldest first
+        redo = item.get("redo") or {}
+        shas = [c for c in dict.fromkeys((redo.get("commit"), sha)) if c]
         diff = ""
-        if sha:
-            rc2, diff, err2 = _git_run(t["repo"], "show", "--stat", "--patch", "--format=fuller", sha)
+        for c in shas:
+            rc2, one, err2 = _git_run(t["repo"], "show", "--stat", "--patch", "--format=fuller", c)
             if rc2 != 0:
-                raise ValueError("git show {} failed: {}".format(sha[:9], firstline(err2)))
+                raise ValueError("git show {} failed: {}".format(c[:9], firstline(err2)))
+            diff += one
         folder = Path(run["folder"])
         report = folder / "{}.md".format(int(t["num"]))
         try:
@@ -1896,7 +1928,8 @@ class TicketRun:
             report_text = ""
         review = Path(self.review_file(run, t))
         review.unlink(missing_ok=True)
-        brief = sbqueue.review_brief(shown if rc == 0 else "", t["repo"], sha, diff, report, report_text, review)
+        brief = sbqueue.review_brief(shown if rc == 0 else "", t["repo"], shas, diff, report, report_text, review,
+                                     redo=redo or None, second=sha)
         log = str(folder / "{}-review.log".format(int(t["num"])))
         try:
             start = os.path.getsize(log)
@@ -1931,16 +1964,38 @@ class TicketRun:
                     "checked": checked}
         if verdict == "finished":
             return self.resolve(item, run, sha, checked, checks, review=path)
+        # partly or not met: the first time, one more try with the findings (`redo`, once); after that try,
+        # the ticket waits for the owner. Either way the findings go on the ticket and no commit is reverted.
+        first = not item.get("redo")
         findings = sbqueue.review_findings(text)
-        missing = [f[2:] for f in findings if re.search(r"\bnot met\b", f, re.I)]
-        text_c = "The sb hub's Opus review judged this ticket {} against its Done when ({} on agent {}). {}\n  {}\n  " \
-                 "Review: {}".format(
-                     verdict, item.get("model"), run.get("agent"),
-                     "The commit {} is left where it landed.".format(sha[:9]) if sha else "The worker made no commit.",
+        not_met = [f for f in findings if re.search(r"\bnot met\b", f, re.I)]
+        if first and path:  # the second try's review writes <num>-review.md afresh: the first one is kept beside it
+            kept = Path(path).with_name("{}-review-1.md".format(int(t["num"])))
+            try:
+                os.replace(path, kept)
+                path = str(kept)
+            except OSError:
+                pass
+        commits = [c[:9] for c in dict.fromkeys(((item.get("redo") or {}).get("commit"), sha)) if c]
+        landed = ("The worker made no commit." if not commits else "The commit {} is left where it landed.".format(
+            commits[0]) if len(commits) == 1 else "Both tries' commits, {} and {}, are left where they landed.".format(
+            *commits))
+        then = ("It gets one more try with these findings." if first else
+                "That was its second try: it waits for the owner.")
+        text_c = "The sb hub's Opus review judged this ticket {} against its Done when ({} on agent {}{}). {} {}\n  " \
+                 "{}\n  Review: {}".format(
+                     verdict, item.get("model"), run.get("agent"), "" if first else ", second try", landed, then,
                      "\n  ".join(findings) or "(the review lists no item)", path)
         self.sbmap("comment", t["map"], "{:03d}".format(int(t["num"])), "--text", text_c)
         self.release(item["key"])
-        note = "judged {} by the Opus review{}".format(verdict, ": " + missing[0] if missing else "")
+        if first:
+            redo = {"commit": sha, "verdict": verdict, "findings": not_met or findings,
+                    "review": path, "base": item.get("base_sha") or run.get("base")}
+            note = "judged {} by the Opus review; one more try with its findings{}".format(
+                verdict, ": " + not_met[0][2:] if not_met else "")
+            return self.result(item, "redo", note[:2000], run, sha, checks, verdict=verdict, review=path, redo=redo)
+        note = "judged {} by the Opus review after its second try{}".format(
+            verdict, ": " + not_met[0][2:] if not_met else "")
         return self.result(item, "failed", note[:2000], run, sha, checks, verdict=verdict, review=path)
 
     def fail(self, item, run, reason, sha, checks=()):
@@ -2248,13 +2303,15 @@ class Supervisor:
 
     # ---- state, always under the hub's lock ----
 
-    def _update(self, key, front=False, **fields):
-        """Change one item; `front` puts it first among the queued ones."""
+    def _update(self, key, front=False, drop=(), **fields):
+        """Change one item; `front` puts it first among the queued ones; the fields in `drop` are removed."""
         with self.hub._lock:
             q = self.hub._data["queue"]
             item = next((i for i in q["items"] if i["key"] == key), None)
             if item is None:
                 return
+            for f in drop:
+                item.pop(f, None)
             item.update(fields)
             if front:
                 q["items"].remove(item)
@@ -2364,6 +2421,13 @@ class Supervisor:
                          note=res["note"] + ("; {} again at {}".format(what, _hm(self.hub.now() + RECHECK_EVERY))
                                              if more else
                                              "; rechecked {} times, press Recheck to try again".format(RECHECKS_MAX)))
+            return
+        if state == "redo":  # the review's one more try: first in the queue, on the model it had, from the newest
+            # commit (its first try's included), told the findings; a stop's resume and an opus retry's reason go
+            self._update(key, front=True, drop=("resume", "retry"), state="queued", tries=(item.get("tries") or 0) + 1,
+                         redo=res["redo"], commit=res["commit"], verdict=res["verdict"], review=res["review"],
+                         first_base=None, checked=None, rechecks=None, recheck_at=None, pid=None, pid_start=None,
+                         started=None, ended=None, note=res["note"])
             return
         if state == "retry":
             self._update(key, front=True, state="queued", tries=1, model=res["retry"]["model"],
@@ -2538,8 +2602,9 @@ class Supervisor:
         res = self.runner.review_end(item, run, item.get("commit"), item.get("checked") or "",
                                      item.get("checks") or [], rv, over)
         self._apply(item, res)
-        if res["state"] == "done" and res["commit"]:
-            self.runner.rebuild_after(row["repo"], item.get("base_sha"), res["commit"])
+        if res["state"] == "done" and res["commit"]:  # after a second try, both tries' changes count
+            self.runner.rebuild_after(row["repo"], (item.get("redo") or {}).get("base") or item.get("base_sha"),
+                                      res["commit"])
 
     def _finish_job(self, item, run, over):
         """A job has no claim, verdict or retry: exit 0 is done, anything else failed, except a usage limit,
@@ -3701,7 +3766,7 @@ def cmd_agents(a):
     return 0
 
 
-RUN_ITEM_FIELDS = ("tries", "stops", "retry", "resume", "base_sha", "first_base", "tree", "branch")
+RUN_ITEM_FIELDS = ("tries", "stops", "retry", "resume", "base_sha", "first_base", "tree", "branch", "redo")
 
 
 def _hub_home():

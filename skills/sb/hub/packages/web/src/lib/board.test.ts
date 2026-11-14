@@ -149,6 +149,16 @@ describe("waits for you", () => {
     expect(waitsFor(s, tickets, ix, new Set()).count).toBe(2 + 1 + 2 + 1 + 1);
   });
 
+  it("lists a ticket the review judged short twice; its one more try, still queued, is not waiting on you", () => {
+    const redo = { commit: "a".repeat(40), verdict: "not met" as const, findings: ["- It works.: not met"], review: "/r/1-review-1.md", base: null };
+    const short = item("sb/one#6", "failed", { ended: NOW - 10, verdict: "not met", commit: "b".repeat(40), redo, note: "judged not met by the Opus review after its second try" });
+    const again = item("sb/one#7", "queued", { verdict: "partly", redo: { ...redo, verdict: "partly" } });
+    const s2 = { ...s, queue: { ...s.queue, items: [...s.queue.items, short, again] } };
+    const w = waitsFor(s2, tickets, ticketIndex(tickets, s2), new Set());
+    expect(w.failed.map((i) => i.key)).toEqual(["sb/one#6", "sb/one#1"]);
+    expect(w.count).toBe(waitsFor(s, tickets, ix, new Set()).count + 1);
+  });
+
   it("drops a run once it is looked at, and only that run", () => {
     const done = s.queue.items[1];
     if (!done) throw new Error("fixture");

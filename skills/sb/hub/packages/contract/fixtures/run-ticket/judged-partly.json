@@ -15,7 +15,16 @@
  "log": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one/1.log",
  "media": [],
  "model": "sonnet",
- "note": "judged partly by the Opus review: It works.: not met: the fake reviewer found no test for it",
+ "note": "judged partly by the Opus review after its second try: It works.: not met: the fake reviewer found no test for it",
+ "redo": {
+  "base": "0000000000000000000000000000000000000000",
+  "commit": "0000000000000000000000000000000000000000",
+  "findings": [
+   "- It works.: not met: the fake reviewer found no test for it"
+  ],
+  "review": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one/1-review-1.md",
+  "verdict": "partly"
+ },
  "report": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one/1.md",
  "retry": null,
  "review": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one/1-review.md",
@@ -24,6 +33,6 @@
  "stop": null,
  "stops": 0,
  "tree": null,
- "tries": 1,
+ "tries": 2,
  "verdict": "partly"
 }

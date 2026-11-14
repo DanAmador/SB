@@ -114,7 +114,9 @@ class RunnerCase(unittest.TestCase):
         self.repos = {folder: self.root / repo for folder, repo, *_ in self.MAPS}
         self.clock = Clock(START)
         self.mode, self.modes, self.launched, self.reviewed = "commit", {}, [], []
-        self.verdicts = {}  # item key -> what its fake second pass does (FAKE_REVIEW), default finished
+        # item key -> what its fake second pass does (FAKE_REVIEW), default finished; a list: one per review, in turn
+        # (its last is kept for any later one)
+        self.verdicts = {}
         self.hub = Hub(self.root / "hub", now=self.clock, launcher=self.launcher)
         with self.hub._lock:
             self.hub._data["installed"] = {n: {"kind": "claude", "dir": str(self.root / (".claude-" + n)), "model": None,
@@ -137,8 +139,9 @@ class RunnerCase(unittest.TestCase):
         (self.reviewed if review else self.launched).append(
             {"key": key, "model": model, "brief": brief, "agent": agent, "log": log})
         fake = {"FAKE_WORKER_MODE": self.modes.get(key, self.mode)}
-        if key in self.verdicts:
-            fake["FAKE_REVIEW"] = self.verdicts[key]
+        if key in self.verdicts and review:
+            v = self.verdicts[key]
+            fake["FAKE_REVIEW"] = (v.pop(0) if len(v) > 1 else v[0]) if isinstance(v, list) else v
         return sbhub.launch(agent, brief, repo, model, {**env, **fake}, log)
 
     # ---- reading the result ----
@@ -385,7 +388,7 @@ class ReviewTest(RunnerCase):
         self.assertIn("Change no code, commit nothing", brief)
         self.assertEqual(Path(self.reviewed[0]["log"]).name, "1-review.log")
 
-    def test_partly_and_not_met_leave_the_ticket_open_with_the_findings_and_name_the_verdict(self):
+    def test_partly_and_not_met_twice_leave_the_ticket_open_with_the_findings_and_name_the_verdict(self):
         self.verdicts = {"repo/one#1": "partly", "repo/one#2": "not met"}
         self.resume()
         self.until(lambda: self.state_of("repo/one#1") == "failed" and self.state_of("repo/one#2") == "failed")
@@ -393,14 +396,17 @@ class ReviewTest(RunnerCase):
         for num, verdict in ((1, "partly"), (2, "not met")):
             item, sha = self.items()["repo/one#{}".format(num)], self.sha(num)
             self.assertEqual((item["verdict"], item["commit"]), (verdict, sha))
-            self.assertTrue(item["note"].startswith("judged {} by the Opus review: It works.".format(verdict)),
-                            item["note"])
+            self.assertTrue(item["note"].startswith(
+                "judged {} by the Opus review after its second try: It works.".format(verdict)), item["note"])
             self.assertEqual((tickets[num]["status"], tickets[num]["claimed_by"]), ("open", None))
             text = self.ticket_text(num)
             self.assertIn("Opus review judged this ticket {} against its Done when".format(verdict), text)
             self.assertIn("- It works.: not met: the fake reviewer found no test for it", text)
-            self.assertIn("The commit {} is left where it landed.".format(sha[:9]), text)
-            self.assertIn(sha, git(self.repos["repo/one"], "log", "--format=%H"))  # the commit stays
+            first = item["redo"]["commit"]
+            self.assertIn("Both tries' commits, {} and {}, are left where they landed.".format(first[:9], sha[:9]), text)
+            log = git(self.repos["repo/one"], "log", "--format=%H")
+            self.assertIn(sha, log)  # the commits stay
+            self.assertIn(first, log)
             self.assertEqual(item["review"], str(Path(item["run"]) / "{}-review.md".format(num)))
         self.assertIn("A: failed, judged partly by the Opus review", self.board())
         self.assertEqual(self.items()["repo/one#2"]["note"].count("not met"), 2)  # the verdict, and the item
@@ -459,7 +465,7 @@ class ReviewTest(RunnerCase):
         self.until(lambda: self.state_of("repo/one#1") == "failed")
         self.until(lambda: self.state_of("repo/one#2") == "skipped")
         self.assertIn("blocked: after A", self.items()["repo/one#2"]["note"])
-        self.assertEqual([x["key"] for x in self.launched], ["repo/one#1"])
+        self.assertEqual([x["key"] for x in self.launched], ["repo/one#1", "repo/one#1"])  # its one more try first
 
     def test_a_review_holds_up_no_other_ticket(self):
         self.verdicts, self.modes = {"repo/one#1": "slow"}, {"repo/one#2": "hang"}
@@ -468,6 +474,117 @@ class ReviewTest(RunnerCase):
         self.resume()
         self.until(lambda: self.state_of("repo/one#1") == "review" and self.state_of("repo/one#2") == "running")
         self.until(lambda: self.state_of("repo/one#1") == "done")
+
+
+class ReviewRetryTest(RunnerCase):
+    """A ticket the review judges partly or not met gets one more try (the item's `redo`), briefed with the review's
+    findings and its first commit; if that falls short too, it stays open and waits for the owner."""
+
+    def ticket_text(self, num, folder="repo/one"):
+        f = next(iter(sorted((self.vault / "wayfinder" / folder / "issues").glob("**/{:03d}*.md".format(num)))))
+        return f.read_text(encoding="utf-8")
+
+    def shas(self, num):
+        """The ticket's commits, oldest first."""
+        out = git(self.repos["repo/one"], "log", "--reverse", "--format=%H", "--grep", "^Ticket: repo/one/{:03d}".format(num))
+        return out.split()
+
+    def only_one(self):
+        """Ticket 1 alone in the queue (a hanging ticket 2 would hold the repo its one more try needs)."""
+        self.hub.queue_set(["repo/one#1"], self.hub.state()["queue"]["version"])
+        self.hub.queue_pause(False)
+
+    def runs(self, key="repo/one#1"):
+        return [x for x in self.launched if x["key"] == key]
+
+    def assert_second_brief(self, brief, first, verdict):
+        self.assertIn("## This is the ticket's second try", brief)
+        self.assertIn("The first try made commit {}, which is already in this branch: build on it, do not redo or "
+                      "revert it.".format(first), brief)
+        self.assertIn("judged that try {} against the Done when".format(verdict), brief)
+        self.assertIn("- It works.: not met: the fake reviewer found no test for it", brief)  # the not-met line
+        self.assertNotIn("- The commit names the ticket: met", brief)  # a met line is not a finding
+
+    def test_not_met_then_finished_runs_the_worker_twice_briefed_with_the_findings_and_the_first_commit(self):
+        self.verdicts = {"repo/one#1": ["not met", "finished"]}
+        self.only_one()
+        self.until(lambda: self.state_of("repo/one#1") == "done")
+        runs, (first, second) = self.runs(), self.shas(1)
+        self.assertEqual([x["model"] for x in runs], ["sonnet", "sonnet"])  # the same model, not a switch to opus
+        self.assertNotIn("second try", runs[0]["brief"])
+        self.assert_second_brief(runs[1]["brief"], first, "not met")
+        item = self.items()["repo/one#1"]
+        self.assertEqual((item["commit"], item["verdict"], item["redo"]["commit"], item["redo"]["verdict"]),
+                         (second, "finished", first, "not met"))
+        # the first review is kept beside the second; the second judges both commits together
+        self.assertEqual(Path(item["redo"]["review"]).name, "1-review-1.md")
+        self.assertIn("Verdict: not met", Path(item["redo"]["review"]).read_text(encoding="utf-8"))
+        rv = [x["brief"] for x in self.reviewed if x["key"] == "repo/one#1"]
+        self.assertEqual(len(rv), 2)
+        self.assertIn("Commits {} (the first try) and {} (the second try)".format(first, second), rv[1])
+        self.assertIn("judge both tries' commits together", rv[1])
+        self.assertIn("show {} {}`".format(first, second), rv[1])
+        self.assertNotIn(1, self.open_tickets())  # resolved
+        done = self.ticket_text(1)
+        self.assertIn(second, done)
+        self.assertIn("It gets one more try with these findings.", done)
+
+    def test_not_met_twice_ends_after_two_runs_open_with_both_findings_and_waiting_for_the_owner(self):
+        self.verdicts = {"repo/one#1": "not met"}
+        self.only_one()
+        self.until(lambda: self.state_of("repo/one#1") == "failed")
+        for _ in range(3):  # nothing more starts for it
+            self.sup.tick()
+        self.assertEqual(len(self.runs()), 2)
+        self.assertEqual(len([x for x in self.reviewed if x["key"] == "repo/one#1"]), 2)
+        first, second = self.shas(1)
+        t = self.open_tickets()[1]
+        self.assertEqual((t["status"], t["claimed_by"]), ("open", None))
+        text = self.ticket_text(1)
+        self.assertEqual(text.count("- It works.: not met: the fake reviewer found no test for it"), 2)
+        self.assertIn("It gets one more try with these findings.", text)
+        self.assertIn("second try). Both tries' commits", text)
+        self.assertIn("That was its second try: it waits for the owner.", text)
+        self.assertIn(Path(self.items()["repo/one#1"]["redo"]["review"]).name, text)  # the first review, kept
+        log = git(self.repos["repo/one"], "log", "--format=%H")
+        self.assertTrue(first in log and second in log)  # nothing reverted
+        # it ends `failed` with its verdict: the page lists ended failed runs under Waits for you (board.ts waitsFor)
+        item = self.items()["repo/one#1"]
+        self.assertEqual((item["state"], item["verdict"], item["commit"]), ("failed", "not met", second))
+        self.assertIsNotNone(item["ended"])
+        self.assertTrue(item["note"].startswith("judged not met by the Opus review after its second try"), item["note"])
+
+    def test_partly_is_handled_as_not_met(self):
+        self.verdicts = {"repo/one#1": "partly", "repo/one#2": ["partly", "finished"]}
+        self.resume()
+        self.until(lambda: self.state_of("repo/one#1") == "failed" and self.state_of("repo/one#2") == "done")
+        for key, num in (("repo/one#1", 1), ("repo/one#2", 2)):
+            runs = self.runs(key)
+            self.assertEqual(len(runs), 2, key)
+            self.assert_second_brief(runs[1]["brief"], self.shas(num)[0], "partly")
+            self.assertEqual(self.items()[key]["redo"]["verdict"], "partly")
+        self.assertEqual(self.open_tickets()[1]["status"], "open")
+        self.assertNotIn(2, self.open_tickets())
+
+    def test_a_ticket_stopped_at_a_usage_limit_before_any_review_still_gets_its_review_driven_try(self):
+        self.mode, self.verdicts = "limit", {"repo/one#1": ["not met", "finished"]}
+        self.only_one()
+        self.until(lambda: self.hub.state()["installed"]["main"]["limited_until"])
+        item = self.items()["repo/one#1"]
+        self.assertEqual((item["state"], item["stops"], item.get("redo"), self.reviewed), ("queued", 1, None, []))
+        self.clock.t = datetime(2026, 11, 13, 4, 40).timestamp() + 1
+        self.mode = "commit"
+        self.until(lambda: self.state_of("repo/one#1") == "done")
+        runs = self.runs()
+        self.assertEqual(len(runs), 3)  # the stopped try, the try it resumed with, the review's one more try
+        self.assertIn("An earlier try", runs[1]["brief"])
+        self.assertNotIn("second try", runs[1]["brief"])
+        self.assert_second_brief(runs[2]["brief"], self.shas(1)[0], "not met")
+        self.assertNotIn("An earlier try", runs[2]["brief"])  # the stop is over: its resume note went
+        item = self.items()["repo/one#1"]
+        self.assertEqual((item["stops"], item["verdict"], item["redo"]["verdict"]), (1, "finished", "not met"))
+        self.assertEqual(len([x for x in self.reviewed if x["key"] == "repo/one#1"]), 2)
+        self.assertNotIn(1, self.open_tickets())
 
 
 class StopsTest(RunnerCase):

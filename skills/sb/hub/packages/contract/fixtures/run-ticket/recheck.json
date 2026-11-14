@@ -16,6 +16,7 @@
  "media": [],
  "model": "opus",
  "note": "check could not run: sh -c 'exit 75' exited 75 (the tool it needs did not answer)",
+ "redo": null,
  "report": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one/1.md",
  "retry": null,
  "review": null,

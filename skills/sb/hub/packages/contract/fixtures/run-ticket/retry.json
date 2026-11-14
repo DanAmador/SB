@@ -9,6 +9,7 @@
  "media": [],
  "model": "sonnet",
  "note": "retrying on opus: no commit after 000000000",
+ "redo": null,
  "report": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one/1.md",
  "retry": {
   "model": "opus",
