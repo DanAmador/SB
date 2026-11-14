@@ -76,6 +76,129 @@ test("the panel's Stop asks why, confirms and calls the stop route; no message i
   expect(errors).toEqual([]);
 });
 
+test.describe("The run's graph", () => {
+  const night = (page: Page) => page.getByTestId("night-graph");
+  const box = (page: Page, name: RegExp) => night(page).getByRole("button", { name });
+
+  test("Everything shows every ticket of the run as one graph, a frame per map, a job apart", async ({ page }) => {
+    const errors: string[] = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await page.goto("/next/");
+    await expect(night(page)).toBeVisible();
+    for (const f of ["The demo board", "The shop site", "Jobs"]) await expect(night(page).getByText(f, { exact: true })).toBeVisible();
+    // the demo board: 1 done, 2 running, 1 fell short, 1 next; the shop site: 1 running, 1 fell short
+    await expect(night(page).getByText("1 done · 2 running · 1 next · 1 fell short")).toBeVisible();
+    await expect(page.getByTestId("run-counts")).toHaveText("1 done · 3 running · 1 in checks · 1 next · 2 fell short");
+    await expect(night(page).locator(".react-flow__node-box")).toHaveCount(8);
+    // a ticket the run never queued is not there
+    await expect(night(page).getByText("Draw the shop window")).toHaveCount(0);
+    await expect(night(page).getByText("Draw the header")).toHaveCount(0);
+    // the queued one has its place; an arrow crosses from the demo board to the shop site
+    await expect(box(page, /Show the queue in order\s*Queued 1/)).toBeVisible();
+    await expect(night(page).locator(".react-flow__edge")).toHaveCount(1);
+    // the graph sits above the running tickets
+    await expect(page.getByRole("list", { name: "Running now" })).toBeVisible();
+    // any box opens the ticket's panel
+    await box(page, /Run the board against the real hub/).click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await expect(page).toHaveURL(/t=demo%2Fboard%235/);
+    expect(errors).toEqual([]);
+  });
+
+  test("picking a project leaves only its frames", async ({ page }) => {
+    await page.goto("/next/?project=other");
+    await expect(night(page).getByText("The shop site", { exact: true })).toBeVisible();
+    await expect(night(page).getByText("The demo board", { exact: true })).toHaveCount(0);
+    await expect(night(page).getByText("Jobs", { exact: true })).toHaveCount(0);
+    await expect(page.getByTestId("run-counts")).toHaveText("1 running · 1 fell short");
+    await page.goto("/next/?project=demo");
+    await expect(night(page).getByText("The demo board", { exact: true })).toBeVisible();
+    await expect(night(page).getByText("Jobs", { exact: true })).toBeVisible();
+    await expect(night(page).getByText("The shop site", { exact: true })).toHaveCount(0);
+  });
+
+  test("a finished box shows its outcome and opens its report; a frame's title picks the map", async ({ page }) => {
+    await page.goto("/next/");
+    const done = night(page).locator(".react-flow__node-box", { hasText: "Wait on the shop's fonts" });
+    await expect(done).toContainText("Done");
+    await expect(done.getByRole("link", { name: "Report" })).toHaveAttribute("href", /^obsidian:\/\/open\?path=/);
+    await expect(night(page).locator(".react-flow__node-box", { hasText: "Fix the sheet's focus" })).toContainText("Fell short");
+    await night(page).getByRole("button", { name: "The demo board" }).click();
+    await expect(page).toHaveURL(/map=demo%2Fboard/);
+    await expect(page.getByTestId("map-graph")).toBeVisible();
+    await expect(night(page)).toHaveCount(0);
+  });
+
+  test("at 375 px the list is grouped by map and nothing scrolls sideways", async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 800 });
+    await page.goto("/next/");
+    await expect(page.getByRole("region", { name: "The demo board" })).toBeVisible();
+    await expect(page.getByRole("region", { name: "The shop site" }).getByRole("listitem")).toHaveCount(2);
+    await expect(page.getByRole("region", { name: "Jobs" }).getByRole("listitem")).toHaveCount(1);
+    await expect(night(page)).toHaveCount(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    const dir = process.env.SB_SHOTS;
+    if (dir !== undefined) await page.screenshot({ path: `${dir}/run-375.png` });
+    await page.getByRole("region", { name: "The demo board" }).getByRole("button", { name: /Show the queue in order/ }).click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+  });
+
+  for (const scheme of ["light", "dark"] as const) {
+    test(`axe finds no serious or critical issue on the run's graph (${scheme}); screenshot`, async ({ page }) => {
+      const { default: AxeBuilder } = await import("@axe-core/playwright");
+      await page.emulateMedia({ colorScheme: scheme });
+      await page.goto("/next/");
+      await expect(night(page).locator(".react-flow__node-box")).toHaveCount(8);
+      await page.waitForTimeout(800);
+      const dir = process.env.SB_SHOTS;
+      if (dir !== undefined) await page.screenshot({ path: `${dir}/run-${scheme}-1440.png` });
+      const r = await new AxeBuilder({ page }).analyze();
+      const bad = r.violations.filter((v) => v.impact === "serious" || v.impact === "critical");
+      expect(bad.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`)).toEqual([]);
+    });
+  }
+
+  test("a ticket that starts and one that ends change in place, without a reload, keeping the zoom and the panel", async ({ page, request }) => {
+    await page.goto("/next/");
+    await expect(box(page, /Show the queue in order\s*Queued 1/)).toBeVisible();
+    await night(page).getByRole("button", { name: "Zoom in" }).click();
+    await page.waitForTimeout(400);
+    const view = (): Promise<string> => page.locator(".react-flow__viewport").first().evaluate((el) => (el as HTMLElement).style.transform);
+    const where = (): Promise<string> => night(page).locator(".react-flow__node-box", { hasText: "Fix the sheet's focus" }).evaluate((el) => (el as HTMLElement).style.transform);
+    const zoom = await view();
+    const spot = await where();
+    await page.evaluate(() => { (window as unknown as { kept: boolean }).kept = true; });
+    await box(page, /Fix the sheet's focus/).click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await request.post("/api/__advance");
+    try {
+      await expect(night(page).locator(".react-flow__node-box", { hasText: "Show the queue in order" })).toContainText("Running", { timeout: 8000 });
+      await expect(night(page).locator(".react-flow__node-box", { hasText: "Run the board against the real hub" })).toContainText("Done");
+      await expect(page.getByTestId("run-counts")).toHaveText("2 done · 3 running · 1 in checks · 2 fell short");
+      expect(await view()).toBe(zoom);
+      expect(await where()).toBe(spot);
+      expect(await page.evaluate(() => (window as unknown as { kept?: boolean }).kept)).toBe(true);
+      await expect(page.getByRole("dialog")).toBeVisible();
+    } finally {
+      await request.post("/api/__restore");
+    }
+  });
+});
+
+test("a ticket found by the Queue's search and dragged into Up next lands at that place, and the hub has it", async ({ page }) => {
+  await page.goto("/next/?view=queue");
+  const next = page.getByTestId("up-next");
+  await expect(next.getByText("Show the queue in order")).toBeVisible();
+  await page.getByRole("searchbox", { name: "Search the tickets" }).fill("drag");
+  await expect(page).toHaveURL(/q=drag/);
+  const found = page.getByTestId("ticket-rows");
+  await expect(found.getByRole("row")).toHaveCount(1);
+  await found.locator("tr", { hasText: "Drag a ticket into the queue" }).dragTo(next.locator("li", { hasText: "Show the queue in order" }));
+  await expect(next.locator("li").first()).toContainText("Drag a ticket into the queue");
+  await expect(next.locator("li").nth(1)).toContainText("Show the queue in order");
+  await expect(page.getByRole("status")).toContainText("Queued.");
+  expect(await queuedKeys(page)).toEqual(["demo/board#2", "demo/board#3"]);
+
 test.describe("Run tab", () => {
   const calls = async (page: Page): Promise<{ moveMap: number; map: number }> => (await page.request.get("/api/__calls")).json() as Promise<{ moveMap: number; map: number }>;
   const order = (page: Page) => page.getByTestId("map-block").evaluateAll((els) => els.map((e) => e.getAttribute("data-map")));

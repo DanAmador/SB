@@ -57,6 +57,14 @@ const batchRoute = (): unknown => MapRoute.parse(addLinks("GET /api/map", {
   map: "demo/batch", title: "The batch map", status: "open", words: "Five tickets that can run.", checks: ["pnpm test"], uri: "obsidian://open?path=%2Fvault%2Fdemo%2Fbatch%2Fmap.md",
   tickets: [mt(1, "Batch A", [], {}, "demo/batch"), mt(2, "Batch B", [], {}, "demo/batch"), mt(3, "Batch C", [], {}, "demo/batch"), mt(4, "Batch D", [1], {}, "demo/batch"), mt(5, "Batch E", [4], {}, "demo/batch")],
 }, ctx));
+const siteRoute = (): unknown => MapRoute.parse(addLinks("GET /api/map", {
+  map: "other/site", title: "The shop site", status: "open", words: "A shop.", checks: ["pnpm test"], uri: "obsidian://open?path=%2Fvault%2Fother%2Fsite%2Fmap.md",
+  tickets: [
+    { ...mt(3, "Write the shop's copy", [], { status: "claimed", state: "claimed", file: "/vault/other/site/issues/3.md" }), blocked_by: [{ map: "demo/board", num: 7, title: "Show who runs what", status: "resolved" }] },
+    mt(1, "Draw the shop window", [], { file: "/vault/other/site/issues/1.md" }),
+    mt(2, "Pick the shop's fonts", [], { state: "waits for you", type: "grilling", file: "/vault/other/site/issues/2.md" }),
+  ],
+}, ctx));
 const mapRoute = (): unknown => MapRoute.parse(addLinks("GET /api/map", {
   map: "demo/board", title: "The demo board", status: "open", words: "A board for the test.", checks: ["pnpm test"], uri: "obsidian://open?path=%2Fvault%2Fdemo%2Fboard%2Fmap.md",
   tickets: [
@@ -107,9 +115,19 @@ const queue = {
       checks: [{ cmd: "pnpm test", code: 0, secs: 12, tail: "" }],
     },
     { ...item("other/site#3", "running"), runner: "main", started: start - 240, run: RUN, log: `${RUN}/s3.log` },
-    { ...item("other/site#4", "failed"), ended: start - 800, note: "check failed: pnpm test", run: RUN, log: `${RUN}/s4.log` },
+    { ...item("other/site#4", "failed"), title: "Check the shop's checkout", ended: start - 800, note: "check failed: pnpm test", run: RUN, log: `${RUN}/s4.log` },
     item("demo/board#3", "queued"),
+    {
+      key: "job:close-off", kind: "job", agent: null, state: "landed", note: "", commit: null, tries: 0, started: start - 700, ended: null, model: null,
+      project: "/demo", repo: "/demo", prompt: "close the night", hash: "abc", name: "close-off", title: "Close off the night", created: start - 3000, close_off: true,
+    },
   ] as Raw<QueueItem>[],
+};
+const first = JSON.stringify(queue.items);
+/** For the live test: the queued ticket starts and a running one ends done; then put it back. */
+const advance = (): void => {
+  queue.items = queue.items.map((i) => (i.key === "demo/board#3" ? { ...i, state: "running" as const, started: now() } : i.key === "demo/board#5" ? { ...i, state: "done" as const, ended: now(), commit: "0123456789abcdef" } : i));
+  queue.version += 1;
 };
 
 const calls = { moveMap: 0, map: 0 };
@@ -231,6 +249,7 @@ createServer((req, res) => {
     if (req.method === "GET" && path === "/api/__vault") { send(res, 200, { vault }); return; }
     if (req.method === "GET" && path === "/api/map") {
       const which = new URL(req.url ?? "", "http://x").searchParams.get("map");
+      if (which === "other/site") { send(res, 200, siteRoute()); return; }
       if (which !== "demo/board" && which !== "demo/batch" && which !== "demo/bare") { send(res, 404, { ok: false, error: "no such map" }); return; }
       send(res, 200, which === "demo/bare" ? bareRoute() : which === "demo/batch" ? batchRoute() : mapRoute());
       return;
@@ -302,6 +321,8 @@ createServer((req, res) => {
     }
     if (req.method === "GET" && path === "/api/__stops") { send(res, 200, stops); return; }
     if (req.method === "GET" && path === "/api/__calls") { send(res, 200, calls); return; }
+    if (req.method === "POST" && path === "/api/__advance") { advance(); send(res, 200, { ok: true }); return; }
+    if (req.method === "POST" && path === "/api/__restore") { queue.items = JSON.parse(first) as Raw<QueueItem>[]; queue.version += 1; send(res, 200, { ok: true }); return; }
     if (req.method === "GET" && path === "/api/__actions") { send(res, 200, actions); return; }
     if (req.method === "POST" && path?.startsWith("/api/ticket/") === true) {
       const b = TicketActionBody.parse(await body(req));

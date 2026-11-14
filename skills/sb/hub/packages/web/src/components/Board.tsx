@@ -19,6 +19,7 @@ import { HistoryView } from "./HistoryView.tsx";
 import { MapView } from "./MapView.tsx";
 import { SessionSheet } from "./SessionPanel.tsx";
 import { RunView } from "./RunView.tsx";
+import { NightGraph } from "./NightGraph.tsx";
 import { DetailSheet } from "./TicketSheet.tsx";
 import { Toolbar } from "./Toolbar.tsx";
 import { WaitsView } from "./WaitsView.tsx";
@@ -226,7 +227,7 @@ function Loaded({ state, tickets, down, lastOk }: { state: State; tickets: Board
             </div>
           )}
           <TabsContent value="run" className="flex flex-col gap-6 outline-none">
-            {scope.map !== "" && <MapView map={scope.map} />}
+            {scope.map !== "" ? <MapView map={scope.map} /> : <NightGraph />}
             <RunView />
           </TabsContent>
           <TabsContent value="waits" className="outline-none">

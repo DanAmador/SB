@@ -2,7 +2,7 @@
  * A map's landing: its tickets as a graph, one box each, an arrow for every "after", the colour for the state. Below
  * 768 px the same tickets show as a plain list. A box opens the ticket panel; a blocker in another map opens that map.
  */
-import { IconFocusCentered, IconCircleCheck, IconLayoutList, IconTopologyStar3, IconClock, IconListNumbers, IconLock, IconMessageQuestion, IconPlayerPlay, IconPlayerSkipForward, IconSquareCheck, IconTicket, IconAlertTriangle, IconBan, IconCheck } from "@tabler/icons-react";
+import { IconFocusCentered, IconCircleCheck, IconLayoutList, IconTopologyStar3, IconClock, IconListNumbers, IconLock, IconMessageQuestion, IconPlayerPlay, IconPlayerSkipForward, IconSquareCheck, IconTicket, IconAlertTriangle, IconBan, IconCheck, IconNotebook } from "@tabler/icons-react";
 import { Background, Controls, Handle, MarkerType, Panel, Position, ReactFlow, SelectionMode, useReactFlow, type Edge, type Node, type NodeProps } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
@@ -18,7 +18,7 @@ import { clearSelection, selected, tick, useSelection } from "@/lib/select.ts";
 import { MapHead } from "./MapHead.tsx";
 import { TicketTable } from "./TicketTable.tsx";
 
-const WIDE = "(min-width: 768px)";
+export const WIDE = "(min-width: 768px)";
 const subscribe = (fn: () => void): (() => void) => {
   const m = matchMedia(WIDE);
   m.addEventListener("change", fn);
@@ -26,9 +26,9 @@ const subscribe = (fn: () => void): (() => void) => {
     m.removeEventListener("change", fn);
   };
 };
-const useWide = (): boolean => useSyncExternalStore(subscribe, () => matchMedia(WIDE).matches, () => true);
+export const useWide = (): boolean => useSyncExternalStore(subscribe, () => matchMedia(WIDE).matches, () => true);
 
-const TONE: Readonly<Record<MapState, string>> = {
+export const TONE: Readonly<Record<MapState, string>> = {
   done: "border-ok/40 bg-ok/5 text-muted-foreground",
   running: "border-brand bg-brand text-background ring-4 ring-brand/30",
   queued: "border-brand bg-card",
@@ -50,7 +50,7 @@ const STATE_ICON: Readonly<Record<MapState, typeof IconTicket>> = {
 };
 const TYPE_ICON: Readonly<Record<string, typeof IconTicket>> = { grilling: IconMessageQuestion, task: IconSquareCheck, other: IconPlayerSkipForward };
 
-const keyOf = (map: string, t: { num: number }): string => `${map}#${String(t.num)}`;
+export const keyOf = (map: string, t: { num: number }): string => `${map}#${String(t.num)}`;
 /** The state in words: a running ticket with its minutes so far. A queued one's place is its own badge. */
 const stateLine = (n: MapNode, mins: number | null): string => {
   if (n.ticket === null) return n.other;
@@ -70,24 +70,32 @@ function TypeGlyph({ type }: { type: string | null }): React.JSX.Element {
   return <Glyph className="mt-0.5 size-3.5 shrink-0" aria-hidden />;
 }
 
-function StateGlyph({ s }: { s: MapState }): React.JSX.Element {
+export function StateGlyph({ s }: { s: MapState }): React.JSX.Element {
   const Glyph = STATE_ICON[s];
   return <Glyph className="size-3 shrink-0" aria-hidden />;
 }
 
-interface Data extends Record<string, unknown> {
+export interface Data extends Record<string, unknown> {
   n: MapNode;
   map: string;
   /** Minutes its run has taken so far; null when it is not running. */
-  mins: number | null;
+  mins?: number | null;
   /** Another state is picked: the box steps back. */
-  dim: boolean;
+  dim?: boolean;
   /** Ticked: the same tick the table's row has. */
-  ticked: boolean;
+  ticked?: boolean;
+  /** The run's graph reuses this box: its own second line, the key it opens, the report it links, a flash on change. */
+  foot?: string;
+  key?: string;
+  report?: string | null;
+  flash?: boolean;
 }
 
-function Box({ data }: NodeProps<Node<Data>>): React.JSX.Element {
-  const { n, map, mins, dim, ticked } = data;
+export function Box({ data }: NodeProps<Node<Data>>): React.JSX.Element {
+  const { n, map } = data;
+  const mins = data.mins ?? null;
+  const dim = data.dim === true;
+  const ticked = data.ticked === true;
   const t = n.ticket;
   const open = (ev: React.MouseEvent): void => {
     // Shift-click ticks; a plain click opens the panel
@@ -95,7 +103,8 @@ function Box({ data }: NodeProps<Node<Data>>): React.JSX.Element {
       if (t !== null) tick([keyOf(map, t)], !ticked);
       return;
     }
-    if (t !== null) setLink({ t: keyOf(map, t) });
+    if (data.key !== undefined) setLink({ t: data.key });
+    else if (t !== null) setLink({ t: keyOf(map, t) });
     else setLink({ project: n.other.split("/")[0] ?? "", map: n.other });
   };
   return (
@@ -110,6 +119,7 @@ function Box({ data }: NodeProps<Node<Data>>): React.JSX.Element {
           n.state === "running" && "motion-safe:animate-pulse",
           ticked && "ring-4 ring-foreground/40",
           dim && "opacity-25",
+          data.flash === true && "motion-safe:animate-[flash_1.2s_ease-out_1]",
         )}
       >
         <span className="flex items-start gap-1.5">
@@ -118,7 +128,7 @@ function Box({ data }: NodeProps<Node<Data>>): React.JSX.Element {
         </span>
         <span className="flex items-center gap-1 text-[10px] leading-none">
           {t !== null && <StateGlyph s={n.state} />}
-          <span className={cn("truncate", n.state === "running" && "font-semibold")}>{footOf(n, mins)}</span>
+          <span className={cn("truncate", n.state === "running" && "font-semibold")}>{data.foot ?? footOf(n, mins)}</span>
           <Place n={n} />
         </span>
         {ticked && (
@@ -128,6 +138,12 @@ function Box({ data }: NodeProps<Node<Data>>): React.JSX.Element {
           </span>
         )}
       </button>
+      {data.report != null && (
+        <a href={data.report} title="Open the report in Obsidian" className="absolute right-2 bottom-1 inline-flex items-center gap-0.5 rounded px-1 text-[10px] text-brand underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none">
+          <IconNotebook className="size-3" aria-hidden />
+          Report
+        </a>
+      )}
       <Handle type="source" position={Position.Bottom} isConnectable={false} className="!pointer-events-none !opacity-0" />
     </>
   );

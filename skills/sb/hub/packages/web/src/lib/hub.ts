@@ -1,5 +1,5 @@
 /** The hub's data as TanStack queries, and every write as one function that refreshes what it changed. */
-import { keepPreviousData, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQueries, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import type { Queue, RouteAnswer, RouteBody, State, TicketAction } from "@sb-hub/contract";
 import { QueueStale } from "@sb-hub/contract";
 import { get, HubError, post, READONLY, ticketPath } from "./api.ts";
@@ -29,6 +29,18 @@ export const useMapRoute = (map: string) =>
     refetchInterval: TICKETS_MS,
     placeholderData: keepPreviousData,
     retry: 1,
+  });
+
+/** Several maps at once, read through the same cache as one map's page. */
+export const useMapRoutes = (maps: readonly string[]) =>
+  useQueries({
+    queries: maps.map((map) => ({
+      queryKey: ["map", map],
+      queryFn: () => get("GET /api/map", { map }),
+      refetchInterval: TICKETS_MS,
+      placeholderData: keepPreviousData,
+      retry: 1,
+    })),
   });
 
 /** One session's last actions, every 2 s; null when the hub has none for it (a session that has not acted yet). */

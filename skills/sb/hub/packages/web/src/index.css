@@ -124,3 +124,9 @@
     transition-duration: 0.01ms !important;
   }
 }
+
+/* a box of the run's graph whose ticket changed state: a ring that fades once */
+@keyframes flash {
+  from { box-shadow: 0 0 0 4px var(--brand); }
+  to { box-shadow: 0 0 0 0 transparent; }
+}
