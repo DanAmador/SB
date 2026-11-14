@@ -1,9 +1,11 @@
 /** The hub on its public port: the built board, and every /api route forwarded to the Python hub and checked. */
+import { createHash, timingSafeEqual } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { addLinks, routeOf, type LinkContext } from "@sb-hub/contract";
 import { Hono, type Context } from "hono";
+import type { Phone } from "./config.ts";
 import { checkAnswer, type Verdict } from "./check.ts";
 import type { Reply, Upstream } from "./upstream.ts";
 
@@ -15,6 +17,8 @@ export interface AppOptions {
   readonly webDir: string;
   /** The vault, for the obsidian:// links added to ticket rows and queue items. */
   readonly links: LinkContext;
+  /** The extra address and its secret; absent, the hub answers only 127.0.0.1 and localhost. */
+  readonly phone?: Phone | undefined;
   /** Where a mismatch with the contract is written. */
   readonly log: (line: string) => void;
 }
@@ -30,14 +34,42 @@ function answer(status: number, body: Buffer | string, contentType: string, extr
 const error = (status: number, text: string): Response =>
   answer(status, JSON.stringify({ ok: false, error: text }), "application/json");
 
+const COOKIE = "sbhub";
+const digest = (s: string): Buffer => createHash("sha256").update(s).digest();
+const same = (a: string, b: string): boolean => timingSafeEqual(digest(a), digest(b));
+
+function cookieOf(header: string | undefined, name: string): string | undefined {
+  for (const part of (header ?? "").split(";")) {
+    const i = part.indexOf("=");
+    if (i > 0 && part.slice(0, i).trim() === name) return part.slice(i + 1).trim();
+  }
+  return undefined;
+}
+
 export function createApp(o: AppOptions): Hono {
-  const hosts = new Set([`127.0.0.1:${String(o.port)}`, `localhost:${String(o.port)}`]);
+  const local = [`127.0.0.1:${String(o.port)}`, `localhost:${String(o.port)}`];
+  const phoneHost = o.phone === undefined ? undefined : `${o.phone.address}:${String(o.port)}`;
+  const hosts = new Set(phoneHost === undefined ? local : [...local, phoneHost]);
   const origins = new Set([...hosts].map((h) => `http://${h}`));
   const app = new Hono();
+  // What the phone's cookie must hold: a hash of the secret, so the secret itself is not kept on the phone.
+  const proof = o.phone === undefined ? "" : digest(o.phone.secret).toString("hex");
 
   // A page that rebinds its own name to 127.0.0.1 gets nothing, as with the Python hub; no answer may be framed or sniffed.
   app.use("*", async (c, next) => {
-    if (!hosts.has(c.req.header("host") ?? "")) return error(403, "forbidden");
+    const host = c.req.header("host") ?? "";
+    if (!hosts.has(host)) return error(403, "forbidden");
+    if (host === phoneHost && o.phone !== undefined) {
+      // From off the Mac: the secret's link sets the cookie once; without the cookie the hub answers nothing at all.
+      const given = c.req.query("token");
+      if (given !== undefined && same(given, o.phone.secret)) {
+        const u = new URL(c.req.url);
+        u.searchParams.delete("token");
+        const to = u.pathname === "/" ? "/next/" : u.pathname + u.search;
+        return new Response(null, { status: 302, headers: { Location: to, "Set-Cookie": `${COOKIE}=${proof}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000`, "Cache-Control": "no-store", ...SAFETY } });
+      }
+      if (!same(cookieOf(c.req.header("cookie"), COOKIE) ?? "", proof)) return new Response(null, { status: 404, headers: SAFETY });
+    }
     await next();
     for (const [k, v] of Object.entries(SAFETY)) c.res.headers.set(k, v);
     return undefined;

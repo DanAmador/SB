@@ -1,7 +1,7 @@
 /** The vault on disk, for the links the API carries: where a ticket note is, and whether a file is there. */
 import { existsSync, readdirSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import type { LinkContext } from "@sb-hub/contract";
 
 /** SB_VAULT, as sbmap and sbhub.py read it, else ~/Documents/Second Brain. */
@@ -30,4 +30,5 @@ export const linkContext = (vault: string): LinkContext => ({
   real: (p) => realpathSync(p),
   findTicket: (map, num) => findTicket(vault, map, num),
   runs: {},
+  vault: ((root) => ({ root, name: basename(root) }))(existsSync(vault) ? realpathSync(vault) : vault),
 });

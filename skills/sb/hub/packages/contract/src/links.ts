@@ -6,12 +6,37 @@
 import { z } from "zod";
 
 /** Python's urllib.parse.quote(path, safe="") leaves letters, digits and _.-~ alone; encodeURIComponent also leaves !'()*. */
-export function obsidianUri(path: string): string {
-  const enc = encodeURIComponent(path).replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
-  return `obsidian://open?path=${enc}`;
+const enc = (s: string): string => encodeURIComponent(s).replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+
+/** The vault as Obsidian knows it: its folder on this Mac (symlinks resolved) and its name, which a phone's vault shares. */
+export interface Vault {
+  readonly root: string;
+  readonly name: string;
 }
 
-const Uri = z.string().startsWith("obsidian://open?path=%2F").nullable();
+/**
+ * With a vault, a note inside it links by the vault's name and its path in the vault, so the same link opens on a phone
+ * whose vault has that name; any other file (or no vault) links by its absolute path, as `sbmap uri` does.
+ */
+export function obsidianUri(path: string, vault?: Vault): string {
+  if (vault !== undefined && path.startsWith(`${vault.root}/`)) {
+    return `obsidian://open?vault=${enc(vault.name)}&file=${enc(path.slice(vault.root.length + 1))}`;
+  }
+  return `obsidian://open?path=${enc(path)}`;
+}
+
+/** An `obsidian://open?path=` link (what the Python hub writes) as a link by vault name; anything else is left alone. */
+export function vaultUri(uri: string, vault: Vault): string {
+  const m = /^obsidian:\/\/open\?path=([^&]*)$/.exec(uri);
+  if (m === null) return uri;
+  try {
+    return obsidianUri(decodeURIComponent(m[1] ?? ""), vault);
+  } catch {
+    return uri;
+  }
+}
+
+const Uri = z.string().regex(/^obsidian:\/\/open\?(?:path=%2F|vault=[^&]+&file=)/).nullable();
 
 /** One link per vault note around a ticket; null where the note does not exist (yet). */
 export const Links = z.strictObject({
@@ -33,10 +58,12 @@ export interface LinkContext {
   findTicket: (map: string, num: number) => string | null;
   /** Map -> its run board, as the queue last gave them: a ticket row has no queue of its own. */
   runs: Record<string, string>;
+  /** Set, every link names the vault instead of the Mac's path. */
+  vault?: Vault;
 }
 
 const linkTo = (path: string | null | undefined, ctx: LinkContext): string | null =>
-  path?.startsWith("/") === true && ctx.exists(path) ? obsidianUri(ctx.real(path)) : null;
+  path?.startsWith("/") === true && ctx.exists(path) ? obsidianUri(ctx.real(path), ctx.vault) : null;
 
 /** A ticket file's map: wayfinder/<repo>/<effort>/issues/[done/]NNN.md -> wayfinder/<repo>/<effort>/map.md. */
 export function mapNote(ticketFile: string): string | null {

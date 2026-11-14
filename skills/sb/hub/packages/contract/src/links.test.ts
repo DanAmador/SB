@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { Links, addLinks, itemLinks, mapNote, obsidianUri, rowLinks, type LinkContext } from "./index.ts";
+import { Links, addLinks, itemLinks, mapNote, obsidianUri, rowLinks, vaultUri, type LinkContext } from "./index.ts";
 
 const SBMAP = join(import.meta.dirname, "..", "..", "..", "..", "scripts", "sbmap.py");
 const vault = realpathSync(mkdtempSync(join(tmpdir(), "vault-")));
@@ -85,5 +85,18 @@ describe("links", () => {
     expect(out.queue.cleared[0]?.links).toEqual({ ticket: null, map: null, board: null, report: null, log: null });
     const rows = addLinks("GET /api/tickets", [{ map: "repo/one", file: ticket }], c) as { links: { board: string } }[];
     expect(rows[0]?.links.board).toBe(sbmapUri(board));
+  });
+});
+
+describe("links by vault name", () => {
+  const v = { root: "/Users/x/Second Brain", name: "Second Brain" };
+  it("name the vault and the path in it; a file outside the vault keeps its path", () => {
+    expect(obsidianUri("/Users/x/Second Brain/wayfinder/r/e/issues/001 A, 'b'.md", v)).toBe("obsidian://open?vault=Second%20Brain&file=wayfinder%2Fr%2Fe%2Fissues%2F001%20A%2C%20%27b%27.md");
+    expect(obsidianUri("/Users/x/Second Brainy/a.md", v)).toBe("obsidian://open?path=%2FUsers%2Fx%2FSecond%20Brainy%2Fa.md");
+  });
+  it("rewrites the Python hub's path links and nothing else", () => {
+    expect(vaultUri("obsidian://open?path=%2FUsers%2Fx%2FSecond%20Brain%2Fmap.md", v)).toBe("obsidian://open?vault=Second%20Brain&file=map.md");
+    expect(vaultUri("https://example.com", v)).toBe("https://example.com");
+    expect(Links.safeParse({ ticket: obsidianUri("/Users/x/Second Brain/a.md", v), map: null, board: null, report: null, log: null }).success).toBe(true);
   });
 });
