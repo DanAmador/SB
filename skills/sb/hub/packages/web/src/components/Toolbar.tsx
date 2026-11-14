@@ -8,6 +8,7 @@ import { say } from "@/lib/notice.ts";
 import { setTheme, useTheme } from "@/lib/theme.ts";
 import { cn } from "@/lib/utils";
 import { RunIcon } from "./bits.tsx";
+import { Pace } from "./Pace.tsx";
 import { useBoard } from "./context.tsx";
 
 export function Toolbar({ onCommand, view }: { onCommand: () => void; view: string }): React.JSX.Element {
@@ -28,6 +29,7 @@ export function Toolbar({ onCommand, view }: { onCommand: () => void; view: stri
         {q.paused ? "Resume" : "Pause"}
       </Button>
       {view === "queue" && <Accounts />}
+      <Pace />
       <StopTime />
       <Button variant="outline" size="sm" onClick={onCommand} aria-label="Commands" aria-keyshortcuts="Meta+K" className="hidden gap-1 text-muted-foreground sm:inline-flex">
         <IconSearch aria-hidden />
