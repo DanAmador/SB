@@ -699,6 +699,8 @@ class Hub:
         runs it. A failed sbmap raises ValueError with sbmap's message; a done one refreshes the ticket list."""
         if action not in TICKET_ACTIONS:
             raise ValueError("unknown action: {}".format(action))
+        if action == "recheck":
+            return self.recheck_now(key)
         with self._lock:
             running = any(i["key"] == key and i["state"] == "running" for i in self._data["queue"]["items"])
         if running:
@@ -737,6 +739,17 @@ class Hub:
             if rc != 0:
                 raise ValueError(err or out or "sbmap failed")
         self._fresh_tickets()
+        return {"ok": True}
+
+    def recheck_now(self, key):
+        """The Recheck button: the ticket's checks run again at the next tick, and the count starts over."""
+        with self._lock:
+            item = next((i for i in self._data["queue"]["items"] if i["key"] == key and i["state"] == "recheck"), None)
+            if item is None:
+                raise ValueError("its checks are not waiting to be run again")
+            item.update(recheck_at=0, rechecks=0)
+            self._data["queue"]["version"] += 1
+            self._save()
         return {"ok": True}
 
     def queue_pause(self, paused):
@@ -919,7 +932,7 @@ def hub_checks_section(passed, reason, sha, checks, report_text, stamp):
     """The `## Hub checks` section the hub appends to a worker's report: the verdict, each check, and the
     worker's own `## Self-checks` section (or "none reported")."""
     lines = ["", "## Hub checks", "", "Checked by the sb hub at {}: {}{}.".format(
-        stamp, "passed" if passed else "failed: " + firstline(reason), ", commit " + sha[:9] if sha else "")]
+        stamp, "passed" if passed else firstline(reason) if passed is None else "failed: " + firstline(reason), ", commit " + sha[:9] if sha else "")]
     if not checks:
         lines.append("No check ran (the verdict stopped before the checks).")
     for c in checks:
@@ -930,7 +943,7 @@ def hub_checks_section(passed, reason, sha, checks, report_text, stamp):
     return "\n".join(lines)
 
 
-TICKET_ACTIONS = ("done", "drop", "release", "comment", "tier", "checks")
+TICKET_ACTIONS = ("done", "drop", "release", "comment", "tier", "checks", "recheck")
 
 
 def sbmap_call(*args):
@@ -975,6 +988,8 @@ TICKETS_FAILED_FOR = 5  # after a failed sbmap, no new try for this long
 
 WORKER_LIMIT = 90 * 60  # a worker still running after this long has its process group killed
 TICK_EVERY = 5
+RECHECK_EVERY = 10 * 60  # a ticket whose check could not run (exit 75): its checks run again this often
+RECHECKS_MAX = 6  # ...this many times, then it waits for the Recheck button
 LOG_TAIL = 65536  # the end of a worker's log that is searched for a limit message
 # what an agent prints when its plan's usage runs out (case-insensitive); any other failure is just `failed`
 LIMIT_PATTERNS = ("usage limit reached", "hit your session limit", "hit your weekly limit", "spend limit")
@@ -1454,7 +1469,7 @@ def media_in(run_folder, num):
 # through TicketRun, so there is one way to run a ticket. Its answer is one result (the contract's
 # RunTicketResult): what happened, and what the queue does next (retry on another model, or wait for a limit) ----
 
-RESULT_STATES = ("done", "failed", "skipped", "retry", "stopped")
+RESULT_STATES = ("done", "failed", "skipped", "retry", "stopped", "recheck")
 STOP_WHY = {"auth": "when its login expired", "limit": "at its usage limit"}
 
 
@@ -1687,9 +1702,11 @@ class TicketRun:
 
     # ---- judging ----
 
-    def finish(self, item, run, over):
+    def finish(self, item, run, over, recheck=False):
         """The result of a worker that ended (`over`: it ran past the limit and was killed): checked in code,
-        then resolved, retried, stopped for a limit or a logout, or failed with a comment on the ticket."""
+        then resolved, retried, stopped for a limit or a logout, or failed with a comment on the ticket. A check
+        that exited 75 could not run: the result is `recheck`, the commit and the claim stay, the worker is not
+        run again. `recheck`: only the checks run again (no stop or opus retry is looked for)."""
         t = run["t"]
         tree, branch = run.get("tree"), run.get("branch")
         checks = []
@@ -1703,16 +1720,18 @@ class TicketRun:
         else:
             passed, reason, sha, checks = self.land(t, run, tree)
             self.report_checks(t, run, passed, reason, sha, checks)
+        if passed is None:
+            return self.result(item, "recheck", reason.splitlines()[0], run, sha, checks)
         if tree and not passed:
             reason += "\nIts work stays on branch {} in {}.".format(branch, tree)
         if passed:  # a worker that did the work is resolved, whatever it printed afterwards
             return self.resolve(item, run, sha, reason, checks)
         # a failed run whose own output (not an earlier try's) names a usage limit or a logout is tried again
-        if not over:
+        if not over and not recheck:
             stopped = self.stopped(item, run, checks)
             if stopped:
                 return stopped
-        if not item.get("tries") and t.get("tier", "sonnet") == "sonnet" and run["inst"].get("kind") == "claude":
+        if not recheck and not item.get("tries") and t.get("tier", "sonnet") == "sonnet" and run["inst"].get("kind") == "claude":
             self.release(item["key"])
             return self.result(item, "retry", "retrying on opus: " + reason.splitlines()[0], run, sha, checks,
                                retry={"model": "opus", "reason": reason})
@@ -1892,6 +1911,7 @@ class Supervisor:
         self._final_review()
         self._close_off()
         if not self.stopped:
+            self._rechecks()
             self._probe()
             self._start()
         self._digest()
@@ -2154,6 +2174,15 @@ class Supervisor:
                          resume={"agent": res["stop"]["agent"], "log": res["log"], "why": STOP_WHY[res["stop"]["kind"]]},
                          note=res["note"])
             return
+        if state == "recheck":
+            n = (item.get("rechecks") or 0) + 1 if item.get("state") == "recheck" else 0
+            more = n < RECHECKS_MAX
+            self._update(key, state="recheck", ended=None, commit=res["commit"], pid=None, pid_start=None, started=None,
+                         rechecks=n, recheck_at=self.hub.now() + RECHECK_EVERY if more else None,
+                         note=res["note"] + ("; the checks run again at {}".format(
+                             _hm(self.hub.now() + RECHECK_EVERY)) if more else
+                             "; rechecked {} times, press Recheck to try again".format(RECHECKS_MAX)))
+            return
         if state == "retry":
             self._update(key, front=True, state="queued", tries=1, model=res["retry"]["model"],
                          retry=res["retry"]["reason"], commit=res["commit"], pid=None, pid_start=None, started=None,
@@ -2222,6 +2251,41 @@ class Supervisor:
         self._apply(item, res)
         if res["state"] == "done" and res["commit"] and run.get("t"):
             self.runner.rebuild_after(run["t"]["repo"], run.get("landed_on") or run.get("base"), res["commit"])
+
+    def _rechecks(self):
+        """Each `recheck` item that is due: only its checks run again, on the commit its worker made."""
+        now = self.hub.now()
+        with self.hub._lock:
+            due = [dict(i) for i in self.hub._data["queue"]["items"]
+                   if i["kind"] == "ticket" and i["state"] == "recheck" and i.get("recheck_at") is not None
+                   and i["recheck_at"] <= now]
+        for item in due:
+            try:
+                self._recheck(item)
+            except Exception as e:  # tried again at the next due time, never failed for it
+                self._update(item["key"], recheck_at=self.hub.now() + RECHECK_EVERY,
+                             note="the recheck did not run: {}: {}".format(type(e).__name__, e))
+
+    def _recheck(self, item):
+        key = item["key"]
+        found, row = self._row(key)
+        if not found:  # the tickets could not be read: not a try
+            self._update(key, recheck_at=self.hub.now() + RECHECK_EVERY)
+            return
+        if row is None:
+            self._end(key, "skipped", note="no longer open: it was resolved or dropped while its checks waited")
+            return
+        run = {"t": row, "agent": item.get("runner"), "inst": {}, "base": item.get("base_sha"),
+               "first_base": item.get("first_base"), "log": item.get("log"), "folder": item.get("run"),
+               "tree": item.get("tree"), "branch": item.get("branch")}
+        if not run["base"] or not run["log"]:
+            self._end(key, "failed", note="cannot recheck: the run's base commit or log is not recorded")
+            return
+        res = self.runner.finish(item, run, False, recheck=True)
+        self._update(key, checks=res["checks"])
+        self._apply(item, res)
+        if res["state"] == "done" and res["commit"]:
+            self.runner.rebuild_after(row["repo"], run.get("landed_on") or run.get("base"), res["commit"])
 
     def _finish_job(self, item, run, over):
         """A job has no claim, verdict or retry: exit 0 is done, anything else failed, except a usage limit,

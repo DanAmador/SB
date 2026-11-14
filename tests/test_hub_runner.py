@@ -264,6 +264,64 @@ class TicketLoopTest(RunnerCase):
         self.assertIn("A: failed, check failed: test -f nope.txt", board)
         self.assertIn("B: done", board)
 
+    def flaky(self, fails):
+        """A check that exits 75 `fails` times, then 0; its calls are counted in a file."""
+        script = self.root / "flaky.sh"
+        script.write_text('n=$(cat "{c}" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "{c}"; '
+                          '[ $n -le {f} ] && exit 75; exit 0\n'.format(c=self.root / "calls", f=fails))
+        return "sh " + str(script)
+
+    def calls(self):
+        return int((self.root / "calls").read_text())
+
+    def tick_later(self, secs):
+        self.clock.t += secs
+        self.sup.tick()
+
+    def test_a_check_that_exits_75_keeps_the_commit_never_reruns_the_worker_and_is_rechecked_later(self):
+        self.sb("set", "repo/one", "001", "tier=opus", "checks=" + self.flaky(2), "--no-sync")
+        self.resume()
+        self.until(lambda: self.state_of("repo/one#1") == "recheck")
+        item = self.items()["repo/one#1"]
+        self.assertIn("check could not run", item["note"])
+        self.assertTrue(item["commit"])
+        self.assertEqual(item["rechecks"], 0)
+        self.assertEqual(self.open_tickets()[1]["status"], "claimed")  # still held: neither failed nor released
+        self.assertNotIn("failed", self.ticket_text(1))
+        self.assertIn("could not run", (Path(item["log"]).parent / "1.md").read_text())
+        self.assertEqual(self.calls(), 1)
+        self.until(lambda: self.state_of("repo/one#2") == "done")
+        # not due yet: nothing runs again
+        self.tick_later(sbhub.RECHECK_EVERY - 60)
+        self.assertEqual(self.calls(), 1)
+        # due: still no answer, so waiting again
+        self.tick_later(61)
+        self.assertEqual((self.calls(), self.state_of("repo/one#1"), self.items()["repo/one#1"]["rechecks"]), (2, "recheck", 1))
+        # due again: it answers, the ticket resolves with the same commit
+        self.tick_later(sbhub.RECHECK_EVERY + 1)
+        self.assertEqual((self.calls(), self.state_of("repo/one#1")), (3, "done"))
+        self.assertEqual(self.items()["repo/one#1"]["commit"], item["commit"])
+        self.assertNotIn(1, self.open_tickets())
+        self.assertEqual([x["key"] for x in self.launched].count("repo/one#1"), 1)  # the worker ran once
+
+    def test_the_recheck_button_runs_the_checks_at_once_and_a_ticket_gives_up_after_six(self):
+        self.sb("set", "repo/one", "001", "tier=opus", "checks=" + self.flaky(99), "--no-sync")
+        self.resume()
+        self.until(lambda: self.state_of("repo/one#1") == "recheck")
+        for _ in range(sbhub.RECHECKS_MAX):
+            self.tick_later(sbhub.RECHECK_EVERY + 1)
+        item = self.items()["repo/one#1"]
+        self.assertEqual((item["state"], item["rechecks"], item["recheck_at"]), ("recheck", sbhub.RECHECKS_MAX, None))
+        self.assertIn("press Recheck", item["note"])
+        self.assertEqual(self.calls(), 1 + sbhub.RECHECKS_MAX)
+        self.tick_later(10 * sbhub.RECHECK_EVERY)
+        self.assertEqual(self.calls(), 1 + sbhub.RECHECKS_MAX)
+        self.hub.ticket_action("recheck", "repo/one#1")
+        self.sup.tick()
+        self.assertEqual((self.calls(), self.items()["repo/one#1"]["rechecks"]), (2 + sbhub.RECHECKS_MAX, 1))
+        with self.assertRaises(ValueError):
+            self.hub.ticket_action("recheck", "repo/one#2")
+
     def test_no_commit_on_sonnet_retries_once_on_opus_then_fails(self):
         self.modes = {"repo/one#1": "nothing", "repo/one#2": "hang"}
         self.resume()

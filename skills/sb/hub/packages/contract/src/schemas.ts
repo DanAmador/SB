@@ -89,7 +89,7 @@ export type Installed = z.infer<typeof Installed>;
 
 // ---- the queue ----
 
-export const ItemState = z.enum(["queued", "running", "done", "failed", "skipped"]);
+export const ItemState = z.enum(["queued", "running", "recheck", "done", "failed", "skipped"]);
 export type ItemState = z.infer<typeof ItemState>;
 
 export const CheckRun = z.strictObject({
@@ -126,6 +126,9 @@ const itemFields = {
   resume: z.strictObject({ agent: z.string(), log: z.string(), why: z.string() }).optional(),
   stops: z.number().int().optional(),
   digested: z.boolean().optional(),
+  /** recheck: how many times its checks ran again, and when they next do (null: waiting for the Recheck button). */
+  rechecks: z.number().int().optional(),
+  recheck_at: Seconds.nullable().optional(),
   media: z.array(z.string()).optional(),
   checks: z.array(CheckRun).optional(),
   /** obsidian:// links to its notes, added by the TypeScript server (links.ts). */
@@ -421,7 +424,7 @@ export const QueueItemAgentBody = z.strictObject({ key: z.string(), name: z.stri
 export const RunSeenBody = z.strictObject({ key: z.string().min(1) });
 export const AgentsDismissBody = z.strictObject({ agent: z.string() });
 export const EmptyBody = z.strictObject({});
-export const TICKET_ACTIONS = ["done", "drop", "release", "comment", "tier", "checks"] as const;
+export const TICKET_ACTIONS = ["done", "drop", "release", "comment", "tier", "checks", "recheck"] as const;
 export const TicketAction = z.enum(TICKET_ACTIONS);
 export type TicketAction = z.infer<typeof TicketAction>;
 export const TicketActionBody = z.strictObject({

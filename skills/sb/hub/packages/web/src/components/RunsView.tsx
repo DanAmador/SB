@@ -23,6 +23,7 @@ export function RunsView(): React.JSX.Element {
   const rows = runRows(state, ix).filter((r) => itemInScope(scope, r.item));
   const ended = scopeItems(scope, endedToday(state));
   const next = scopeItems(scope, qv.next);
+  const rechecking = scopeItems(scope, qv.rechecking);
   const nextWords = next.length === 0 ? "Nothing is queued." : `${plural(next.length, "item")} up next${state.queue.paused ? ", and the queue is paused" : ""}.`;
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-4">
@@ -33,6 +34,20 @@ export function RunsView(): React.JSX.Element {
         <ul aria-label="Running now" className="flex flex-col divide-y rounded-xl border bg-card">
           {rows.map((r) => (
             <RunLine key={r.item.key} r={r} />
+          ))}
+        </ul>
+      )}
+      {rechecking.length > 0 && (
+        <ul aria-label="Checks waiting to run" className="flex flex-col divide-y rounded-xl border bg-card">
+          {rechecking.map((i) => (
+            <li key={i.key} className="flex items-center gap-3 px-4 py-2 text-sm">
+              <ToneIcon icon={IconBan} tone="warn" label="check could not run" />
+              <TicketTitle itemKey={i.key} links={i.links} className="flex-1 truncate">
+                {itemTitle(i, ix.byKey.get(i.key))}
+                <span className="text-warn"> · {plainReason(i)}</span>
+              </TicketTitle>
+              <FileLinks item={i} />
+            </li>
           ))}
         </ul>
       )}

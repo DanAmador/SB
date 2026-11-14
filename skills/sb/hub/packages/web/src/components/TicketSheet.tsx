@@ -106,6 +106,7 @@ function TicketPanel({ itemKey }: { itemKey: string }): React.JSX.Element {
         {i && (
           <Block title="In the queue">
             <p className="text-sm">{status}</p>
+            {i.state === "recheck" && <p className="text-sm text-warn">{firstLine(i.note)}</p>}
             {(i.state === "failed" || i.state === "skipped") && <p className="text-sm text-destructive">{firstLine(i.note) || "no reason recorded"}</p>}
             <Checks checks={i.checks ?? []} />
             <Pictures item={i} full />
@@ -125,7 +126,7 @@ function QueueActions({ itemKey }: { itemKey: string }): React.JSX.Element | nul
   const i = state.queue.items.find((x) => x.key === itemKey);
   const off = down || busy;
   if (i?.state === "running") return <RunningActions itemKey={itemKey} />;
-  if (i?.kind === "job" || t === undefined) return null;
+  if (i?.kind === "job" || i?.state === "recheck" || t === undefined) return null; // waiting checks: queuing would rerun the worker
   const queued = i?.state === "queued";
   const at = qv.queuedKeys.indexOf(itemKey);
   if (!queued && (qv.live.has(itemKey) || !addable(t, ix))) return null;
@@ -235,19 +236,21 @@ const ACTS: Readonly<Record<TicketAction, readonly [string, string, string]>> = 
   drop: ["Drop", "Drop it, out of scope, with this reason", "Yes, drop it"],
   release: ["Release", "Release the claim: it goes back to open", "Yes, release it"],
   tier: ["Tier", "Run it on this tier", "Yes, set it"],
+  recheck: ["Recheck", "Run its checks again now (its commit is kept, the worker does not run again)", "Yes, recheck"],
   checks: ["Map checks", "Set its map's checks (every ticket of the map)", "Yes, set them"],
 };
 
 function TicketActions({ itemKey, mapChecks }: { itemKey: string; mapChecks: readonly string[] | null }): React.JSX.Element | null {
-  const { ix, writes, down } = useBoard();
+  const { ix, writes, down, state } = useBoard();
   const t = ix.byKey.get(itemKey);
+  const waitingChecks = state.queue.items.some((x) => x.key === itemKey && x.state === "recheck");
   const [action, setAction] = useState<TicketAction | null>(null);
   const [text, setText] = useState("");
   const [commit, setCommit] = useState("");
   const [confirm, setConfirm] = useState(false);
   const [working, setWorking] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const available: TicketAction[] = t ? ["comment", "done", "drop", ...(t.status === "claimed" ? (["release"] as const) : []), "tier", "checks"] : ["comment"];
+  const available: TicketAction[] = t ? ["comment", "done", "drop", ...(t.status === "claimed" ? (["release"] as const) : []), ...(waitingChecks ? (["recheck"] as const) : []), "tier", "checks"] : ["comment"];
   const pick = (a: TicketAction): void => {
     setAction(a === action ? null : a);
     setConfirm(false);
@@ -258,7 +261,7 @@ function TicketActions({ itemKey, mapChecks }: { itemKey: string; mapChecks: rea
   const go = async (): Promise<void> => {
     if (action === null) return;
     setWorking(true);
-    const body = action === "release" ? { key: itemKey } : action === "done" && commit.trim() ? { key: itemKey, text: text.trim(), commit: commit.trim() } : { key: itemKey, text: text.trim() };
+    const body = action === "release" || action === "recheck" ? { key: itemKey } : action === "done" && commit.trim() ? { key: itemKey, text: text.trim(), commit: commit.trim() } : { key: itemKey, text: text.trim() };
     const out = await writes.ticket(action, body, `Done: ${ACTS[action][1].toLowerCase()}.`);
     setWorking(false);
     setConfirm(false);
@@ -290,7 +293,7 @@ function TicketActions({ itemKey, mapChecks }: { itemKey: string; mapChecks: rea
           className="mt-2 flex flex-col gap-2 rounded-lg border bg-card p-3"
           onSubmit={(ev) => {
             ev.preventDefault();
-            if (action !== "release" && !text.trim()) {
+            if (action !== "release" && action !== "recheck" && !text.trim()) {
               setErr("Type it first.");
               return;
             }
@@ -347,7 +350,7 @@ function TicketActions({ itemKey, mapChecks }: { itemKey: string; mapChecks: rea
             <div role="alert" className="flex flex-col gap-2 rounded-md bg-warn-soft p-2.5 text-sm">
               <span>
                 {ACTS[action][1]}
-                {text.trim() && action !== "release" ? `: “${text.trim()}”` : ""}
+                {text.trim() && action !== "release" && action !== "recheck" ? `: “${text.trim()}”` : ""}
                 {commit.trim() ? `, commit ${commit.trim()}` : ""}?
               </span>
               <div className="flex gap-2">

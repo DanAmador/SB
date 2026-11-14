@@ -402,3 +402,33 @@ test("screenshots of Sessions", async ({ page }) => {
   await shoot("light", "sessions-phone.png", false);
   await shoot("dark", "sessions-sheet-phone.png", true);
 });
+
+test("screenshots of a check that could not run", async ({ page }) => {
+  const dir = process.env.SB_SHOTS;
+  test.skip(dir === undefined, "SB_SHOTS names the folder to write to");
+  const to = (n: string): string => `${dir ?? ""}/${n}`;
+  await page.route("**/api/state", async (route) => {
+    const res = await route.fetch();
+    const body = (await res.json()) as { queue: { items: Record<string, unknown>[] } };
+    const t = Date.now() / 1000;
+    const failed = body.queue.items.find((i) => i.key === "demo/board#6");
+    body.queue.items.push({
+      links: failed?.links,
+      key: "demo/board#2", kind: "ticket", agent: null, state: "recheck", tries: 1, started: t - 1800, ended: t - 600,
+      commit: "fedcba9876543210", rechecks: 1, recheck_at: t + 600, run: "/vault/runs/2026-11-13-board", log: "/vault/runs/2026-11-13-board/2.log",
+      note: "check could not run: pnpm test exited 75 (the tool it needs did not answer); rechecking in 10 minutes (1 of 6)",
+      checks: [{ cmd: "pnpm test", code: 75, secs: 300, tail: "Unity Editor did not answer" }],
+    });
+    await route.fulfill({ response: res, json: body });
+  });
+  await page.goto("/next/?view=runs");
+  await expect(page.getByRole("list", { name: "Checks waiting to run" })).toBeVisible();
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: to("runs-recheck.png") });
+  await page.goto("/next/?view=runs&t=demo%2Fboard%232");
+  await expect(page.getByRole("dialog").getByText("1 of 1 check could not run")).toBeVisible();
+  await expect(page.getByRole("dialog").getByRole("button", { name: "Queue it" })).toHaveCount(0);
+  await page.getByRole("dialog").getByText("1 of 1 check could not run").click();
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: to("sheet-recheck.png") });
+});

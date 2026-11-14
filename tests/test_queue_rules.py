@@ -194,6 +194,14 @@ class VerdictTest(unittest.TestCase):
         self.assertIn("echo boom; exit 3", why)
         self.assertIn("boom", why)
 
+    def test_a_check_that_exits_75_could_not_run_and_is_neither_passed_nor_failed(self):
+        sha = self.commit(["src/a.py"])
+        ok, why, got = verdict(self.t(checks=["true", "exit 75"]), self.repo, self.base)
+        self.assertEqual((ok, got), (None, sha))
+        self.assertTrue(why.startswith("check could not run"))
+        ok, why, got = verdict(self.t(checks=["exit 3", "exit 75"]), self.repo, self.base)
+        self.assertEqual(ok, False)
+
     def test_timeout_names_command(self):
         self.commit(["src/a.py"])
 

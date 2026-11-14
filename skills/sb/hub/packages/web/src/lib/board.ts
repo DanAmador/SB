@@ -80,6 +80,8 @@ export interface QueueView {
   readonly queuedKeys: readonly string[];
   /** Keys queued or running. */
   readonly live: ReadonlySet<string>;
+  /** Tickets whose check could not run (exit 75): the commit is kept, the hub runs only the checks again. */
+  readonly rechecking: readonly QueueItem[];
   /** Ended in the last week (done) or still on the list (failed, skipped), newest first; then the cleared ones. */
   readonly done: readonly QueueItem[];
   readonly doneCleared: readonly QueueItem[];
@@ -99,6 +101,7 @@ export function queueView(state: Pick<State, "queue" | "now">): QueueView {
     next,
     queuedKeys: next.filter((i) => i.kind === "ticket").map((i) => i.key),
     live: new Set(items.filter((i) => i.state === "queued" || i.state === "running").map((i) => i.key)),
+    rechecking: items.filter((i) => i.state === "recheck"),
     done: ended(items, ["done"], false),
     doneCleared: ended(cleared, ["done"], false),
     failed: ended(items, ["failed", "skipped"], true),
