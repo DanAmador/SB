@@ -34,6 +34,8 @@ export interface Link {
   readonly mv: string;
   /** The map graph's picked state chip: boxes of another state dim. Empty picks none. */
   readonly ms: string;
+  /** The sidebar's "Active only" switch: "1" hides every project and map with nothing queued or running. */
+  readonly act: string;
   /** The ticket table's chosen state, type and priority, its sort ("-title" is descending) and its page. */
   readonly ts: string;
   readonly tt: string;
@@ -42,7 +44,7 @@ export interface Link {
   readonly page: string;
 }
 
-const KEYS = ["view", "q", "project", "map", "s", "t", "run", "pic", "range", "out", "pics", "acct", "model", "sess", "kind", "mv", "ms", "ts", "tt", "tp", "sort", "page"] as const;
+const KEYS = ["view", "q", "project", "map", "s", "t", "run", "pic", "range", "out", "pics", "acct", "model", "sess", "kind", "mv", "ms", "act", "ts", "tt", "tp", "sort", "page"] as const;
 
 export function readLink(search: string): Link {
   const s = new URLSearchParams(search);
@@ -66,6 +68,7 @@ export function readLink(search: string): Link {
     kind: s.get("kind") ?? "",
     mv: s.get("mv") === "table" ? "table" : "",
     ms: s.get("ms") ?? "",
+    act: s.get("act") === "1" ? "1" : "",
     ts: s.get("ts") ?? "",
     tt: s.get("tt") ?? "",
     tp: s.get("tp") ?? "",

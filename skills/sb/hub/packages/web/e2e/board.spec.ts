@@ -192,6 +192,24 @@ test("the sidebar picks a map and every view narrows; the pick lives in the page
   await expect(page.getByRole("searchbox")).toBeFocused();
 });
 
+test("Active only leaves the projects and maps with something running or queued, and survives a reload", async ({ page }) => {
+  await page.goto("/next/");
+  const side = page.getByRole("navigation", { name: "Projects and maps" });
+  const sw = side.getByRole("switch", { name: "Active only" });
+  await expect(sw).toHaveAttribute("aria-checked", "false");
+  await expect(side.getByRole("button", { name: "1 quiet map" })).toBeVisible();
+  await sw.click();
+  await expect(page).toHaveURL(/act=1/);
+  await expect(sw).toHaveAttribute("aria-checked", "true");
+  await expect(side.getByRole("button", { name: /quiet map/ })).toHaveCount(0);
+  await expect(side.getByRole("button", { name: /^board / })).toBeVisible();
+  await page.reload();
+  await expect(side.getByRole("switch", { name: "Active only" })).toHaveAttribute("aria-checked", "true");
+  await side.getByRole("switch", { name: "Active only" }).click();
+  await expect(page).not.toHaveURL(/act=/);
+  await expect(side.getByRole("button", { name: "1 quiet map" })).toBeVisible();
+});
+
 test("quiet maps fold under one line that opens; a picked quiet map stays shown after a reload", async ({ page }) => {
   await page.goto("/next/");
   const side = page.getByRole("navigation", { name: "Projects and maps" });
