@@ -1453,6 +1453,108 @@ def stop_of(run, now):
     until = rejected or limited_until(said, now)
     return None if until is None else {"kind": "limit", "agent": run["agent"], "until": until}
 
+# ---- a landed change to the hub's own code: the page is rebuilt (not in git) and the hub restarts itself ----
+
+HUB_DIR = "skills/sb/hub"
+HUB_WEB = HUB_DIR + "/packages/web/"
+REBUILD_TAIL = 12  # lines of a failed build shown to the owner
+SERVICE_SH = Path(__file__).resolve().parent / "sbhub_service.sh"
+
+
+def rebuild_kind(paths):
+    """What a landed change to `paths` needs: "restart" (the hub's server or scripts: build, then restart), "web"
+    (only the page: build, no restart) or None (nothing of the hub's)."""
+    kind = None
+    for p in paths:
+        if p.startswith(HUB_WEB) or p == HUB_DIR + "/README.md":
+            kind = kind or "web"
+        elif p.startswith(HUB_DIR + "/") or re.fullmatch(r"skills/sb/scripts/sbhub[^/]*\.py", p):
+            return "restart"
+    return kind
+
+
+class Rebuild:
+    """Rebuilds the board and restarts the hub after a ticket landed in the checkout this hub runs from.
+
+    `build()` and `restart()` return (ok, text): the real ones run pnpm and `sbhub_service.sh restart` (detached:
+    it ends this very process, whose workers are adopted by the next one). A build waits until no ticket of the
+    repo is landing, and a failed build leaves the running hub alone and puts a line in Waits for you."""
+
+    def __init__(self, hub, root=None, build=None, restart=None, wait=True):
+        self.hub, self.wait = hub, wait
+        self.root = root or _git(Path(__file__).resolve().parent, "rev-parse", "--show-toplevel")
+        self.build = build or self._build
+        self.restart = restart or self._restart
+        self.cond = threading.Condition()
+        self.landing = {}  # repo -> tickets landing now
+        self.pending = {}  # repo -> "web" | "restart", waiting for the build
+        self.thread = None
+
+    def mine(self, repo):
+        return bool(self.root) and os.path.realpath(str(repo)) == os.path.realpath(self.root)
+
+    def landing_in(self, repo, delta):
+        repo = os.path.realpath(str(repo))
+        with self.cond:
+            self.landing[repo] = self.landing.get(repo, 0) + delta
+            self.cond.notify_all()
+
+    def after(self, repo, paths):
+        """A ticket landed with these changed paths: start a rebuild when they are the hub's own and the checkout is
+        the one this hub runs from. Returns the thread (tests join it), or None."""
+        kind = rebuild_kind(paths) if self.mine(repo) else None
+        if not kind:
+            return None
+        repo = os.path.realpath(str(repo))
+        with self.cond:
+            old = self.pending.get(repo)
+            self.pending[repo] = "restart" if "restart" in (old, kind) else kind
+            if self.thread and self.thread.is_alive():
+                return self.thread  # the running one takes it
+            self.thread = threading.Thread(target=self._run, args=(repo,), daemon=True)
+            self.thread.start()
+            return self.thread
+
+    def _run(self, repo):
+        while True:
+            with self.cond:
+                while self.landing.get(repo):
+                    self.cond.wait(1)
+                kind = self.pending.pop(repo, None)
+            if not kind:
+                return
+            ok, text = self.build()
+            if not ok:
+                self._tell("The hub's page did not build after a merge; the running hub is unchanged. Last lines:\n"
+                           + "\n".join(text.strip().splitlines()[-REBUILD_TAIL:]))
+                continue
+            if kind == "restart":
+                ok, text = self.restart()
+                if not ok:
+                    self._tell("The hub was rebuilt but did not restart: " + firstline(text))
+
+    def _tell(self, text):
+        try:
+            self.hub.ask("hub", text, ["Got it", "Dismiss"], "Got it", 10 * 365 * 86400)
+        except ValueError:
+            pass
+
+    def _build(self):
+        try:
+            r = subprocess.run(["pnpm", "--dir", str(Path(self.root) / HUB_DIR), "build"], capture_output=True,
+                               text=True, timeout=600)
+        except (OSError, subprocess.SubprocessError) as e:
+            return False, str(e)
+        return r.returncode == 0, (r.stdout + r.stderr)
+
+    def _restart(self):
+        try:  # its own session: it kills this process, and must not go down with it
+            subprocess.Popen(["bash", str(SERVICE_SH), "restart"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, start_new_session=True)
+        except OSError as e:
+            return False, str(e)
+        return True, ""
+
 
 class TicketRun:
     """Start a ticket's worker (`start`) and judge it once it ended (`finish`). It claims, briefs, launches, checks,
@@ -1465,6 +1567,7 @@ class TicketRun:
 
     def __init__(self, hub, port, limit=WORKER_LIMIT, stopping=lambda: False):
         self.hub, self.port, self.limit, self.stopping = hub, port, limit, stopping
+        self.rebuild = Rebuild(hub)
 
     @staticmethod
     def sbmap(*args):
@@ -1485,6 +1588,11 @@ class TicketRun:
                 "base": run.get("base"), "log": run.get("log"),
                 "report": report if report and os.path.isfile(report) else None, "run": folder,
                 "tree": run.get("tree"), "branch": run.get("branch")}
+
+    def rebuild_after(self, repo, base, sha):
+        """A resolved ticket's commit: rebuild (and restart) when it touched the hub's own code."""
+        rc, out, _ = _git_run(repo, "diff", "--name-only", "{}..{}".format(base, sha)) if base else (1, "", "")
+        return self.rebuild.after(repo, out.split()) if rc == 0 else None
 
     # ---- the ticket's row and its claim ----
 
@@ -1614,6 +1722,13 @@ class TicketRun:
         return {**self.result(item, "stopped", note, run, checks=checks, stop=stop), "stops": stops}
 
     def land(self, t, run, tree):
+        self.rebuild.landing_in(t["repo"], 1)
+        try:
+            return self._land(t, run, tree)
+        finally:
+            self.rebuild.landing_in(t["repo"], -1)
+
+    def _land(self, t, run, tree):
         """(passed, reason, sha, checks) of a worktree ticket: its commits rebased onto the checkout's newest commit,
         judged there, then fast-forwarded into the checkout; the worktree and branch go once it landed."""
         report = Path(run["log"]).parent / "{}.md".format(int(t["num"])) if run.get("log") else None
@@ -1628,6 +1743,8 @@ class TicketRun:
             if not passed:
                 return passed, reason, sha, checks
             why = land(t["repo"], sha) if sha else None
+            if why is None and sha:
+                run["landed_on"] = head
             if why == MOVED:
                 continue  # someone committed on the checkout meanwhile: on top of that, and checked again
             if why:
@@ -2085,6 +2202,8 @@ class Supervisor:
         if not over:
             self._update(key, checks=res["checks"])
         self._apply(item, res)
+        if res["state"] == "done" and res["commit"] and run.get("t"):
+            self.runner.rebuild_after(run["t"]["repo"], run.get("landed_on") or run.get("base"), res["commit"])
 
     def _finish_job(self, item, run, over):
         """A job has no claim, verdict or retry: exit 0 is done, anything else failed, except a usage limit,
