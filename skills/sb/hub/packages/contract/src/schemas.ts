@@ -93,8 +93,12 @@ export type Installed = z.infer<typeof Installed>;
 
 // ---- the queue ----
 
-/** review: its commit and checks passed and the Opus second pass judges it against its Done when. */
-export const ItemState = z.enum(["queued", "running", "review", "recheck", "done", "failed", "skipped"]);
+/**
+ * landed: its commit and checks passed and its work landed, but it is not judged yet: it holds no files and no place
+ * among the tickets running at once, and the ticket stays open. review: its map's one Opus second pass is judging it
+ * against its Done when (a queue saved by an older hub may hold items here with no pass running: they are judged).
+ */
+export const ItemState = z.enum(["queued", "running", "landed", "review", "recheck", "done", "failed", "skipped"]);
 export type ItemState = z.infer<typeof ItemState>;
 
 /** The Opus second pass's judgement of a ticket against its Done when: only finished resolves it. */

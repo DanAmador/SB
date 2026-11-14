@@ -4,6 +4,7 @@ never port 8765, ~/.sb-hub, the owner's vault or the real ~/.claude*."""
 import http.server
 import json
 import os
+import re
 import shlex
 import shutil
 import signal
@@ -20,6 +21,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills" / "sb" / "scripts"))
 from helpers import SBMAP, SCRIPT, free_port  # noqa: E402
 import sbhub  # noqa: E402
+import sbqueue  # noqa: E402
 from sbhub import Hub, Supervisor  # noqa: E402
 
 FAKE = Path(__file__).resolve().parent / "fake_worker.py"
@@ -133,15 +135,22 @@ class RunnerCase(unittest.TestCase):
         return r
 
     def launcher(self, agent, brief, repo, model, env, log):
-        """Workers go to `launched`, second passes (a brief naming a review file) to `reviewed`."""
+        """Workers go to `launched`, second passes (a brief naming review files) to `reviewed`, with the keys of the
+        tickets it was handed."""
         key = env["SB_HUB_AGENT"]
         review = "\nWrite your review to: " in brief
+        nums = re.findall(r"^Write your review to: .*?(\d+)-review\.md$", brief, re.M)
+        keys = [sbqueue.map_of(key) + "#" + n for n in nums]
         (self.reviewed if review else self.launched).append(
-            {"key": key, "model": model, "brief": brief, "agent": agent, "log": log})
+            {"key": key, "keys": keys, "model": model, "brief": brief, "agent": agent, "log": log})
         fake = {"FAKE_WORKER_MODE": self.modes.get(key, self.mode)}
-        if key in self.verdicts and review:
-            v = self.verdicts[key]
-            fake["FAKE_REVIEW"] = (v.pop(0) if len(v) > 1 else v[0]) if isinstance(v, list) else v
+        if review and any(k in self.verdicts for k in keys):
+            got = {}
+            for k in keys:
+                v = self.verdicts.get(k)
+                if v is not None:
+                    got[k.rsplit("#", 1)[1]] = (v.pop(0) if len(v) > 1 else v[0]) if isinstance(v, list) else v
+            fake["FAKE_REVIEW"] = json.dumps(got)
         return sbhub.launch(agent, brief, repo, model, {**env, **fake}, log)
 
     # ---- reading the result ----
@@ -169,6 +178,11 @@ class RunnerCase(unittest.TestCase):
         rows = self.hub.tickets()
         ready = [t["map"] + "#" + str(t["num"]) for t in rows if t["state"] == "ready"]
         self.hub.queue_set(ready, self.hub.state()["queue"]["version"])
+
+    def only(self, *nums, folder="repo/one"):
+        """Just these tickets of the map ticked and resumed (a map's second pass waits for its whole run)."""
+        self.hub.queue_set(["{}#{}".format(folder, n) for n in nums], self.hub.state()["queue"]["version"])
+        self.hub.queue_pause(False)
 
     def resume(self):
         """The owner's ticks, then the resume: nothing starts before this."""
@@ -253,12 +267,11 @@ class TicketLoopTest(RunnerCase):
 
     def test_a_commit_outside_its_paths_passes_and_names_the_files(self):
         self.sb("set", "repo/one", "001", "tier=opus", "--no-sync")
-        self.modes = {"repo/one#1": "stray", "repo/one#2": "hang"}
-        self.resume()
+        self.modes = {"repo/one#1": "stray"}
+        self.only(1)
         self.until(lambda: self.state_of("repo/one#1") == "done")
         done = next((self.vault / "wayfinder").rglob("done/001*.md")).read_text()
         self.assertIn("stray.txt", done)
-        self.until(lambda: self.state_of("repo/one#2") == "running")
 
     def test_a_failing_check_leaves_the_ticket_open_with_its_commit_in_place(self):
         self.sb("set", "repo/one", "001", "tier=opus", "checks=test -f nope.txt", "--no-sync")
@@ -301,7 +314,7 @@ class TicketLoopTest(RunnerCase):
         self.assertNotIn("failed", self.ticket_text(1))
         self.assertIn("could not run", (Path(item["log"]).parent / "1.md").read_text())
         self.assertEqual(self.calls(), 1)
-        self.until(lambda: self.state_of("repo/one#2") == "done")
+        self.until(lambda: self.state_of("repo/one#2") == "landed")  # judged with the map's, once its checks ran
         # not due yet: nothing runs again
         self.tick_later(sbhub.RECHECK_EVERY - 60)
         self.assertEqual(self.calls(), 1)
@@ -314,6 +327,8 @@ class TicketLoopTest(RunnerCase):
         self.until(lambda: self.state_of("repo/one#1") == "done")
         self.assertEqual(self.items()["repo/one#1"]["commit"], item["commit"])
         self.assertNotIn(1, self.open_tickets())
+        self.assertEqual(self.state_of("repo/one#2"), "done")  # the one review judged both
+        self.assertEqual([x["keys"] for x in self.reviewed], [["repo/one#1", "repo/one#2"]])
         self.assertEqual([x["key"] for x in self.launched].count("repo/one#1"), 1)  # the worker ran once
 
     def test_the_recheck_button_runs_the_checks_at_once_and_a_ticket_gives_up_after_six(self):
@@ -378,8 +393,7 @@ class ReviewTest(RunnerCase):
         return git(self.repos["repo/one"], "log", "-1", "--format=%H", "--grep", "^Ticket: repo/one/{:03d}".format(num))
 
     def test_a_finished_verdict_resolves_the_ticket_with_its_commit_and_the_review_file_is_on_the_item(self):
-        self.modes = {"repo/one#2": "hang"}
-        self.resume()
+        self.only(1)
         self.until(lambda: self.state_of("repo/one#1") == "done")
         item, sha = self.items()["repo/one#1"], self.sha(1)
         self.assertEqual((item["commit"], item["verdict"], item.get("checked")), (sha, "finished", None))
@@ -426,7 +440,7 @@ class ReviewTest(RunnerCase):
         self.resume()
         self.until(lambda: self.state_of("repo/one#1") == "done" and self.state_of("repo/one#2") == "done")
         self.assertEqual([(x["key"], x["model"]) for x in self.launched], [("repo/one#1", "sonnet"), ("repo/one#2", "opus")])
-        self.assertEqual([(x["key"], x["model"]) for x in self.reviewed], [("repo/one#1", "opus"), ("repo/one#2", "opus")])
+        self.assertEqual([(x["keys"], x["model"]) for x in self.reviewed], [(["repo/one#1", "repo/one#2"], "opus")])
         log = Path(self.reviewed[0]["log"]).read_text(encoding="utf-8")
         self.assertIn('"--model", "opus"', log)  # the real launch's flags
         self.assertIn('"CLAUDE_CONFIG_DIR": "{}"'.format(self.root / ".claude-main"), log)  # the worker's own account
@@ -438,8 +452,8 @@ class ReviewTest(RunnerCase):
 
     def test_a_review_without_a_verdict_keeps_the_commit_and_the_claim_and_a_recheck_runs_the_review_only(self):
         self.sb("set", "repo/one", "001", "tier=opus", "checks=" + self.counting_check(), "--no-sync")
-        self.modes, self.verdicts = {"repo/one#2": "hang"}, {"repo/one#1": "none"}
-        self.resume()
+        self.verdicts = {"repo/one#1": "none"}
+        self.only(1)
         self.until(lambda: self.state_of("repo/one#1") == "recheck")
         item, sha = self.items()["repo/one#1"], self.sha(1)
         self.assertTrue(item["note"].startswith("review could not run: its review file names no verdict; "), item["note"])
@@ -465,25 +479,135 @@ class ReviewTest(RunnerCase):
         self.assertEqual(int((self.root / "calls").read_text()), 1)
         self.assertNotIn(1, self.open_tickets())
 
-    def test_a_ticket_that_waits_on_one_judged_not_met_is_not_started(self):
+    def test_a_ticket_that_waits_on_a_landed_one_starts_and_both_are_judged_at_the_map_end(self):
+        # the owner's default: what comes after a landed-but-unjudged ticket may start, the review judging it later
         self.sb("block", "repo/one", "002", "1", "--no-sync")
-        self.verdicts = {"repo/one#1": "not met"}
-        self.hub.queue_set(["repo/one#1", "repo/one#2"], self.hub.state()["queue"]["version"])
-        self.hub.queue_pause(False)
-        self.until(lambda: self.state_of("repo/one#1") in ("review", "failed"))
-        self.assertEqual(self.state_of("repo/one#2"), "queued")  # it waits for the verdict
+        self.verdicts = {"repo/one#1": ["not met", "not met"]}
+        self.only(1, 2)
+        self.until(lambda: self.state_of("repo/one#2") == "running")
+        self.assertEqual((self.state_of("repo/one#1"), self.reviewed), ("landed", []))
         self.until(lambda: self.state_of("repo/one#1") == "failed")
-        self.until(lambda: self.state_of("repo/one#2") == "skipped")
-        self.assertIn("blocked: after A", self.items()["repo/one#2"]["note"])
-        self.assertEqual([x["key"] for x in self.launched], ["repo/one#1", "repo/one#1"])  # its one more try first
+        self.assertEqual([x["keys"] for x in self.reviewed], [["repo/one#1", "repo/one#2"], ["repo/one#1"]])
+        self.assertEqual([x["key"] for x in self.launched], ["repo/one#1", "repo/one#2", "repo/one#1"])
+        self.assertEqual(self.state_of("repo/one#2"), "done")
 
-    def test_a_review_holds_up_no_other_ticket(self):
-        self.verdicts, self.modes = {"repo/one#1": "slow"}, {"repo/one#2": "hang"}
+
+class MapReviewTest(RunnerCase):
+    """One second pass per map, once the map's run has ended: a ticket whose checks pass lands, holds nothing, and the
+    next one starts at once; the review then judges every landed ticket together."""
+    MAPS = (("repo/one", "repoA", ("A", "one/"), ("B", "one/")),)  # both own the same path
+
+    def ticket_text(self, num, folder="repo/one"):
+        f = next(iter(sorted((self.vault / "wayfinder" / folder / "issues").glob("**/{:03d}*.md".format(num)))))
+        return f.read_text(encoding="utf-8")
+
+    def shas(self, num):
+        out = git(self.repos["repo/one"], "log", "--reverse", "--format=%H", "--grep", "^Ticket: repo/one/{:03d}".format(num))
+        return out.split()
+
+    def test_a_ticket_whose_checks_pass_lands_and_frees_its_path_and_no_review_runs_while_the_map_has_work(self):
+        self.modes = {"repo/one#2": "hang"}  # (1) the second ticket shares the first one's path
+        self.resume()
+        self.until(lambda: self.state_of("repo/one#1") == "landed" and self.state_of("repo/one#2") == "running")
+        item = self.items()["repo/one#1"]
+        self.assertEqual((item["commit"], self.reviewed), (self.shas(1)[0], []))  # (1) it started before any review
+        self.assertEqual(self.open_tickets()[1]["status"], "claimed")  # the ticket stays open until judged
+        for _ in range(5):  # (2) a running ticket of the map: no review starts
+            self.sup.tick()
+            time.sleep(0.05)
+        self.assertEqual((self.state_of("repo/one#1"), self.reviewed), ("landed", []))
+        # a ticket queued behind it holds the review back too
+        self.assertEqual(self.sup.reviews, {})
+
+    def test_when_the_maps_last_ticket_ends_one_review_on_opus_is_handed_every_landed_ticket(self):
+        self.resume()
+        self.until(lambda: self.state_of("repo/one#1") == "done" and self.state_of("repo/one#2") == "done")
+        self.assertEqual(len(self.reviewed), 1)  # (3) one review, for both
+        rv = self.reviewed[0]
+        self.assertEqual((rv["model"], rv["keys"]), ("opus", ["repo/one#1", "repo/one#2"]))
+        for n in (1, 2):
+            self.assertIn("work for repo/one/00{}".format(n), rv["brief"])  # each commit's diff
+            self.assertIn(self.shas(n)[0], rv["brief"])
+            self.assertIn("{}-review.md".format(n), rv["brief"])
+        self.assertIn("#1: A", rv["brief"])  # each ticket, as sbmap show prints it
+        self.assertIn("#2: B", rv["brief"])
+        self.assertEqual(rv["brief"].count("## Hub checks"), 2)  # each worker's report
+        # (4) finished resolves each ticket with its own commit
+        for n in (1, 2):
+            sha = self.shas(n)[0]
+            self.assertEqual((self.items()["repo/one#{}".format(n)]["commit"], self.items()["repo/one#{}".format(n)]["verdict"]),
+                             (sha, "finished"))
+            self.assertIn(sha, self.ticket_text(n))
+        self.assertEqual(self.open_tickets(), {})
+        self.assertEqual(sbhub.review_limit(2), 20 * 60)  # 10 minutes plus 5 per ticket
+        self.assertEqual(self.sup.reviews, {})
+
+    def test_the_review_may_run_for_ten_minutes_plus_five_per_ticket(self):
+        self.verdicts = {"repo/one#1": "slow"}
         os.environ["FAKE_REVIEW_SLEEP"] = "3"
         self.addCleanup(os.environ.pop, "FAKE_REVIEW_SLEEP", None)
         self.resume()
-        self.until(lambda: self.state_of("repo/one#1") == "review" and self.state_of("repo/one#2") == "running")
+        self.until(lambda: "repo/one" in self.sup.reviews)
+        self.assertEqual(self.sup.reviews["repo/one"]["limit"], (10 + 5 * 2) * 60)
         self.until(lambda: self.state_of("repo/one#1") == "done")
+
+    def test_not_met_leaves_the_ticket_open_with_the_findings_and_queues_its_one_retry_which_alone_is_judged_next(self):
+        self.verdicts = {"repo/one#2": ["not met", "finished"]}
+        self.resume()
+        self.until(lambda: self.items()["repo/one#2"].get("redo") is not None)
+        item = self.items()["repo/one#2"]
+        self.assertEqual(self.state_of("repo/one#1"), "done")  # (4) the finished one is resolved
+        self.assertEqual((item["redo"]["verdict"], item["redo"]["commit"]), ("not met", self.shas(2)[0]))
+        self.assertIn(item["state"], ("queued", "running"))
+        self.assertEqual(self.open_tickets()[2]["status"] in ("open", "claimed"), True)  # not resolved
+        self.assertIn("- It works.: not met: the fake reviewer found no test for it", self.ticket_text(2))
+        self.assertIn("It gets one more try with these findings.", self.ticket_text(2))
+        self.until(lambda: self.state_of("repo/one#2") == "done")
+        # (5) the retry's review judges only it, both tries' commits together
+        self.assertEqual([x["keys"] for x in self.reviewed], [["repo/one#1", "repo/one#2"], ["repo/one#2"]])
+        second = self.reviewed[1]["brief"]
+        self.assertNotIn(self.shas(1)[0], second)
+        self.assertNotIn("1-review.md", second)
+        self.assertIn("judge both tries' commits together", second)
+        self.assertEqual([x["key"] for x in self.launched], ["repo/one#1", "repo/one#2", "repo/one#2"])
+
+    def test_pausing_the_queue_starts_the_review_of_a_map_with_landed_tickets(self):
+        self.modes = {"repo/one#1": "slow"}
+        os.environ["FAKE_WORKER_SLEEP"] = "1.5"
+        self.addCleanup(os.environ.pop, "FAKE_WORKER_SLEEP", None)
+        self.resume()
+        self.until(lambda: self.state_of("repo/one#1") == "running")
+        self.hub.queue_pause(True)  # ticket 2 waits in the line; the run is over once ticket 1 ends
+        self.until(lambda: self.state_of("repo/one#1") == "done")  # (6) judged while paused, 2 still queued
+        self.assertEqual((self.state_of("repo/one#2"), [x["keys"] for x in self.reviewed]), ("queued", [["repo/one#1"]]))
+        self.hub.queue_pause(False)
+        self.until(lambda: self.state_of("repo/one#2") == "done")
+        self.assertEqual([x["keys"] for x in self.reviewed], [["repo/one#1"], ["repo/one#2"]])
+
+    def test_a_queue_saved_with_items_in_the_old_review_state_loads_and_they_are_judged(self):
+        self.modes = {"repo/one#2": "hang"}
+        self.resume()
+        self.until(lambda: self.state_of("repo/one#1") == "landed" and self.state_of("repo/one#2") == "running")
+        self.sup.stop()  # the hub ends; an older one had saved ticket 1 in state `review` with no pass running
+        with self.hub._lock:
+            q = self.hub._data["queue"]
+            q["items"] = [i for i in q["items"] if i["key"] == "repo/one#1"]
+            q["items"][0]["state"] = "review"
+            self.hub._save()
+        self.reviewed.clear()
+        hub = Hub(self.root / "hub", now=self.clock, launcher=self.launcher)
+        self.assertEqual([i["state"] for i in hub.state()["queue"]["items"]], ["review"])
+        sup = Supervisor(hub, port=4321)
+        sup.close_off = False
+        self.addCleanup(sup.stop)
+        end = time.time() + 60
+        while time.time() < end and hub.state()["queue"]["items"][0]["state"] != "done":
+            sup.tick()
+            time.sleep(0.03)
+        item = hub.state()["queue"]["items"][0]
+        self.assertEqual((item["state"], item["verdict"], item["commit"]), ("done", "finished", self.shas(1)[0]))
+        self.assertEqual([x["keys"] for x in self.reviewed], [["repo/one#1"]])
+        self.assertNotIn(1, self.open_tickets())
 
 
 class ReviewRetryTest(RunnerCase):
@@ -698,8 +822,7 @@ class StopsTest(RunnerCase):
     def test_a_worker_that_outlived_its_hub_is_waited_for_and_judged_never_run_twice(self):
         self.modes = {"repo/one#1": "slow"}
         os.environ["FAKE_WORKER_SLEEP"] = "1.5"
-        self.mode = "hang"
-        self.resume()
+        self.only(1)
         self.sup.tick()
         pid = self.items()["repo/one#1"]["pid"]
         hub = Hub(self.root / "hub", now=self.clock, launcher=self.launcher)  # the hub died; a new one starts
@@ -711,7 +834,7 @@ class StopsTest(RunnerCase):
         self.assertEqual([x["key"] for x in self.launched], ["repo/one#1"])
         self.assertTrue(alive(pid))
         end = time.time() + 10
-        while time.time() < end and hub.state()["queue"]["items"][0]["state"] in ("running", "review"):
+        while time.time() < end and hub.state()["queue"]["items"][0]["state"] in ("running", "landed", "review"):
             sup.tick()
             time.sleep(0.05)
         item = hub.state()["queue"]["items"][0]

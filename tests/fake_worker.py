@@ -20,14 +20,15 @@ its arguments (the log keeps them), and does what FAKE_WORKER_MODE says:
   hang     start a child that sleeps, write both pids to FAKE_WORKER_PIDS, sleep past any limit
 
 A brief that names a review file (`Write your review to: <path>`, templates/review-brief.md) makes it the fake
-reviewer instead, whatever the mode: FAKE_REVIEW says what it does (default finished):
+reviewer instead, whatever the mode (it names one review file per landed ticket, `<num>-review.md`). FAKE_REVIEW
+says what it does with each, a mode for all or a JSON object {"<num>": mode} (default finished):
 
   finished | partly | not met   write one line per Done-when item and that verdict, exit 0
   none     write the item lines but no verdict, exit 0
   crash    write nothing, exit 1
   slow     sleep FAKE_REVIEW_SLEEP seconds (default 2), then as finished
 
-Every review it runs appends a line to FAKE_REVIEW_CALLS when that is set.
+Every review it runs appends a line to FAKE_REVIEW_CALLS when that is set: each file's name and mode.
 
 Printed as `claude -p --output-format stream-json` does: the result is the last line. FAKE_WORKER_USAGE="0.30>0.45"
 adds a rate_limit_event with 5-hour use 0.30 at the start and 0.45 just before the result (resetsAt from
@@ -63,27 +64,40 @@ def result(obj):
     print(json.dumps(obj), flush=True)
 
 
-def reviewer(path):
-    """The fake second pass: FAKE_REVIEW's verdict in the review file the brief names."""
-    mode = os.environ.get("FAKE_REVIEW", "finished")
+def reviewer(paths):
+    """The fake second pass: one review file per path the brief names (one per landed ticket, `<num>-review.md`),
+    each with FAKE_REVIEW's verdict: a mode for all of them, or a JSON object {"<num>": mode} (others finished)."""
+    raw = os.environ.get("FAKE_REVIEW", "finished")
+    try:
+        modes = json.loads(raw)
+    except ValueError:
+        modes = raw
+    pick = lambda path: modes.get(re.match(r"(\d+)", os.path.basename(path)).group(1), "finished") \
+        if isinstance(modes, dict) else modes
     if os.environ.get("FAKE_REVIEW_CALLS"):
         with open(os.environ["FAKE_REVIEW_CALLS"], "a", encoding="utf-8") as f:
-            f.write(mode + "\n")
-    if mode == "crash":
+            f.write(" ".join("{}:{}".format(os.path.basename(p), pick(p)) for p in paths) + "\n")
+    crashed = False
+    if "slow" in map(pick, paths):
+        time.sleep(float(os.environ.get("FAKE_REVIEW_SLEEP") or 2))
+    for path in paths:
+        mode = pick(path)
+        if mode == "crash":
+            crashed = True
+            continue
+        mode = "finished" if mode == "slow" else mode
+        met = "met" if mode == "finished" else "not met: the fake reviewer found no test for it"
+        lines = ["# Review", "", "- It works.: " + met]
+        if mode == "partly":
+            lines.append("- The commit names the ticket: met")
+        if mode != "none":
+            lines += ["", "Verdict: " + mode]
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+    if crashed:
         print(json.dumps({"type": "result", "is_error": True, "result": "crashed"}), flush=True)
         return 1
-    if mode == "slow":
-        time.sleep(float(os.environ.get("FAKE_REVIEW_SLEEP") or 2))
-        mode = "finished"
-    met = "met" if mode == "finished" else "not met: the fake reviewer found no test for it"
-    lines = ["# Review", "", "- It works.: " + met]
-    if mode == "partly":
-        lines.append("- The commit names the ticket: met")
-    if mode != "none":
-        lines += ["", "Verdict: " + mode]
-    with open(path, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines) + "\n")
-    result({"type": "result", "subtype": "success", "is_error": False, "result": "Verdict: {} {}".format(mode, path)})
+    result({"type": "result", "subtype": "success", "is_error": False, "result": "Verdict: " + ", ".join(paths)})
     return 0
 
 
@@ -97,9 +111,9 @@ def main():
     if brief == "reply ok":  # the hub's usage probe
         print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "result": "ok"}))
         return 0
-    review = re.search(r"^Write your review to: (.+)$", brief, re.M)
+    review = re.findall(r"^Write your review to: (.+)$", brief, re.M)
     if review:
-        return reviewer(review.group(1).strip())
+        return reviewer([r.strip() for r in review])
     if os.environ.get("FAKE_WORKER_USAGE"):
         event(float(os.environ["FAKE_WORKER_USAGE"].split(">")[0]))
     mode = os.environ.get("FAKE_WORKER_MODE", "commit")

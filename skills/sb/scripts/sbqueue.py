@@ -105,7 +105,7 @@ def order(tickets, queued, maps=()):
     return out
 
 
-HOLDING = ("running", "review", "recheck")  # a ticket at work: its map stays the repo's current one
+HOLDING = ("running", "landed", "review", "recheck")  # a ticket at work or not judged yet: its map stays current
 
 
 def map_queueable(tickets, name, live):
@@ -214,6 +214,7 @@ def brief(t, map_plain_words, run_folder, repo, branch):
 
 
 REVIEW_TEMPLATE = Path(__file__).resolve().parent.parent / "templates" / "review-brief.md"
+REVIEW_TICKET_TEMPLATE = REVIEW_TEMPLATE.with_name("review-ticket.md")
 VERDICTS = ("finished", "partly", "not met")
 DIFF_MAX = 60000  # characters of the commit's diff handed to the review inline; the rest it reads with git
 NO_CHANGE = re.compile(r"^#{1,6}\s*No change needed\s*$", re.M | re.I)
@@ -234,14 +235,15 @@ def _fill(template, values):
     return "\n".join(out).rstrip("\n") + "\n"
 
 
-def review_brief(ticket_text, repo, shas, diff, report_path, report_text, review_file, redo=None, second=None):
-    """The second pass's prompt: templates/review-brief.md filled with the ticket as `sbmap show` prints it, the
-    diff of its commits `shas` (oldest first; cut at DIFF_MAX, the review reads the rest itself) and the worker's
-    report. `redo`: the item's review-driven try (its first try's commit, verdict and review), whose second try made
-    `second` (None: no commit): both tries are judged together."""
+def review_section(ticket_text, repo, shas, diff, report_path, report_text, review_file, redo=None, second=None,
+                   diff_max=DIFF_MAX):
+    """One ticket's part of the second pass's prompt (templates/review-ticket.md): the ticket as `sbmap show` prints
+    it, the diff of its commits `shas` (oldest first; cut at `diff_max`, the review reads the rest itself), the
+    worker's report and the file its review goes in. `redo`: the item's review-driven try (its first try's commit,
+    verdict and review), whose second try made `second` (None: no commit): both tries are judged together."""
     shas = [s for s in ([shas] if isinstance(shas, str) else shas or []) if s]
-    if len(diff) > DIFF_MAX:
-        diff = diff[:DIFF_MAX] + f"\n... cut at {DIFF_MAX} characters: read the rest with git show"
+    if len(diff) > diff_max:
+        diff = diff[:diff_max] + f"\n... cut at {diff_max} characters: read the rest with git show"
     first = (redo or {}).get("commit")
     if len(shas) > 1:
         commit_line = f"Commits {first} (the first try) and {second} (the second try), in {repo}."
@@ -262,6 +264,15 @@ def review_brief(ticket_text, repo, shas, diff, report_path, report_text, review
         "diff": diff.strip() or "(no change)", "report_path": str(report_path),
         "report": report_text.strip() or "(the worker wrote no report)", "review_file": str(review_file),
     }
+    return _fill(REVIEW_TICKET_TEMPLATE, values).rstrip("\n")
+
+
+def review_brief(sections, repo):
+    """The second pass's prompt for one map's run: templates/review-brief.md with each landed ticket's
+    `review_section` in it, one review file per ticket."""
+    sections = list(sections)
+    values = {"repo": str(repo), "count": str(len(sections)), "s": "" if len(sections) == 1 else "s",
+              "tickets": "\n\n".join(sections)}
     return _fill(REVIEW_TEMPLATE, values)
 
 

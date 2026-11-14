@@ -140,7 +140,7 @@ class FitTest(PacingCase):
         self.sup.tick()
         self.assertEqual(list(self.running()), [first])  # no learned cost yet: one worker
         self.agent_env = {}
-        self.until(lambda: self.state_of(first) == "done")
+        self.until(lambda: self.state_of(first) == "landed")  # the cost of work that landed counts
         self.assertEqual(self.inst("main")["costs"], {"sonnet": {"avg": 0.12, "n": 1}})
         self.assertEqual(self.inst("main")["usage"]["five_hour"], 0.77)
         # 77% + the learned 12% fits under 90% (the default 15% would not); a third would not fit
@@ -396,7 +396,7 @@ class Batch2Test(PacingCase):
         self.sup.tick()
         report = Path(self.items()["repo/one#1"]["run"]) / "1.md"
         report.write_text("# A\n\n## Self-checks\n\n- ran the greeting by hand: ok\n\n## Notes\n\nx\n")
-        self.until(lambda: self.state_of("repo/one#1") == "done")
+        self.until(lambda: self.state_of("repo/one#1") == "landed")  # judged at its map's end, its checks are kept now
         checks = self.items()["repo/one#1"]["checks"]
         self.assertEqual([(c["cmd"], c["code"], c["tail"]) for c in checks], [("echo checked-ok", 0, "checked-ok")])
         self.assertIsInstance(checks[0]["secs"], float)

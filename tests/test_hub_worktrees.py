@@ -106,8 +106,8 @@ class WorktreeTest(RunnerCase):
     def test_a_worktree_worker_that_outlived_its_hub_is_judged_and_landed_by_the_next_one(self):
         self.modes = {"repo/one#1": "slow"}
         os.environ["FAKE_WORKER_SLEEP"] = "1.5"
-        self.mode = "hang"
-        self.resume()
+        self.hub.queue_set(["repo/one#1"], self.hub.state()["queue"]["version"])  # alone: its map's review follows it
+        self.hub.queue_pause(False)
         self.sup.tick()
         tree = self.cwd_of("repo/one#1")
         hub = Hub(self.root / "hub", now=self.clock, launcher=self.launcher)  # the hub died; a new one starts
@@ -115,7 +115,7 @@ class WorktreeTest(RunnerCase):
         sup.close_off = False
         self.addCleanup(sup.stop)
         end = time.time() + 10
-        while time.time() < end and hub.state()["queue"]["items"][0]["state"] in ("running", "review"):
+        while time.time() < end and hub.state()["queue"]["items"][0]["state"] in ("running", "landed", "review"):
             sup.tick()
             time.sleep(0.05)
         item = hub.state()["queue"]["items"][0]

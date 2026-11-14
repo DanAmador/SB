@@ -238,7 +238,7 @@ class ContractFixturesTest(unittest.TestCase):
         end = self.clock.t
         for _ in range(400):
             self.sup.tick()
-            if self.hub.state()["queue"]["items"][0]["state"] not in ("running", "review"):
+            if self.hub.state()["queue"]["items"][0]["state"] not in ("running", "landed", "review"):
                 break
             threading.Event().wait(0.03)
         self.assertEqual(self.hub.state()["queue"]["items"][0]["state"], "done", self.hub.state()["queue"])

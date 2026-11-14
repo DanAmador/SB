@@ -46,9 +46,11 @@ Every command but `serve` also takes --port N.
 the owner resumes it (`queue resume`); a resumed queue stays so across restarts. Every 5 s it starts the next
 queued ticket whose agent and repo are free as a headless worker (`claude -p` in auto mode, or `agy -p`),
 with SB_HUB_AGENT=<ticket key> and SB_HUB_PARENT=queue so `hook` reports it as that item's worker; when the
-worker exits it checks the commit, paths and checks in code; when they pass, a second pass on Opus (`claude -p`
-from templates/review-brief.md) judges the work against the ticket's Done when and writes <run>/<num>-review.md,
-and only its `finished` verdict resolves the ticket. Partly or not met queue it once more at the front, its brief
+worker exits it checks the commit, paths and checks in code; when they pass, the work lands and the ticket is
+`landed` (not judged yet): it holds no files, and what comes after it may start. When a map has nothing queued,
+running or in checks left, ONE second pass on Opus (`claude -p` from templates/review-brief.md) judges every landed
+ticket of it against its Done when and writes <run>/<num>-review.md for each; only a `finished` verdict resolves a
+ticket (pausing the queue counts as the run's end). Partly or not met queue it once more at the front, its brief
 naming the first commit and the review's not-met lines; a second verdict short of finished leaves it open with
 both findings, failed, for the owner. The hub never reverts a commit.
 
@@ -538,7 +540,7 @@ class Hub:
 
     def _live_keys(self):
         return {i["key"] for i in self._data["queue"]["items"]
-                if i["kind"] == "ticket" and i["state"] in ("queued", "running", "review")}
+                if i["kind"] == "ticket" and i["state"] in ("queued", "running", "landed", "review")}
 
     @staticmethod
     def _item(key):
@@ -1137,7 +1139,14 @@ WORKER_LIMIT = 90 * 60  # a worker still running after this long has its process
 TICK_EVERY = 5
 RECHECK_EVERY = 10 * 60  # a ticket whose check could not run (exit 75): its checks run again this often
 RECHECKS_MAX = 6  # ...this many times, then it waits for the Recheck button
-REVIEW_LIMIT = 30 * 60  # a second pass still running after this long is killed: the review could not run
+REVIEW_BASE, REVIEW_EACH = 10 * 60, 5 * 60  # a map's second pass may run 10 minutes plus 5 per ticket, then it is killed
+
+
+def review_limit(n):
+    """Seconds a second pass over `n` tickets may run before it is killed (the review could not run)."""
+    return REVIEW_BASE + REVIEW_EACH * max(1, n)
+
+
 REVIEW_MODEL = "opus"  # the second pass runs on Opus, whichever model did the work
 # A ticket's tries, each with its own counter on its queue item, none of which spends another's:
 #   tries     worker runs that ended (a sonnet first try whose checks failed runs once more on opus: `retry`)
@@ -1885,8 +1894,8 @@ class TicketRun:
 
     def finish(self, item, run, over, recheck=False):
         """The result of a worker that ended (`over`: it ran past the limit and was killed): checked in code,
-        then `review` (its commit and checks passed: the second pass judges it next, see review_start and
-        review_end; `checked` is the hub's reason), retried, stopped for a limit or a logout, or failed with a
+        then `landed` (its commit and checks passed and its work landed: its map's second pass judges it when the
+        map's run ends, see review_start and review_end; `checked` is the hub's reason), retried, stopped for a limit or a logout, or failed with a
         comment on the ticket. A check that exited 75 could not run: the result is `recheck`, the commit and the
         claim stay, the worker is not run again. `recheck`: only the checks run again (no stop or opus retry is
         looked for)."""
@@ -1907,9 +1916,9 @@ class TicketRun:
             return self.result(item, "recheck", reason.splitlines()[0], run, sha, checks)
         if tree and not passed:
             reason += "\nIts work stays on branch {} in {}.".format(branch, tree)
-        if passed:  # a worker that did the work goes to the second pass, whatever it printed afterwards
-            return {**self.result(item, "review", "checks passed; the Opus review judges it against its Done when",
-                                  run, sha, checks), "checked": reason}
+        if passed:  # a worker that did the work lands, whatever it printed afterwards; its map's second pass judges it
+            return {**self.result(item, "landed", "landed, not judged yet: the Opus review judges it when its map's "
+                                  "run ends", run, sha, checks), "checked": reason}
         # a failed run whose own output (not an earlier try's) names a usage limit or a logout is tried again
         if not over and not recheck:
             stopped = self.stopped(item, run, checks)
@@ -2042,55 +2051,64 @@ class TicketRun:
                 return n, dict(e)
         return "claude", {"kind": "claude", "dir": None, "model": None}
 
-    def review_start(self, item, run, sha):
-        """Start the second pass on REVIEW_MODEL in the ticket's repo, briefed from templates/review-brief.md with
-        the ticket (`sbmap show`), the commit's diff and the worker's report; it writes <run>/<num>-review.md (any
-        earlier one is removed first, so an old verdict is never read). Returns {p, agent, inst, log, start, file};
-        OSError, ValueError or SubprocessError when it could not start."""
-        t = run["t"]
-        if not run.get("folder"):
+    def review_start(self, entries):
+        """Start ONE second pass on REVIEW_MODEL in the map's repo over `entries`, a list of (item, run, sha): each
+        landed ticket. It is briefed from templates/review-brief.md with every ticket (`sbmap show`), its commits'
+        diff and its worker's report, and writes <run>/<num>-review.md for each (any earlier one is removed first,
+        so an old verdict is never read). Returns {p, agent, inst, log, start, files (item key -> review file),
+        keys, limit}; OSError, ValueError or SubprocessError when it could not start."""
+        item0, run0, _ = entries[0]
+        t0 = run0["t"]
+        if not run0.get("folder"):
             raise ValueError("the run folder is not recorded")
-        nnn = "{:03d}".format(int(t["num"]))
-        rc, shown, err = self.sbmap("show", t["map"], nnn)
-        # a review-driven second try is judged with the first try's commit: both, oldest first
-        redo = item.get("redo") or {}
-        shas = [c for c in dict.fromkeys((redo.get("commit"), sha)) if c]
-        diff = ""
-        for c in shas:
-            rc2, one, err2 = _git_run(t["repo"], "show", "--stat", "--patch", "--format=fuller", c)
-            if rc2 != 0:
-                raise ValueError("git show {} failed: {}".format(c[:9], firstline(err2)))
-            diff += one
-        folder = Path(run["folder"])
-        report = folder / "{}.md".format(int(t["num"]))
-        try:
-            report_text = report.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            report_text = ""
-        review = Path(self.review_file(run, t))
-        review.unlink(missing_ok=True)
-        brief = sbqueue.review_brief(shown if rc == 0 else "", t["repo"], shas, diff, report, report_text, review,
-                                     redo=redo or None, second=sha)
-        log = str(folder / "{}-review.log".format(int(t["num"])))
+        cap = max(6000, sbqueue.DIFF_MAX // len(entries))
+        sections, files = [], {}
+        for item, run, sha in entries:
+            t = run["t"]
+            rc, shown, err = self.sbmap("show", t["map"], "{:03d}".format(int(t["num"])))
+            # a review-driven second try is judged with the first try's commit: both, oldest first
+            redo = item.get("redo") or {}
+            shas = [c for c in dict.fromkeys((redo.get("commit"), sha)) if c]
+            diff = ""
+            for c in shas:
+                rc2, one, err2 = _git_run(t["repo"], "show", "--stat", "--patch", "--format=fuller", c)
+                if rc2 != 0:
+                    raise ValueError("git show {} failed: {}".format(c[:9], firstline(err2)))
+                diff += one
+            folder = Path(run["folder"])
+            report = folder / "{}.md".format(int(t["num"]))
+            try:
+                report_text = report.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                report_text = ""
+            review = Path(self.review_file(run, t))
+            review.unlink(missing_ok=True)
+            files[item["key"]] = str(review)
+            sections.append(sbqueue.review_section(shown if rc == 0 else "", t["repo"], shas, diff, report,
+                                                   report_text, review, redo=redo or None, second=sha, diff_max=cap))
+        brief = sbqueue.review_brief(sections, t0["repo"])
+        folder = Path(run0["folder"])
+        log = str(folder / ("{}-review.log".format(int(t0["num"])) if len(entries) == 1 else "review.log"))
         try:
             start = os.path.getsize(log)
         except OSError:
             start = 0
-        name, inst = self._review_agent(run)
+        name, inst = self._review_agent(run0)
         if self.stopping():
             raise OSError("the hub is stopping")
-        env = {"SB_HUB_AGENT": item["key"], "SB_HUB_PARENT": "queue", "SB_HUB_PORT": str(self.port),
-               "SB_HUB_RUN": str(Path(log).parent)}
-        p = self.hub.launcher(inst, brief, t["repo"], REVIEW_MODEL, env, log)
-        return {"p": p, "agent": name, "inst": inst, "log": log, "start": start, "file": str(review)}
+        env = {"SB_HUB_AGENT": item0["key"], "SB_HUB_PARENT": "queue", "SB_HUB_PORT": str(self.port),
+               "SB_HUB_RUN": str(folder)}
+        p = self.hub.launcher(inst, brief, t0["repo"], REVIEW_MODEL, env, log)
+        return {"p": p, "agent": name, "inst": inst, "log": log, "start": start, "files": files,
+                "keys": [i["key"] for i, _, _ in entries], "limit": review_limit(len(entries))}
 
     def review_end(self, item, run, sha, checked, checks, rv, over=False):
         """The result once the second pass ended: `finished` resolves the ticket with its commit; `partly` and `not
         met` leave it open and claimed by nobody, with the findings as a comment and the commit where it landed
-        (result `failed`, naming the verdict); a review that crashed, ran past REVIEW_LIMIT or wrote no verdict
+        (result `failed`, naming the verdict); a review that crashed, ran past its limit or wrote no verdict
         could not run: `recheck`, the commit and the claim stay and only the review runs again."""
         t = run["t"]
-        path = rv.get("file") if rv else self.review_file(run, t)
+        path = ((rv or {}).get("files") or {}).get(item["key"]) or self.review_file(run, t)
         try:
             text = Path(path).read_text(encoding="utf-8", errors="replace") if path else ""
         except OSError:
@@ -2098,7 +2116,7 @@ class TicketRun:
         verdict = None if over else sbqueue.review_verdict(text)
         if verdict is None:
             code = getattr(rv.get("p"), "returncode", None) if rv else None
-            why = ("it ran past {} minutes".format(REVIEW_LIMIT // 60) if over else
+            why = ("it ran past {} minutes".format(int((rv or {}).get("limit") or review_limit(1)) // 60) if over else
                    "it wrote no review file" if not text else "its review file names no verdict")
             if code not in (None, 0) and not over:
                 why = "it exited {} and {}".format(code, why[3:])
@@ -2168,7 +2186,7 @@ class Supervisor:
         # item key -> {p, t (the ticket row it started from), agent, inst, base, log, start, pos (log read up to),
         # u0/u1 (its first and newest usage reading), alone (no other worker on its agent overlapped it), braked}
         self.procs = {}
-        self.reviews = {}  # item key -> its second pass's {p, agent, inst, log, start, file}, while it runs
+        self.reviews = {}  # map -> its second pass's {p, agent, inst, log, start, files, keys, limit, at}, while it runs
         self.streak = (None, 0)  # the failure class of the last failed items in a row, and how many
         self.stopped = False
         self.note_path = None  # wayfinder/runs/hub-now.md: `serve` sets it; tests leave the vault alone
@@ -2206,7 +2224,7 @@ class Supervisor:
             if getattr(run["p"], "sure", True):  # an adopted pid ps could not confirm is never killed
                 _kill_group(run["p"], grace=1)
         self.procs.clear()
-        for rv in list(self.reviews.values()):  # its item stays `review`: the next hub starts the review afresh
+        for rv in list(self.reviews.values()):  # its items stay `review`: the next hub starts the review afresh
             _kill_group(rv["p"], grace=1)
         self.reviews.clear()
 
@@ -2502,8 +2520,8 @@ class Supervisor:
                     self._apply(item, self.runner.fail(item, run, why, None))
             with self.hub._lock:
                 now_item = next((i for i in self.hub._data["queue"]["items"] if i["key"] == item["key"]), {})
-            # only finished work says what an item costs: a worker whose checks passed (its review runs on) counts
-            if now_item.get("state") in ("done", "review"):
+            # only finished work says what an item costs: a worker whose checks passed (it landed) counts
+            if now_item.get("state") in ("done", "landed"):
                 self._learn(run, item.get("model") or "sonnet")
 
     def _job_stopped(self, item, run):
@@ -2548,8 +2566,8 @@ class Supervisor:
                          resume={"agent": res["stop"]["agent"], "log": res["log"], "why": STOP_WHY[res["stop"]["kind"]]},
                          note=res["note"])
             return
-        if state == "review":  # the checks passed: the second pass starts at the next look (_reviews)
-            self._update(key, state="review", ended=None, commit=res["commit"], checked=res["checked"], pid=None,
+        if state == "landed":  # the checks passed and the work landed: its map's second pass judges it (_reviews)
+            self._update(key, state="landed", ended=None, commit=res["commit"], checked=res["checked"], pid=None,
                          pid_start=None, rechecks=None, recheck_at=None, verdict=None, review=None, note=res["note"])
             return
         if state == "recheck":
@@ -2666,7 +2684,7 @@ class Supervisor:
             self._end(key, "skipped", note="no longer open: it was resolved or dropped while its checks waited")
             return
         if item.get("checked") is not None:  # the checks passed and the review could not run: only it runs again
-            self._update(key, state="review", recheck_at=None, note="the review runs again")
+            self._update(key, state="review", recheck_at=None, note="the review runs again")  # in its map's next one
             return
         run = {"t": row, "agent": item.get("runner"), "inst": {}, "base": item.get("base_sha"),
                "first_base": item.get("first_base"), "log": item.get("log"), "folder": item.get("run"),
@@ -2681,72 +2699,110 @@ class Supervisor:
             self.runner.rebuild_after(row["repo"], run.get("landed_on") or run.get("base"), res["commit"])
 
     def _reviews(self):
-        """Each `review` item: its second pass is started (also after a hub restart, which lost the process), or,
-        once it ended or ran past REVIEW_LIMIT, judged: resolved, left open with the findings, or `recheck` when the
-        review could not run. A review is a process like a worker: the tick never waits for it, and it holds no
-        repo and no agent slot, so other tickets start meanwhile."""
-        with self.hub._lock:
-            items = [dict(i) for i in self.hub._data["queue"]["items"]
-                     if i["kind"] == "ticket" and i["state"] == "review"]
-        for item in items:
-            key = item["key"]
-            rv = self.reviews.get(key)
+        """A map's second pass: one per map, started when the map's run has ended and judging every ticket of it that
+        landed (`_start_reviews`); once it ended or ran past its limit, each ticket is judged: resolved, left open with
+        the findings, or `recheck` when its review could not run (`_review_end`). A review is a process like a worker:
+        the tick never waits for it, and it holds no repo and no agent slot, so other tickets start meanwhile."""
+        for m, rv in list(self.reviews.items()):
             try:
-                if rv is None:
-                    if not self.stopped:
-                        self._review_start(item)
-                    continue
                 ended = rv["p"].poll() is not None
-                over = not ended and self.hub.now() - rv["at"] > REVIEW_LIMIT
+                over = not ended and self.hub.now() - rv["at"] > rv["limit"]
                 if not (ended or over):
                     continue
                 _kill_group(rv["p"], grace=3 if over else 0)
-                del self.reviews[key]
+                del self.reviews[m]
                 self._consume(rv, final=True)  # its usage readings pace its account like a worker's
-                self._review_end(item, rv, over)
-            except Exception as e:  # the commit and the claim stay: the review runs again later
-                self.reviews.pop(key, None)
-                self._apply(item, {"state": "recheck", "commit": item.get("commit"), "checked": item.get("checked") or "",
-                                   "review": None, "note": "review could not run: {}: {}".format(type(e).__name__, e)})
+                self._review_end(rv, over)
+            except Exception as e:  # the commits and the claims stay: the review runs again later
+                self.reviews.pop(m, None)
+                for key in rv["keys"]:
+                    with self.hub._lock:
+                        item = next((dict(i) for i in self.hub._data["queue"]["items"]
+                                     if i["key"] == key and i["state"] == "review"), None)
+                    if item:
+                        self._apply(item, self._review_failed(item, "{}: {}".format(type(e).__name__, e)))
+        if not self.stopped:
+            try:
+                self._start_reviews()
+            except Exception as e:  # tried again at the next look
+                print("sb hub queue: reviews: {}: {}".format(type(e).__name__, e), file=sys.stderr, flush=True)
+
+    @staticmethod
+    def _review_failed(item, why):
+        return {"state": "recheck", "commit": item.get("commit"), "checked": item.get("checked") or "",
+                "review": None, "note": "review could not run: " + why}
+
+    def _start_reviews(self):
+        """For each map whose run has ended (no item of it queued, running or in checks; a paused queue's queued items
+        do not count), start ONE second pass over its landed tickets: those in state `landed`, and any in state
+        `review` that no running second pass holds (a hub that restarted, or one that saved the old state)."""
+        with self.hub._lock:
+            q = self.hub._data["queue"]
+            covered = {k for rv in self.reviews.values() for k in rv["keys"]}
+            groups, busy = {}, set()
+            for i in q["items"]:
+                if i["kind"] != "ticket":
+                    continue
+                m, st = sbqueue.map_of(i["key"]), i["state"]
+                if st in ("landed", "review") and i["key"] not in covered:
+                    groups.setdefault(m, []).append(dict(i))
+                elif st == "running" or st == "queued" and not q["paused"] or st == "recheck" and i.get("checked") is None:
+                    busy.add(m)
+            groups = {m: g for m, g in groups.items() if m not in busy and m not in self.reviews}
+        if not groups:
+            return
+        rows = self.hub._fresh_tickets()
+        if rows is None:
+            return  # the tickets could not be read: tried again at the next look
+        by = {sbqueue.key(t): t for t in rows}
+        for m, group in groups.items():
+            entries = []
+            for item in group:
+                row = by.get(item["key"])
+                if row is None:
+                    self._end(item["key"], "skipped", note="no longer open: it was resolved or dropped before its review")
+                    continue
+                entries.append((item, self._review_run(item, row), item.get("commit")))
+            if not entries:
+                continue
+            try:
+                rv = self.runner.review_start(entries)
+            except (OSError, ValueError, KeyError, subprocess.SubprocessError) as e:
+                for item, _, _ in entries:
+                    self._apply(item, self._review_failed(item, "could not start it: {}".format(e)))
+                continue
+            rv["at"] = self.hub.now()
+            self.reviews[m] = rv
+            for item, _, _ in entries:
+                self._update(item["key"], state="review", review=rv["files"][item["key"]],
+                             note="the Opus review runs on {}".format(rv["agent"]))
 
     def _review_run(self, item, row):
         return {"t": row, "agent": item.get("runner"), "inst": {}, "base": item.get("base_sha"),
                 "first_base": item.get("first_base"), "log": item.get("log"), "folder": item.get("run"),
                 "tree": item.get("tree"), "branch": item.get("branch")}
 
-    def _review_start(self, item):
-        key = item["key"]
-        found, row = self._row(key)
-        if not found:
-            return  # the tickets could not be read: tried again at the next look
-        if row is None:
-            self._end(key, "skipped", note="no longer open: it was resolved or dropped before its review")
-            return
-        try:
-            rv = self.runner.review_start(item, self._review_run(item, row), item.get("commit"))
-        except (OSError, ValueError, KeyError, subprocess.SubprocessError) as e:
-            self._apply(item, {"state": "recheck", "commit": item.get("commit"), "checked": item.get("checked") or "",
-                               "review": None, "note": "review could not run: could not start it: {}".format(e)})
-            return
-        rv["at"] = self.hub.now()
-        self.reviews[key] = rv
-        self._update(key, review=rv["file"], note="the Opus review runs on {}".format(rv["agent"]))
-
-    def _review_end(self, item, rv, over):
-        key = item["key"]
-        found, row = self._row(key)
-        if not found:
-            raise OSError("the tickets could not be read")
-        if row is None:
-            self._end(key, "skipped", note="no longer open: it was resolved or dropped while its review ran")
-            return
-        run = self._review_run(item, row)
-        res = self.runner.review_end(item, run, item.get("commit"), item.get("checked") or "",
-                                     item.get("checks") or [], rv, over)
-        self._apply(item, res)
-        if res["state"] == "done" and res["commit"]:  # after a second try, both tries' changes count
-            self.runner.rebuild_after(row["repo"], (item.get("redo") or {}).get("base") or item.get("base_sha"),
-                                      res["commit"])
+    def _review_end(self, rv, over):
+        """Each ticket the ended second pass held is judged from its own review file."""
+        for key in rv["keys"]:
+            with self.hub._lock:
+                item = next((dict(i) for i in self.hub._data["queue"]["items"]
+                             if i["key"] == key and i["state"] == "review"), None)
+            if item is None:
+                continue
+            found, row = self._row(key)
+            if not found:
+                raise OSError("the tickets could not be read")
+            if row is None:
+                self._end(key, "skipped", note="no longer open: it was resolved or dropped while its review ran")
+                continue
+            run = self._review_run(item, row)
+            res = self.runner.review_end(item, run, item.get("commit"), item.get("checked") or "",
+                                         item.get("checks") or [], rv, over)
+            self._apply(item, res)
+            if res["state"] == "done" and res["commit"]:  # after a second try, both tries' changes count
+                self.runner.rebuild_after(row["repo"], (item.get("redo") or {}).get("base") or item.get("base_sha"),
+                                          res["commit"])
 
     def _finish_job(self, item, run, over):
         """A job has no claim, verdict or retry: exit 0 is done, anything else failed, except a usage limit,
@@ -2803,7 +2859,8 @@ class Supervisor:
         """When the last ticket item has ended: with `final_review` on, one review job per touched repo."""
         with self.hub._lock:
             q = self.hub._data["queue"]
-            if any(i["kind"] == "ticket" and i["state"] in ("queued", "running", "review") for i in q["items"]):
+            if any(i["kind"] == "ticket" and i["state"] in ("queued", "running", "landed", "review")
+                   for i in q["items"]):
                 return
             bases, q["bases"] = q.get("bases") or {}, {}
             if not bases:
@@ -2963,6 +3020,7 @@ class Supervisor:
             if stuck:
                 self.hub._sync_maps(q)
             running = [i for i in q["items"] if i["state"] == "running"]
+            landed = {i["key"] for i in q["items"] if i["state"] == "landed"}  # not judged yet: no longer holds anything
             load, par = self._load(running), {}
             busy = {}  # repo -> the paths of each worktree ticket running in it; None for one in the checkout itself
             for i in running:
@@ -3023,8 +3081,8 @@ class Supervisor:
                     item.update(state="skipped", note=skip, ended=now, **({"title": t["title"]} if t else {}))
                     changed = True
                     continue
-                if t["blocked_by_open"]:
-                    continue  # its blockers are queued ahead of it: it waits for them
+                if any(sbqueue._blocker_key(t, b) not in landed for b in t["blocked_by_open"]):
+                    continue  # a blocker is queued ahead of it: it waits for it (one that landed does not hold it)
                 model = (item.get("model") if item.get("tries") else
                          inst.get("model") if inst.get("kind") == "agy" else t.get("tier") or "sonnet")
                 if parallel(t["repo"]) > 1:  # its own worktree; a later try keeps the one it had
@@ -3129,7 +3187,7 @@ class Supervisor:
         with self.hub._lock:
             q = self.hub._data["queue"]
             tickets = [i for i in q["items"] if i["kind"] == "ticket"]
-            if any(i["state"] in ("queued", "running", "review") for i in tickets):
+            if any(i["state"] in ("queued", "running", "landed", "review") for i in tickets):
                 return
             ended = [i for i in tickets if i["state"] in ("done", "failed", "skipped") and not i.get("digested")]
             if not ended:
@@ -4011,17 +4069,17 @@ def run_ticket(key, agent=None, model=None, item=None, home=None, port=None, lim
         over = True
     _kill_group(p, grace=3 if over else 0)  # also whatever it left running
     res = runner.finish(item, run, over)
-    if res["state"] != "review":
+    if res["state"] != "landed":
         return res
     sha, checked = res["commit"], res.pop("checked")
     try:
-        rv = runner.review_start(item, run, sha)
+        rv = runner.review_start([(item, run, sha)])
     except (OSError, ValueError, subprocess.SubprocessError) as e:
         return {**runner.result(item, "recheck", "review could not run: could not start it: {}".format(e), run, sha,
                                 res["checks"])}
     over = False
     try:
-        rv["p"].wait(timeout=REVIEW_LIMIT)
+        rv["p"].wait(timeout=rv["limit"])
     except subprocess.TimeoutExpired:
         over = True
     _kill_group(rv["p"], grace=3 if over else 0)

@@ -45,7 +45,7 @@ class MapsTest(unittest.TestCase):
         self.assertEqual(stuck_on("r/a#2", self.by, live, []), ("r/a#1", "not queued"))
 
     def test_a_recheck_or_review_holds_its_map(self):
-        for state in ("review", "recheck"):
+        for state in ("landed", "review", "recheck"):
             items = [item("r/a#1", state), item("r/a#2"), item("r/b#1")]
             self.assertEqual(current_maps(items, self.by, ["r/a", "r/b"], {"r/a#1", "r/a#2", "r/b#1"})[0],
                              {"/x": "r/a"})
