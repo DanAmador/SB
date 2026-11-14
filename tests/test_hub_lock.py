@@ -1,5 +1,6 @@
 """One hub runs the queue per home (flock on queue.lock), and the worker's git guard hook."""
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -53,7 +54,9 @@ class QueueLockTest(HubCase):
 class GuardTest(unittest.TestCase):
     def run_hook(self, command, cwd="/nonexistent-dir"):
         r = subprocess.run([sys.executable, str(ROOT / "hooks" / "guard_git.py")], capture_output=True, text=True,
-                           input=json.dumps({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": cwd}))
+                           input=json.dumps({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": cwd}),
+                           env={k: v for k, v in os.environ.items()  # a worker running this suite is not the hook's worker
+                                if k not in ("SB_HUB_AGENT", "SB_HUB_PORT", "SB_HUB_PARENT")})
         self.assertEqual(r.returncode, 0)
         return json.loads(r.stdout)["hookSpecificOutput"] if r.stdout else None
 

@@ -15,10 +15,16 @@ GUARD = ROOT / "hooks" / "guard_git.py"
 SBMAP = "python3 ~/.agents/skills/sb/scripts/sbmap.py"
 
 
+def hook_env(env=None):
+    """The hook's environment: a worker that runs this suite must not make the hook report to its own hub."""
+    base = {k: v for k, v in os.environ.items() if k not in ("SB_HUB_AGENT", "SB_HUB_PORT", "SB_HUB_PARENT")}
+    return {**base, **(env or {})}
+
+
 def run_guard(tool, tin, cwd="/nonexistent-dir", env=None):
     r = subprocess.run([sys.executable, str(GUARD)], capture_output=True, text=True,
                        input=json.dumps({"tool_name": tool, "tool_input": tin, "cwd": cwd}),
-                       env={**os.environ, **(env or {})})
+                       env=hook_env(env))
     assert r.returncode == 0, r.stderr
     return json.loads(r.stdout)["hookSpecificOutput"] if r.stdout else None
 
@@ -104,6 +110,37 @@ class RefusalReachesTheTrail(HubCase):
 
     def test_no_hub_no_failure(self):
         self.assertEqual(bash("git push", env={"SB_HUB_AGENT": "a", "SB_HUB_PORT": "1"})["permissionDecision"], "deny")
+
+
+class SuiteSendsNothingToTheWorkersHub(unittest.TestCase):
+    def test_a_stub_hub_named_in_the_environment_hears_nothing_from_the_suite(self):
+        import http.server
+        import threading
+        posts = []
+
+        class Stub(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                posts.append(self.rfile.read(int(self.headers.get("Content-Length") or 0)))
+                self.send_response(200)
+                self.end_headers()
+
+            def log_message(self, *a):
+                pass
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Stub)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        live = {"SB_HUB_AGENT": "repo/one#1", "SB_HUB_PORT": str(server.server_address[1]), "SB_HUB_PARENT": "queue"}
+        # the guard's own suites, run as a worker would run them: the stub's address is in the test process's environment
+        r = subprocess.run([sys.executable, "-m", "unittest", "test_hub_lock.GuardTest", "test_hub_guard.RefusedTest",
+                            "test_hub_guard.AllowedTest"], capture_output=True, text=True, cwd=Path(__file__).parent,
+                           env={**os.environ, **live})
+        self.assertEqual(r.returncode, 0, r.stderr[-2000:])
+        self.assertEqual(posts, [])
+        # and the control: the hook does post when its own environment names a hub
+        self.assertEqual(bash("git push", env=live)["permissionDecision"], "deny")
+        self.assertEqual(len(posts), 1)
 
 
 class RefusalCountsOnTheRun(unittest.TestCase):

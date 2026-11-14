@@ -95,6 +95,11 @@
           "key": "repo/one#2",
           "kind": "ticket",
           "note": "",
+          "refused": 2,
+          "refused_lines": [
+            "refused: Bash: `git push` is refused",
+            "refused: Bash: `git stash` is refused"
+          ],
           "started": null,
           "state": "queued",
           "tries": 0
@@ -128,12 +133,12 @@
       "runs": {},
       "seeded": true,
       "stop_at": 1794549600.0,
-      "version": 23
+      "version": 25
     }
   },
   "contentType": "application/json",
   "request": {
-    "version": 22
+    "version": 24
   },
   "route": "POST /api/queue/clear-finished",
   "status": 200

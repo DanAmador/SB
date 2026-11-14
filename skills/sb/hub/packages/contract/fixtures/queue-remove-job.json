@@ -93,6 +93,11 @@
           "key": "repo/one#2",
           "kind": "ticket",
           "note": "",
+          "refused": 2,
+          "refused_lines": [
+            "refused: Bash: `git push` is refused",
+            "refused: Bash: `git stash` is refused"
+          ],
           "started": null,
           "state": "queued",
           "tries": 0
@@ -126,13 +131,13 @@
       "runs": {},
       "seeded": true,
       "stop_at": 1794549600.0,
-      "version": 22
+      "version": 24
     }
   },
   "contentType": "application/json",
   "request": {
     "key": "job:tttttttttttt:1",
-    "version": 21
+    "version": 23
   },
   "route": "POST /api/queue/remove_job",
   "status": 200
