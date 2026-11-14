@@ -133,7 +133,7 @@ export function NightGraph(): React.JSX.Element | null {
     { id: f.id, type: "frame", position: { x: f.x, y: f.y }, width: f.w, height: f.h, data: { f }, draggable: false, connectable: false, selectable: false, focusable: false, zIndex: -1, style: { pointerEvents: "none" } },
     ...f.boxes.map((b): Node<Data> => ({
       id: b.id, type: "box", parentId: f.id, position: { x: b.x, y: b.y }, width: NODE_W, height: NODE_H, draggable: false, connectable: false, focusable: false, style: { pointerEvents: "all" },
-      data: { n: nodeOf(b, f.map), map: f.map, foot: b.foot, key: b.id, report: b.report, flash: changed.has(b.id) },
+      data: { n: nodeOf(b, f.map), map: f.map, ...(b.place === null && { foot: b.foot }), key: b.id, report: b.report, flash: changed.has(b.id) },
     })),
   ]);
   const edges: Edge[] = g.edges.map((e) => ({

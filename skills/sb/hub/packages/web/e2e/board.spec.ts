@@ -94,7 +94,7 @@ test.describe("The run's graph", () => {
     await expect(night(page).getByText("Draw the shop window")).toHaveCount(0);
     await expect(night(page).getByText("Draw the header")).toHaveCount(0);
     // the queued one has its place; an arrow crosses from the demo board to the shop site
-    await expect(box(page, /Show the queue in order\s*Queued 1/)).toBeVisible();
+    await expect(box(page, /Show the queue in order.*Queued\s*next 1/)).toBeVisible();
     await expect(night(page).locator(".react-flow__edge")).toHaveCount(1);
     // the graph sits above the running tickets
     await expect(page.getByRole("list", { name: "Running now" })).toBeVisible();
@@ -160,7 +160,7 @@ test.describe("The run's graph", () => {
 
   test("a ticket that starts and one that ends change in place, without a reload, keeping the zoom and the panel", async ({ page, request }) => {
     await page.goto("/next/");
-    await expect(box(page, /Show the queue in order\s*Queued 1/)).toBeVisible();
+    await expect(box(page, /Show the queue in order.*Queued\s*next 1/)).toBeVisible();
     await night(page).getByRole("button", { name: "Zoom in" }).click();
     await page.waitForTimeout(400);
     const view = (): Promise<string> => page.locator(".react-flow__viewport").first().evaluate((el) => (el as HTMLElement).style.transform);
