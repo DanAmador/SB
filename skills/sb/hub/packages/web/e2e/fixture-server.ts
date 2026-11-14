@@ -29,6 +29,7 @@ const tickets = (): TicketRow[] => Tickets.parse(addLinks("GET /api/tickets", [
   ticket(1, "Draw the shop window", { map: "other/site", map_title: "The shop site", file: "/vault/other/site/issues/1.md" }),
   ticket(2, "Pick the shop's fonts", { map: "other/site", map_title: "The shop site", state: "waits for you", type: "grilling", file: "/vault/other/site/issues/2.md" }),
   ticket(3, "Write the shop's copy", { map: "other/site", map_title: "The shop site", status: "claimed", state: "claimed", reason: "claimed by hub main", file: "/vault/other/site/issues/3.md" }),
+  ticket(1, "Sweep the old attic", { map: "other/old", map_title: "The old attic", status: "claimed", state: "claimed", reason: "claimed by hub main", file: "/vault/other/old/issues/1.md" }),
 ], ctx));
 
 const item = (key: string, state: QueueItem["state"]): Raw<QueueItem> => ({

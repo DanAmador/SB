@@ -11,7 +11,6 @@ import {
   queueView,
   scopeItems,
   scopeWaits,
-  sidebarTree,
   ticketInScope,
   runRows,
   filterOptions,
@@ -378,13 +377,5 @@ describe("the sidebar's scope", () => {
     const one = scopeWaits(waits, { project: "sb", map: "sb/one" }, s);
     expect(one.count).toBe(2);
     expect(scopeWaits(waits, { project: "sk4te", map: "" }, s).questions.map(([id]) => id)).toEqual(["b"]);
-  });
-
-  it("counts running and waiting for you on Everything, each project and each map", () => {
-    const tree = sidebarTree(s, tickets, waits);
-    expect(tree.all).toEqual({ running: 2, waiting: 4 });
-    expect(tree.projects.map((p) => [p.project, p.running, p.waiting])).toEqual([["sb", 1, 3], ["sk4te", 1, 1]]);
-    const sb = tree.projects[0];
-    expect(sb?.maps.map((m) => [m.map, m.running, m.waiting])).toEqual([["sb/one", 1, 2], ["sb/two", 0, 1]]);
   });
 });

@@ -130,8 +130,10 @@ test("the sidebar picks a map and every view narrows; the pick lives in the page
   // Everything, then each project with its maps and two counts each
   await expect(side.getByRole("button", { name: "Everything" })).toHaveAttribute("aria-current", "page");
   const shop = side.getByRole("button", { name: /^other/ });
-  await expect(shop.getByLabel("1 running")).toBeVisible();
-  await expect(shop.getByLabel("1 waiting for you")).toBeVisible();
+  await expect(shop.getByLabel("1 can run now")).toBeVisible();
+  await expect(shop.getByLabel("1 queued")).toBeVisible();
+  await expect(shop.getByRole("img", { name: "running" })).toBeVisible();
+  await expect(side.getByText("can run · queued")).toBeVisible();
   await expect(page.getByRole("list", { name: "Running now" }).getByRole("listitem")).toHaveCount(3);
 
   // collapse a project: its maps go
@@ -184,6 +186,23 @@ test("the sidebar picks a map and every view narrows; the pick lives in the page
   await page.keyboard.press("2");
   await page.keyboard.press("/");
   await expect(page.getByRole("searchbox")).toBeFocused();
+});
+
+test("quiet maps fold under one line that opens; a picked quiet map stays shown after a reload", async ({ page }) => {
+  await page.goto("/next/");
+  const side = page.getByRole("navigation", { name: "Projects and maps" });
+  await expect(side.getByRole("button", { name: /^site/ })).toBeVisible();
+  await expect(side.getByRole("button", { name: /^old/ })).toHaveCount(0);
+  const fold = side.getByRole("button", { name: "1 quiet map" });
+  await expect(fold).toHaveAttribute("aria-expanded", "false");
+  await fold.click();
+  await expect(fold).toHaveAttribute("aria-expanded", "true");
+  await side.getByRole("button", { name: /^old/ }).click();
+  await expect(page).toHaveURL(/map=other%2Fold/);
+  await page.reload();
+  await expect(side.getByRole("button", { name: /^old/ })).toHaveAttribute("aria-current", "page");
+  // picked, so it is shown and the fold line is gone
+  await expect(side.getByRole("button", { name: /quiet map/ })).toHaveCount(0);
 });
 
 test("Cmd-K jumps to a map or a ticket", async ({ page }) => {
@@ -431,4 +450,38 @@ test("screenshots of a check that could not run", async ({ page }) => {
   await page.getByRole("dialog").getByText("1 of 1 check could not run").click();
   await page.waitForTimeout(300);
   await page.screenshot({ path: to("sheet-recheck.png") });
+});
+
+test("screenshots of the sidebar", async ({ page }) => {
+  const dir = process.env.SB_SHOTS;
+  test.skip(dir === undefined, "SB_SHOTS names the folder to write to");
+  const to = (n: string): string => `${dir ?? ""}/${n}`;
+  // a map whose tickets cannot run only for want of checks, so the mark shows
+  await page.route("**/api/tickets", async (route) => {
+    const res = await route.fetch();
+    const body = (await res.json()) as Record<string, unknown>[];
+    const first = body[0] ?? {};
+    body.push({ ...first, map: "other/bare", num: 1, map_title: "bare", checks: [], state: "not ready", reason: "no check commands", file: "/vault/other/bare/issues/1.md" });
+    await route.fulfill({ response: res, json: body });
+  });
+  await page.goto("/next/");
+  const side = page.getByRole("navigation", { name: "Projects and maps" });
+  await side.getByRole("button", { name: /quiet map/ }).first().click();
+  await expect(side.getByText("no checks")).toBeVisible();
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: to("sidebar-1440.png") });
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: to("sidebar-dark-1440.png") });
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.setViewportSize({ width: 375, height: 800 });
+  await page.goto("/next/");
+  await page.getByRole("button", { name: "Projects and maps" }).click();
+  const sheet = page.getByRole("dialog", { name: "Projects" });
+  await sheet.getByRole("button", { name: /quiet map/ }).first().click();
+  await expect(sheet.getByText("no checks")).toBeVisible();
+  // the sheet itself does not scroll sideways
+  expect(await sheet.evaluate((e) => e.scrollWidth <= e.clientWidth)).toBe(true);
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: to("sidebar-375.png") });
 });

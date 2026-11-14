@@ -1,9 +1,10 @@
-/** The sidebar: Everything, then each project with its maps (collapsible), each row with two counts. On a phone it is a sheet. */
+/** The sidebar: Everything, then each project with its maps (collapsible, quiet ones folded), each row with can-run and queued counts. On a phone it is a sheet. */
 import { IconChevronDown, IconChevronRight, IconMenu2, IconX } from "@tabler/icons-react";
 import { useState } from "react";
 import type * as React from "react";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
-import { isScoped, type Counts, type Scope, type Sidebar as Tree } from "@/lib/board.ts";
+import { isScoped, type Scope } from "@/lib/board.ts";
+import type { Counts, Sidebar as Tree, SidebarMap } from "@/lib/sidebar.ts";
 import { setLink } from "@/lib/link.ts";
 import { cn } from "@/lib/utils";
 
@@ -13,29 +14,53 @@ const rowCls = (on: boolean): string =>
     on && "bg-accent font-medium",
   );
 
-/** Running (green) and waiting for you (red); a zero is dimmed so the non-zero ones stand out. */
+/** Can run now · queued; a zero is dimmed so the non-zero ones stand out. */
 function CountPair({ c }: { c: Counts }): React.JSX.Element {
   return (
     <span className="ml-auto flex shrink-0 items-center gap-1.5 text-xs tabular-nums">
-      <span className={cn("min-w-4 text-right", c.running > 0 ? "text-ok" : "text-muted-foreground")} title={`${String(c.running)} running`} aria-label={`${String(c.running)} running`}>
-        {c.running}
+      <span className={cn("min-w-4 text-right", c.canRun > 0 ? "font-medium text-foreground" : "text-muted-foreground")} title={`${String(c.canRun)} can run now`} aria-label={`${String(c.canRun)} can run now`}>
+        {c.canRun}
       </span>
-      <span className={cn("min-w-4 text-right", c.waiting > 0 ? "font-medium text-destructive" : "text-muted-foreground")} title={`${String(c.waiting)} waiting for you`} aria-label={`${String(c.waiting)} waiting for you`}>
-        {c.waiting}
+      <span className={cn("min-w-4 text-right", c.queued > 0 ? "font-medium text-foreground" : "text-muted-foreground")} title={`${String(c.queued)} queued`} aria-label={`${String(c.queued)} queued`}>
+        {c.queued}
       </span>
     </span>
   );
 }
 
+/** A green dot beside a name when a worker runs there. */
+function Dot({ on }: { on: boolean }): React.JSX.Element | null {
+  return on ? <span role="img" aria-label="running" title="a worker is running" className="size-2 shrink-0 rounded-full bg-ok" /> : null;
+}
+
+function MapRow({ m, project, on, pick }: { m: SidebarMap; project: string; on: boolean; pick: (p: string, m: string) => void }): React.JSX.Element {
+  return (
+    <div className="flex pl-6">
+      <button type="button" aria-current={on ? "page" : undefined} title={m.map} className={rowCls(on)} onClick={() => { pick(project, m.map); }}>
+        <span className="truncate text-muted-foreground">{m.title}</span>
+        <Dot on={m.running} />
+        {m.noChecks && (
+          <span className="shrink-0 rounded border px-1 text-[10px] leading-4 text-muted-foreground" title="its tickets cannot run: the map has no checks">
+            no checks
+          </span>
+        )}
+        <CountPair c={m} />
+      </button>
+    </div>
+  );
+}
+
 function ProjectTree({ tree, scope, onPick }: { tree: Tree; scope: Scope; onPick: () => void }): React.JSX.Element {
   const [shut, setShut] = useState<ReadonlySet<string>>(new Set());
+  const [quietOpen, setQuietOpen] = useState<ReadonlySet<string>>(new Set());
+  const flip = (set: ReadonlySet<string>, p: string): Set<string> => {
+    const n = new Set(set);
+    if (n.has(p)) n.delete(p);
+    else n.add(p);
+    return n;
+  };
   const toggle = (p: string): void => {
-    setShut((s) => {
-      const n = new Set(s);
-      if (n.has(p)) n.delete(p);
-      else n.add(p);
-      return n;
-    });
+    setShut((s) => flip(s, p));
   };
   const pick = (project: string, map: string): void => {
     setLink({ project, map });
@@ -44,11 +69,12 @@ function ProjectTree({ tree, scope, onPick }: { tree: Tree; scope: Scope; onPick
   return (
     <nav aria-label="Projects and maps" className="flex flex-col gap-0.5 text-sm">
       <div className="flex px-2 pb-1 text-[11px] text-muted-foreground">
-        <span className="ml-auto">running · waiting</span>
+        <span className="ml-auto">can run · queued</span>
       </div>
       <div className="flex">
         <button type="button" aria-current={!isScoped(scope) ? "page" : undefined} className={rowCls(!isScoped(scope))} onClick={() => { pick("", ""); }}>
           <span className="truncate">Everything</span>
+          <Dot on={tree.all.running} />
           <CountPair c={tree.all} />
         </button>
       </div>
@@ -69,21 +95,25 @@ function ProjectTree({ tree, scope, onPick }: { tree: Tree; scope: Scope; onPick
               </button>
               <button type="button" aria-current={onProject ? "page" : undefined} className={rowCls(onProject)} onClick={() => { pick(p.project, ""); }}>
                 <span className="truncate">{p.project}</span>
+                <Dot on={p.running} />
                 <CountPair c={p} />
               </button>
             </div>
-            {open &&
-              p.maps.map((m) => {
-                const on = scope.map === m.map;
-                return (
-                  <div key={m.map} className="flex pl-6">
-                    <button type="button" aria-current={on ? "page" : undefined} title={m.map} className={rowCls(on)} onClick={() => { pick(p.project, m.map); }}>
-                      <span className="truncate text-muted-foreground">{m.title}</span>
-                      <CountPair c={m} />
-                    </button>
-                  </div>
-                );
-              })}
+            {open && p.maps.map((m) => <MapRow key={m.map} m={m} project={p.project} on={scope.map === m.map} pick={pick} />)}
+            {open && p.quiet.length > 0 && (
+              <div className="flex flex-col pl-6">
+                <button
+                  type="button"
+                  aria-expanded={quietOpen.has(p.project)}
+                  className="flex items-center gap-1 rounded-md px-2 py-1 text-left text-xs text-muted-foreground hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                  onClick={() => { setQuietOpen((q) => flip(q, p.project)); }}
+                >
+                  {quietOpen.has(p.project) ? <IconChevronDown className="size-3" aria-hidden /> : <IconChevronRight className="size-3" aria-hidden />}
+                  {String(p.quiet.length)} quiet {p.quiet.length === 1 ? "map" : "maps"}
+                </button>
+                {quietOpen.has(p.project) && p.quiet.map((m) => <MapRow key={m.map} m={m} project={p.project} on={false} pick={pick} />)}
+              </div>
+            )}
           </div>
         );
       })}

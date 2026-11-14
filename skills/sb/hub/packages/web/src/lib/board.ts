@@ -496,7 +496,7 @@ export function mapInScope(s: Scope, map: string, project?: string): boolean {
 }
 
 /** The map a queue item belongs to, "" for a job. */
-const itemMapKey = (i: Pick<QueueItem, "key" | "kind">): string => (i.kind === "job" ? "" : i.key.replace(/#\d+$/, ""));
+export const itemMapKey = (i: Pick<QueueItem, "key" | "kind">): string => (i.kind === "job" ? "" : i.key.replace(/#\d+$/, ""));
 export const itemInScope = (s: Scope, i: QueueItem): boolean => mapInScope(s, itemMapKey(i), i.kind === "job" ? folder(i.project) : undefined);
 export const ticketInScope = (s: Scope, t: Pick<TicketRow, "map">): boolean => mapInScope(s, t.map);
 export const scopeItems = (s: Scope, items: readonly QueueItem[]): QueueItem[] => items.filter((i) => itemInScope(s, i));
@@ -524,81 +524,4 @@ export function scopeWaits(w: Waits, s: Scope, state: Pick<State, "agents" | "al
   const badWidgets = w.badWidgets.filter((b) => s.map === "" && (s.project === "" || folder(b.project) === s.project));
   const open = questions.filter(([, q]) => q.answer === null).length;
   return { questions, failed, done, tickets, signedOut: [], badWidgets, count: open + failed.length + done.length + badWidgets.length };
-}
-
-export interface Counts {
-  readonly running: number;
-  readonly waiting: number;
-}
-export interface SidebarMap extends Counts {
-  readonly map: string;
-  readonly title: string;
-}
-export interface SidebarProject extends Counts {
-  readonly project: string;
-  readonly maps: readonly SidebarMap[];
-}
-export interface Sidebar {
-  readonly all: Counts;
-  readonly projects: readonly SidebarProject[];
-}
-
-/** Everything, then each project with its maps, each with its running and waiting-for-you counts. */
-export function sidebarTree(state: State, tickets: readonly TicketRow[] | null, waits: Waits): Sidebar {
-  const titles = new Map<string, string>();
-  for (const t of tickets ?? []) titles.set(t.map, mapTitle(t));
-  const run = new Map<string, number>();
-  const wait = new Map<string, number>();
-  const bump = (m: Map<string, number>, k: string, n = 1): void => {
-    m.set(k, (m.get(k) ?? 0) + n);
-  };
-  const projectOfItem = (i: QueueItem): { map: string; project: string } => {
-    const map = itemMapKey(i);
-    return { map, project: i.kind === "job" ? folder(i.project) : projOf(map) };
-  };
-  const proj = new Map<string, Set<string>>();
-  const see = (project: string, map: string): void => {
-    if (project === "") return;
-    const set = proj.get(project) ?? new Set<string>();
-    if (map !== "") set.add(map);
-    proj.set(project, set);
-  };
-  for (const m of titles.keys()) see(projOf(m), m);
-  const runsByProject = new Map<string, number>();
-  const waitsByProject = new Map<string, number>();
-  const count = (i: QueueItem, into: "run" | "wait"): void => {
-    const w = projectOfItem(i);
-    see(w.project, w.map);
-    bump(into === "run" ? runsByProject : waitsByProject, w.project);
-    if (w.map !== "") bump(into === "run" ? run : wait, w.map);
-  };
-  for (const i of state.queue.items) if (i.state === "running") count(i, "run");
-  for (const i of [...waits.failed, ...waits.done]) count(i, "wait");
-  for (const [, q] of waits.questions) {
-    if (q.answer !== null) continue;
-    const w = askerScope(state, q.agent);
-    const project = w.map === "" ? w.project : projOf(w.map);
-    see(project, w.map);
-    bump(waitsByProject, project);
-    if (w.map !== "") bump(wait, w.map);
-  }
-  for (const b of waits.badWidgets) {
-    const p = folder(b.project);
-    see(p, "");
-    bump(waitsByProject, p);
-  }
-  const projects = [...proj.entries()]
-    .sort(([x], [y]) => x.localeCompare(y))
-    .map(([project, maps]): SidebarProject => ({
-      project,
-      running: runsByProject.get(project) ?? 0,
-      waiting: waitsByProject.get(project) ?? 0,
-      maps: [...maps]
-        .map((map): SidebarMap => ({ map, title: map.split("/").pop() ?? map, running: run.get(map) ?? 0, waiting: wait.get(map) ?? 0 }))
-        .sort((x, y) => x.map.localeCompare(y.map)),
-    }));
-  return {
-    all: { running: state.queue.items.filter((i) => i.state === "running").length, waiting: waits.count },
-    projects,
-  };
 }

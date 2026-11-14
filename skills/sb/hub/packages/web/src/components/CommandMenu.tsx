@@ -6,9 +6,9 @@ import { Button } from "@/components/ui/button";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
-import type { Sidebar } from "@/lib/board.ts";
 import { tkey, agentLabel, agentOf, folder, poolOf, projOf, whenDelivered } from "@/lib/board.ts";
 import { setLink } from "@/lib/link.ts";
+import type { Sidebar } from "@/lib/sidebar.ts";
 import { say } from "@/lib/notice.ts";
 import { useBoard } from "./context.tsx";
 
@@ -53,7 +53,7 @@ export function CommandMenu({ open, onClose, go, tree }: { open: boolean; onClos
                   <IconFolder aria-hidden />
                   <span className="truncate">{p.project}</span>
                 </CommandItem>,
-                ...p.maps.map((m) => (
+                ...[...p.maps, ...p.quiet].map((m) => (
                   <CommandItem key={m.map} value={`map ${m.map} ${m.title}`} onSelect={() => { run(() => { setLink({ project: p.project, map: m.map }); }); }}>
                     <IconMap2 aria-hidden />
                     <span className="truncate">{m.map}</span>

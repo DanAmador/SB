@@ -5,7 +5,8 @@ import type * as React from "react";
 import type { RouteBody, State } from "@sb-hub/contract";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { itemInScope, plural, projOf, queueView, scopeItems, scopeWaits, sidebarTree, splitAgents, ticketIndex, waitsFor, withBlockers } from "@/lib/board.ts";
+import { sidebarTree } from "@/lib/sidebar.ts";
+import { itemInScope, plural, projOf, queueView, scopeItems, scopeWaits, splitAgents, ticketIndex, waitsFor, withBlockers } from "@/lib/board.ts";
 import { sessionCards } from "@/lib/sessions.ts";
 import { READONLY } from "@/lib/api.ts";
 import { useHubState, useTickets, useWrites, type Outcome } from "@/lib/hub.ts";
@@ -71,7 +72,7 @@ function Loaded({ state, tickets, down, lastOk }: { state: State; tickets: Board
   const qv = queueView(state);
   const ix = ticketIndex(tickets ?? [], state);
   const allWaits = waitsFor(state, tickets, ix, new Set(state.seen));
-  const tree = sidebarTree(state, tickets, allWaits);
+  const tree = sidebarTree(state, tickets, scope);
   const waits = scopeWaits(allWaits, scope, state);
   const alerts = waits.count;
   const sessions = sessionCards(state, ix, agents).filter((c) => !c.idle);
