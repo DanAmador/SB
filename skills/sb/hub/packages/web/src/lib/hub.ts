@@ -1,5 +1,5 @@
 /** The hub's data as TanStack queries, and every write as one function that refreshes what it changed. */
-import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import type { Queue, RouteAnswer, RouteBody, State, TicketAction } from "@sb-hub/contract";
 import { QueueStale } from "@sb-hub/contract";
 import { get, post, ticketPath } from "./api.ts";
@@ -18,6 +18,19 @@ export const useTicketDetail = (key: string | null) =>
     enabled: key !== null && /#\d+$/.test(key),
     refetchInterval: TICKETS_MS,
   });
+
+/** History's runs from `since` on, newest first, the newest `limit` of them. */
+export const useRuns = (since: number, limit: number) =>
+  useQuery({
+    queryKey: ["runs", since, limit],
+    queryFn: () => get("GET /api/runs", { since: String(since), limit: String(limit) }),
+    refetchInterval: TICKETS_MS,
+    placeholderData: keepPreviousData,
+    retry: 1,
+  });
+/** One run with its checks, report and log tail. */
+export const useRun = (key: string) =>
+  useQuery({ queryKey: ["run", key], queryFn: () => get("GET /api/run", { key }), enabled: key !== "", refetchInterval: TICKETS_MS, retry: 1 });
 
 /** The outcome of a write, in the words the page shows. */
 export type Outcome = { ok: true; words: string } | { ok: false; words: string };

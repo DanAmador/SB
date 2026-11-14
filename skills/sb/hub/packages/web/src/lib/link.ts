@@ -3,8 +3,8 @@ import { useSyncExternalStore } from "react";
 import { SHOWS, type Show } from "./board.ts";
 import { Store } from "./store.ts";
 
-/** Runs is the landing view. Sessions (ticket 044) and History come later: keys 4 and 5 are theirs. */
-export const VIEWS = ["runs", "queue", "waits"] as const;
+/** Runs is the landing view. Sessions (ticket 044) is key 4 and comes later; History is key 5. */
+export const VIEWS = ["runs", "queue", "waits", "history"] as const;
 export type View = (typeof VIEWS)[number];
 export const DEFAULT_VIEW: View = "runs";
 
@@ -18,9 +18,18 @@ export interface Link {
   readonly s: Show;
   /** The open ticket's key, "p:<path>" for a project, or "". */
   readonly t: string;
+  /** History: the open run's key, and the open picture's name. */
+  readonly run: string;
+  readonly pic: string;
+  /** History's filters: time range, outcome, has pictures ("1"), account, model. */
+  readonly range: string;
+  readonly out: string;
+  readonly pics: string;
+  readonly acct: string;
+  readonly model: string;
 }
 
-const KEYS = ["view", "q", "project", "map", "s", "t"] as const;
+const KEYS = ["view", "q", "project", "map", "s", "t", "run", "pic", "range", "out", "pics", "acct", "model"] as const;
 
 export function readLink(search: string): Link {
   const s = new URLSearchParams(search);
@@ -33,6 +42,13 @@ export function readLink(search: string): Link {
     map: s.get("map") ?? "",
     s: SHOWS.find((x) => x === show) ?? "ready",
     t: s.get("t") ?? "",
+    run: s.get("run") ?? "",
+    pic: s.get("pic") ?? "",
+    range: s.get("range") ?? "",
+    out: s.get("out") ?? "",
+    pics: s.get("pics") ?? "",
+    acct: s.get("acct") ?? "",
+    model: s.get("model") ?? "",
   };
 }
 

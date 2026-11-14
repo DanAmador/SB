@@ -197,7 +197,118 @@ test("on a phone the sidebar is a sheet behind the menu button", async ({ page }
   await expect(page.getByRole("list", { name: "Running now" }).getByRole("listitem")).toHaveCount(1);
 });
 
-for (const [view, scheme] of [["runs", "light"], ["queue", "dark"], ["waits", "light"], ["waits", "dark"]] as const) {
+test("History lists every run by day, filters them, opens one beside the list and steps through its pictures", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(String(e)));
+  await page.goto("/next/");
+  await page.keyboard.press("5");
+  await expect(page.getByRole("tab", { name: "History" })).toHaveAttribute("aria-selected", "true");
+  const list = page.getByRole("main");
+  // 7 days is the default range: the 20-day-old run is not there
+  await expect(list.getByRole("button", { name: "Show who runs what" })).toBeVisible();
+  await expect(list.getByRole("button", { name: "Wire up the very first sketch" })).toHaveCount(0);
+  await page.getByRole("group", { name: "Time range" }).getByRole("button", { name: "30 days" }).click();
+  await expect(list.getByRole("button", { name: "Wire up the very first sketch" })).toBeVisible();
+  await page.getByRole("group", { name: "Time range" }).getByRole("button", { name: "7 days" }).click();
+  // chips and search
+  await page.getByRole("group", { name: "Outcome" }).getByRole("button", { name: "failed" }).click();
+  await expect(list.getByRole("button", { name: "Fix the sheet's focus" })).toBeVisible();
+  await expect(list.getByRole("button", { name: "Show who runs what" })).toHaveCount(0);
+  await expect(page).toHaveURL(/out=failed/);
+  await page.getByRole("group", { name: "Outcome" }).getByRole("button", { name: "failed" }).click();
+  await page.getByRole("button", { name: "Has pictures" }).click();
+  await expect(list.getByRole("button", { name: "Drag a ticket into the queue" })).toBeVisible();
+  await expect(list.getByRole("button", { name: "Fix the sheet's focus" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Has pictures" }).click();
+  await page.getByRole("searchbox", { name: "Search runs" }).fill("fonts");
+  await expect(list.getByRole("button", { name: /Pick the shop/ })).toBeVisible();
+  await expect(list.getByRole("button", { name: "Show who runs what" })).toHaveCount(0);
+  await page.getByRole("searchbox", { name: "Search runs" }).fill("");
+  // a run opens beside the list, in its own page link
+  await list.getByRole("button", { name: "Show who runs what" }).click();
+  await expect(page).toHaveURL(/run=demo%2Fboard%237/);
+  const run = page.getByRole("region", { name: "Run" });
+  await expect(run.getByRole("heading", { name: "Show who runs what" })).toBeVisible();
+  await expect(list.getByRole("button", { name: "Fix the sheet's focus" })).toBeVisible();
+  await expect(run).toContainText("sonnet");
+  await expect(run.getByRole("link", { name: "Report in Obsidian" })).toHaveAttribute("href", /^obsidian:/);
+  await expect(run.getByRole("link", { name: "Ticket" })).toHaveAttribute("href", /^obsidian:/);
+  await run.getByRole("tab", { name: /Checks/ }).click();
+  await expect(run.getByRole("list", { name: "Checks" })).toContainText("pnpm typecheck");
+  await run.getByRole("tab", { name: "Report" }).click();
+  await expect(run.getByRole("heading", { name: "What changed" })).toBeVisible();
+  await run.getByRole("tab", { name: "Log" }).click();
+  await run.getByRole("searchbox", { name: "Search the log" }).fill("Edit");
+  await expect(run.locator("pre[aria-label=Log]")).toHaveText("→ Edit src/Header.tsx");
+  // the picture viewer: arrows, keys, zoom, Esc
+  await run.getByRole("tab", { name: /Pictures/ }).click();
+  await run.getByRole("button", { name: "Open board-1440.png" }).click();
+  const viewer = page.getByRole("dialog", { name: /^Picture \d+ of \d+/ });
+  await expect(page).toHaveURL(/pic=board-1440\.png/);
+  await expect(viewer.getByRole("img", { name: "board-1440.png" })).toBeVisible();
+  await page.keyboard.press("ArrowRight");
+  await expect(viewer.getByRole("img", { name: "board-phone.png" })).toBeVisible();
+  await viewer.getByRole("button", { name: "Next picture" }).click();
+  await expect(viewer.getByRole("img", { name: "sheet-open.png" })).toBeVisible();
+  await page.keyboard.press("ArrowRight");
+  await expect(viewer.getByRole("img", { name: "board-1440.png" })).toBeVisible();
+  await page.keyboard.press("ArrowLeft");
+  await expect(viewer.getByRole("img", { name: "sheet-open.png" })).toBeVisible();
+  await page.keyboard.press("+");
+  await expect(viewer).toContainText("125%");
+  await viewer.getByRole("img", { name: "sheet-open.png" }).hover();
+  await page.mouse.wheel(0, -100);
+  await expect(viewer).not.toContainText("125%");
+  await viewer.getByRole("button", { name: "Show board-phone.png" }).click();
+  await expect(viewer.getByRole("img", { name: "board-phone.png" })).toBeVisible();
+  await expect(viewer).toContainText("100%");
+  await page.keyboard.press("Escape");
+  await expect(viewer).toHaveCount(0);
+  await expect(page).not.toHaveURL(/pic=/);
+  expect(errors).toEqual([]);
+  // a reload on the run's link opens the same run
+  await page.reload();
+  await expect(page.getByRole("region", { name: "Run" }).getByRole("heading", { name: "Show who runs what" })).toBeVisible();
+});
+
+test("History: the sidebar's project applies, and on a phone a run takes the page", async ({ page }) => {
+  await page.goto("/next/?view=history&project=other");
+  const list = page.getByRole("main");
+  await expect(list.getByRole("button", { name: /Pick the shop/ })).toBeVisible();
+  await expect(list.getByRole("button", { name: "Show who runs what" })).toHaveCount(0);
+  await page.setViewportSize({ width: 390, height: 800 });
+  await page.goto("/next/?view=history");
+  await page.getByRole("main").getByRole("button", { name: "Show who runs what" }).click();
+  await expect(page.getByRole("region", { name: "Run" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Fix the sheet's focus" })).toBeHidden();
+  await page.getByRole("button", { name: "Back to the list" }).click();
+  await expect(page.getByRole("button", { name: "Fix the sheet's focus" })).toBeVisible();
+});
+
+/** Screenshots for the report: SB_SHOTS=<folder> writes them; without it this test does nothing. */
+test("screenshots of History", async ({ page }) => {
+  const dir = process.env.SB_SHOTS;
+  test.skip(dir === undefined, "SB_SHOTS names the folder to write to");
+  const to = (n: string): string => `${dir ?? ""}/${n}`;
+  await page.goto("/next/?view=history&run=demo%2Fboard%237");
+  await expect(page.getByRole("region", { name: "Run" })).toBeVisible();
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: to("history-1440.png") });
+  await page.getByRole("button", { name: "Open board-1440.png" }).click();
+  await expect(page.getByRole("dialog", { name: /^Picture \d+ of \d+/ }).getByRole("img", { name: "board-1440.png" })).toBeVisible();
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: to("viewer-1440.png") });
+  await page.setViewportSize({ width: 390, height: 800 });
+  await page.goto("/next/?view=history");
+  await expect(page.getByRole("button", { name: "Show who runs what" })).toBeVisible();
+  await page.screenshot({ path: to("history-phone.png") });
+  await page.goto("/next/?view=history&run=demo%2Fboard%237&pic=board-phone.png");
+  await expect(page.getByRole("dialog", { name: /^Picture \d+ of \d+/ }).getByRole("img", { name: "board-phone.png" })).toBeVisible();
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: to("viewer-phone.png") });
+});
+
+for (const [view, scheme] of [["runs", "light"], ["queue", "dark"], ["waits", "light"], ["waits", "dark"], ["history", "light"], ["history", "dark"]] as const) {
   test(`axe finds no serious or critical issue on ${view} (${scheme})`, async ({ page }) => {
     const { default: AxeBuilder } = await import("@axe-core/playwright");
     await page.emulateMedia({ colorScheme: scheme });

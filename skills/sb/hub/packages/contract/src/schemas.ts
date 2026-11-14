@@ -233,6 +233,40 @@ export const Trail = z.strictObject({
 });
 export type Trail = z.infer<typeof Trail>;
 
+/** How a run ended; unknown for a run in the vault the queue never judged. */
+export const RunOutcome = z.enum(["done", "failed", "skipped", "unknown"]);
+export type RunOutcome = z.infer<typeof RunOutcome>;
+
+/** One run of one ticket, from the queue's items and the vault's run folders. */
+export const Run = z.strictObject({
+  /** `<map>#<number>`, as a queue item's key. */
+  key: z.string(),
+  title: z.string(),
+  project: z.string(),
+  map: z.string(),
+  outcome: RunOutcome,
+  /** Why it did not finish, in plain words; empty for a run that is done. */
+  reason: z.string(),
+  account: z.string().nullable(),
+  model: z.string().nullable(),
+  started: Seconds.nullable(),
+  ended: Seconds.nullable(),
+  commit: z.string().nullable(),
+  tries: z.number().int(),
+  /** File names in its <number>-media folder, served by api/media?key=&name=. */
+  pictures: z.array(z.string()),
+  links: Links,
+});
+export type Run = z.infer<typeof Run>;
+
+/** One page of runs, newest first; `total` counts every run in the time range asked for. */
+export const RunsPage = z.strictObject({ runs: z.array(Run), total: z.number().int(), offset: z.number().int(), limit: z.number().int() });
+export type RunsPage = z.infer<typeof RunsPage>;
+
+/** What the run viewer shows: the run, its checks, its report and the end of its log (null where it has none). */
+export const RunDetail = z.strictObject({ run: Run, checks: z.array(CheckRun), report: z.string().nullable(), log: z.string().nullable() });
+export type RunDetail = z.infer<typeof RunDetail>;
+
 export const State = z.strictObject({
   agents: z.record(z.string(), AgentRow),
   locks: z.record(z.string(), Lock),

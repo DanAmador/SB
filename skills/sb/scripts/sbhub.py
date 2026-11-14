@@ -73,6 +73,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import sbqueue
+import sbruns
 
 AGENT_FIELDS = ("name", "title", "asked", "project", "role", "parent", "ticket", "state", "note", "done", "total")
 ALERT_STATES = ("needs you", "blocked")
@@ -591,6 +592,19 @@ class Hub:
         if not path or not os.path.isfile(path):
             raise KeyError(key)
         return path, _tail(path, 0, LOG_SERVED) if what == "log" else Path(path).read_text(encoding="utf-8", errors="replace")
+
+    def _run_items(self):
+        with self._lock:
+            q = self._data["queue"]
+            return json.loads(json.dumps(q["items"] + (q.get("cleared") or [])))
+
+    def runs(self, since=0, offset=0, limit=100):
+        """Every run for History: the queue's finished ticket items and the vault's run folders, newest first."""
+        return sbruns.list_runs(_vault(), self._run_items(), since, offset, limit)
+
+    def run(self, key):
+        """One run with its checks, report and the end of its log; KeyError when nobody knows it."""
+        return sbruns.detail(_vault(), self._run_items(), key)
 
     def _media_dir(self, item):
         """A ticket item's media folder, <run folder>/<num>-media, or None for a job or an item that never ran."""
@@ -2664,10 +2678,33 @@ def make_handler(hub):
             elif path == "/api/media":
                 from urllib.parse import parse_qs, urlsplit
                 qs = parse_qs(urlsplit(self.path).query)
+                key, name = (qs.get("key") or [""])[0], (qs.get("name") or [""])[0]
                 try:
-                    self.send_file(*hub.media_file((qs.get("key") or [""])[0], (qs.get("name") or [""])[0]))
+                    try:
+                        found = hub.media_file(key, name)
+                    except KeyError:  # a run the queue never had: its folder in the vault; a queue item's media stay as it recorded them
+                        items = hub._run_items()
+                        if any(i["key"] == key for i in items):
+                            raise
+                        f = sbruns.media_file(_vault(), items, key, name)
+                        found = (f, MEDIA_TYPES[f.suffix.lower()])
+                    self.send_file(*found)
                 except (KeyError, OSError):
                     self.send(404, b"", "text/plain")
+            elif path == "/api/runs":
+                from urllib.parse import parse_qs, urlsplit
+                qs = parse_qs(urlsplit(self.path).query)
+                try:
+                    n = {k: int(float((qs.get(k) or [d])[0])) for k, d in (("since", 0), ("offset", 0), ("limit", 100))}
+                except ValueError:
+                    return self.send(400, {"ok": False, "error": "since, offset and limit are numbers"})
+                self.send(200, hub.runs(n["since"], n["offset"], n["limit"]))
+            elif path == "/api/run":
+                from urllib.parse import parse_qs, urlsplit
+                try:
+                    self.send(200, hub.run((parse_qs(urlsplit(self.path).query).get("key") or [""])[0]))
+                except (KeyError, OSError):
+                    self.send(404, {"ok": False, "error": "no such run"})
             elif path.startswith("/api/question/"):
                 try:
                     self.send(200, hub.question(path[len("/api/question/"):]))

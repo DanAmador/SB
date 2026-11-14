@@ -253,8 +253,27 @@ class ContractFixturesTest(unittest.TestCase):
         for f in self.vault.rglob("*"):  # the side panel's trail shows file times
             os.utime(f, (START, START))
 
+        # an older run that only the vault knows: its report, log and a picture, in a run folder no queue item points at
+        old = self.vault / "wayfinder" / "repo" / "runs" / "2026-11-12-one"
+        (old / "7-media").mkdir(parents=True)
+        (old / "7.md").write_text("# 7: An older run\n\nCommit: abc1234 (branch sb/one)\n\n## Hub checks\n\n"
+                                  "Checked by the sb hub at 2026-11-12 02:00: failed: check failed: pnpm test, commit abc1234.\n\n"
+                                  "- `pnpm test`: exit 1, 3.5 s\n\n  ```\n  1 failed\n  ```\n", encoding="utf-8")
+        (old / "7.log").write_text('{"type":"assistant","message":{"content":[{"type":"text","text":"Reading the tests."},'
+                                   '{"type":"tool_use","name":"Read","input":{"file_path":"a.ts"}}]}}\nplain stderr line\n', encoding="utf-8")
+        (old / "7-media" / "one.png").write_bytes(b"\x89PNG\r\n\x1a\nold")
+        (old / "7-media" / "two.png").write_bytes(b"\x89PNG\r\n\x1a\nold2")
+        for f in old.rglob("*"):
+            os.utime(f, (START - 86400, START - 86400))
+
         # every GET, in the state above
         self.record("state", "/api/state")
+        self.record("runs", "/api/runs")
+        self.record("runs-page", "/api/runs?limit=1&offset=1&since={}".format(int(START - 2 * 86400)))
+        self.record("run", "/api/run?key=" + quote("repo/one#1"))
+        self.record("run-vault", "/api/run?key=" + quote("repo/one#7"))
+        self.record("run-unknown", "/api/run?key=nope", status=404)
+        self.record("media-vault", "/api/media?key={}&name=two.png".format(quote("repo/one#7")))
         self.record("tickets", "/api/tickets")
         self.sb("comment", "repo/one", "003", "--text", "Look at the queue first.")
         self.record("ticket", "/api/ticket?key=" + quote("repo/one#3"))

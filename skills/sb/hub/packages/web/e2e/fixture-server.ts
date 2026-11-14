@@ -3,7 +3,7 @@
  * against the contract before it leaves. Run with `node e2e/fixture-server.ts` (Node strips the types).
  */
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { QueueMoveBody, QueueSetBody, SendBody, State, Tickets, addLinks, type LinkContext, type Message, type QueueItem, type TicketRow } from "@sb-hub/contract";
+import { QueueMoveBody, QueueSetBody, RunDetail, RunsPage, SendBody, State, Tickets, addLinks, type LinkContext, type Message, type QueueItem, type TicketRow } from "@sb-hub/contract";
 
 /** Every file the fixtures name exists; the server's own vault lookup is covered by the server's tests. */
 const ctx: LinkContext = { exists: () => true, real: (p) => p, findTicket: (map, num) => `/vault/${map}/issues/${String(num)}.md`, runs: {} };
@@ -55,6 +55,37 @@ const queue = {
 
 const messages: Record<string, Message> = {};
 
+// ---- History: runs the queue and the vault's run folders know of, and the pictures of two of them ----
+const run = (key: string, title: string, ago: number, more: Record<string, unknown> = {}): Record<string, unknown> => ({
+  key, title, project: key.split("/")[0], map: key.replace(/#\d+$/, ""), outcome: "done", reason: "", account: "main", model: "sonnet",
+  started: start - ago - 600, ended: start - ago, commit: "0123456789abcdef", tries: 1, pictures: [],
+  links: { ticket: `obsidian://open?path=%2Fvault%2F${key.replace(/[#/]/g, "-")}.md`, map: null, board: null, report: `obsidian://open?path=%2Fvault%2Frun-${key.replace(/[#/]/g, "-")}.md`, log: null }, ...more,
+});
+const PICS = ["board-1440.png", "board-phone.png", "sheet-open.png"];
+const runs: Record<string, unknown>[] = [
+  run("demo/board#7", "Show who runs what", 1200, { pictures: PICS }),
+  run("demo/board#6", "Fix the sheet's focus", 900, { outcome: "failed", reason: "ended without a commit", commit: null, model: "opus", tries: 2 }),
+  run("other/site#4", "Pick the shop's fonts", 800, { outcome: "failed", reason: "pnpm test failed", account: "spare", commit: null }),
+  run("demo/board#2", "Drag a ticket into the queue", 86400 + 3600, { pictures: ["drag.png"], commit: "abcdef0123456789" }),
+  run("demo/board#1", "Draw the header", 86400 * 3, { outcome: "skipped", reason: "someone else had claimed it", commit: null, account: null, model: null }),
+  run("demo/board#0", "Wire up the very first sketch", 86400 * 20, { outcome: "unknown", commit: "9999999aaaaaaa", account: null, model: null }),
+];
+const colours = ["#3b82f6", "#16a34a", "#f59e0b"];
+const svg = (name: string): string => {
+  const c = colours[Math.max(0, PICS.indexOf(name)) % colours.length] ?? "#3b82f6";
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="960" height="600" viewBox="0 0 960 600"><rect width="960" height="600" fill="${c}"/><rect x="60" y="60" width="840" height="80" rx="12" fill="#fff" opacity=".85"/><rect x="60" y="180" width="380" height="360" rx="12" fill="#fff" opacity=".6"/><rect x="480" y="180" width="420" height="160" rx="12" fill="#fff" opacity=".6"/><text x="80" y="115" font-size="40" font-family="sans-serif" fill="#111">${name}</text></svg>`;
+};
+const detailOf = (key: string): unknown => {
+  const r = runs.find((x) => x.key === key);
+  if (r === undefined) return undefined;
+  return RunDetail.parse({
+    run: r,
+    checks: r.outcome === "failed" ? [{ cmd: "pnpm test", code: 1, secs: 41.2, tail: "1 failed, 12 passed\nFAIL src/board.test.ts" }] : [{ cmd: "pnpm typecheck", code: 0, secs: 12.4, tail: "" }, { cmd: "pnpm test", code: 0, secs: 31, tail: "13 passed" }],
+    report: `# Show who runs what\n\nCommit: 0123456 (branch sb/demo)\n\n## What changed\n- The **Runs** view names the account.\n- A \`pnpm test\` run now covers it.\n\n## Self-checks\n- \`pnpm test\`: exit 0\n`,
+    log: "Reading the board.\n→ Read src/Board.tsx\nThe header needs the account name.\n→ Edit src/Header.tsx\nresult: done",
+  });
+};
+
 function state(): State {
   return State.parse({
     agents: {
@@ -85,6 +116,24 @@ createServer((req, res) => {
   void (async () => {
     const path = (req.url ?? "").split("?")[0];
     if (req.method === "GET" && path === "/api/state") { send(res, 200, state()); return; }
+    if (req.method === "GET" && path === "/api/runs") {
+      const u = new URL(req.url ?? "", "http://x").searchParams;
+      const since = Number(u.get("since") ?? "0");
+      const list = runs.filter((r) => Number(r.ended) >= since);
+      send(res, 200, RunsPage.parse({ runs: list.slice(0, Number(u.get("limit") ?? "100")), total: list.length, offset: 0, limit: Number(u.get("limit") ?? "100") }));
+      return;
+    }
+    if (req.method === "GET" && path === "/api/run") {
+      const d = detailOf(new URL(req.url ?? "", "http://x").searchParams.get("key") ?? "");
+      if (d === undefined) send(res, 404, { ok: false, error: "no such run" });
+      else send(res, 200, d);
+      return;
+    }
+    if (req.method === "GET" && path === "/api/media") {
+      res.writeHead(200, { "Content-Type": "image/svg+xml" });
+      res.end(svg(new URL(req.url ?? "", "http://x").searchParams.get("name") ?? ""));
+      return;
+    }
     if (req.method === "GET" && path === "/api/tickets") { send(res, 200, tickets().map((t) => ({ ...t, queued: queue.items.some((i) => i.key === `${t.map}#${String(t.num)}`) }))); return; }
     if (req.method === "GET" && path === "/api/ticket") {
       const key = new URL(req.url ?? "", "http://x").searchParams.get("key") ?? "";

@@ -1,6 +1,6 @@
 /** The board: the header with the views and the toolbar, what needs you, one view at a time, the panel and the dialogs. */
 import { IconCircleCheck, IconCircleX, IconWifiOff } from "@tabler/icons-react";
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import type * as React from "react";
 import type { RouteBody, State } from "@sb-hub/contract";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils";
 import { CommandMenu, JobDialog, MessageDialog, type Dialogs } from "./CommandMenu.tsx";
 import { BoardContext, type BoardData } from "./context.tsx";
 import { Breadcrumb, MenuButton, SidebarColumn, SidebarSheet } from "./Sidebar.tsx";
+import { HistoryView } from "./HistoryView.tsx";
 import { QueueView } from "./QueueView.tsx";
 import { RunsView } from "./RunsView.tsx";
 import { DetailSheet } from "./TicketSheet.tsx";
@@ -43,7 +44,7 @@ function openRow(el: HTMLElement | null): void {
   go?.click();
 }
 
-const VIEW_WORDS: Readonly<Record<View, string>> = { runs: "Runs", queue: "Queue", waits: "Waits for you" };
+const VIEW_WORDS: Readonly<Record<View, string>> = { runs: "Runs", queue: "Queue", waits: "Waits for you", history: "History" };
 
 export function Board(): React.JSX.Element {
   const stateQ = useHubState();
@@ -76,6 +77,7 @@ function Loaded({ state, tickets, down, lastOk }: { state: State; tickets: Board
     runs: qv.running.filter((i) => itemInScope(scope, i)).length,
     queue: scopeItems(scope, qv.next).length,
     waits: alerts,
+    history: 0,
   };
 
   const queueWrite: BoardData["queueWrite"] = async (route, body, done) => {
@@ -145,9 +147,9 @@ function Loaded({ state, tickets, down, lastOk }: { state: State; tickets: Board
           find.focus();
         }
       } else if (ev.key >= "1" && ev.key <= "5") {
-        // 4 (Sessions) and 5 (History) are not built yet: their keys do nothing until they are
-        const view = VIEWS[Number(ev.key) - 1];
-        if (view) setLink({ view });
+        // 4 (Sessions) is not built yet: its key does nothing until it is
+        const view = ev.key === "5" ? "history" : VIEWS[Number(ev.key) - 1];
+        if (view && ev.key !== "4") setLink({ view });
       } else if (ev.key === "j" || ev.key === "k") {
         stepRow(ev.key === "j" ? 1 : -1);
       } else if (ev.key === "Enter") {
@@ -187,7 +189,14 @@ function Loaded({ state, tickets, down, lastOk }: { state: State; tickets: Board
             </div>
             <TabsList aria-label="Views" className="order-3 w-full sm:order-none sm:w-auto">
               {VIEWS.map((v) => (
-                <TabsTrigger key={v} value={v}>
+                <Fragment key={v}>
+                {/* a slot for Sessions, every live session (ticket 044): view 4, before History */}
+                {v === "history" && (
+                  <TabsTrigger value="sessions" disabled title="Sessions: coming with its own ticket" className="hidden md:inline-flex">
+                    Sessions
+                  </TabsTrigger>
+                )}
+                <TabsTrigger value={v}>
                   {VIEW_WORDS[v]}
                   {v === "waits" ? (
                     alerts > 0 && (
@@ -199,11 +208,8 @@ function Loaded({ state, tickets, down, lastOk }: { state: State; tickets: Board
                     counts[v] > 0 && <span className="text-xs text-muted-foreground tabular-nums">{counts[v]}</span>
                   )}
                 </TabsTrigger>
+                </Fragment>
               ))}
-              {/* a slot for Sessions, every live session (ticket 044) */}
-              <TabsTrigger value="sessions" disabled title="Sessions: coming with its own ticket" className="hidden md:inline-flex">
-                Sessions
-              </TabsTrigger>
             </TabsList>
             <div className="ml-auto">
               <Toolbar
@@ -228,6 +234,9 @@ function Loaded({ state, tickets, down, lastOk }: { state: State; tickets: Board
           </TabsContent>
           <TabsContent value="waits" className="outline-none">
             <WaitsView w={waits} />
+          </TabsContent>
+          <TabsContent value="history" className="outline-none">
+            <HistoryView />
           </TabsContent>
         </main>
         </div>

@@ -1,0 +1,42 @@
+{
+  "body": {
+    "checks": [
+      {
+        "cmd": "pnpm test",
+        "code": 1,
+        "secs": 0.0,
+        "tail": "1 failed"
+      }
+    ],
+    "log": "Reading the tests.\n\u2192 Read a.ts\nplain stderr line",
+    "report": "# 7: An older run\n\nCommit: abc1234 (branch sb/one)\n\n## Hub checks\n\nChecked by the sb hub at 2026-11-12 02:00: failed: check failed: pnpm test, commit abc1234.\n\n- `pnpm test`: exit 1, 0.0 s\n\n  ```\n  1 failed\n  ```\n",
+    "run": {
+      "account": null,
+      "commit": "abc1234",
+      "ended": 1794441600.0,
+      "key": "repo/one#7",
+      "links": {
+        "board": null,
+        "log": "obsidian://open?path=%2Ffixture%2FVault%2Fwayfinder%2Frepo%2Fruns%2F2026-11-12-one%2F7.log",
+        "map": null,
+        "report": "obsidian://open?path=%2Ffixture%2FVault%2Fwayfinder%2Frepo%2Fruns%2F2026-11-12-one%2F7.md",
+        "ticket": null
+      },
+      "map": "repo/one",
+      "model": null,
+      "outcome": "failed",
+      "pictures": [
+        "one.png",
+        "two.png"
+      ],
+      "project": "repo",
+      "reason": "pnpm test failed",
+      "started": null,
+      "title": "An older run",
+      "tries": 1
+    }
+  },
+  "contentType": "application/json",
+  "route": "GET /api/run",
+  "status": 200
+}

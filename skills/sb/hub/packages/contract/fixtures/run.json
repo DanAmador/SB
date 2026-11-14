@@ -1,0 +1,41 @@
+{
+  "body": {
+    "checks": [
+      {
+        "cmd": "true",
+        "code": 0,
+        "secs": 0.0,
+        "tail": ""
+      }
+    ],
+    "log": "argv: [\"--permission-mode\", \"auto\", \"--model\", \"sonnet\", \"--output-format\", \"stream-json\", \"--verbose\"]\nenv: {\"CLAUDE_CONFIG_DIR\": \"/fixture/.claude-main\", \"SB_HUB_AGENT\": \"repo/one#1\", \"SB_HUB_PARENT\": \"queue\", \"SB_HUB_PORT\": \"4321\"}\ncwd: /fixture/repo\nresult: done",
+    "report": "# A\n\n## Self-checks\n\n- `true`: exit 0\n\n## Hub checks\n\nChecked by the sb hub at 2026-11-13 01:00: passed, commit d8d88e804.\n\n- `true`: exit 0, 0.0 s\n\n  ```\n  ```\n\n### The worker's self-checks\n\n- `true`: exit 0\n",
+    "run": {
+      "account": null,
+      "commit": "d8d88e8049de73d87e5d3ef7dbd589ee7cda6720",
+      "ended": 1794528000.0,
+      "key": "repo/one#1",
+      "links": {
+        "board": null,
+        "log": "obsidian://open?path=%2Ffixture%2FVault%2Fwayfinder%2Frepo%2Fruns%2F2026-11-13-one%2F1.log",
+        "map": "obsidian://open?path=%2Ffixture%2FVault%2Fwayfinder%2Frepo%2Fone%2Fmap.md",
+        "report": "obsidian://open?path=%2Ffixture%2FVault%2Fwayfinder%2Frepo%2Fruns%2F2026-11-13-one%2F1.md",
+        "ticket": "obsidian://open?path=%2Ffixture%2FVault%2Fwayfinder%2Frepo%2Fone%2Fissues%2Fdone%2F001%20A.md"
+      },
+      "map": "repo/one",
+      "model": "sonnet",
+      "outcome": "done",
+      "pictures": [
+        "board.png"
+      ],
+      "project": "repo",
+      "reason": "",
+      "started": 1794528000.0,
+      "title": "A",
+      "tries": 1
+    }
+  },
+  "contentType": "application/json",
+  "route": "GET /api/run",
+  "status": 200
+}

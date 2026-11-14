@@ -1,0 +1,61 @@
+{
+  "body": {
+    "limit": 100,
+    "offset": 0,
+    "runs": [
+      {
+        "account": null,
+        "commit": "d8d88e8049de73d87e5d3ef7dbd589ee7cda6720",
+        "ended": 1794528000.0,
+        "key": "repo/one#1",
+        "links": {
+          "board": null,
+          "log": "obsidian://open?path=%2Ffixture%2FVault%2Fwayfinder%2Frepo%2Fruns%2F2026-11-13-one%2F1.log",
+          "map": "obsidian://open?path=%2Ffixture%2FVault%2Fwayfinder%2Frepo%2Fone%2Fmap.md",
+          "report": "obsidian://open?path=%2Ffixture%2FVault%2Fwayfinder%2Frepo%2Fruns%2F2026-11-13-one%2F1.md",
+          "ticket": "obsidian://open?path=%2Ffixture%2FVault%2Fwayfinder%2Frepo%2Fone%2Fissues%2Fdone%2F001%20A.md"
+        },
+        "map": "repo/one",
+        "model": "sonnet",
+        "outcome": "done",
+        "pictures": [
+          "board.png"
+        ],
+        "project": "repo",
+        "reason": "",
+        "started": 1794528000.0,
+        "title": "A",
+        "tries": 1
+      },
+      {
+        "account": null,
+        "commit": "abc1234",
+        "ended": 1794441600.0,
+        "key": "repo/one#7",
+        "links": {
+          "board": null,
+          "log": "obsidian://open?path=%2Ffixture%2FVault%2Fwayfinder%2Frepo%2Fruns%2F2026-11-12-one%2F7.log",
+          "map": null,
+          "report": "obsidian://open?path=%2Ffixture%2FVault%2Fwayfinder%2Frepo%2Fruns%2F2026-11-12-one%2F7.md",
+          "ticket": null
+        },
+        "map": "repo/one",
+        "model": null,
+        "outcome": "failed",
+        "pictures": [
+          "one.png",
+          "two.png"
+        ],
+        "project": "repo",
+        "reason": "pnpm test failed",
+        "started": null,
+        "title": "An older run",
+        "tries": 1
+      }
+    ],
+    "total": 2
+  },
+  "contentType": "application/json",
+  "route": "GET /api/runs",
+  "status": 200
+}
