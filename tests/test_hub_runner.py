@@ -900,6 +900,35 @@ class JobsTest(RunnerCase):
     def jobs(self):
         return [i for i in self.hub.state()["queue"]["items"] if i["kind"] == "job"]
 
+    def seed(self, key):
+        self.hub.report({"agent": key, "role": "worker", "parent": "queue", "state": "working", "note": "reading"})
+
+    def test_a_ticket_and_a_job_that_end_leave_their_agent_rows_done(self):
+        self.seed("repo/one#1")
+        self.resume()
+        self.until(lambda: self.state_of("repo/one#1") == "done")
+        item = self.items()["repo/one#1"]
+        row = self.hub.state()["agents"]["repo/one#1"]
+        self.assertEqual((row["state"], row["at"], row["since"]), ("done", item["ended"], item["ended"]))
+        out = self.hub.queue_job("repo", "Audit the thing", "main", "sonnet", "audit")
+        self.seed(out["key"])
+        self.until(lambda: self.state_of(out["key"]) == "done")
+        row = self.hub.state()["agents"][out["key"]]
+        self.assertEqual((row["state"], row["at"]), ("done", self.items()[out["key"]]["ended"]))
+
+    def test_a_hub_that_starts_with_an_ended_item_and_a_working_row_repairs_the_row(self):
+        self.seed("repo/one#1")
+        self.seed("repo/one#2")
+        with self.hub._lock:
+            self.hub._data["queue"]["items"] = [
+                {"key": "repo/one#1", "kind": "ticket", "state": "failed", "ended": self.clock.t - 5},
+                {"key": "repo/one#2", "kind": "ticket", "state": "running"}]
+            self.hub._save()
+        again = Hub(self.root / "hub", now=self.clock, launcher=self.launcher)
+        agents = again.state()["agents"]
+        self.assertEqual((agents["repo/one#1"]["state"], agents["repo/one#1"]["at"]), ("done", self.clock.t - 5))
+        self.assertEqual(agents["repo/one#2"]["state"], "working")
+
     def test_a_jobs_result_lands_in_its_run_folder_and_the_item_links_it(self):
         out = self.hub.queue_job("repo", "Audit the thing\nin detail", "main", "sonnet", "audit")
         self.resume()

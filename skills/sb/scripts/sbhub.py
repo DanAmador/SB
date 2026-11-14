@@ -134,6 +134,8 @@ class Hub:
         if isinstance(saved, dict):
             self._data.update(saved)
         self._sync_maps(self._data["queue"])  # a queue saved before maps: its maps in their first tickets' order
+        with self._lock:
+            self._end_rows()  # rows of items that ended while no hub was watching
 
     def _save(self):
         self.home.mkdir(parents=True, exist_ok=True)
@@ -211,6 +213,21 @@ class Hub:
             changed = True
         if changed:
             self._save()
+
+    def _end_rows(self, only=None):
+        """Every agent row of a queue item that ended (done, failed, skipped) reads `done` at the item's end time,
+        never `working`. `only` limits it to one item key. Call with the lock held; returns whether a row changed."""
+        agents, changed = self._data["agents"], False
+        for i in self._data["queue"]["items"]:
+            row = agents.get(i["key"])
+            if i["state"] not in ("done", "failed", "skipped") or row is None or only not in (None, i["key"]):
+                continue
+            if row.get("state") != "done":
+                at = i.get("ended") or self.now()
+                row.update(state="done", at=at, since=at)
+                self._trail_ended(i["key"])
+                changed = True
+        return changed
 
     def _trail_ended(self, agent):
         t = self._trails.get(agent)
@@ -2473,6 +2490,7 @@ class Supervisor:
             for f in drop:
                 item.pop(f, None)
             item.update(fields)
+            self.hub._end_rows(key)
             if front:
                 q["items"].remove(item)
                 at = next((n for n, i in enumerate(q["items"]) if i["state"] == "queued"), len(q["items"]))

@@ -100,7 +100,11 @@ function Dots({ c, bad }: { c: SessionCard; bad: boolean }): React.JSX.Element {
   return (
     <>
       {bad && <span role="img" aria-label="a failure in the last 5 minutes" title="a failure in the last 5 minutes" className="size-2.5 shrink-0 rounded-full bg-destructive" />}
-      {c.silent && <span className="text-xs text-warn">{`silent ${dur(c.quiet)}`}</span>}
+      {c.silentSince !== null ? (
+        <span className="text-xs text-muted-foreground">{`silent since ${c.silentSince}`}</span>
+      ) : (
+        c.silent && <span className="text-xs text-warn">{`silent ${dur(c.quiet)}`}</span>
+      )}
     </>
   );
 }
@@ -113,7 +117,7 @@ function Card({ c }: { c: SessionCard }): React.JSX.Element {
   return (
     <li
       aria-label={c.title}
-      className={cn("group relative flex flex-col gap-2 rounded-xl border bg-card p-3 hover:bg-accent/30", c.silent && "ring-2 ring-warn", c.idle && "opacity-60 grayscale")}
+      className={cn("group relative flex flex-col gap-2 rounded-xl border bg-card p-3 hover:bg-accent/30", c.silent && !c.idle && "ring-2 ring-warn", c.idle && "opacity-60 grayscale")}
     >
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">

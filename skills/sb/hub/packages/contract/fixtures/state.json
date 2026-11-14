@@ -9,7 +9,7 @@
         "parent": "queue",
         "role": "worker",
         "since": 1794528000.0,
-        "state": "working",
+        "state": "done",
         "ticket": "A"
       },
       "sess-1": {

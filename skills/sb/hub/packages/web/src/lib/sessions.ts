@@ -101,20 +101,27 @@ export interface SessionCard {
   readonly quiet: number;
   readonly silent: boolean;
   readonly idle: boolean;
+  /** "HH:MM" of its last event for a worker with no queue item that went quiet for IDLE seconds, else null. */
+  readonly silentSince: string | null;
   readonly now: string;
   /** obsidian:// links of the ticket a worker runs on. */
   readonly links: Links | undefined;
 }
 
+const clock = (sec: number): string => new Date(sec * 1000).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+
 const projectName = (p: string | undefined): string => (p ?? "").split("/").filter(Boolean).pop() ?? "";
 
-/** Every live session, workers and the owner's chats: awake ones first (blocked, then by recency), idle chats last. */
+/** Every live session, workers and the owner's chats: awake ones first (blocked, then by recency), idle ones (ended or quiet chats and helper workers) last. */
 export function sessionCards(state: State, ix: TicketIndex, ags: Agents = splitAgents(state)): SessionCard[] {
   const ticketOf = (a: AgentRow): string | null => (/#\d+$/.test(a.agent) ? a.agent : null);
   const make = (a: AgentRow, kind: Kind): SessionCard => {
     const quiet = Math.max(0, state.now - a.at);
     const item = state.queue.items.find((i) => i.key === a.agent);
     const ended = a.state === "done";
+    const stale = quiet >= IDLE;
+    // a helper a chat started has no queue item to say it ended: quiet for IDLE while "working" is all there is to go by
+    const lost = a.role === "worker" && item === undefined && !ended && a.state === "working" && stale;
     return {
       id: a.agent,
       kind,
@@ -125,7 +132,8 @@ export function sessionCards(state: State, ix: TicketIndex, ags: Agents = splitA
       ticketKey: ticketOf(a),
       quiet,
       silent: !ended && quiet >= SILENT,
-      idle: kind === "chat" && (a.state === "idle" || a.state === "done" || quiet >= IDLE),
+      idle: a.state === "idle" || a.state === "done" || (stale && (kind === "chat" || item === undefined)),
+      silentSince: lost ? clock(a.at) : null,
       now: a.note ?? a.asked ?? "",
       links: item?.links,
     };

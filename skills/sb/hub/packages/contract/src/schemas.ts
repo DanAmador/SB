@@ -13,6 +13,13 @@ export const Count = z.union([z.number(), z.string()]);
 
 // ---- agents, locks, questions, messages ----
 
+/**
+ * What an agent row says. A queue worker's row ends as "done" when its queue item ends (done, failed or skipped), at
+ * the item's end time. "silent since HH:MM" is not stored: the page derives it from `at` for a worker with no queue item.
+ */
+export const AgentState = z.enum(["idle", "working", "waiting", "your turn", "needs you", "blocked", "done"]);
+export type AgentState = z.infer<typeof AgentState>;
+
 export const AgentRow = z.strictObject({
   agent: z.string(),
   name: z.string().optional(),
@@ -26,7 +33,7 @@ export const AgentRow = z.strictObject({
   map: z.string().optional(),
   /** A queue worker's row: the id of the live session in charge of its map, when there is one. */
   in_charge: z.string().optional(),
-  state: z.string().optional(),
+  state: AgentState.optional(),
   note: z.string().optional(),
   done: Count.optional(),
   total: Count.optional(),
