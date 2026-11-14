@@ -81,6 +81,13 @@ class ContractFixturesTest(unittest.TestCase):
         for title, path in (("A", "one/"), ("B", "two/"), ("C", "three/"), ("D", "four/")):
             self.sb("new", "repo/one", "--title", title, "--why", "Because.", "--done-when", "It works.", "--paths", path,
                     "--no-sync")
+        # a second map of the repo: queued whole, then moved before the first
+        self.sb("init", "repo/two", "--title", "Two", "--why", "Why.", "--destination", "Elsewhere.", "--repo", str(self.repo))
+        self.sb("mapset", "repo/two", "checks=true")
+        for title in ("E", "F"):
+            self.sb("new", "repo/two", "--title", title, "--why", "Because.", "--done-when", "It works.", "--paths", "five/",
+                    "--no-sync")
+        self.sb("new", "repo/two", "--title", "G", "--why", "Because.", "--type", "grilling", "--no-sync")
         (self.vault / "wayfinder" / "repo" / "one" / "handoff.md").write_text(
             "---\ntitle: Handoff\n---\n# Handoff\n\nPick up at B.\n", encoding="utf-8")
         self.clock = Clock(START)
@@ -242,6 +249,12 @@ class ContractFixturesTest(unittest.TestCase):
         self.record("queue-set-stale", "/api/queue/set", {"keys": ["repo/one#2"], "version": v}, 409)
         v = self.hub.state()["queue"]["version"]
         r("queue_move", {"key": "repo/one#3", "to": 0, "version": v})
+        v = self.hub.state()["queue"]["version"]
+        mapped = r("queue_map", {"map": "repo/two", "version": v})
+        self.assertEqual([x["key"] for x in mapped["left_out"]], ["repo/two#7"])  # G needs the owner
+        v = self.hub.state()["queue"]["version"]
+        moved = r("queue_move_map", {"map": "repo/two", "to": 0, "version": v})
+        self.assertEqual(moved["queue"]["maps"], ["repo/two", "repo/one"])
         v = self.hub.state()["queue"]["version"]
         r("queue_options", {"stop_at": START + 6 * 3600, "final_review": True, "version": v})
         r("queue_item_agent", {"key": "repo/one#2", "name": "spare"})

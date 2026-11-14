@@ -51,8 +51,24 @@ def _title(t, b, tickets):
     return f"ticket {b}" if isinstance(b, int) else str(b)
 
 
-def order(tickets, queued):
-    """Queued keys in run order: blockers first, then priority, then most unblocked, then map order."""
+def map_of(k):
+    """The map of a queue key (`<map>#<num>`); a job's key is its own map."""
+    return k.rsplit("#", 1)[0] if "#" in k else k
+
+
+def map_list(maps, keys):
+    """`maps` with every map of `keys` it lacks added after it, in the order their first keys appear: a single
+    ticket whose map is not queued is a map of one at its place."""
+    out = list(dict.fromkeys(maps or ()))
+    for k in keys:
+        if "#" in k and map_of(k) not in out:
+            out.append(map_of(k))
+    return out
+
+
+def order(tickets, queued, maps=()):
+    """Queued keys in run order: map by map in `maps` order (a map it does not name comes after, where its first
+    key is), and inside a map blockers first, then priority, then most unblocked, then map order and number."""
     by = {key(t): t for t in tickets}
     live = {k: by[k] for k in queued if k in by}
     # drop what waits on something neither resolved nor queued, and what waits on a dropped ticket
@@ -66,10 +82,11 @@ def order(tickets, queued):
     deps = {k: {_blocker_key(t, b) for b in t["blocked_by_open"]} for k, t in live.items()}
     unblocks = {k: sum(k in d for d in deps.values()) for k in live}
     pos = {k: i for i, k in enumerate(queued)}
+    place = {m: i for i, m in enumerate(map_list(maps, queued))}
 
     def rank(k):
         t = live[k]
-        return (_rank(t), -unblocks[k], int(t.get("map_order") or 0), pos[k])
+        return (place[map_of(k)], _rank(t), -unblocks[k], int(t.get("map_order") or 0), int(t["num"]), pos[k])
 
     waiting = {k: set(d) for k, d in deps.items()}
     heap = [(rank(k), k) for k, d in waiting.items() if not d]
@@ -86,6 +103,83 @@ def order(tickets, queued):
     if len(out) != len(live):
         raise ValueError("dependency cycle among " + ", ".join(sorted(set(live) - set(out))))
     return out
+
+
+HOLDING = ("running", "review", "recheck")  # a ticket at work: its map stays the repo's current one
+
+
+def map_queueable(tickets, name, live):
+    """(keys, left_out) for queueing every open ticket of map `name`: what waits on an earlier ticket of the map
+    comes too and starts when that one lands. Left out, each as (key, reason): claimed tickets, ones that need the
+    owner or have no done-when or checks, and ones waiting on what is neither resolved nor queued (another map
+    that is not queued, or a ticket left out)."""
+    rows = [t for t in tickets if t["map"] == name and key(t) not in live]
+    take = {key(t): t for t in rows}
+    changed = True
+    while changed:
+        changed = False
+        for k, t in list(take.items()):
+            if classify(t, set(live) | set(take), tickets)[0] != "ready":
+                del take[k]
+                changed = True
+    left = [(key(t), "{}: {}".format(*classify(t, set(live) | set(take), tickets))) for t in rows
+            if key(t) not in take]
+    return [key(t) for t in rows if key(t) in take], left
+
+
+def stuck_on(k, by, live, items=None):
+    """(key, words) of the ticket queued key `k` is stuck behind: its first open blocker that is neither resolved
+    nor queued nor at work, followed through the queued ones; `k` itself when nothing blocks it."""
+    seen = set()
+    while k not in seen:
+        seen.add(k)
+        t = by.get(k)
+        if t is None:
+            return k, "no longer open"
+        nxt = None
+        for b in t["blocked_by_open"]:
+            bk = _blocker_key(t, b)
+            if bk is None:
+                return k, "after {}".format(b)
+            if bk not in live:
+                state = next((i["state"] for i in items or () if i["key"] == bk), None)
+                return bk, {"failed": "failed", "skipped": "skipped", "done": "not resolved"}.get(state, "not queued")
+            nxt = nxt or bk
+        if nxt is None:
+            return k, classify(t, live)[1]
+        k = nxt
+    return k, "a dependency cycle"
+
+
+def current_maps(items, by, maps, live, repo_of=None):
+    """({repo: map}, {map: [stuck queued keys]}): in each repo, the first map in `maps` order with a ticket at work
+    (running, in review or waiting on a recheck) or a queued one the hub can act on now: one that starts, or one it
+    skips (gone, claimed, not ready). A queued ticket waiting on a queued ticket of its map is neither; one waiting
+    on what is neither queued nor at work is stuck. The maps before a repo's current one, and every map of a repo
+    with no current one, give their queued tickets as stuck. Repos are independent. `by`: key -> fresh row."""
+    repo_of = repo_of or (lambda i: (by.get(i["key"]) or {}).get("repo") or i.get("repo"))
+    tickets = [i for i in items if i["kind"] == "ticket" and "#" in i["key"]]
+    order_ = map_list(maps, [i["key"] for i in tickets])
+    acting, queued = {}, {}  # (repo, map) -> True when it has work or something to act on; its queued keys
+    for i in tickets:
+        rm = (repo_of(i), map_of(i["key"]))
+        if i["state"] in HOLDING:
+            acting[rm] = True
+        elif i["state"] == "queued":
+            queued.setdefault(rm, []).append(i["key"])
+            t = by.get(i["key"])
+            waits = t is not None and any(_blocker_key(t, b) not in live for b in t["blocked_by_open"])  # stuck
+            if t is None or not waits and (not t["blocked_by_open"] or classify(t, live)[0] != "ready"):
+                acting[rm] = True
+    current, stuck = {}, {}
+    for repo in dict.fromkeys(r for r, _ in list(acting) + list(queued)):
+        for m in order_:
+            if acting.get((repo, m)):
+                current[repo] = m
+                break
+            if queued.get((repo, m)):
+                stuck.setdefault(m, []).extend(queued[(repo, m)])
+    return current, stuck
 
 
 def move(order_keys, k, to_index, tickets):

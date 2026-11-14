@@ -58,6 +58,28 @@
           "agent": null,
           "commit": null,
           "ended": null,
+          "key": "repo/two#5",
+          "kind": "ticket",
+          "note": "",
+          "started": null,
+          "state": "queued",
+          "tries": 0
+        },
+        {
+          "agent": null,
+          "commit": null,
+          "ended": null,
+          "key": "repo/two#6",
+          "kind": "ticket",
+          "note": "",
+          "started": null,
+          "state": "queued",
+          "tries": 0
+        },
+        {
+          "agent": null,
+          "commit": null,
+          "ended": null,
           "key": "repo/one#3",
           "kind": "ticket",
           "note": "",
@@ -97,11 +119,15 @@
           "tries": 0
         }
       ],
+      "maps": [
+        "repo/two",
+        "repo/one"
+      ],
       "paused": true,
       "runs": {},
       "seeded": true,
       "stop_at": 1794549600.0,
-      "version": 18
+      "version": 20
     }
   },
   "contentType": "application/json",

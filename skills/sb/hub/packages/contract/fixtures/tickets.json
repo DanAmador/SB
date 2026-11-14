@@ -89,6 +89,94 @@
       "title": "D",
       "type": "task",
       "why": "Because."
+    },
+    {
+      "blocked_by": [],
+      "blocked_by_open": [],
+      "checks": [
+        "true"
+      ],
+      "claimed_by": null,
+      "done_when": "It works.",
+      "file": "/fixture/Vault/wayfinder/repo/two/issues/005 E.md",
+      "has_done_when": true,
+      "map": "repo/two",
+      "map_order": 0,
+      "map_title": "Two",
+      "num": 5,
+      "out": "",
+      "paths": [
+        "five/"
+      ],
+      "priority": "C",
+      "question": "",
+      "queued": true,
+      "reason": "ready",
+      "repo": "/fixture/repo",
+      "state": "ready",
+      "status": "open",
+      "tier": "sonnet",
+      "title": "E",
+      "type": "task",
+      "why": "Because."
+    },
+    {
+      "blocked_by": [],
+      "blocked_by_open": [],
+      "checks": [
+        "true"
+      ],
+      "claimed_by": null,
+      "done_when": "It works.",
+      "file": "/fixture/Vault/wayfinder/repo/two/issues/006 F.md",
+      "has_done_when": true,
+      "map": "repo/two",
+      "map_order": 1,
+      "map_title": "Two",
+      "num": 6,
+      "out": "",
+      "paths": [
+        "five/"
+      ],
+      "priority": "C",
+      "question": "",
+      "queued": true,
+      "reason": "ready",
+      "repo": "/fixture/repo",
+      "state": "ready",
+      "status": "open",
+      "tier": "sonnet",
+      "title": "F",
+      "type": "task",
+      "why": "Because."
+    },
+    {
+      "blocked_by": [],
+      "blocked_by_open": [],
+      "checks": [
+        "true"
+      ],
+      "claimed_by": null,
+      "done_when": "",
+      "file": "/fixture/Vault/wayfinder/repo/two/issues/007 G.md",
+      "has_done_when": false,
+      "map": "repo/two",
+      "map_order": 2,
+      "map_title": "Two",
+      "num": 7,
+      "out": "",
+      "paths": [],
+      "priority": "C",
+      "question": "",
+      "queued": false,
+      "reason": "a grilling ticket needs you",
+      "repo": "/fixture/repo",
+      "state": "waits for you",
+      "status": "open",
+      "tier": "sonnet",
+      "title": "G",
+      "type": "grilling",
+      "why": "Because."
     }
   ],
   "contentType": "application/json",

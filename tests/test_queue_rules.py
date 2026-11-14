@@ -6,7 +6,8 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills" / "sb" / "scripts"))
-from sbqueue import brief, classify, key, move, order, verdict  # noqa: E402
+from sbqueue import (brief, classify, current_maps, key, map_list, map_queueable, move, order, stuck_on,  # noqa: E402
+                     verdict)
 
 
 def T(num, **kw):
@@ -17,6 +18,46 @@ def T(num, **kw):
          "repo": "/x", "map_order": num, "claimed_by": None}
     t.update(kw)
     return t
+
+
+def item(k, state="queued"):
+    return {"key": k, "kind": "ticket", "state": state}
+
+
+class MapsTest(unittest.TestCase):
+    def setUp(self):
+        self.ts = [T(1, map="r/a"), T(2, map="r/a", blocked_by_open=[1]), T(3, map="r/a", blocked_by_open=[2]),
+                   T(1, map="r/b"), T(1, map="r/c", repo="/y")]
+        self.by = {key(t): t for t in self.ts}
+
+    def test_the_first_map_with_work_or_a_start_is_current_per_repo(self):
+        items = [item("r/a#1", "running"), item("r/a#2"), item("r/a#3"), item("r/b#1"), item("r/c#1")]
+        live = {i["key"] for i in items}
+        self.assertEqual(current_maps(items, self.by, ["r/a", "r/b", "r/c"], live),
+                         ({"/x": "r/a", "/y": "r/c"}, {}))
+
+    def test_a_map_with_nothing_to_start_and_nothing_at_work_is_stuck(self):
+        items = [item("r/a#1", "failed"), item("r/a#2"), item("r/a#3"), item("r/b#1")]
+        live = {"r/a#2", "r/a#3", "r/b#1"}
+        current, stuck = current_maps(items, self.by, ["r/a", "r/b"], live)
+        self.assertEqual((current, stuck), ({"/x": "r/b"}, {"r/a": ["r/a#2", "r/a#3"]}))
+        self.assertEqual(stuck_on("r/a#3", self.by, live, items), ("r/a#1", "failed"))
+        self.assertEqual(stuck_on("r/a#2", self.by, live, []), ("r/a#1", "not queued"))
+
+    def test_a_recheck_or_review_holds_its_map(self):
+        for state in ("review", "recheck"):
+            items = [item("r/a#1", state), item("r/a#2"), item("r/b#1")]
+            self.assertEqual(current_maps(items, self.by, ["r/a", "r/b"], {"r/a#1", "r/a#2", "r/b#1"})[0],
+                             {"/x": "r/a"})
+
+    def test_queueing_a_map_takes_what_waits_inside_it_and_leaves_out_the_rest_with_a_reason(self):
+        ts = self.ts + [T(4, map="r/a", type="grilling"), T(5, map="r/a", blocked_by_open=[4]),
+                        T(6, map="r/a", blocked_by_open=["map r/z"])]
+        keys, left = map_queueable(ts, "r/a", set())
+        self.assertEqual(keys, ["r/a#1", "r/a#2", "r/a#3"])
+        self.assertEqual(dict(left), {"r/a#4": "waits for you: a grilling ticket needs you",
+                                      "r/a#5": "blocked: after T4", "r/a#6": "blocked: after map r/z"})
+        self.assertEqual(map_queueable(ts, "r/a", {"r/a#1"})[0], ["r/a#2", "r/a#3"])
 
 
 class ClassifyTest(unittest.TestCase):
@@ -72,6 +113,15 @@ class OrderTest(unittest.TestCase):
     def test_unqueued_blocker_drops_dependant_and_its_dependants(self):
         ts = [T(1, blocked_by_open=[9]), T(2, blocked_by_open=[1]), T(3), T(4, blocked_by_open=["ref"])]
         self.assertEqual(order(ts, [key(t) for t in ts]), ["r/m#3"])
+
+    def test_maps_come_whole_in_their_order_and_priority_orders_only_inside_one(self):
+        ts = [T(1, map="r/a"), T(2, map="r/a", blocked_by_open=[1]), T(1, map="r/b", priority="S"), T(3, map="r/a")]
+        keys = ["r/b#1", "r/a#2", "r/a#1", "r/a#3"]
+        self.assertEqual(order(ts, keys, ["r/a", "r/b"]), ["r/a#1", "r/a#2", "r/a#3", "r/b#1"])
+        self.assertEqual(order(ts, keys), ["r/b#1", "r/a#1", "r/a#2", "r/a#3"])  # unnamed maps: where they first appear
+
+    def test_a_single_ticket_is_a_map_of_one_at_its_place(self):
+        self.assertEqual(map_list(["r/a"], ["r/c#4", "r/a#1", "r/b#2", "job:x"]), ["r/a", "r/c", "r/b"])
 
     def test_cycle_raises(self):
         ts = [T(1, blocked_by_open=[2]), T(2, blocked_by_open=[1])]

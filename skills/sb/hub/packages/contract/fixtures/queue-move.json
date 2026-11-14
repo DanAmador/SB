@@ -75,6 +75,9 @@
           "tries": 0
         }
       ],
+      "maps": [
+        "repo/one"
+      ],
       "paused": true,
       "runs": {},
       "seeded": true,

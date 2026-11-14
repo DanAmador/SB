@@ -38,6 +38,8 @@ export const ROUTES = {
   "POST /api/take": post(s.TakeBody, { 200: s.TakeAnswer }),
   "POST /api/queue/set": post(s.QueueSetBody, { 200: s.QueueAnswer, 409: s.QueueStale }),
   "POST /api/queue/move": post(s.QueueMoveBody, { 200: s.QueueAnswer, 409: s.QueueStale }),
+  "POST /api/queue/map": post(s.QueueMapBody, { 200: s.QueueMapAnswer, 409: s.QueueStale }),
+  "POST /api/queue/move_map": post(s.QueueMoveMapBody, { 200: s.QueueAnswer, 409: s.QueueStale }),
   "POST /api/queue/pause": post(s.QueuePauseBody, { 200: s.QueueAnswer }),
   "POST /api/queue/agent": post(s.QueueAgentBody, { 200: s.QueueAnswer }),
   "POST /api/queue/agents": post(s.QueueAgentsBody, { 200: s.QueueAnswer, 409: s.QueueStale }),

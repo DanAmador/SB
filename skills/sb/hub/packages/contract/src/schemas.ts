@@ -203,6 +203,9 @@ export const Queue = z.strictObject({
   paused: z.boolean(),
   agent: z.string().nullable(),
   items: z.array(QueueItem),
+  /** The queued maps in run order: in a repo the hub starts tickets only from the first one with work or something
+   * to start. A ticket queued alone is a map of one. Absent from a queue saved before maps. */
+  maps: z.array(z.string()).optional(),
   agents: z.array(z.string()).optional(),
   stop_at: Seconds.nullable().optional(),
   final_review: z.boolean().optional(),
@@ -474,6 +477,10 @@ export const UnsendBody = z.strictObject({ id: z.string() });
 export const TakeBody = z.strictObject({ agent: z.string(), how: z.string().nullable().optional() });
 export const QueueSetBody = z.strictObject({ keys: z.array(z.string()), version: z.number().int().nullable() });
 export const QueueMoveBody = z.strictObject({ key: z.string(), to: z.number().int(), version: z.number().int().nullable() });
+/** Queue every open ticket of a map that can run, in order, at the map's place (last when it is new). */
+export const QueueMapBody = z.strictObject({ map: z.string().min(1), version: z.number().int().nullable() });
+/** Move a queued map to place `to` among the queued maps. */
+export const QueueMoveMapBody = z.strictObject({ map: z.string().min(1), to: z.number().int(), version: z.number().int().nullable() });
 export const QueuePauseBody = z.strictObject({ paused: z.boolean() });
 export const QueueAgentBody = z.strictObject({ name: z.string() });
 export const QueueAgentsBody = z.strictObject({ names: z.array(z.string()).min(1), version: z.number().int().nullable() });
@@ -526,5 +533,10 @@ export const QueueAnswer = z.strictObject({ ok: z.literal(true), queue: Queue })
 export const QueueStale = z.strictObject({ ok: z.literal(false), stale: z.literal(true), queue: Queue });
 export type QueueStale = z.infer<typeof QueueStale>;
 export const QueueJobAnswer = QueueAnswer.extend({ key: z.string() });
+/** Each ticket of the map left out, with why: it needs the owner, has no done-when or checks, is claimed, or waits
+ * on a map that is not queued. */
+export const QueueMapAnswer = QueueAnswer.extend({
+  left_out: z.array(z.strictObject({ key: z.string(), reason: z.string() })),
+});
 export const ClearQuietAnswer = z.strictObject({ ok: z.literal(true), cleared: z.number().int() });
 export const ScanAnswer = z.strictObject({ ok: z.literal(true), installed: z.record(z.string(), Installed) });

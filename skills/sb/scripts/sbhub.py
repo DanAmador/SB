@@ -116,7 +116,9 @@ class Hub:
         # aliases: session id -> the agent id that session reports as (`report --agent X`)
         self._data = {"agents": {}, "locks": {}, "questions": {}, "aliases": {}, "messages": {},
                       # a new queue waits paused until the owner resumes it: nothing runs on its own
-                      "queue": {"version": 0, "seeded": False, "paused": True, "agent": None, "items": []},
+                      "queue": {"version": 0, "seeded": False, "paused": True, "agent": None, "items": [],
+                                # the queued maps in run order: a repo finishes its first one before the next
+                                "maps": []},
                       "installed": {},
                       # runs the owner has opened ("<key>@<ended>"), oldest first; Waits for you leaves them out
                       "seen": []}
@@ -127,6 +129,7 @@ class Hub:
             saved = None
         if isinstance(saved, dict):
             self._data.update(saved)
+        self._sync_maps(self._data["queue"])  # a queue saved before maps: its maps in their first tickets' order
 
     def _save(self):
         self.home.mkdir(parents=True, exist_ok=True)
@@ -533,21 +536,46 @@ class Hub:
                 "tries": 0, "started": None, "ended": None}
 
     def _apply_selection(self, q, keys, rows):
-        """Queued tickets become `keys`, in run order; every other item stays where it was, in front. A
-        failed or skipped ticket that is ticked again is queued afresh (a stop time or a passing error is
-        no reason to keep it out); a running or done one is never queued twice."""
+        """Queued tickets become `keys`; every other item stays where it was, in front. What was queued keeps its
+        place (the owner's drops are not re-sorted); a new ticket goes last in its map, after its blockers and
+        before what waits on it, and a new map after the queued ones (sbqueue.order). A failed or skipped ticket
+        that is ticked again is queued afresh (a stop time or a passing error is no reason to keep it out); a
+        running or done one is never queued twice."""
         want = set(keys)
         have = {i["key"]: i for i in q["items"] if i["kind"] == "ticket"}
+        before = [i["key"] for i in q["items"] if i["kind"] == "ticket" and i["state"] == "queued"]
         again = lambda i: i["kind"] == "ticket" and (
             i["state"] == "queued" or i["state"] in ("failed", "skipped") and i["key"] in want)
         keep = [i for i in q["items"] if not again(i)]
         taken = {i["key"] for i in keep if i["kind"] == "ticket"}
         keys = [k for k in dict.fromkeys(keys) if k not in taken]
         running = taken & self._live_keys()
-        ordered = [k for k in sbqueue.order(rows, keys + sorted(running)) if k in keys]
+        maps = sbqueue.map_list(q.get("maps"), [i["key"] for i in keep if i["key"] in running] + before)
+        ordered = [k for k in sbqueue.order(rows, keys + sorted(running), maps) if k in keys]
         known = {sbqueue.key(t) for t in rows}
         ordered += [k for k in keys if k not in known and k in have]  # no longer listed: kept, not dropped
-        q["items"] = keep + [self._afresh(have.get(k)) or self._item(k) for k in ordered]
+        seq = [k for k in before if k in ordered]
+        for k in ordered:
+            if k not in seq:
+                m = sbqueue.map_of(k)
+                end = max((n + 1 for n, x in enumerate(seq) if sbqueue.map_of(x) == m), default=len(seq))
+                seq = sbqueue.move(seq, k, end, rows)
+        q["maps"] = sbqueue.map_list(maps, seq)
+        q["items"] = keep + [self._afresh(have.get(k)) or self._item(k) for k in seq]
+
+    @staticmethod
+    def _sync_maps(q):
+        """The queued maps: each map with a ticket queued or at work, in the owner's order, a map not named yet
+        after them where its first ticket is; the queued tickets are arranged map by map, each keeping its place
+        inside its map. Every other item stays where it is."""
+        items = q.setdefault("items", [])
+        live = [i["key"] for i in items if i.get("kind") == "ticket" and i.get("state") in ("queued",) + sbqueue.HOLDING]
+        q["maps"] = [m for m in sbqueue.map_list(q.get("maps"), live) if any(sbqueue.map_of(k) == m for k in live)]
+        place = {m: n for n, m in enumerate(q["maps"])}
+        at = [n for n, i in enumerate(items) if i.get("kind") == "ticket" and i.get("state") == "queued"]
+        ranked = sorted((items[n] for n in at), key=lambda i: place.get(sbqueue.map_of(i["key"]), len(place)))
+        for n, i in zip(at, ranked):
+            items[n] = i
 
     def _afresh(self, item):
         """A failed or skipped item queued again: its last try's outcome is cleared; the owner's agent stays."""
@@ -571,6 +599,7 @@ class Hub:
             if version is not None and version != q["version"]:
                 return {"ok": False, "stale": True, "queue": json.loads(json.dumps(q))}
             change(q, rows)
+            self._sync_maps(q)
             q["version"] += 1
             self._save()
             self.queue_kick.set()
@@ -594,6 +623,37 @@ class Hub:
             others = [i for i in q["items"] if i not in queued]
             q["items"] = others + [by[k] for k in moved]
         return self._queue_write(version, change, needs_tickets=True)
+
+    def queue_map(self, name, version):
+        """Queue every open ticket of map `name` that can run, in order, at the map's place (last when it is new):
+        what waits on an earlier ticket of the map comes too and starts when that one lands. The answer's
+        `left_out` names each ticket left out with why (it needs the owner, has no done-when or checks, is claimed,
+        or waits on a map that is not queued)."""
+        left = []
+
+        def change(q, rows):
+            if not any(t["map"] == name for t in rows):
+                raise ValueError("no open ticket in map {}".format(name))
+            queued = [i["key"] for i in q["items"] if i["kind"] == "ticket" and i["state"] == "queued"]
+            keys, out = sbqueue.map_queueable(rows, name, self._live_keys())
+            left.extend({"key": k, "reason": r} for k, r in out)
+            q["maps"] = sbqueue.map_list(q.get("maps"), queued + keys)
+            self._apply_selection(q, queued + keys, rows)
+            q["seeded"] = True
+        out = self._queue_write(version, change, needs_tickets=True)
+        return {**out, "left_out": left} if out["ok"] else out
+
+    def queue_move_map(self, name, to_index, version):
+        """Move a queued map to place `to_index` among the queued maps; its tickets keep their order."""
+        def change(q, rows):
+            self._sync_maps(q)
+            maps = list(q["maps"])
+            if name not in maps:
+                raise ValueError("not a queued map: {}".format(name))
+            maps.remove(name)
+            maps.insert(max(0, min(int(to_index), len(maps))), name)
+            q["maps"] = maps
+        return self._queue_write(version, change)
 
     def queue_remove_job(self, key, version):
         """Take a queued job out of the queue; it no longer counts as a duplicate. Running and finished
@@ -2853,14 +2913,32 @@ class Supervisor:
         if rows is None:
             return
         by = {sbqueue.key(t): t for t in rows}
-        picks = []
+        # the hub's own claim left by a release that failed is no claim against its own queued item
+        mine = {k: ({**t, "status": "open", "claimed_by": None} if _hub_holds(t) else t) for k, t in by.items()}
+        picks, changed = [], False
         with self.hub._lock:
             q = self.hub._data["queue"]
             if q["paused"]:
                 return
             live = self.hub._live_keys()
+            self.hub._sync_maps(q)
+            # whole maps first: in each repo only the first queued map with work or something to start runs; a map
+            # with neither is stuck, and what is left of it is skipped naming the ticket it is stuck on
+            current, stuck = sbqueue.current_maps(q["items"], mine, q["maps"], live)
+            for m, ks in stuck.items():
+                for k in ks:
+                    root, why = sbqueue.stuck_on(k, mine, live, q["items"])
+                    title = (by.get(root) or {}).get("title") or next(
+                        (i.get("title") for i in q["items"] if i["key"] == root and i.get("title")), "")
+                    item = next(i for i in q["items"] if i["key"] == k)
+                    note = ("blocked: after {} ({}, {}): the map is stuck on it".format(title or root, root, why)
+                            if root != k else "the map is stuck on {}{} ({})".format(root, " " + title if title else "", why))
+                    item.update(state="skipped", ended=now, note=note, **({"title": by[k]["title"]} if k in by else {}))
+                    changed = True
+            if stuck:
+                self.hub._sync_maps(q)
             running = [i for i in q["items"] if i["state"] == "running"]
-            load, changed, par = self._load(running), False, {}
+            load, par = self._load(running), {}
             busy = {}  # repo -> the paths of each worktree ticket running in it; None for one in the checkout itself
             for i in running:
                 busy.setdefault(i.get("repo"), []).append(list(i.get("paths") or []) if i.get("tree") else None)
@@ -2897,6 +2975,9 @@ class Supervisor:
                     changed = True
                     continue
                 t = by.get(item["key"])
+                repo = (t or {}).get("repo") or item.get("repo")
+                if repo in current and current[repo] != sbqueue.map_of(item["key"]):
+                    continue  # an earlier map of its repo is not finished: it waits its map's turn
                 if t is not None and not room(t.get("repo"), t.get("paths")):
                     continue  # its repo is busy: it is not about to start, so it is not judged yet
                 name, inst, need = self._pick(q, item, t, load, now)
@@ -2908,9 +2989,7 @@ class Supervisor:
                 if t is None:
                     skip = "no longer open: resolved or out of scope since it was queued"
                 else:
-                    # the hub's own claim left by a release that failed is no claim against its own queued item
-                    mine = {**t, "status": "open", "claimed_by": None} if _hub_holds(t) else t
-                    state, reason = sbqueue.classify(mine, live, rows)
+                    state, reason = sbqueue.classify(mine[item["key"]], live, rows)
                     if state != "ready":
                         skip = "{}: {}".format(state, reason)
                     elif not usable_project(t.get("repo")):
@@ -3354,6 +3433,10 @@ def make_handler(hub):
                     out = hub.queue_set(d["keys"], d["version"])
                 elif path == "/api/queue/move":
                     out = hub.queue_move(d["key"], d["to"], d["version"])
+                elif path == "/api/queue/map":
+                    out = hub.queue_map(d["map"], d["version"])
+                elif path == "/api/queue/move_map":
+                    out = hub.queue_move_map(d["map"], d["to"], d["version"])
                 elif path == "/api/queue/pause":
                     out = hub.queue_pause(d["paused"])
                 elif path == "/api/queue/agent":

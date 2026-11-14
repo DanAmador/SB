@@ -114,7 +114,9 @@
               "label": "Maps in the vault",
               "lines": [
                 "repo/one                         open       4 on frontier \u00b7 4 open",
-                "                                 One"
+                "                                 One",
+                "repo/two                         open       3 on frontier \u00b7 3 open",
+                "                                 Two"
               ]
             }
           ]
@@ -206,6 +208,28 @@
           "agent": null,
           "commit": null,
           "ended": null,
+          "key": "repo/two#5",
+          "kind": "ticket",
+          "note": "",
+          "started": null,
+          "state": "queued",
+          "tries": 0
+        },
+        {
+          "agent": null,
+          "commit": null,
+          "ended": null,
+          "key": "repo/two#6",
+          "kind": "ticket",
+          "note": "",
+          "started": null,
+          "state": "queued",
+          "tries": 0
+        },
+        {
+          "agent": null,
+          "commit": null,
+          "ended": null,
           "key": "repo/one#3",
           "kind": "ticket",
           "note": "",
@@ -264,11 +288,15 @@
           "tries": 0
         }
       ],
+      "maps": [
+        "repo/two",
+        "repo/one"
+      ],
       "paused": true,
       "runs": {},
       "seeded": true,
       "stop_at": 1794549600.0,
-      "version": 19
+      "version": 21
     },
     "seen": []
   },

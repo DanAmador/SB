@@ -250,7 +250,7 @@ class QueueTest(unittest.TestCase):
         rows[0] = [t for t in TICKETS if t["num"] != 4]
         now[0] += 20
         h.queue_set(["repo/one#4", "repo/one#1"], h.state()["queue"]["version"])
-        self.assertEqual([i["key"] for i in h.state()["queue"]["items"]], ["repo/one#1", "repo/one#4"])
+        self.assertEqual([i["key"] for i in h.state()["queue"]["items"]], ["repo/one#4", "repo/one#1"])  # not re-sorted
 
     def test_a_resumed_fresh_queue_still_ticks_nothing(self):
         h = Hub(self.home / "p", run=lambda: json.dumps(TICKETS))
@@ -575,6 +575,147 @@ class QueueHttpTest(HubCase):
                      ["queue", "resume"], ["queue", "agent", "x"], ["agents"], ["agents", "--scan"]):
             r = self.hub(*args, port=down)
             self.assertEqual((r.returncode, r.stderr.strip()), (2, "sbhub: not running"), args)
+
+
+class WholeMapsTest(unittest.TestCase):
+    """Whole maps first: in a repo the hub starts tickets only from the first queued map that has work or something
+    to start; repos run side by side. The workers are not launched: a start is recorded and the item stays running."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        self.r1, self.r2 = root / "r1", root / "r2"
+        self.r1.mkdir()
+        self.r2.mkdir()
+        mt = lambda m, num, repo, **kw: tk(num, map=m, title="{} {}".format(m, num), repo=str(repo), **kw)
+        self.rows = [mt("r/a", 1, self.r1), mt("r/a", 2, self.r1, blocked=[1]), mt("r/a", 3, self.r1, blocked=[2]),
+                     mt("r/b", 1, self.r1, priority="S"), mt("r/b", 2, self.r1, priority="S"),
+                     mt("r/c", 1, self.r2)]
+        self.h = Hub(root / "home", run=lambda: json.dumps(self.rows))
+        with self.h._lock:
+            self.h._data["installed"] = {n: {"kind": "claude", "dir": "/x", "model": None, "limited_until": None}
+                                         for n in ("main", "spare")}
+            self.h._data["queue"].update(agents=["main", "spare"], paused=False)
+        self.h.tickets()
+        self.started = []
+        sup = Supervisor(self.h, port=4321)
+        sup._launch = lambda item, t, name, inst: self.started.append(item["key"])
+        self.sup = sup
+
+    def v(self):
+        return self.h.state()["queue"]["version"]
+
+    def items(self):
+        return {i["key"]: i for i in self.h.state()["queue"]["items"]}
+
+    def land(self, key, state="done"):
+        """The ticket ended: done resolves it (gone from the open list, its dependants unblocked)."""
+        with self.h._lock:
+            next(i for i in self.h._data["queue"]["items"] if i["key"] == key)["state"] = state
+        if state == "done":
+            m, n = key.split("#")
+            self.rows = [t for t in self.rows if not (t["map"] == m and t["num"] == int(n))]
+            for t in self.rows:
+                if t["map"] == m:
+                    t["blocked_by_open"] = [b for b in t["blocked_by_open"] if b != int(n)]
+
+    def run_all(self):
+        """Tick until nothing more starts, landing each start as done; the start order."""
+        for _ in range(20):
+            before = len(self.started)
+            self.sup._start()
+            if len(self.started) == before:
+                break
+            for k in self.started[before:]:
+                self.land(k)
+        return self.started
+
+    def test_every_ticket_of_the_first_map_starts_before_any_of_the_next(self):
+        self.h.queue_map("r/a", self.v())
+        self.h.queue_map("r/b", self.v())  # higher priority, queued second: it waits for r/a
+        self.assertEqual(self.h.state()["queue"]["maps"], ["r/a", "r/b"])
+        self.assertEqual(self.run_all(), ["r/a#1", "r/a#2", "r/a#3", "r/b#1", "r/b#2"])
+
+    def test_a_map_stuck_on_a_failed_ticket_lets_the_next_start_and_names_that_ticket(self):
+        self.h.queue_map("r/a", self.v())
+        self.h.queue_map("r/b", self.v())
+        self.sup._start()
+        self.assertEqual(self.started, ["r/a#1"])
+        self.sup._start()  # r/a#1 runs: nothing of r/b starts, though a worker of the pool is free
+        self.assertEqual(self.started, ["r/a#1"])
+        self.land("r/a#1", "failed")
+        self.sup._start()
+        self.assertEqual(self.started, ["r/a#1", "r/b#1"])
+        items = self.items()
+        for k in ("r/a#2", "r/a#3"):
+            self.assertEqual(items[k]["state"], "skipped")
+            self.assertEqual(items[k]["note"], "blocked: after r/a 1 (r/a#1, failed): the map is stuck on it")
+        self.assertEqual(self.h.state()["queue"]["maps"], ["r/b"])
+
+    def test_two_repos_run_side_by_side(self):
+        self.h.queue_map("r/a", self.v())
+        self.h.queue_map("r/b", self.v())
+        self.h.queue_map("r/c", self.v())
+        self.sup._start()
+        self.assertEqual(sorted(self.started), ["r/a#1", "r/c#1"])
+
+    def test_move_map_changes_the_order(self):
+        self.h.queue_map("r/a", self.v())
+        self.h.queue_map("r/b", self.v())
+        out = self.h.queue_move_map("r/b", 0, self.v())
+        self.assertEqual(out["queue"]["maps"], ["r/b", "r/a"])
+        self.assertEqual([i["key"] for i in out["queue"]["items"]], ["r/b#1", "r/b#2", "r/a#1", "r/a#2", "r/a#3"])
+        self.assertTrue(self.h.queue_move_map("r/b", 5, out["queue"]["version"] - 1)["stale"])
+        with self.assertRaises(ValueError):
+            self.h.queue_move_map("r/c", 0, self.v())
+        self.assertEqual(self.run_all(), ["r/b#1", "r/b#2", "r/a#1", "r/a#2", "r/a#3"])
+
+    def test_a_single_ticket_is_a_map_of_one_at_its_place(self):
+        self.h.queue_set(["r/b#2"], self.v())
+        self.h.queue_map("r/a", self.v())
+        self.assertEqual(self.h.state()["queue"]["maps"], ["r/b", "r/a"])
+        self.assertEqual(self.run_all(), ["r/b#2", "r/a#1", "r/a#2", "r/a#3"])
+
+    def test_a_ticket_dropped_in_a_queued_map_keeps_the_owners_order(self):
+        self.h.queue_map("r/b", self.v())
+        self.h.queue_move("r/b#2", 0, self.v())
+        self.h.queue_set(["r/b#2", "r/b#1", "r/c#1"], self.v())  # one more ticked: the owner's order stays
+        self.assertEqual([i["key"] for i in self.h.state()["queue"]["items"]], ["r/b#2", "r/b#1", "r/c#1"])
+        self.assertEqual(self.h.state()["queue"]["maps"], ["r/b", "r/c"])
+
+    def test_queueing_a_map_takes_every_ticket_that_can_run_and_says_why_others_stay_out(self):
+        self.rows += [tk(1, map="r/d", repo=str(self.r1)), tk(2, map="r/d", repo=str(self.r1), type="grilling"),
+                      tk(3, map="r/d", repo=str(self.r1), blocked=[1]), tk(4, map="r/d", repo=str(self.r1),
+                                                                           blocked=["map r/z"]),
+                      tk(5, map="r/d", repo=str(self.r1), has_done_when=False), tk(6, map="r/d", repo=str(self.r1),
+                                                                                      blocked=[2])]
+        self.h.tickets(fresh=True)
+        out = self.h.queue_map("r/d", self.v())  # one call: the third comes after the first and is queued too
+        self.assertEqual([i["key"] for i in out["queue"]["items"]], ["r/d#1", "r/d#3"])
+        self.assertEqual({x["key"]: x["reason"] for x in out["left_out"]},
+                         {"r/d#2": "waits for you: a grilling ticket needs you", "r/d#4": "blocked: after map r/z",
+                          "r/d#5": "not ready: no done-when", "r/d#6": "blocked: after T2"})
+        self.sup._start()
+        self.sup._start()
+        self.assertEqual(self.started, ["r/d#1"])  # the third waits for the first to land
+        self.land("r/d#1")
+        self.sup._start()
+        self.assertEqual(self.started, ["r/d#1", "r/d#3"])
+        with self.assertRaises(ValueError):
+            self.h.queue_map("r/nowhere", self.v())
+
+    def test_a_queue_saved_before_maps_loads_with_its_maps_in_first_ticket_order(self):
+        home = Path(self.h.home).parent / "old"
+        home.mkdir()
+        items = [Hub._item(k) for k in ("r/b#1", "r/a#1", "r/b#2", "r/a#2")]
+        items[0]["state"] = "running"
+        (home / "state.json").write_text(json.dumps({"queue": {"version": 7, "seeded": True, "paused": True,
+                                                               "agent": None, "items": items}}))
+        q = Hub(home, run=lambda: json.dumps(self.rows)).state()["queue"]
+        self.assertEqual(q["maps"], ["r/b", "r/a"])
+        self.assertEqual([i["key"] for i in q["items"]], ["r/b#1", "r/b#2", "r/a#1", "r/a#2"])
+        self.assertEqual(q["version"], 7)
 
 
 if __name__ == "__main__":

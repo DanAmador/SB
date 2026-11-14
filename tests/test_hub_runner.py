@@ -738,7 +738,7 @@ class ConcurrencyTest(RunnerCase):
     def test_one_ticket_per_repo_and_per_agent(self):
         self.mode = "hang"
         self.resume()
-        self.assertEqual(list(self.items()), ["repo/one#1", "repo/two#3", "repo/one#2"])
+        self.assertEqual(list(self.items()), ["repo/one#1", "repo/one#2", "repo/two#3"])  # map by map
         self.sup.tick()
         self.sup.tick()
         self.assertEqual([self.state_of(k) for k in ("repo/one#1", "repo/two#3", "repo/one#2")],
