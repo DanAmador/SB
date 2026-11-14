@@ -26,6 +26,7 @@
           "commit": "d8d88e8049de73d87e5d3ef7dbd589ee7cda6720",
           "digested": true,
           "ended": 1794528000.0,
+          "first_base": "3fea00e95453cf271189dc8924ebcd942426162f",
           "key": "repo/one#1",
           "kind": "ticket",
           "log": "/fixture/Vault/wayfinder/repo/runs/2026-11-13-one/1.log",

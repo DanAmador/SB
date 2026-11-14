@@ -11,7 +11,7 @@ import { CheckRun, Seconds } from "./schemas.ts";
  * while it ran; retry: run it again on `retry.model`; stopped: its agent hit a usage limit or a logout, run it
  * again on any agent that fits.
  */
-export const RunTicketState = z.enum(["done", "failed", "skipped", "retry", "stopped"]);
+export const RunTicketState = z.enum(["done", "failed", "skipped", "retry", "stopped", "recheck"]);
 export type RunTicketState = z.infer<typeof RunTicketState>;
 
 export const RunTicketStop = z.strictObject({

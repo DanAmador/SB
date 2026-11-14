@@ -91,6 +91,18 @@ class RunTicketTest(RunTicketCase):
         self.assertEqual(self.open_tickets()[1]["status"], "open")
         self.fixture("failed", again)
 
+    def test_a_check_that_exits_75_answers_recheck_keeps_the_commit_and_the_claim(self):
+        self.sb("set", "repo/one", "001", "tier=opus", "checks=sh -c 'exit 75'", "--no-sync")
+        res = self.run_ticket()
+        self.assertResult(res, "recheck")
+        self.assertTrue(res["commit"])
+        self.assertIn("check could not run", res["note"])
+        self.assertEqual(res["checks"][0]["code"], 75)
+        self.assertEqual(self.open_tickets()[1]["status"], "claimed")
+        self.assertNotIn("failed", self.ticket_text(1))
+        self.assertIn("check could not run", Path(res["report"]).read_text(encoding="utf-8"))
+        self.fixture("recheck", res)
+
     def test_a_failing_check_fails_with_the_checks_tail(self):
         self.sb("set", "repo/one", "001", "tier=opus", "checks=echo broke && false", "--no-sync")
         res = self.run_ticket()

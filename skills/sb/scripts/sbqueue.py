@@ -10,6 +10,8 @@ from pathlib import Path
 PRIORITY = "SABCDEF"
 SBMAP = Path(__file__).resolve().parent / "sbmap.py"
 CHECK_TIMEOUT = 20 * 60
+EX_TEMPFAIL = 75  # a check exits it when the tool it needs did not answer: it could not run, it did not fail
+NOT_RUN = "check could not run"
 
 
 def key(t):
@@ -153,7 +155,8 @@ def _owned_test(f, paths):
 
 
 def verdict(t, repo, base_sha, run=subprocess.run, report=None, first_base=None):
-    """(passed, reason, sha): a trailered commit after base_sha and every check green. Files changed outside the
+    """(passed, reason, sha): `passed` is None when a check exited 75 (could not run: neither passed nor failed, the
+    commit stands). A trailered commit after base_sha and every check green. Files changed outside the
     ticket's paths are allowed (a change may need them) and named in the reason. A research ticket that made no
     commit passes on its written report alone (`report`, the worker's report file). A retry starts from HEAD, so an
     earlier try's commit sits behind base_sha: when nothing new carries the trailer, `first_base` (the item's first
@@ -190,6 +193,8 @@ def verdict(t, repo, base_sha, run=subprocess.run, report=None, first_base=None)
     failed = _run_checks(t["checks"], repo, run)
     if not failed:
         return True, "commit and checks all good" + outside, sha
+    if failed.startswith(NOT_RUN):
+        return None, failed, sha
     # Others' uncommitted work in the shared folder can break a check the commit itself passes: only then, try the
     # checks once more on a clean copy of the commit. A clean folder never pays for this.
     dirty = run(["git", "-C", str(repo), "status", "--porcelain", "--untracked-files=no"],
@@ -205,14 +210,14 @@ def verdict(t, repo, base_sha, run=subprocess.run, report=None, first_base=None)
     finally:
         _drop_clean_copy(repo, clean, run)
     if again:
-        return False, again, sha
+        return (None if again.startswith(NOT_RUN) else False), again, sha
     shown = ", ".join(dirty[:5]) + (f" and {len(dirty) - 5} more" if len(dirty) > 5 else "")
     return True, ("commit and checks all good; the checks passed on a clean copy of the commit, because "
                   f"other uncommitted work in the shared folder breaks them there ({shown})" + outside), sha
 
 
 def _run_checks(checks, cwd, run):
-    """None when every check exits 0, else the first failure in words."""
+    """None when every check exits 0, else the first failure in words (starting NOT_RUN when it exited 75)."""
     for cmd in checks:
         try:
             r = run(cmd, shell=True, cwd=str(cwd), capture_output=True, text=True, timeout=CHECK_TIMEOUT)
@@ -220,6 +225,8 @@ def _run_checks(checks, cwd, run):
             return f"check timed out after 20 minutes: {cmd}"
         if r.returncode != 0:
             tail = "\n".join(((r.stdout or "") + (r.stderr or "")).splitlines()[-20:])
+            if r.returncode == EX_TEMPFAIL:
+                return f"{NOT_RUN}: {cmd} exited {EX_TEMPFAIL} (the tool it needs did not answer)\n{tail}"
             return f"check failed: {cmd}\n{tail}"
     return None
 
