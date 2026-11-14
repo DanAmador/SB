@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 import sys
@@ -331,3 +332,41 @@ class ClaimsDoNotCollide(VaultCase):
         self.sb("claim", "monorepo/overrides", "1", "--by", "a", "--no-sync")
         self.sb("claim", "monorepo/overrides", "1", "--by", "b", "--no-sync", ok=False)
         self.assertLockFree()
+
+
+class MapWithItsClosedTickets(VaultCase):
+    """`sbmap tickets --json --map`: every ticket of one map, closed ones too, and what each one comes after."""
+
+    def test_a_map_lists_resolved_and_out_of_scope_tickets_and_resolves_every_kind_of_blocker(self):
+        self.map("repo/night", "Night map")
+        self.map("repo/other", "Other map", status="Project.Finished")
+        self.ticket("repo/other", 7, "Foreign work")
+        self.write("wayfinder/repo/night/issues/done/001-done-work.md", "---\nstatus: Project.Finished\ntype: task\n---\n# Done work\n")
+        self.write("wayfinder/repo/night/issues/done/002-dropped-work.md", "---\nstatus: Project.Dropped\ntype: task\n---\n# Dropped work\n")
+        self.write("wayfinder/repo/night/issues/003-open-work.md", """---
+status: Project.Planned
+type: task
+why: Because.
+priority: A
+tier: opus
+blocked_by:
+  - "[[wayfinder/repo/night/issues/done/001-done-work|001]]"
+  - "[[wayfinder/repo/other/issues/007-foreign-work|007]]"
+  - "[[wayfinder/repo/other/map|Other map]]"
+  - "[[wayfinder/repo/night/issues/done/002-dropped-work|002]]"
+---
+# Open work
+""")
+        out = json.loads(self.sb("tickets", "--json", "--map", "repo/night").stdout)
+        self.assertEqual((out["map"], out["title"], out["status"]), ("repo/night", "Night map", "claimed"))
+        self.assertTrue(out["uri"].startswith("obsidian://open?path="))
+        rows = {t["num"]: t for t in out["tickets"]}
+        self.assertEqual({n: t["status"] for n, t in rows.items()}, {1: "resolved", 2: "out-of-scope", 3: "open"})
+        t = rows[3]
+        self.assertEqual((t["priority"], t["tier"], t["why"]), ("A", "opus", "Because."))
+        self.assertEqual(t["blocked_by"], [
+            {"map": "repo/night", "num": 1, "title": "Done work", "status": "resolved"},
+            {"map": "repo/other", "num": 7, "title": "Foreign work", "status": "resolved"},
+            {"map": "repo/other", "num": None, "title": "Other map", "status": "resolved"},
+            {"map": "repo/night", "num": 2, "title": "Dropped work", "status": "out-of-scope"}])
+        self.sb("tickets", "--json", "--map", "repo/nowhere", ok=False)

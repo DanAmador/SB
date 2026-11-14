@@ -36,6 +36,10 @@ function addRowLinks(route: RouteName, body: unknown, ctx: LinkContext): unknown
   if (route === "GET /api/tickets" && Array.isArray(body)) {
     return body.map((r: unknown) => (isObj(r) && typeof r.map === "string" && typeof r.file === "string" ? { ...r, links: rowLinks({ map: r.map, file: r.file }, ctx) } : r));
   }
+  if (route === "GET /api/map" && isObj(body) && typeof body.map === "string" && Array.isArray(body.tickets)) {
+    const map = body.map;
+    return { ...body, tickets: body.tickets.map((r: unknown) => (isObj(r) && typeof r.file === "string" ? { ...r, links: rowLinks({ map, file: r.file }, ctx) } : r)) };
+  }
   if (!isObj(body) || body.queue === undefined) return body;
   return { ...body, queue: linkQueue(body.queue, ctx) };
 }

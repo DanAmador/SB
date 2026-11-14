@@ -20,7 +20,7 @@ Bases see the whole route. It answers what an agent should never compute or type
     sbmap.py lanes    <map> [--max 2] [--json]
                                         open tickets split into parallel lanes by their paths and
                                         blockers, the rest serial (ticket 009's rule)
-    sbmap.py tickets  [--repo <path>] --json
+    sbmap.py tickets  [--repo <path>] [--map <map>] --json
                                         every open or claimed ticket of every open map as one JSON list:
                                         tier, checks (the ticket's, else the map's), open blockers, map order
     sbmap.py next     <map>             the next free ticket number for this map's repo
@@ -2320,10 +2320,46 @@ def sections(body):
     return {k: "\n".join(v).strip() for k, v in out.items()}
 
 
+def blocker_ref(m, ref):
+    """{map, num, title, status} for one blocked_by entry: a ticket (of this map or another), a whole map
+    (num null, its title and status), or a reference that points nowhere (status "missing")."""
+    x = m.resolve_ref(ref)
+    if isinstance(x, Map):
+        return {"map": x.rel_name, "num": None, "title": x.title, "status": x.status}
+    if isinstance(x, Ticket):
+        folder = x.path.parent.parent if x.path.parent.name == "done" else x.path.parent
+        try:
+            name = str(folder.parent.resolve().relative_to(WAYFINDER.resolve()))
+        except ValueError:
+            name = folder.parent.name
+        return {"map": name, "num": x.num, "title": x.title, "status": x.status}
+    return {"map": "", "num": None, "title": str(ref), "status": "missing"}
+
+
+def map_tickets(m):
+    """One map as the page draws it: its words, checks and link, and every ticket in map order, closed ones too."""
+    rows = []
+    for t in m.order():
+        rows.append({
+            "num": t.num, "title": t.title, "type": t.type, "status": t.status, "why": t.props.get("why", ""),
+            "priority": t.props.get("priority") or None, "tier": str(t.props.get("tier") or "sonnet"),
+            "blocked_by": [blocker_ref(m, ref) for ref in t.blocked_by], "file": str(t.path)})
+    return {"map": m.rel_name, "title": m.title, "status": m.status, "words": short(" ".join(l for l in plain_words(m).splitlines() if not l.startswith(">")).strip(), 300),
+            "checks": m.props.get("checks") or [], "uri": obsidian_uri(m.md_path), "tickets": rows}
+
+
 def cmd_tickets(args):
-    """Every open or claimed ticket of every open map, as the facts a queue decides on."""
+    """Every open or claimed ticket of every open map, as the facts a queue decides on; with --map, one map
+    (closed or not) with all its tickets, resolved and out of scope included."""
     if "--json" not in args:
         sys.exit("sbmap: tickets needs --json")
+    if "--map" in args:
+        want = opt(args, "--map") or ""
+        m = next((m for m in all_maps() if m.rel_name == want or m.folder.name == want), None)
+        if m is None:
+            sys.exit(f"sbmap: no map {want}")
+        print(json.dumps(map_tickets(m), indent=1))
+        return
     repo = opt(args, "--repo")
     rows = []
     for m in all_maps():

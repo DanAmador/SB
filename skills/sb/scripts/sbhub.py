@@ -101,6 +101,7 @@ class Hub:
         self._run = run  # () -> the open tickets (list or JSON); sbmap when None
         self.launcher = launcher or launch  # starts one worker; tests hand in their own
         self._tcache = (0.0, None)
+        self._mcache = {}  # map -> (when, sbmap's answer or None when it had none), for /api/map
         self._tfailed = None  # when sbmap last failed
         self.now = now
         self._lock = threading.Lock()
@@ -482,6 +483,45 @@ class Hub:
         queued = {sbqueue.key(t) for t in rows} & live
         return [{**t, "queued": sbqueue.key(t) in queued,
                  **dict(zip(("state", "reason"), sbqueue.classify(t, live, rows)))} for t in rows]
+
+    MAP_NAME = re.compile(r"[\w.\- ]+(?:/[\w.\- ]+)*")
+
+    def map_tickets(self, name):
+        """One map and every ticket of it, resolved and out of scope too (sbmap `tickets --map`, cached like the
+        ticket list), each with the hub's state word, its place in the queue and its last run's outcome.
+        KeyError when there is no such map."""
+        if not isinstance(name, str) or ".." in name or not self.MAP_NAME.fullmatch(name):
+            raise KeyError(name)
+        now = self.now()
+        with self._lock:
+            at, got = self._mcache.get(name, (0.0, None))
+        if now - at >= TICKETS_CACHED_FOR:
+            rc, out, _ = sbmap_call("tickets", "--json", "--map", name)
+            try:
+                got = json.loads(out) if rc == 0 else None
+            except ValueError:
+                got = None
+            with self._lock:
+                self._mcache = {k: v for k, v in self._mcache.items() if now - v[0] < TICKETS_CACHED_FOR}
+                self._mcache[name] = (now, got)
+        if got is None:
+            raise KeyError(name)
+        rows = {t["num"]: t for t in self.tickets() if t["map"] == got["map"]}
+        with self._lock:
+            q = self._data["queue"]
+            items = [i for i in q["items"] if i["kind"] == "ticket"]
+            place = {i["key"]: n for n, i in enumerate((i for i in items if i["state"] == "queued"), 1)}
+            ran = {}
+            for i in [i for i in q.get("cleared") or [] if i["kind"] == "ticket"] + items:  # the newest wins
+                if i["state"] != "queued":
+                    ran[i["key"]] = {"state": i["state"], "note": i.get("note") or "", "ended": i.get("ended")}
+        out = []
+        for t in got["tickets"]:
+            key = "{}#{}".format(got["map"], t["num"])
+            word = {"resolved": "done", "out-of-scope": "out of scope"}.get(t["status"]) or (
+                rows[t["num"]]["state"] if t["num"] in rows else "claimed" if t["status"] == "claimed" else "not ready")
+            out.append({**t, "state": word, "place": place.get(key), "last_run": ran.get(key)})
+        return {**got, "tickets": out}
 
     def _live_keys(self):
         return {i["key"] for i in self._data["queue"]["items"]
@@ -3207,6 +3247,12 @@ def make_handler(hub):
                     self.send(404, {"ok": False, "error": "no trail for that agent"})
             elif path == "/api/tickets":
                 self.send(200, hub.tickets())
+            elif path == "/api/map":
+                from urllib.parse import parse_qs, urlsplit
+                try:
+                    self.send(200, hub.map_tickets((parse_qs(urlsplit(self.path).query).get("map") or [""])[0]))
+                except KeyError:
+                    self.send(404, {"ok": False, "error": "no such map"})
             elif path == "/api/ticket":
                 from urllib.parse import parse_qs, urlsplit
                 try:

@@ -357,6 +357,49 @@ export const TicketRow = z.strictObject({
 export type TicketRow = z.infer<typeof TicketRow>;
 export const Tickets = z.array(TicketRow);
 
+/** A ticket another ticket comes after: in this map or another; `num` is null when it names a whole map. */
+export const Blocker = z.strictObject({
+  map: z.string(),
+  num: z.number().int().nullable(),
+  title: z.string(),
+  /** The ticket's or map's status; "missing" when the reference points nowhere. */
+  status: z.string(),
+});
+
+/** One ticket of GET /api/map: open, claimed, resolved or out of scope. */
+export const MapTicket = z.strictObject({
+  num: z.number().int(),
+  title: z.string(),
+  type: z.string(),
+  status: z.enum(["open", "claimed", "resolved", "out-of-scope"]),
+  /** The hub's state word as /api/tickets gives it, plus "done" and "out of scope". */
+  state: z.union([TicketState, z.enum(["done", "out of scope"])]),
+  why: z.string(),
+  priority: z.string().nullable(),
+  tier: z.string(),
+  /** 1-based place among the queued tickets, or null when it is not queued. */
+  place: z.number().int().nullable(),
+  /** The outcome of its last queue run, or null when it never ran. */
+  last_run: z.strictObject({ state: z.string(), note: z.string(), ended: Seconds.nullable() }).nullable(),
+  blocked_by: z.array(Blocker),
+  file: z.string(),
+  links: Links,
+});
+export type MapTicket = z.infer<typeof MapTicket>;
+
+/** GET /api/map?map=: a map's bearings and every ticket of it, in map order. */
+export const MapRoute = z.strictObject({
+  map: z.string(),
+  title: z.string(),
+  status: z.string(),
+  /** The first sentence of the map's plain words. */
+  words: z.string(),
+  checks: z.array(z.string()),
+  uri: z.string(),
+  tickets: z.array(MapTicket),
+});
+export type MapRoute = z.infer<typeof MapRoute>;
+
 export const TrailFile = z.strictObject({
   name: z.string(),
   path: z.string(),

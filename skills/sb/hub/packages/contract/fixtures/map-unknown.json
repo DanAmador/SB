@@ -1,0 +1,9 @@
+{
+  "body": {
+    "error": "no such map",
+    "ok": false
+  },
+  "contentType": "application/json",
+  "route": "GET /api/map",
+  "status": 404
+}

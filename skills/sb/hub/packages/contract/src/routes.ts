@@ -21,6 +21,7 @@ export const ROUTES = {
   "GET /api/runs": json({ 200: s.RunsPage }),
   "GET /api/run": json({ 200: s.RunDetail, 404: s.ApiError }),
   "GET /api/tickets": json({ 200: s.Tickets }),
+  "GET /api/map": json({ 200: s.MapRoute, 404: s.ApiError }),
   "GET /api/ticket": json({ 200: s.TicketDetail, 404: s.ApiError }),
   "GET /api/item/report": text({ 200: s.ItemText, 404: s.ApiError }),
   "GET /api/item/log": text({ 200: s.ItemText, 404: s.ApiError }),

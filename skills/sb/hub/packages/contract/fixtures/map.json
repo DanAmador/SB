@@ -1,0 +1,77 @@
+{
+  "body": {
+    "checks": [
+      "true"
+    ],
+    "map": "repo/one",
+    "status": "open",
+    "tickets": [
+      {
+        "blocked_by": [],
+        "file": "/fixture/Vault/wayfinder/repo/one/issues/done/001 A.md",
+        "last_run": {
+          "ended": 1794528000.0,
+          "note": "resolved, commit d8d88e804",
+          "state": "done"
+        },
+        "num": 1,
+        "place": null,
+        "priority": "C",
+        "state": "done",
+        "status": "resolved",
+        "tier": "sonnet",
+        "title": "A",
+        "type": "task",
+        "why": "Because."
+      },
+      {
+        "blocked_by": [],
+        "file": "/fixture/Vault/wayfinder/repo/one/issues/002 B.md",
+        "last_run": null,
+        "num": 2,
+        "place": 2,
+        "priority": "C",
+        "state": "ready",
+        "status": "open",
+        "tier": "sonnet",
+        "title": "B",
+        "type": "task",
+        "why": "Because."
+      },
+      {
+        "blocked_by": [],
+        "file": "/fixture/Vault/wayfinder/repo/one/issues/003 C.md",
+        "last_run": null,
+        "num": 3,
+        "place": 1,
+        "priority": "C",
+        "state": "ready",
+        "status": "open",
+        "tier": "sonnet",
+        "title": "C",
+        "type": "task",
+        "why": "Because."
+      },
+      {
+        "blocked_by": [],
+        "file": "/fixture/Vault/wayfinder/repo/one/issues/004 D.md",
+        "last_run": null,
+        "num": 4,
+        "place": null,
+        "priority": "C",
+        "state": "ready",
+        "status": "open",
+        "tier": "sonnet",
+        "title": "D",
+        "type": "task",
+        "why": "Because."
+      }
+    ],
+    "title": "One",
+    "uri": "obsidian://open?path=%2Ffixture%2FVault%2Fwayfinder%2Frepo%2Fone%2Fmap.md",
+    "words": "Why."
+  },
+  "contentType": "application/json",
+  "route": "GET /api/map",
+  "status": 200
+}
