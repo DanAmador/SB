@@ -494,7 +494,7 @@ class Hub:
         """A failed or skipped item queued again: its last try's outcome is cleared; the owner's agent stays."""
         if item is None or item["state"] == "queued":
             return item
-        for f in ("retry", "digested", "runner", "pid", "pid_start", "result", "base_sha", "resume", "stops", "log_start"):
+        for f in ("retry", "digested", "runner", "pid", "pid_start", "result", "base_sha", "first_base", "resume", "stops", "log_start"):
             item.pop(f, None)
         item.update(state="queued", note="", ended=None, tries=0, started=None, commit=None)
         return item
@@ -1675,7 +1675,7 @@ class TicketRun:
             start = os.path.getsize(log)  # launch appends: this try's output begins here
         except OSError:
             start = 0
-        run = {**bare, "base": base, "log": log, "start": start, "folder": str(folder)}
+        run = {**bare, "base": base, "first_base": item.get("first_base") or base, "log": log, "start": start, "folder": str(folder)}
         try:
             if self.stopping():
                 raise OSError("the hub is stopping")
@@ -1697,7 +1697,8 @@ class TicketRun:
             passed, reason, sha = False, ran_past(self.limit), None
         elif not tree:
             report = Path(run["log"]).parent / "{}.md".format(int(t["num"])) if run.get("log") else None
-            passed, reason, sha = sbqueue.verdict(t, t["repo"], run["base"], run=_recording(checks), report=report)
+            passed, reason, sha = sbqueue.verdict(t, t["repo"], run["base"], run=_recording(checks), report=report,
+                                                    first_base=run.get("first_base"))
             self.report_checks(t, run, passed, reason, sha, checks)
         else:
             passed, reason, sha, checks = self.land(t, run, tree)
@@ -1755,7 +1756,8 @@ class TicketRun:
             why = rebase_tree(tree, head) if head else "the checkout has no commit"
             if why:
                 return False, "could not land: " + why, None, checks
-            passed, reason, sha = sbqueue.verdict(t, tree, head, run=_recording(checks), report=report)
+            passed, reason, sha = sbqueue.verdict(t, tree, head, run=_recording(checks), report=report,
+                                                    first_base=run.get("first_base"))
             if not passed:
                 return passed, reason, sha, checks
             why = land(t["repo"], sha) if sha else None
@@ -2193,7 +2195,7 @@ class Supervisor:
                 inst = dict(self.hub._data["installed"].get(item.get("runner")) or {})
             self.procs[item["key"]] = {"p": _Adopted(pid, started if sure else None), "t": None, "adopted": True,
                                        "agent": item.get("runner"), "inst": inst, "base": item.get("base_sha"),
-                                       "log": item.get("log"), "start": item.get("log_start") or 0, "alone": False,
+                                       "first_base": item.get("first_base"), "log": item.get("log"), "start": item.get("log_start") or 0, "alone": False,
                                        "tree": item.get("tree"), "branch": item.get("branch"), "folder": item.get("run")}
             self._update(item["key"], note="running on {}, started before the hub restarted".format(item.get("runner")))
             return
@@ -2539,7 +2541,7 @@ class Supervisor:
             self.hub._save()
         self._track(key, run)
         p = run["p"]
-        self._update(key, base_sha=base, log=run["log"], log_start=run["start"], run=run["folder"], pid=p.pid,
+        self._update(key, base_sha=base, first_base=run.get("first_base") or base, log=run["log"], log_start=run["start"], run=run["folder"], pid=p.pid,
                      pid_start=_proc_start(p.pid), note="running on {} ({})".format(name, item["model"]))
 
     def _launch_job(self, item, name, inst):
@@ -3385,7 +3387,7 @@ def cmd_agents(a):
     return 0
 
 
-RUN_ITEM_FIELDS = ("tries", "stops", "retry", "resume", "base_sha", "tree", "branch")
+RUN_ITEM_FIELDS = ("tries", "stops", "retry", "resume", "base_sha", "first_base", "tree", "branch")
 
 
 def _hub_home():

@@ -171,12 +171,13 @@ class VerdictTest(unittest.TestCase):
         self.assertIn("other/b.py", why)
         self.assertNotIn("src/a.py", why)
 
-    def test_an_untrailered_commit_outside_paths_before_a_good_one_is_named(self):
+    def test_an_untrailered_commit_outside_paths_before_a_good_one_is_not_named(self):
+        # the list comes from the ticket's commit alone (ticket 052), not from base..HEAD
         self.commit(["other/sneaky.py"], trailer=None)
         sha = self.commit(["src/a.py"])
         ok, why, got = verdict(self.t(checks=["true"]), self.repo, self.base)
         self.assertEqual((ok, got), (True, sha))
-        self.assertIn("other/sneaky.py", why)
+        self.assertNotIn("other/sneaky.py", why)
         self.assertNotIn("src/a.py", why)
 
     def test_a_bad_base_says_so(self):
@@ -219,6 +220,31 @@ class VerdictTest(unittest.TestCase):
     def test_pass(self):
         sha = self.commit(["src/a.py"])
         self.assertEqual(verdict(self.t(checks=["true"]), self.repo, self.base)[::2], (True, sha))
+
+    def test_a_retry_that_commits_nothing_resolves_with_the_first_tries_commit(self):
+        # the 446 case: try one commits; try two starts from HEAD (the new base) and commits nothing
+        sha = self.commit(["src/a.py", "elsewhere.txt"])
+        retry_base = git(self.repo, "rev-parse", "HEAD")
+        ok, why, got = verdict(self.t(checks=["true"]), self.repo, retry_base)
+        self.assertEqual((ok, got), (False, None))
+        self.assertTrue(why.startswith("no commit after"))
+        ok, why, got = verdict(self.t(checks=["true"]), self.repo, retry_base, first_base=self.base)
+        self.assertEqual((ok, got), (True, sha))
+        self.assertIn("elsewhere.txt", why)
+
+    def test_outside_files_come_from_the_ticket_commit_alone(self):
+        sha = self.commit(["src/a.py"])
+        (self.repo / "other.txt").write_text("z")
+        git(self.repo, "add", ".")
+        git(self.repo, "commit", "-qm", "someone else")
+        ok, why, got = verdict(self.t(checks=["true"]), self.repo, git(self.repo, "rev-parse", "HEAD"),
+                               first_base=self.base)
+        self.assertEqual((ok, got, "outside" in why), (True, sha, False))
+
+    def test_a_retry_without_the_trailer_anywhere_still_fails(self):
+        self.commit(["src/a.py"], trailer=None)
+        ok, why, got = verdict(self.t(), self.repo, git(self.repo, "rev-parse", "HEAD"), first_base=self.base)
+        self.assertEqual((ok, got), (False, None))
 
     def owned(self, paths, files):
         sha = self.commit(files)

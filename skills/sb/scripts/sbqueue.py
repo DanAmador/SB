@@ -152,10 +152,12 @@ def _owned_test(f, paths):
     return False
 
 
-def verdict(t, repo, base_sha, run=subprocess.run, report=None):
+def verdict(t, repo, base_sha, run=subprocess.run, report=None, first_base=None):
     """(passed, reason, sha): a trailered commit after base_sha and every check green. Files changed outside the
     ticket's paths are allowed (a change may need them) and named in the reason. A research ticket that made no
-    commit passes on its written report alone (`report`, the worker's report file)."""
+    commit passes on its written report alone (`report`, the worker's report file). A retry starts from HEAD, so an
+    earlier try's commit sits behind base_sha: when nothing new carries the trailer, `first_base` (the item's first
+    base) is searched too, and a trailered commit there stands as the ticket's commit."""
     num = int(t["num"])
     wanted = {f"Ticket: {t['map']}/{num}", f"Ticket: {t['map']}/{num:03d}"}
     r = run(["git", "-C", str(repo), "log", f"{base_sha}..HEAD", "--format=%H%x00%B%x01"],
@@ -165,15 +167,21 @@ def verdict(t, repo, base_sha, run=subprocess.run, report=None):
     log = r.stdout
     entries = [e.strip("\n").split("\x00", 1) for e in log.split("\x01") if e.strip()]
     sha = next((s.strip() for s, body in entries if wanted & {l.strip() for l in body.splitlines()}), None)
+    if not sha and first_base and first_base != base_sha:
+        r2 = run(["git", "-C", str(repo), "log", f"{first_base}..HEAD", "--format=%H%x00%B%x01"],
+                 capture_output=True, text=True)
+        if r2.returncode == 0:
+            es = [e.strip("\n").split("\x00", 1) for e in r2.stdout.split("\x01") if e.strip()]
+            sha = next((s.strip() for s, body in es if wanted & {l.strip() for l in body.splitlines()}), None)
     if not sha and t.get("type") == "research" and report and Path(report).is_file() and Path(report).stat().st_size:
         return True, "research: no commit needed, the findings are in the worker's report", None
-    if not entries:
+    if not entries and not sha:
         return False, f"no commit after {base_sha[:9]}", None
     if not sha:
         return False, f"no commit carries the trailer Ticket: {t['map']}/{num:03d}", None
     outside = ""
     if t["paths"]:
-        files = run(["git", "-C", str(repo), "diff", "--name-only", f"{base_sha}..{sha}"],
+        files = run(["git", "-C", str(repo), "diff-tree", "--root", "--no-commit-id", "--name-only", "-r", sha],
                     capture_output=True, text=True).stdout.split("\n")
         stray = [f for f in files if f and not _under(f, t["paths"]) and not _owned_test(f, t["paths"])]
         if stray:

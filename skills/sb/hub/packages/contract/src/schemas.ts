@@ -120,6 +120,7 @@ const itemFields = {
   /** The process's start time as `ps -o lstart` prints it. */
   pid_start: z.string().nullable().optional(),
   base_sha: z.string().nullable().optional(),
+  first_base: z.string().nullable().optional(),
   result: z.string().optional(),
   retry: z.string().optional(),
   resume: z.strictObject({ agent: z.string(), log: z.string(), why: z.string() }).optional(),
