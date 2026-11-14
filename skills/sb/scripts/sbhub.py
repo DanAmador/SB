@@ -67,6 +67,7 @@ import hashlib
 import json
 import math
 import os
+import ast
 import re
 import shlex
 import shutil
@@ -1949,14 +1950,45 @@ REBUILD_TAIL = 12  # lines of a failed build shown to the owner
 SERVICE_SH = Path(__file__).resolve().parent / "sbhub_service.sh"
 
 
+SCRIPTS = "skills/sb/scripts/"
+TEMPLATES = "skills/sb/templates/"
+_LOADED = {}
+
+
+def hub_modules():
+    """The scripts the hub loads: sbhub.py's imports that live beside it, and theirs in turn (read from the code,
+    not listed by hand), as repo paths. A change to any of them is not in the running hub until it restarts."""
+    here = Path(__file__).resolve().parent
+    if here not in _LOADED:
+        seen, todo = set(), [Path(__file__).stem]
+        while todo:
+            name = todo.pop()
+            f = here / (name + ".py")
+            if name in seen or not f.is_file():
+                continue
+            seen.add(name)
+            try:
+                tree = ast.parse(f.read_text(encoding="utf-8"))
+            except (OSError, SyntaxError):
+                continue
+            for n in ast.walk(tree):
+                if isinstance(n, ast.Import):
+                    todo.extend(a.name.split(".")[0] for a in n.names)
+                elif isinstance(n, ast.ImportFrom) and n.module and not n.level:
+                    todo.append(n.module.split(".")[0])
+        _LOADED[here] = {SCRIPTS + n + ".py" for n in seen}
+    return _LOADED[here]
+
+
 def rebuild_kind(paths):
-    """What a landed change to `paths` needs: "restart" (the hub's server or scripts: build, then restart), "web"
-    (only the page: build, no restart) or None (nothing of the hub's)."""
+    """What a landed change to `paths` needs: "restart" (the hub's server, the scripts it imports or the templates
+    it fills: build, then restart), "web" (only the page: build, no restart) or None (nothing of the hub's)."""
     kind = None
     for p in paths:
         if p.startswith(HUB_WEB) or p == HUB_DIR + "/README.md":
             kind = kind or "web"
-        elif p.startswith(HUB_DIR + "/") or re.fullmatch(r"skills/sb/scripts/sbhub[^/]*\.py", p):
+        elif (p.startswith(HUB_DIR + "/") or p.startswith(TEMPLATES) or re.fullmatch(SCRIPTS + r"sbhub[^/]*\.py", p)
+              or p in hub_modules()):
             return "restart"
     return kind
 
@@ -1976,6 +2008,7 @@ class Rebuild:
         self.cond = threading.Condition()
         self.landing = {}  # repo -> tickets landing now
         self.pending = {}  # repo -> "web" | "restart", waiting for the build
+        self.working = set()  # repos whose build or restart is under way
         self.thread = None
 
     def mine(self, repo):
@@ -1991,8 +2024,16 @@ class Rebuild:
         """A ticket landed with these changed paths: start a rebuild when they are the hub's own and the checkout is
         the one this hub runs from. Returns the thread (tests join it), or None."""
         kind = rebuild_kind(paths) if self.mine(repo) else None
-        if not kind:
-            return None
+        return self.ask(repo, kind) if kind else None
+
+    def busy(self, repo):
+        """A rebuild or restart is waiting or under way for `repo`: nothing may start a review on it."""
+        repo = os.path.realpath(str(repo))
+        with self.cond:
+            return repo in self.pending or repo in self.working
+
+    def ask(self, repo, kind):
+        """Queue a rebuild of `kind` for `repo` (after() and a review that needs a restart both come here)."""
         repo = os.path.realpath(str(repo))
         with self.cond:
             old = self.pending.get(repo)
@@ -2009,6 +2050,10 @@ class Rebuild:
                 while self.landing.get(repo):
                     self.cond.wait(1)
                 kind = self.pending.pop(repo, None)
+                if kind:
+                    self.working.add(repo)
+                else:
+                    self.working.discard(repo)
             if not kind:
                 return
             ok, text = self.build()
@@ -2463,6 +2508,7 @@ class Supervisor:
         # u0/u1 (its first and newest usage reading), alone (no other worker on its agent overlapped it), braked}
         self.procs = {}
         self.reviews = {}  # map -> its second pass's {p, agent, inst, log, start, files, keys, limit, at}, while it runs
+        self.restart_asked = set()  # repos whose hub was asked to restart for a review template it could not fill
         self.streak = (None, 0)  # the failure class of the last failed items in a row, and how many
         self.stopped = False
         self.note_path = None  # wayfinder/runs/hub-now.md: `serve` sets it; tests leave the vault alone
@@ -3107,6 +3153,8 @@ class Supervisor:
             return  # the tickets could not be read: tried again at the next look
         by = {sbqueue.key(t): t for t in rows}
         for m, group in groups.items():
+            if any(by.get(i["key"]) and self.runner.rebuild.busy(by[i["key"]]["repo"]) for i in group):
+                continue  # the hub is about to restart on new code: no review starts on code it has not loaded
             entries = []
             for item in group:
                 row = by.get(item["key"])
@@ -3119,6 +3167,13 @@ class Supervisor:
             try:
                 rv = self.runner.review_start(entries)
             except (OSError, ValueError, KeyError, subprocess.SubprocessError) as e:
+                repo = entries[0][1]["t"]["repo"]
+                if (isinstance(e, KeyError) and "cannot fill" in str(e) and repo not in self.restart_asked
+                        and self.runner.rebuild.mine(repo)):
+                    # the template names a field this running code lacks: restart once, then try again, no 10-minute wait
+                    self.restart_asked.add(repo)
+                    self.runner.rebuild.ask(repo, "restart")
+                    continue
                 for item, _, _ in entries:
                     self._apply(item, self._review_failed(item, "could not start it: {}".format(e)))
                 continue

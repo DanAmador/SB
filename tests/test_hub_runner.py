@@ -482,6 +482,44 @@ class ReviewTest(RunnerCase):
         self.assertEqual(int((self.root / "calls").read_text()), 1)
         self.assertNotIn(1, self.open_tickets())
 
+    def own_rebuild(self):
+        """This repo is the one the hub runs from; its build and restart are fakes that note their calls."""
+        self.calls = []
+        repo = os.path.realpath(str(self.repos["repo/one"]))
+        rb = sbhub.Rebuild(self.hub, root=repo, build=lambda: (self.calls.append("build"), (True, ""))[1],
+                           restart=lambda: (self.calls.append("restart"), (True, ""))[1])
+        self.sup.runner.rebuild = rb
+        return rb, repo
+
+    def test_no_review_starts_while_a_restart_is_pending_for_the_repo_and_one_starts_once_it_is_done(self):
+        rb, repo = self.own_rebuild()
+        rb.pending[repo] = "restart"
+        self.only(1)
+        self.until(lambda: self.state_of("repo/one#1") == "landed")
+        for _ in range(5):
+            self.sup.tick()
+            time.sleep(0.05)
+        self.assertEqual((self.state_of("repo/one#1"), self.reviewed), ("landed", []))
+        rb.pending.clear()  # the restart is done
+        self.until(lambda: self.state_of("repo/one#1") == "done")
+        self.assertEqual(len(self.reviewed), 1)
+
+    def test_a_review_template_naming_a_field_the_hub_cannot_fill_asks_for_one_restart_not_a_recheck(self):
+        rb, repo = self.own_rebuild()
+        real, tries = self.sup.runner.review_start, []
+
+        def review_start(entries):
+            tries.append(1)
+            if len(tries) == 1:
+                raise KeyError("review-brief.md names diff_max, which the hub cannot fill")
+            return real(entries)
+        self.sup.runner.review_start = review_start
+        self.only(1)
+        self.until(lambda: self.calls == ["build", "restart"])
+        self.assertNotEqual(self.state_of("repo/one#1"), "recheck")
+        self.until(lambda: self.state_of("repo/one#1") == "done")  # the restarted hub's review
+        self.assertEqual((self.calls, len(tries)), (["build", "restart"], 2))
+
     def test_a_ticket_that_waits_on_a_landed_one_starts_and_both_are_judged_at_the_map_end(self):
         # the owner's default: what comes after a landed-but-unjudged ticket may start, the review judging it later
         self.sb("block", "repo/one", "002", "1", "--no-sync")

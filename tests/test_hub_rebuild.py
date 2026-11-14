@@ -24,7 +24,7 @@ class RebuildTest(unittest.TestCase):
         git(self.repo, "config", "user.name", "t")
         self.commit("README.md")
         self.hub = Hub(Path(self._tmp.name) / "home")
-        self.calls, self.build_ok = [], True
+        self.calls, self.during, self.build_ok = [], [], True
         self.rb = Rebuild(self.hub, root=str(self.repo), build=self.build, restart=self.restart)
 
     def commit(self, *paths):
@@ -37,10 +37,12 @@ class RebuildTest(unittest.TestCase):
         return git(self.repo, "rev-parse", "HEAD")
 
     def build(self):
+        self.during.append(self.rb.busy(self.repo))
         self.calls.append("build")
         return self.build_ok, "line1\nTS2322: bad type" if not self.build_ok else "ok"
 
     def restart(self):
+        self.during.append(self.rb.busy(self.repo))
         self.calls.append("restart")
         return True, ""
 
@@ -60,6 +62,25 @@ class RebuildTest(unittest.TestCase):
         self.assertEqual(rebuild_kind(["skills/sb/hub/packages/web/src/a.tsx"]), "web")
         self.assertEqual(rebuild_kind(["skills/sb/hub/packages/web/src/a.tsx", "skills/sb/scripts/sbhub.py"]), "restart")
         self.assertIsNone(rebuild_kind(["skills/sb/scripts/sbmap.py", "tests/test_hub.py", "README.md"]))
+
+    def test_what_the_hub_imports_and_fills_restarts_it(self):
+        for p in ("sbqueue.py", "sbruns.py", "sbhub_snapshot.py"):
+            self.assertEqual(rebuild_kind(["skills/sb/scripts/" + p]), "restart", p)
+        self.assertEqual(rebuild_kind(["skills/sb/templates/review-brief.md"]), "restart")
+        self.assertIsNone(rebuild_kind(["skills/sb/scripts/sbmap.py", "skills/sb/SKILL.md"]))
+
+    def test_a_review_waits_while_a_rebuild_is_pending_or_under_way(self):
+        repo = str(self.repo)
+        self.assertFalse(self.rb.busy(repo))
+        self.rb.landing_in(repo, 1)
+        self.commit("skills/sb/templates/x.md")
+        th = self.rb.after(self.repo, ["skills/sb/templates/x.md"])
+        self.assertTrue(self.rb.busy(repo))
+        self.rb.landing_in(repo, -1)
+        th.join(10)
+        self.assertEqual(self.calls, ["build", "restart"])
+        self.assertEqual(self.during, [True, True])  # busy through the build and the restart
+        self.assertFalse(self.rb.busy(repo))  # done (or failed): reviews start again
 
     def test_hub_paths_build_and_restart(self):
         self.landed("skills/sb/scripts/sbhub.py")
