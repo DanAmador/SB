@@ -175,6 +175,9 @@ const itemFields = {
   redo: Redo.optional(),
   /** The hub's own check that passed, kept while the review runs (or waits to run again); null after. */
   checked: z.string().nullable().optional(),
+  /** How many actions the worker's hook refused so far, and the last few; absent until the first refusal. */
+  refused: z.number().int().optional(),
+  refused_lines: z.array(z.string()).optional(),
   /** obsidian:// links to its notes, added by the TypeScript server (links.ts). */
   links: Links,
 };
