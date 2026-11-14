@@ -3,7 +3,7 @@
  * against the contract before it leaves. Run with `node e2e/fixture-server.ts` (Node strips the types).
  */
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { QueueMoveBody, QueueSetBody, RunDetail, RunsPage, SendBody, State, Tickets, addLinks, type LinkContext, type Message, type QueueItem, type TicketRow } from "@sb-hub/contract";
+import { QueueMoveBody, QueueSetBody, RunDetail, RunSeenBody, RunsPage, SendBody, State, Tickets, addLinks, type LinkContext, type Message, type QueueItem, type TicketRow } from "@sb-hub/contract";
 
 /** Every file the fixtures name exists; the server's own vault lookup is covered by the server's tests. */
 const ctx: LinkContext = { exists: () => true, real: (p) => p, findTicket: (map, num) => `/vault/${map}/issues/${String(num)}.md`, runs: {} };
@@ -54,6 +54,7 @@ const queue = {
 };
 
 const messages: Record<string, Message> = {};
+const seen: string[] = [];
 
 // ---- History: runs the queue and the vault's run folders know of, and the pictures of two of them ----
 const run = (key: string, title: string, ago: number, more: Record<string, unknown> = {}): Record<string, unknown> => ({
@@ -97,6 +98,7 @@ function state(): State {
     locks: {}, aliases: {}, messages, providers: {},
     questions: { q1: { agent: "s-1", q: "Ship the new board tonight?", options: ["Yes", "Not yet"], default: "Yes", asked: now() - 10, deadline: now() + 600, answer: null, by: null } },
     installed: { main: { kind: "claude", dir: null, model: null, limited_until: null } },
+    seen: [...seen],
     now: now(),
     queue: (addLinks("GET /api/state", { queue }, ctx) as { queue: unknown }).queue,
   });
@@ -156,6 +158,16 @@ createServer((req, res) => {
       queue.items = [...queue.items.filter((i) => i.state !== "queued"), ...queued];
       queue.version += 1;
       { send(res, 200, addLinks("POST /api/queue/set", { ok: true, queue }, ctx)); return; }
+    }
+    if (req.method === "POST" && path === "/api/__reset-seen") {
+      seen.length = 0;
+      send(res, 200, { ok: true });
+      return;
+    }
+    if (req.method === "POST" && path === "/api/run/seen") {
+      seen.push(RunSeenBody.parse(await body(req)).key);
+      send(res, 200, { ok: true });
+      return;
     }
     if (req.method === "POST" && path === "/api/send") {
       const b = SendBody.parse(await body(req));

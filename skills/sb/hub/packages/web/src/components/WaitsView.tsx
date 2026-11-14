@@ -2,37 +2,41 @@
  * Waits for you: questions first, then failed runs (reason, checks, pictures, Run again), then done runs (checks,
  * pictures, Looks good), then tickets that wait for a decision, then accounts and widgets in trouble.
  */
-import { IconAlertTriangle, IconBan, IconCheck, IconCircleCheck, IconGitCommit, IconLock, IconRefresh, IconX } from "@tabler/icons-react";
+import { IconAlertTriangle, IconBan, IconCheck, IconChecks, IconCircleCheck, IconExternalLink, IconGitCommit, IconLock, IconRefresh, IconX } from "@tabler/icons-react";
 import type * as React from "react";
 import type { QueueItem, TicketRow } from "@sb-hub/contract";
 import { Button } from "@/components/ui/button";
-import { scopeItems, ago, canTickAgain, folder, hm, itemProject, itemTitle, mapTitle, plainReason, plural, projOf, seenKey, tkey, type Waits } from "@/lib/board.ts";
+import { ago, canTickAgain, folder, hm, itemProject, itemTitle, mapTitle, plainReason, projOf, seenKey, tkey, type Waits } from "@/lib/board.ts";
 import { cn } from "@/lib/utils";
-import { markSeen } from "@/lib/seen.ts";
+import { setLink } from "@/lib/link.ts";
+import { say } from "@/lib/notice.ts";
 import { QuestionCard } from "./QuestionCard.tsx";
 import { Checks, Empty, FileLinks, Fold, MapName, Pictures, SectionTitle, TicketTitle, ToneIcon } from "./bits.tsx";
 import { useBoard } from "./context.tsx";
 
 export function WaitsView({ w }: { w: Waits }): React.JSX.Element {
-  const { state, qv, scope, queueWrite, down, busy } = useBoard();
-  const clear =
-    qv.done.length + qv.failed.length > 0 ? (
-      <Button
-        variant="ghost"
-        size="xs"
-        disabled={down || busy}
-        title="Takes done, failed and skipped runs off the queue's list; they stay in the vault"
-        onClick={() => {
-          void queueWrite("POST /api/queue/clear-finished", { version: state.queue.version }, "Ended runs cleared from the list; they stay in the vault.");
-        }}
-      >
-        Clear finished
-      </Button>
-    ) : undefined;
-  const nothing = w.questions.length + w.failed.length + w.done.length + w.tickets.length + w.signedOut.length + w.badWidgets.length === 0;
+  const { writes, down } = useBoard();
+  const runs = [...w.failed, ...w.done];
+  const nothing = w.questions.length + runs.length + w.tickets.length + w.signedOut.length + w.badWidgets.length === 0;
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-8">
       {nothing && <Empty>Nothing waits for you.</Empty>}
+      {runs.length > 0 && (
+        <div className="flex justify-end">
+          <Button
+            variant="outline"
+            size="xs"
+            disabled={down}
+            title="Moves every run listed here to History; nothing in the queue or the vault changes"
+            onClick={() => {
+              void writes.seen(runs.map(seenKey)).then(say);
+            }}
+          >
+            <IconChecks aria-hidden />
+            Mark all seen
+          </Button>
+        </div>
+      )}
       {w.questions.length > 0 && (
         <Part id="questions" title="Questions">
           <div className="grid gap-3 md:grid-cols-2">
@@ -42,8 +46,8 @@ export function WaitsView({ w }: { w: Waits }): React.JSX.Element {
           </div>
         </Part>
       )}
-      <Ended title="Failed" id="failed" now={w.failed} old={scopeItems(scope, qv.failedCleared)} clear={clear} />
-      <Ended title="Done" id="done" now={w.done} old={scopeItems(scope, qv.doneCleared)} clear={w.failed.length === 0 ? clear : undefined} />
+      <Ended title="Failed" id="failed" runs={w.failed} />
+      <Ended title="Done" id="done" runs={w.done} />
       {w.tickets.length > 0 && (
         <Part id="decide" title="Tickets that need a decision">
           <ul className="flex flex-col divide-y rounded-xl border bg-card">
@@ -94,41 +98,29 @@ const ENDED = {
   skipped: [IconBan, "skipped", "warn"],
 } as const;
 
-/** Failed or Done: the runs to look at, then the ones cleared from the list, folded. */
-function Ended({ title, id, now, old, clear }: { title: string; id: string; now: readonly QueueItem[]; old: readonly QueueItem[]; clear: React.ReactNode }): React.JSX.Element | null {
-  if (now.length === 0 && old.length === 0) return null;
+/** Failed or Done: the runs not yet looked at. */
+function Ended({ title, id, runs }: { title: string; id: string; runs: readonly QueueItem[] }): React.JSX.Element | null {
+  if (runs.length === 0) return null;
   return (
-    <Part id={id} title={title} aside={now.length > 0 ? clear : undefined}>
-      {now.length > 0 && (
-        <ul className="flex flex-col divide-y rounded-xl border bg-card">
-          {now.map((i) => (
-            <RunLine key={seenKey(i)} i={i} />
-          ))}
-        </ul>
-      )}
-      {old.length > 0 && (
-        <Fold summary={<span className="text-muted-foreground">{`${plural(old.length, "earlier one")}, cleared from the list`}</span>}>
-          <ul className="mt-1 flex flex-col divide-y rounded-xl border bg-card">
-            {old.map((i) => (
-              <RunLine key={`old-${seenKey(i)}`} i={i} cleared />
-            ))}
-          </ul>
-        </Fold>
-      )}
+    <Part id={id} title={title}>
+      <ul className="flex flex-col divide-y rounded-xl border bg-card">
+        {runs.map((i) => (
+          <RunLine key={seenKey(i)} i={i} />
+        ))}
+      </ul>
     </Part>
   );
 }
 
 /** An ended run: its reason in plain words, its checks and pictures, and what to do about it. */
-function RunLine({ i, cleared }: { i: QueueItem; cleared?: boolean }): React.JSX.Element {
-  const { state, ix, enqueue, down, busy } = useBoard();
+function RunLine({ i }: { i: QueueItem }): React.JSX.Element {
+  const { state, ix, enqueue, down, busy, writes } = useBoard();
   const st = i.state === "done" || i.state === "skipped" ? i.state : "failed";
   const [Ic, word, tone] = ENDED[st];
   const t = ix.byKey.get(i.key);
   const title = itemTitle(i, t);
   const done = i.state === "done";
   const again = canTickAgain(i, ix);
-  const old = cleared === true;
   return (
     <li className="flex gap-3 px-4 py-3">
       <div className="pt-0.5">
@@ -157,15 +149,26 @@ function RunLine({ i, cleared }: { i: QueueItem; cleared?: boolean }): React.JSX
           </span>
         </div>
         {!done && <p className={cn("text-sm", i.state === "skipped" ? "text-warn" : "text-destructive")}>{plainReason(i)}</p>}
-        {!old && <Checks checks={i.checks ?? []} />}
-        {!old && <Pictures item={i} />}
+        <Checks checks={i.checks ?? []} />
+        <Pictures item={i} />
         <div className="flex flex-wrap items-center gap-2">
-          {done && !old && (
+          <Button
+            size="xs"
+            variant="outline"
+            onClick={() => {
+              void writes.seen([seenKey(i)]);
+              setLink({ view: "history", run: i.key, pic: "" });
+            }}
+          >
+            <IconExternalLink aria-hidden />
+            Open the run
+          </Button>
+          {done && (
             <Button
               size="xs"
-              variant="outline"
+              variant="ghost"
               onClick={() => {
-                markSeen(seenKey(i));
+                void writes.seen([seenKey(i)]);
               }}
             >
               <IconCheck aria-hidden />
@@ -185,13 +188,13 @@ function RunLine({ i, cleared }: { i: QueueItem; cleared?: boolean }): React.JSX
               Run again
             </Button>
           )}
-          {!done && !old && (
+          {!done && (
             <Button
               size="xs"
               variant="ghost"
-              title="Take it off this list in this browser; the queue and the vault keep it"
+              title="Moves it to History without opening it"
               onClick={() => {
-                markSeen(seenKey(i));
+                void writes.seen([seenKey(i)]);
               }}
             >
               Set aside

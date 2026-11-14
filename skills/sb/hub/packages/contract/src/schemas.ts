@@ -276,6 +276,8 @@ export const State = z.strictObject({
   messages: z.record(z.string(), Message),
   queue: Queue,
   installed: z.record(z.string(), Installed),
+  /** Ended runs the owner has opened, as `<key>@<ended>`, oldest first. */
+  seen: z.array(z.string()),
   now: Seconds,
   /** Project path -> its panels. */
   providers: z.record(z.string(), z.array(ProviderPanel)),
@@ -412,6 +414,8 @@ export const QueueJobBody = z.strictObject({
 export const QueueRemoveJobBody = z.strictObject({ key: z.string(), version: z.number().int().nullable() });
 export const QueueClearFinishedBody = z.strictObject({ version: z.number().int().nullable().optional() });
 export const QueueItemAgentBody = z.strictObject({ key: z.string(), name: z.string().nullable().optional() });
+/** `<run key>@<ended>`: one ended run, once. */
+export const RunSeenBody = z.strictObject({ key: z.string().min(1) });
 export const AgentsDismissBody = z.strictObject({ agent: z.string() });
 export const EmptyBody = z.strictObject({});
 export const TICKET_ACTIONS = ["done", "drop", "release", "comment", "tier", "checks"] as const;

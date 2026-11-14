@@ -293,6 +293,7 @@ class ContractFixturesTest(unittest.TestCase):
         r("queue_clear-finished", {"version": self.hub.state()["queue"]["version"]})
         r("unsend", {"id": pending})
         r("unlock", {"key": "port:5173", "by": "sess-1"})
+        r("run_seen", {"key": "repo/one#1@1000"})
         r("agents_dismiss", {"agent": "sess-3"})
         r("agents_clear-quiet", {})
         self.record("missing-field", "/api/lock", {"key": "x"}, 400)

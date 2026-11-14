@@ -83,6 +83,7 @@ function state(more: Partial<State> = {}, queue: Partial<State["queue"]> = {}): 
     aliases: {},
     messages: {},
     installed: {},
+    seen: [],
     now: NOW,
     providers: {},
     ...more,
@@ -155,6 +156,14 @@ describe("waits for you", () => {
     expect(w.done.map((i) => i.key)).toEqual(["sb/one#3"]);
     // the same ticket ending again is a new run to look at
     expect(seenKey({ key: "sb/one#2", ended: NOW })).not.toBe(seenKey(done));
+  });
+
+  it("the count is the unseen total: marking every run seen leaves questions, accounts and widgets", () => {
+    const all = new Set(s.queue.items.map(seenKey));
+    const w = waitsFor(s, tickets, ix, all);
+    expect(w.failed).toEqual([]);
+    expect(w.done).toEqual([]);
+    expect(w.count).toBe(2 + 1 + 1);
   });
 });
 

@@ -45,6 +45,7 @@ export const ROUTES = {
   "POST /api/queue/remove_job": post(s.QueueRemoveJobBody, { 200: s.QueueAnswer, 409: s.QueueStale }),
   "POST /api/queue/clear-finished": post(s.QueueClearFinishedBody, { 200: s.QueueAnswer, 409: s.QueueStale }),
   "POST /api/queue/item_agent": post(s.QueueItemAgentBody, { 200: s.QueueAnswer }),
+  "POST /api/run/seen": post(s.RunSeenBody, { 200: s.Ok }),
   "POST /api/agents/dismiss": post(s.AgentsDismissBody, { 200: s.Ok }),
   "POST /api/agents/clear-quiet": post(s.EmptyBody, { 200: s.ClearQuietAnswer }),
   "POST /api/agents/scan": post(s.EmptyBody, { 200: s.ScanAnswer }),

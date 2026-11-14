@@ -108,7 +108,9 @@ class Hub:
         self._data = {"agents": {}, "locks": {}, "questions": {}, "aliases": {}, "messages": {},
                       # a new queue waits paused until the owner resumes it: nothing runs on its own
                       "queue": {"version": 0, "seeded": False, "paused": True, "agent": None, "items": []},
-                      "installed": {}}
+                      "installed": {},
+                      # runs the owner has opened ("<key>@<ended>"), oldest first; Waits for you leaves them out
+                      "seen": []}
         path = self.home / "state.json"
         try:
             saved = json.loads(path.read_text(encoding="utf-8"))
@@ -550,6 +552,17 @@ class Hub:
             q["cleared"] = q["cleared"][-CLEARED_KEPT:]
         return self._queue_write(version, change)
 
+    def run_seen(self, key):
+        """Mark one ended run looked at (`<key>@<ended>`). It leaves Waits for you and stays in History;
+        nothing in the queue or the vault changes. Marking twice is harmless."""
+        if not isinstance(key, str) or not key.strip():
+            raise ValueError("key is the run's key and its end time")
+        with self._lock:
+            seen = [k for k in self._data.get("seen") or [] if k != key] + [key]
+            self._data["seen"] = seen[-SEEN_KEPT:]
+            self._save()
+            return {"ok": True}
+
     def agents_dismiss(self, agent):
         """Take one session row (and its workers) off the board; the session itself is never stopped or told,
         and its next hook event brings its row back."""
@@ -853,6 +866,7 @@ class Hub:
 
 SBMAP = Path(__file__).resolve().parent / "sbmap.py"
 JOB_DUPLICATE_WINDOW = 86400  # the same project and prompt is refused again for this long
+SEEN_KEPT = 2000  # runs marked seen that the hub remembers; older marks drop off
 CLEARED_KEPT = 300  # finished items cleared off the queue list that the page's log still shows
 QUIET_FOR = 2 * 3600  # a row idle or on "your turn" this long is quiet (agents_clear_quiet)
 LOG_SERVED = 1 << 20  # the end of a worker's log the page can open
@@ -2773,6 +2787,8 @@ def make_handler(hub):
                     out = hub.queue_remove_job(d["key"], d["version"])
                 elif path == "/api/queue/clear-finished":
                     out = hub.queue_clear_finished(d.get("version"))
+                elif path == "/api/run/seen":
+                    out = hub.run_seen(d["key"])
                 elif path == "/api/agents/dismiss":
                     out = hub.agents_dismiss(d["agent"])
                 elif path == "/api/agents/clear-quiet":

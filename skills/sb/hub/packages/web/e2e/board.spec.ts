@@ -8,6 +8,11 @@ const queuedKeys = async (page: Page): Promise<string[]> => {
   return state.queue.items.filter((i) => i.state === "queued").map((i) => i.key);
 };
 
+// the hub keeps the seen marks, so every test starts with none
+test.beforeEach(async ({ request }) => {
+  await request.post("/api/__reset-seen");
+});
+
 test("Runs is the landing page: one row per worker run, the silent one amber, never a chat session", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(String(e)));
@@ -100,6 +105,13 @@ test("Waits for you: the question first, then the failed run in plain words, the
   await done.getByRole("button", { name: "Looks good" }).click();
   await expect(page.getByRole("region", { name: "Done" })).toHaveCount(0);
   await expect(page.getByRole("tab", { name: /Waits for you/ })).toContainText("3");
+
+  // Open the run: it is marked seen, so it leaves Waits for you and sits in History
+  await page.getByRole("region", { name: "Failed" }).getByRole("button", { name: "Open the run" }).first().click();
+  await expect(page).toHaveURL(/view=history/);
+  await page.goto("/next/?view=waits");
+  await expect(page.getByRole("region", { name: "Failed" }).getByRole("listitem")).toHaveCount(1);
+  await expect(page.getByRole("tab", { name: /Waits for you/ })).toContainText("2");
 });
 
 test("Cmd-K opens the command menu with New job and Message", async ({ page }) => {
@@ -306,6 +318,20 @@ test("screenshots of History", async ({ page }) => {
   await expect(page.getByRole("dialog", { name: /^Picture \d+ of \d+/ }).getByRole("img", { name: "board-phone.png" })).toBeVisible();
   await page.waitForTimeout(300);
   await page.screenshot({ path: to("viewer-phone.png") });
+});
+
+test("screenshots of Waits for you", async ({ page }) => {
+  const dir = process.env.SB_SHOTS;
+  test.skip(dir === undefined, "SB_SHOTS names the folder to write to");
+  const to = (n: string): string => `${dir ?? ""}/${n}`;
+  await page.goto("/next/?view=waits");
+  await expect(page.getByRole("button", { name: "Mark all seen" })).toBeVisible();
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: to("waits-before.png") });
+  await page.getByRole("button", { name: "Mark all seen" }).click();
+  await expect(page.getByRole("region", { name: "Failed" })).toHaveCount(0);
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: to("waits-after.png") });
 });
 
 for (const [view, scheme] of [["runs", "light"], ["queue", "dark"], ["waits", "light"], ["waits", "dark"], ["history", "light"], ["history", "dark"]] as const) {

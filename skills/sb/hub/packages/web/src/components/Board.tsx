@@ -9,7 +9,6 @@ import { itemInScope, plural, projOf, queueView, scopeItems, scopeWaits, sidebar
 import { useHubState, useTickets, useWrites, type Outcome } from "@/lib/hub.ts";
 import { setLink, useLink, VIEWS, type View } from "@/lib/link.ts";
 import { say, useNotices } from "@/lib/notice.ts";
-import { useSeen } from "@/lib/seen.ts";
 import { cn } from "@/lib/utils";
 import { CommandMenu, JobDialog, MessageDialog, type Dialogs } from "./CommandMenu.tsx";
 import { BoardContext, type BoardData } from "./context.tsx";
@@ -68,8 +67,7 @@ function Loaded({ state, tickets, down, lastOk }: { state: State; tickets: Board
   const agents = splitAgents(state);
   const qv = queueView(state);
   const ix = ticketIndex(tickets ?? [], state);
-  const seen = useSeen();
-  const allWaits = waitsFor(state, tickets, ix, seen);
+  const allWaits = waitsFor(state, tickets, ix, new Set(state.seen));
   const tree = sidebarTree(state, tickets, allWaits);
   const waits = scopeWaits(allWaits, scope, state);
   const alerts = waits.count;

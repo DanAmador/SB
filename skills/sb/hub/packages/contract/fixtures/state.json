@@ -263,7 +263,8 @@
       "seeded": true,
       "stop_at": 1794549600.0,
       "version": 17
-    }
+    },
+    "seen": []
   },
   "contentType": "application/json",
   "route": "GET /api/state",

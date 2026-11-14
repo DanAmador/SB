@@ -59,6 +59,8 @@ export interface Writes {
   dismiss: (agent: string) => Promise<Outcome>;
   clearQuiet: () => Promise<Outcome>;
   scan: () => Promise<Outcome>;
+  /** Mark ended runs seen (`<key>@<ended>` each): they leave Waits for you at once and the hub keeps the mark. */
+  seen: (keys: readonly string[]) => Promise<Outcome>;
 }
 
 /** The hub's writes. Queue writes carry the version the page last read; a stale one redraws from the hub's queue. */
@@ -114,6 +116,13 @@ export function useWrites(): Writes {
       const out = await post("POST /api/agents/clear-quiet", {});
       refresh(false);
       return out.ok ? { ok: true, words: `Cleared ${String(out.data.cleared)} quiet sessions.` } : { ok: false, words: out.error };
+    },
+    async seen(keys) {
+      qc.setQueryData<State>(["state"], (s) => (s ? { ...s, seen: [...s.seen.filter((k) => !keys.includes(k)), ...keys] } : s));
+      const outs = await Promise.all(keys.map((key) => post("POST /api/run/seen", { key })));
+      refresh(false);
+      for (const o of outs) if (!o.ok) return { ok: false, words: o.error };
+      return { ok: true, words: "Marked seen." };
     },
     async scan() {
       const out = await post("POST /api/agents/scan", {});

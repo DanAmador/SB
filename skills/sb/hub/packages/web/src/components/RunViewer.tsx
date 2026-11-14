@@ -1,6 +1,6 @@
 /** A run beside the History list: what it was, then Pictures, Checks, Report and Log, and the three things to do next. */
 import { IconArrowLeft, IconBan, IconCircleCheck, IconHelpCircle, IconNotebook, IconPlayerPlay, IconTicket, IconX } from "@tabler/icons-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type * as React from "react";
 import type { Run, RunDetail, RunOutcome } from "@sb-hub/contract";
 import { Badge } from "@/components/ui/badge";
@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { mediaUrl } from "@/lib/api.ts";
-import { hm, plural } from "@/lib/board.ts";
+import { hm, plural, seenKey } from "@/lib/board.ts";
 import { minutesOf, searchLog } from "@/lib/history.ts";
 import { useRun } from "@/lib/hub.ts";
 import { setLink, useLink } from "@/lib/link.ts";
@@ -26,8 +26,13 @@ export const OUTCOME = {
 } as const satisfies Record<RunOutcome, readonly [unknown, string, string, string]>;
 
 export function RunViewer({ run }: { run: Run }): React.JSX.Element {
-  const { ix, enqueue, down } = useBoard();
+  const { ix, enqueue, down, writes, state } = useBoard();
   const link = useLink();
+  const mark = run.ended === null || state.seen.includes(seenKey(run)) ? null : seenKey(run);
+  // opening a run is looking at it: it leaves Waits for you and stays in History
+  useEffect(() => {
+    if (mark !== null) void writes.seen([mark]);
+  }, [mark, writes]);
   const q = useRun(run.key);
   const detail: RunDetail | undefined = q.data;
   const shown = detail?.run ?? run;
