@@ -485,3 +485,56 @@ test("screenshots of the sidebar", async ({ page }) => {
   await page.waitForTimeout(400);
   await page.screenshot({ path: to("sidebar-375.png") });
 });
+
+test.describe("Map view", () => {
+  test("picking a map draws one node per ticket and an arrow per after; a node opens its panel; the legend names the states", async ({ page }) => {
+    const errors: string[] = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await page.goto("/next/");
+    await page.getByRole("navigation", { name: "Projects and maps" }).getByRole("button", { name: /^board / }).click();
+    const graph = page.getByTestId("map-graph");
+    await expect(graph.locator(".react-flow__node")).toHaveCount(8 + 1);
+    await expect(graph.locator(".react-flow__edge")).toHaveCount(6);
+    await expect(page.getByRole("list", { name: "Legend" }).getByRole("listitem")).toHaveCount(9);
+    // the queued one shows its place; the other map's blocker is named by its map
+    await expect(graph.getByRole("button", { name: /Show the queue in order\s*3 · Queued 1/ })).toBeVisible();
+    await expect(graph.getByRole("button", { name: /other\/site/ })).toBeVisible();
+    // keyboard: Tab reaches a node, Enter opens its panel
+    const node = graph.getByRole("button", { name: /^Drag a ticket into the queue 2 / });
+    await node.focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await expect(page).toHaveURL(/t=demo%2Fboard%232/);
+    await page.keyboard.press("Escape");
+    await graph.getByRole("button", { name: /^Decide the colour scheme 4 / }).click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+    expect(errors).toEqual([]);
+  });
+
+  test("at 375 px a plain list shows instead of the graph, and nothing scrolls sideways", async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 800 });
+    await page.goto("/next/?project=demo&map=demo%2Fboard");
+    const list = page.getByRole("list", { name: "Tickets of the map" });
+    await expect(list.getByRole("listitem")).toHaveCount(8);
+    await expect(page.getByTestId("map-graph")).toHaveCount(0);
+    await expect(list.getByRole("listitem").nth(2)).toContainText("Queued 1");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await list.getByRole("button", { name: /Show the queue in order/ }).click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+  });
+
+  for (const scheme of ["light", "dark"] as const) {
+    test(`axe finds no serious or critical issue on a map (${scheme}); screenshot`, async ({ page }) => {
+      const { default: AxeBuilder } = await import("@axe-core/playwright");
+      await page.emulateMedia({ colorScheme: scheme });
+      await page.goto("/next/?project=demo&map=demo%2Fboard");
+      await expect(page.getByTestId("map-graph").locator(".react-flow__node")).toHaveCount(9);
+      await page.waitForTimeout(800);
+      const dir = process.env.SB_SHOTS;
+      if (dir !== undefined) await page.screenshot({ path: `${dir}/map-${scheme}-1440.png` });
+      const r = await new AxeBuilder({ page }).analyze();
+      const bad = r.violations.filter((v) => v.impact === "serious" || v.impact === "critical");
+      expect(bad.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`)).toEqual([]);
+    });
+  }
+});

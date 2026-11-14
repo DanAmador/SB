@@ -20,6 +20,17 @@ export const useTicketDetail = (key: string | null) =>
     refetchInterval: TICKETS_MS,
   });
 
+/** A map and every ticket of it, finished ones too. */
+export const useMapRoute = (map: string) =>
+  useQuery({
+    queryKey: ["map", map],
+    queryFn: () => get("GET /api/map", { map }),
+    enabled: map !== "",
+    refetchInterval: TICKETS_MS,
+    placeholderData: keepPreviousData,
+    retry: 1,
+  });
+
 /** One session's last actions, every 2 s; null when the hub has none for it (a session that has not acted yet). */
 export const useTrail = (agent: string) =>
   useQuery({

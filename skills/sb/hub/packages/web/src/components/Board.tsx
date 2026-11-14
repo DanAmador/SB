@@ -17,6 +17,7 @@ import { CommandMenu, JobDialog, MessageDialog, type Dialogs } from "./CommandMe
 import { BoardContext, type BoardData } from "./context.tsx";
 import { Breadcrumb, MenuButton, SidebarColumn, SidebarSheet } from "./Sidebar.tsx";
 import { HistoryView } from "./HistoryView.tsx";
+import { MapView } from "./MapView.tsx";
 import { QueueView } from "./QueueView.tsx";
 import { SessionsView } from "./SessionsView.tsx";
 import { RunsView } from "./RunsView.tsx";
@@ -192,7 +193,7 @@ function Loaded({ state, tickets, down, lastOk }: { state: State; tickets: Board
                 title={down ? "offline" : "live"}
               />
             </div>
-            <TabsList aria-label="Views" className="order-3 w-full sm:order-none sm:w-auto">
+            <TabsList aria-label="Views" className="order-3 w-full max-w-full justify-start overflow-x-auto sm:order-none sm:w-auto">
               {VIEWS.map((v) => (
                 <TabsTrigger key={v} value={v}>
                   {VIEW_WORDS[v]}
@@ -229,7 +230,8 @@ function Loaded({ state, tickets, down, lastOk }: { state: State; tickets: Board
               This hub is read-only: {state.queue_lock.holder} holds the queue lock and runs the queue, not the server answering here.
             </div>
           )}
-          <TabsContent value="runs" className="outline-none">
+          <TabsContent value="runs" className="flex flex-col gap-6 outline-none">
+            {scope.map !== "" && <MapView map={scope.map} />}
             <RunsView />
           </TabsContent>
           <TabsContent value="queue" className="outline-none">

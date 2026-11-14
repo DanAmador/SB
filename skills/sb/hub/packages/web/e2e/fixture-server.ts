@@ -3,7 +3,7 @@
  * against the contract before it leaves. Run with `node e2e/fixture-server.ts` (Node strips the types).
  */
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { QueueMoveBody, QueueSetBody, RunDetail, RunSeenBody, RunsPage, SendBody, State, Tickets, Trail, addLinks, type LinkContext, type Message, type QueueItem, type TicketRow } from "@sb-hub/contract";
+import { QueueMoveBody, QueueSetBody, RunDetail, RunSeenBody, MapRoute, RunsPage, SendBody, State, Tickets, Trail, addLinks, type LinkContext, type Message, type QueueItem, type TicketRow } from "@sb-hub/contract";
 
 /** Every file the fixtures name exists; the server's own vault lookup is covered by the server's tests. */
 const ctx: LinkContext = { exists: () => true, real: (p) => p, findTicket: (map, num) => `/vault/${map}/issues/${String(num)}.md`, runs: {} };
@@ -31,6 +31,26 @@ const tickets = (): TicketRow[] => Tickets.parse(addLinks("GET /api/tickets", [
   ticket(3, "Write the shop's copy", { map: "other/site", map_title: "The shop site", status: "claimed", state: "claimed", reason: "claimed by hub main", file: "/vault/other/site/issues/3.md" }),
   ticket(1, "Sweep the old attic", { map: "other/old", map_title: "The old attic", status: "claimed", state: "claimed", reason: "claimed by hub main", file: "/vault/other/old/issues/1.md" }),
 ], ctx));
+
+// ---- a map with every shape the Map view draws: a diamond, a chain, a lone ticket, a blocker in another map ----
+const mt = (num: number, title: string, after: number[], more: Record<string, unknown> = {}): Record<string, unknown> => ({
+  num, title, type: "task", status: "open", state: "ready", why: "So the map can be drawn.", priority: null, tier: "sonnet", place: null, last_run: null,
+  blocked_by: after.map((n) => ({ map: "demo/board", num: n, title: `Ticket ${String(n)}`, status: "open" })),
+  file: `/vault/demo/board/issues/${String(num)}.md`, ...more,
+});
+const mapRoute = (): unknown => MapRoute.parse(addLinks("GET /api/map", {
+  map: "demo/board", title: "The demo board", status: "open", words: "A board for the test.", checks: ["pnpm test"], uri: "obsidian://open?path=%2Fvault%2Fdemo%2Fboard%2Fmap.md",
+  tickets: [
+    mt(1, "Draw the header", [], { status: "resolved", state: "done" }),
+    mt(2, "Drag a ticket into the queue", [1], { status: "claimed", state: "claimed" }),
+    mt(3, "Show the queue in order", [1], { place: 1 }),
+    mt(4, "Decide the colour scheme", [2, 3], { state: "waits for you", type: "grilling" }),
+    mt(5, "Run the board against the real hub", [4], { state: "blocked" }),
+    mt(6, "Fix the sheet's focus", []),
+    { ...mt(7, "Wait on the shop's fonts", [], { state: "blocked" }), blocked_by: [{ map: "other/site", num: 2, title: "Pick the shop's fonts", status: "open" }] },
+    mt(9, "Left out of the first cut", [], { status: "out-of-scope", state: "out of scope" }),
+  ],
+}, ctx));
 
 const item = (key: string, state: QueueItem["state"]): Raw<QueueItem> => ({
   key, kind: "ticket", agent: null, state, note: "", commit: null, tries: 0, started: state === "running" ? now() - 300 : null, ended: null,
@@ -156,6 +176,11 @@ createServer((req, res) => {
       return;
     }
     if (req.method === "GET" && path === "/api/tickets") { send(res, 200, tickets().map((t) => ({ ...t, queued: queue.items.some((i) => i.key === `${t.map}#${String(t.num)}`) }))); return; }
+    if (req.method === "GET" && path === "/api/map") {
+      if (new URL(req.url ?? "", "http://x").searchParams.get("map") !== "demo/board") { send(res, 404, { ok: false, error: "no such map" }); return; }
+      send(res, 200, mapRoute());
+      return;
+    }
     if (req.method === "GET" && path === "/api/ticket") {
       const key = new URL(req.url ?? "", "http://x").searchParams.get("key") ?? "";
       { send(res, 200, { key, title: key, file: "/vault/x.md", open: true, comments: [], map_checks: ["pnpm test"], trail: [], uri: "obsidian://open?path=x", map_uri: "obsidian://open?path=m" }); return; }
