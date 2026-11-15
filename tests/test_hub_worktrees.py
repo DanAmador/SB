@@ -115,10 +115,12 @@ class WorktreeTest(RunnerCase):
         sup.close_off = False
         self.addCleanup(sup.stop)
         end = time.time() + 10
-        while time.time() < end and hub.state()["queue"]["items"][0]["state"] in ("running", "landed", "review"):
+        def one():  # judged: the night ended and the item is on its record
+            return next((i for i in hub.state()["queue"]["items"] if i.get("night")), None) or hub.night(hub.nights()["nights"][0]["id"])["night"]["items"][0]
+        while time.time() < end and one()["state"] in ("running", "landed", "review"):
             sup.tick()
             time.sleep(0.05)
-        item = hub.state()["queue"]["items"][0]
+        item = one()
         self.assertEqual((item["key"], item["state"]), ("repo/one#1", "done"))
         self.assertIn("Ticket: repo/one/001", git(self.repo, "log", "-1", "--format=%B"))
         self.assertNotIn(tree, self.trees())

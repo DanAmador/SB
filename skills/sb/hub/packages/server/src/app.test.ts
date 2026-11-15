@@ -176,7 +176,7 @@ describe("obsidian links", () => {
     writeFileSync(join(run, "1.md"), "report");
     writeFileSync(join(run, "1.log"), "log");
     writeFileSync(join(run, "board.md"), "board");
-    const items = STATE.queue.items.map((i): object => (i.key === "repo/one#1" ? { ...i, run, log: join(run, "1.log"), map: "repo/one" } : i));
+    const items = STATE.queue.items.map((i): object => (i.key === "repo/two#5" ? { ...i, key: "repo/one#1", run, log: join(run, "1.log"), map: "repo/one" } : i));
     const state = { ...STATE, queue: { ...STATE.queue, runs: { "repo/one": join(run, "board.md") }, items } };
     const { call } = setup(() => json(200, state), "/nonexistent", ctx);
     const body = (await (await call("/api/state")).json()) as { queue: { items: { key: string; links: Links }[] } };

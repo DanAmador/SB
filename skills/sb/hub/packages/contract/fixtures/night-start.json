@@ -1,0 +1,31 @@
+{
+  "body": {
+    "night": {
+      "by": "sess-1",
+      "counts": {
+        "done": 0,
+        "failed": 0,
+        "items": 0,
+        "not_reached": 0,
+        "queued": 0,
+        "running": 0,
+        "skipped": 0
+      },
+      "ended": null,
+      "how": null,
+      "id": "night-fixture-2",
+      "name": "Second night",
+      "not_reached": [],
+      "started": 1794528060.0,
+      "state": "live"
+    },
+    "ok": true
+  },
+  "contentType": "application/json",
+  "request": {
+    "by": "sess-1",
+    "name": "Second night"
+  },
+  "route": "POST /api/night/start",
+  "status": 200
+}

@@ -153,6 +153,8 @@ const itemFields = {
   started: Seconds.nullable(),
   ended: Seconds.nullable(),
   title: z.string().optional(),
+  /** The id of the night it belongs to; absent from an item only a close-off job is. */
+  night: z.string().optional(),
   repo: z.string().optional(),
   runner: z.string().optional(),
   run: z.string().optional(),
@@ -247,6 +249,8 @@ export const Queue = z.strictObject({
   agents: z.array(z.string()).optional(),
   stop_at: Seconds.nullable().optional(),
   final_review: z.boolean().optional(),
+  /** The id of the night that is live or stopping, null when none is. */
+  night: z.string().nullable().optional(),
   /** Finished items taken off the list: the page's log. */
   cleared: z.array(QueueItem).optional(),
   /** Map -> tonight's run board. */
@@ -258,6 +262,46 @@ export const Queue = z.strictObject({
   repos: z.record(z.string(), RepoLoad).optional(),
 });
 export type Queue = z.infer<typeof Queue>;
+
+// ---- nights: one sb tonight ----
+
+export const NightState = z.enum(["live", "stopping", "ended"]);
+export type NightState = z.infer<typeof NightState>;
+/** finished: its last item was judged; stopped: you stopped it after what ran; stop_time: the queue's stop time passed. */
+export const NightHow = z.enum(["finished", "stopped", "stop_time"]);
+export type NightHow = z.infer<typeof NightHow>;
+
+export const NightCounts = z.strictObject({
+  items: z.number().int(),
+  queued: z.number().int(),
+  /** At work or not judged yet (running, landed, review, recheck). */
+  running: z.number().int(),
+  done: z.number().int(),
+  failed: z.number().int(),
+  skipped: z.number().int(),
+  not_reached: z.number().int(),
+});
+
+export const Night = z.strictObject({
+  id: z.string(),
+  name: z.string(),
+  started: Seconds,
+  /** The session that started it; null when none said. */
+  by: z.string().nullable(),
+  state: NightState,
+  ended: Seconds.nullable(),
+  how: NightHow.nullable(),
+  /** What a stop left out of the line: open tickets (and jobs) that never started. */
+  not_reached: z.array(z.strictObject({ key: z.string(), title: z.string() })),
+  counts: NightCounts,
+});
+export type Night = z.infer<typeof Night>;
+
+export const NightsAnswer = z.strictObject({ nights: z.array(Night) });
+export const NightDetail = z.strictObject({ night: Night.extend({ items: z.array(QueueItem) }) });
+export const NightAnswer = z.strictObject({ ok: z.literal(true), night: Night });
+export const NightStartBody = z.strictObject({ name: z.string().nullable().optional(), by: z.string().nullable().optional() });
+export const NightStopBody = z.strictObject({ mode: z.literal("after") });
 
 // ---- providers: the hub's own panel is strict, a project's script may add anything ----
 
@@ -550,7 +594,6 @@ export const QueueJobBody = z.strictObject({
   at: z.string().nullable().optional(),
 });
 export const QueueRemoveJobBody = z.strictObject({ key: z.string(), version: z.number().int().nullable() });
-export const QueueClearFinishedBody = z.strictObject({ version: z.number().int().nullable().optional() });
 export const QueueItemAgentBody = z.strictObject({ key: z.string(), name: z.string().nullable().optional() });
 /** `<run key>@<ended>`: one ended run, once. */
 export const RunSeenBody = z.strictObject({ key: z.string().min(1) });

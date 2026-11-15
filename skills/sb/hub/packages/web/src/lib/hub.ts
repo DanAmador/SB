@@ -66,7 +66,6 @@ type QueueRoute =
   | "POST /api/queue/options"
   | "POST /api/queue/job"
   | "POST /api/queue/remove_job"
-  | "POST /api/queue/clear-finished"
   | "POST /api/queue/item_agent";
 
 function putQueue(qc: QueryClient, queue: Queue): void {

@@ -51,7 +51,7 @@ class LanTest(HubCase):
     def test_without_the_token_every_path_is_an_empty_404(self):
         for path in ("/", "/assets/x.js", "/api/state", "/v/", "/v/wrong/", "/v/wrong/api/state", f"/v/{self.token[:-1]}/"):
             self.assertEqual(self.req(path), (404, b""), path)
-        self.assertEqual(self.req("/v/wrong/api/queue/clear-finished", {}), (404, b""))
+        self.assertEqual(self.req("/v/wrong/api/night/stop", {}), (404, b""))
 
     def test_it_serves_the_built_board_under_the_token_and_nothing_outside_it(self):
         dist = Path(LAN).parents[1] / "hub" / "packages" / "web" / "dist"
@@ -76,7 +76,7 @@ class LanTest(HubCase):
         self.assertEqual(code, 200)
         self.assertIn("a", json.loads(body)["agents"])
         for path in ("api/queue/set", "api/queue/pause", "api/send", "api/answer", "api/ticket/done", "api/report",
-                     "api/queue/clear-finished", "api/agents/dismiss", "api/agents/clear-quiet", "api/run/seen"):
+                     "api/night/start", "api/night/stop", "api/agents/dismiss", "api/agents/clear-quiet", "api/run/seen"):
             self.assertEqual(self.req(self.v(path), {"keys": [], "version": 0, "paused": False})[0], 403, path)
         self.assertIn("a", self.get("/api/state")["agents"])
 

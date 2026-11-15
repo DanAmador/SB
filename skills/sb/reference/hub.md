@@ -80,8 +80,7 @@ filters (project, map, text) kept in the page link. Columns:
 | Done | every finished item of the last 7 days, newest first: commit, checks, self-checks, report and log |
 | Failed | failed and skipped items with the reason; Tick again queues one afresh |
 
-Dragging a Ready card into Queued queues it (and what it waits on). Clear finished takes done, failed and
-skipped items off the list (they stay in the vault and fold under each column); Dismiss and Clear quiet
+Dragging a Ready card into Queued queues it (and what it waits on). Dismiss and Clear quiet
 sessions take rows off the board without stopping anything. A card opens a side panel: why, done when, paths,
 checks, comments, its map's handoff, checkpoint and newest run board, Open in Obsidian links (`sbmap uri`), and
 the actions Done, Drop, Release, Comment, Tier and the map's Checks, each confirmed and each run through
@@ -99,8 +98,23 @@ byte ranges, so a phone plays the clips) and answers anything else with an empty
 `.claude/launch.json`) serves the same page read-only to a phone on the WiFi: `sbhub_lan.py url` prints its
 address, `http://<the Mac's WiFi address>:8766/v/<token>/`. The token (32 characters, `$SB_HUB_HOME/lan-token`)
 is in every path; without it every path answers an empty 404. It forwards reads under `/api/` to the hub and
-only three writes, all display state: clear finished, dismiss, clear quiet sessions. Every other write answers
+only the writes that change display state: dismiss, clear quiet sessions. Every other write answers
 403, and the page hides its controls.
+
+## Nights
+
+A night is one sb tonight: `id`, `name` (default `Night of 2026-11-14, 22:45`), `started`, `by`, `state` (`live`,
+`stopping`, `ended`), `ended`, `how` (`finished`, `stopped`, `stop_time`), `counts` and, after a stop, `not_reached`.
+Every queue item carries its night's `night` id; at most one night is live. Queuing a ticket, a map or a job with
+none live starts one by itself, and everything queued while it is live joins it. `POST /api/night/start {name?, by?}`
+(`sbhub night start [--name]`) opens one; a second start is refused (400). When the night's last item has ended and
+been judged it ends as `finished`; its items leave the live line for the night's own record (outcome, commit, report,
+review links), so nothing is cleared by hand. `POST /api/night/stop {mode: "after"}` (`sbhub night stop`) starts
+nothing new, lets what runs finish and be judged, then ends the night as `stopped`; the tickets it never reached
+leave the line, stay open and not queued, and are listed on the night as `not_reached` (queuing while it stops is
+refused). A night whose queue stop time passes ends as `stop_time`. `GET /api/nights` lists nights newest first with
+counts; `GET /api/night?id=` gives one with its items. A queue saved before nights loads as one ended night, `Before
+runs`, plus a live night for what was queued or running. The final review and the run note belong to the live night.
 
 ## Running it unattended
 

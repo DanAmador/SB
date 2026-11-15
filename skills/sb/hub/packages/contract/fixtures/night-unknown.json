@@ -1,0 +1,9 @@
+{
+  "body": {
+    "error": "no such night",
+    "ok": false
+  },
+  "contentType": "application/json",
+  "route": "GET /api/night",
+  "status": 404
+}

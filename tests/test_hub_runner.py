@@ -156,7 +156,10 @@ class RunnerCase(unittest.TestCase):
     # ---- reading the result ----
 
     def items(self):
-        return {i["key"]: i for i in self.hub.state()["queue"]["items"]}
+        """Every item by key: the live line, and the items of nights that ended (they leave the line)."""
+        out = {i["key"]: i for n in self.hub.nights()["nights"][::-1] for i in self.hub.night(n["id"])["night"]["items"]}
+        out.update({i["key"]: i for i in self.hub.state()["queue"]["items"]})
+        return out
 
     def open_tickets(self, folder="repo/one"):
         rows = json.loads(self.sb("tickets", "--json").stdout)
@@ -600,11 +603,13 @@ class MapReviewTest(RunnerCase):
         sup = Supervisor(hub, port=4321)
         sup.close_off = False
         self.addCleanup(sup.stop)
+        def one():  # judged: the night ended and the item is on its record
+            return next((i for i in hub.state()["queue"]["items"] if i.get("night")), None) or hub.night(hub.nights()["nights"][0]["id"])["night"]["items"][0]
         end = time.time() + 60
-        while time.time() < end and hub.state()["queue"]["items"][0]["state"] != "done":
+        while time.time() < end and one()["state"] != "done":
             sup.tick()
             time.sleep(0.03)
-        item = hub.state()["queue"]["items"][0]
+        item = one()
         self.assertEqual((item["state"], item["verdict"], item["commit"]), ("done", "finished", self.shas(1)[0]))
         self.assertEqual([x["keys"] for x in self.reviewed], [["repo/one#1"]])
         self.assertNotIn(1, self.open_tickets())
@@ -778,7 +783,7 @@ class StopsTest(RunnerCase):
         self.resume()
         self.until(lambda: self.hub.state()["queue"]["paused"])
         q = self.hub.state()["queue"]
-        self.assertEqual([i["state"] for i in q["items"]], ["failed"] * 3)
+        self.assertEqual([i["state"] for i in self.items().values()], ["failed"] * 3)  # the night ended: its record
         self.assertIn("no commit", q["note"])
 
     def test_a_ticket_resolved_or_claimed_while_queued_is_skipped_with_its_new_state(self):
@@ -833,11 +838,13 @@ class StopsTest(RunnerCase):
         self.assertEqual((item["key"], item["state"], item["pid"]), ("repo/one#1", "running", pid))  # waited for
         self.assertEqual([x["key"] for x in self.launched], ["repo/one#1"])
         self.assertTrue(alive(pid))
+        def one():  # judged: the night ended and the item is on its record
+            return next((i for i in hub.state()["queue"]["items"] if i.get("night")), None) or hub.night(hub.nights()["nights"][0]["id"])["night"]["items"][0]
         end = time.time() + 10
-        while time.time() < end and hub.state()["queue"]["items"][0]["state"] in ("running", "landed", "review"):
+        while time.time() < end and one()["state"] in ("running", "landed", "review"):
             sup.tick()
             time.sleep(0.05)
-        item = hub.state()["queue"]["items"][0]
+        item = one()
         sha = git(self.repos["repo/one"], "log", "-1", "--format=%H", "--grep", "^Ticket: repo/one/001")
         self.assertEqual((item["state"], item["commit"]), ("done", sha))  # judged by the new hub, in code
         self.assertEqual([x["key"] for x in self.launched].count("repo/one#1"), 1)
@@ -898,7 +905,7 @@ class JobsTest(RunnerCase):
         git(repo, "commit", "-q", "-m", "other")
 
     def jobs(self):
-        return [i for i in self.hub.state()["queue"]["items"] if i["kind"] == "job"]
+        return [i for i in self.items().values() if i["kind"] == "job"]
 
     def seed(self, key):
         self.hub.report({"agent": key, "role": "worker", "parent": "queue", "state": "working", "note": "reading"})
@@ -971,7 +978,7 @@ class JobsTest(RunnerCase):
         self.clock.t = START + 120
         self.sup.tick()
         self.assertEqual(self.launched, [])
-        notes = {i["state"] + ": " + i["note"] for i in self.hub.state()["queue"]["items"]}
+        notes = {i["state"] + ": " + i["note"] for i in self.items().values()}  # the night ended: its items are on its record
         self.assertEqual(notes, {"skipped: past the stop time"})
         self.assertEqual(self.state_of(job), "skipped")
 
@@ -983,7 +990,7 @@ class JobsTest(RunnerCase):
         self.assertEqual(self.state_of("repo/one#1"), "queued")
         self.clock.t = START + 3601
         self.sup.tick()
-        self.assertEqual({i["state"] for i in self.hub.state()["queue"]["items"]}, {"skipped"})
+        self.assertEqual({i["state"] for i in self.items().values()}, {"skipped"})
         self.assertEqual(len(self.launched), 1)
 
     def test_a_duplicate_job_within_a_day_is_refused_naming_the_earlier_item_and_accepted_after_a_day(self):
@@ -1029,7 +1036,8 @@ class JobsTest(RunnerCase):
         self.clock.t = START + 120
         self.sup.tick()
         q = self.hub.state()["queue"]
-        self.assertEqual({i["state"] for i in q["items"]}, {"skipped"})
+        self.assertEqual({i["state"] for i in self.items().values()}, {"skipped"})
+        self.assertEqual(self.hub.nights()["nights"][0]["how"], "stop_time")
         self.assertIsNone(q.get("stop_at"))
         self.clock.t = START + 86400
         key = self.hub.queue_job("repo", "Audit it", "main")["key"]

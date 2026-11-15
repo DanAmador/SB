@@ -1,0 +1,47 @@
+{
+  "body": {
+    "nights": [
+      {
+        "by": null,
+        "counts": {
+          "done": 0,
+          "failed": 0,
+          "items": 5,
+          "not_reached": 0,
+          "queued": 5,
+          "running": 0,
+          "skipped": 0
+        },
+        "ended": null,
+        "how": null,
+        "id": "night-20261113-010100",
+        "name": "Night of 2026-11-13, 01:01",
+        "not_reached": [],
+        "started": 1794528060.0,
+        "state": "live"
+      },
+      {
+        "by": "sess-1",
+        "counts": {
+          "done": 1,
+          "failed": 0,
+          "items": 1,
+          "not_reached": 0,
+          "queued": 0,
+          "running": 0,
+          "skipped": 0
+        },
+        "ended": 1794528000.0,
+        "how": "finished",
+        "id": "night-20261113-010000",
+        "name": "Night of 2026-11-13, 01:00",
+        "not_reached": [],
+        "started": 1794528000.0,
+        "state": "ended"
+      }
+    ]
+  },
+  "contentType": "application/json",
+  "route": "GET /api/nights",
+  "status": 200
+}

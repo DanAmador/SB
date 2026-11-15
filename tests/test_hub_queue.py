@@ -93,13 +93,16 @@ class QueueTest(unittest.TestCase):
         v = self.h.state()["queue"]["version"]
         with self.h._lock:
             a, b = self.h._data["queue"]["items"]
+            # one more item still at work keeps the night live: when every item is judged the night ends and they leave
+            self.h._data["queue"]["items"].append({"key": "job:x:1", "kind": "job", "state": "running",
+                                                   "night": a["night"]})
             a.update(state="failed", note="the worker exited 1", ended=5.0, tries=1, started=4.0, commit="abc",
                      retry="it failed", agent="main", digested=True)
             b.update(state="skipped", note="past the stop time", ended=6.0)
         self.h.queue_set([], v)  # unticked: they stay as they ended
-        self.assertEqual([i["state"] for i in self.h.state()["queue"]["items"]], ["failed", "skipped"])
+        self.assertEqual([i["state"] for i in self.h.state()["queue"]["items"]], ["failed", "skipped", "running"])
         self.h.queue_set(["repo/one#4", "repo/one#1"], v + 1)
-        items = {i["key"]: i for i in self.h.state()["queue"]["items"]}
+        items = {i["key"]: i for i in self.h.state()["queue"]["items"] if i["kind"] == "ticket"}
         self.assertEqual(list(items), ["repo/one#4", "repo/one#1"])
         for i in items.values():
             self.assertEqual((i["state"], i["note"], i["ended"], i["tries"], i["started"], i["commit"]),
@@ -855,6 +858,175 @@ class WholeMapsTest(unittest.TestCase):
         self.assertEqual(q["maps"], ["r/b", "r/a"])
         self.assertEqual([i["key"] for i in q["items"]], ["r/b#1", "r/b#2", "r/a#1", "r/a#2"])
         self.assertEqual(q["version"], 7)
+
+
+class NightTest(unittest.TestCase):
+    """One sb tonight: a night with a start, an end and the items that belong to it."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.home = Path(self._tmp.name)
+        self.clock = [1_800_000_000.0]
+        self.h = Hub(self.home, now=lambda: self.clock[0], run=lambda: json.dumps(TICKETS))
+        self.h.tickets()
+
+    def q(self):
+        return self.h.state()["queue"]
+
+    def set(self, *nums, **kw):
+        return self.h.queue_set(["repo/one#{}".format(n) for n in nums], None, **kw)
+
+    def judge(self, key, state="done"):
+        with self.h._lock:
+            next(i for i in self.h._data["queue"]["items"] if i["key"] == key).update(state=state, ended=self.clock[0])
+        with self.h._lock:
+            self.h._night_settle()
+
+    def test_start_makes_a_live_night_and_a_second_start_is_refused(self):
+        out = self.h.night_start("Tonight", by="sess-1")
+        n = out["night"]
+        self.assertEqual((n["name"], n["state"], n["by"], n["ended"], n["how"]), ("Tonight", "live", "sess-1", None, None))
+        self.assertEqual(self.q()["night"], n["id"])
+        with self.assertRaisesRegex(ValueError, "already live"):
+            self.h.night_start()
+        self.assertEqual(len(self.h.nights()["nights"]), 1)
+
+    def test_the_default_name_carries_the_date_and_time(self):
+        name = self.h.night_start()["night"]["name"]
+        self.assertRegex(name, r"^Night of \d{4}-\d\d-\d\d, \d\d:\d\d$")
+
+    def test_queuing_with_none_live_starts_one_and_what_follows_joins_it(self):
+        self.assertIsNone(self.q()["night"])
+        self.set(1)
+        nid = self.q()["night"]
+        self.assertTrue(nid)
+        self.set(1, 4)
+        self.assertEqual({i["night"] for i in self.q()["items"]}, {nid})
+        self.assertEqual(len(self.h.nights()["nights"]), 1)
+
+    def test_a_night_started_first_takes_what_is_queued_and_names_who_queued(self):
+        nid = self.h.night_start("Mine")["night"]["id"]
+        self.set(1)
+        self.assertEqual([i["night"] for i in self.q()["items"]], [nid])
+
+    def test_when_the_last_item_is_judged_the_night_ends_as_finished(self):
+        self.set(1, 4)
+        nid = self.q()["night"]
+        self.judge("repo/one#1")
+        self.assertEqual(self.q()["night"], nid)  # one is still queued
+        self.assertEqual(len(self.q()["items"]), 2)
+        self.clock[0] += 60
+        self.judge("repo/one#4", "failed")
+        self.assertEqual((self.q()["night"], self.q()["items"]), (None, []))
+        n = self.h.night(nid)["night"]
+        self.assertEqual((n["state"], n["how"], n["ended"]), ("ended", "finished", self.clock[0]))
+        self.assertEqual({i["key"]: i["state"] for i in n["items"]}, {"repo/one#1": "done", "repo/one#4": "failed"})
+        self.assertEqual(n["counts"]["done"], 1)
+        self.assertEqual(n["counts"]["failed"], 1)
+        self.set(4)  # the next queue write opens a new night
+        self.assertNotEqual(self.q()["night"], nid)
+        self.assertEqual([n["state"] for n in self.h.nights()["nights"]], ["live", "ended"])  # newest first
+
+    def test_stop_after_starts_nothing_new_lets_the_running_one_finish_and_lists_the_unreached(self):
+        self.set(1, 4)
+        nid = self.q()["night"]
+        with self.h._lock:
+            next(i for i in self.h._data["queue"]["items"] if i["key"] == "repo/one#4").update(state="running")
+        out = self.h.night_stop("after")["night"]
+        self.assertEqual(out["state"], "stopping")
+        self.assertEqual([x["key"] for x in out["not_reached"]], ["repo/one#1"])
+        self.assertEqual([i["key"] for i in self.q()["items"]], ["repo/one#4"])  # the queued one left the line
+        with self.assertRaisesRegex(ValueError, "stopping"):
+            self.set(1, 4)
+        self.assertEqual([i["key"] for i in self.q()["items"]], ["repo/one#4"])
+        self.judge("repo/one#4")
+        n = self.h.night(nid)["night"]
+        self.assertEqual((n["state"], n["how"]), ("ended", "stopped"))
+        self.assertEqual([i["key"] for i in n["items"]], ["repo/one#4"])
+        self.assertEqual([x["key"] for x in n["not_reached"]], ["repo/one#1"])
+        self.assertEqual((n["counts"]["not_reached"], self.q()["night"]), (1, None))
+        self.assertNotIn("repo/one#1", {i["key"] for i in self.q()["items"]})  # not queued: it can be queued again
+        self.set(1)
+        self.assertEqual([i["key"] for i in self.q()["items"]], ["repo/one#1"])
+
+    def test_stop_with_nothing_running_ends_the_night_at_once(self):
+        self.set(1)
+        nid = self.q()["night"]
+        out = self.h.night_stop("after")["night"]
+        self.assertEqual((out["state"], out["how"], len(out["not_reached"])), ("ended", "stopped", 1))
+        self.assertEqual(self.h.night(nid)["night"]["items"], [])
+        with self.assertRaisesRegex(ValueError, "no night"):
+            self.h.night_stop("after")
+        with self.assertRaises(ValueError):
+            self.h.night_stop("now")
+
+    def test_a_queue_from_before_nights_loads_as_before_runs_plus_one_live_night(self):
+        home = self.home / "old"
+        home.mkdir()
+        items = [Hub._item(k) for k in ("repo/one#1", "repo/one#4", "repo/one#2")]
+        items[0].update(state="done", started=100.0, ended=200.0, commit="abc")
+        items[1].update(state="failed", started=300.0, ended=400.0)
+        items[2]["state"] = "queued"
+        (home / "state.json").write_text(json.dumps({"queue": {"version": 3, "seeded": True, "paused": False,
+                                                               "agent": None, "items": items,
+                                                               "cleared": [Hub._item("repo/one#9")]}}))
+        h = Hub(home, now=lambda: 1_800_000_000.0, run=lambda: json.dumps(TICKETS))
+        nights = h.nights()["nights"]
+        self.assertEqual([(n["name"], n["state"], n["how"]) for n in nights],
+                         [("Night of {}".format(__import__("datetime").datetime.fromtimestamp(1_800_000_000.0).strftime("%Y-%m-%d, %H:%M")), "live", None),
+                          ("Before runs", "ended", "finished")])
+        before = nights[1]
+        self.assertEqual((before["started"], before["ended"], before["counts"]["items"]), (100.0, 400.0, 2))
+        q = h.state()["queue"]
+        self.assertEqual([i["key"] for i in q["items"]], ["repo/one#2"])
+        self.assertEqual((q["night"], q["items"][0]["night"]), (nights[0]["id"], nights[0]["id"]))
+        self.assertEqual([i["key"] for i in q["cleared"]], ["repo/one#9"])  # the ones cleared earlier stay where they are
+        self.assertEqual(h.night(before["id"])["night"]["items"][0]["commit"], "abc")
+        self.assertNotIn("nights", h.state())
+        again = Hub(home, run=lambda: json.dumps(TICKETS))  # loaded twice: not migrated twice
+        self.assertEqual(len(again.nights()["nights"]), 2)
+
+    def test_the_stop_time_ends_the_night_as_stop_time_reached(self):
+        self.set(1)
+        with self.h._lock:
+            self.h._data["queue"]["stop_at"] = self.clock[0] - 1
+        sup = Supervisor(self.h, port=1)
+        sup.close_off = False
+        sup.tick()
+        n = self.h.nights()["nights"][0]
+        self.assertEqual((n["state"], n["how"], n["counts"]["skipped"]), ("ended", "stop_time", 1))
+
+    def test_over_http(self):
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", free_port()), make_handler(self.h))
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        port = server.server_address[1]
+
+        def call(path, data=None):
+            req = urllib.request.Request("http://127.0.0.1:{}{}".format(port, path), None if data is None else
+                                         json.dumps(data).encode(), {"Content-Type": "application/json"})
+            try:
+                with urllib.request.urlopen(req) as r:
+                    return r.status, json.loads(r.read())
+            except urllib.error.HTTPError as e:
+                with e:
+                    return e.code, json.loads(e.read())
+
+        code, out = call("/api/night/start", {"name": "Tonight"})
+        self.assertEqual((code, out["night"]["state"]), (200, "live"))
+        self.assertEqual(call("/api/night/start", {})[0], 400)
+        self.set(1)
+        code, out = call("/api/nights")
+        self.assertEqual((code, [n["id"] for n in out["nights"]]), (200, [self.q()["night"]]))
+        self.assertNotIn("items", out["nights"][0])
+        code, out = call("/api/night?id=" + self.q()["night"])
+        self.assertEqual((code, [i["key"] for i in out["night"]["items"]]), (200, ["repo/one#1"]))
+        self.assertEqual(call("/api/night?id=nope")[0], 404)
+        code, out = call("/api/night/stop", {"mode": "after"})
+        self.assertEqual((code, out["night"]["how"]), (200, "stopped"))
+        self.assertEqual(call("/api/night/stop", {"mode": "now"})[0], 400)
 
 
 if __name__ == "__main__":
