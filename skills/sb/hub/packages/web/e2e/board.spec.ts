@@ -925,13 +925,18 @@ test.describe("Map view", () => {
     await page.getByRole("menuitem", { name: "Tick everything that comes after this" }).click();
     await expect(graph.getByText("Ticked")).toHaveCount(2);
     await page.keyboard.press("Escape");
-    // queue three by a box again (the page may have scrolled meanwhile: measure again)
+    await expect(bar).toHaveCount(0);
+    await expect(graph.getByText("Ticked")).toHaveCount(0);
+    // queue three by a box again. The page may have scrolled meanwhile so far that the graph's top edge sits
+    // under the sticky header, where a drag would start on the header: bring the graph to the middle, then measure again
+    await graph.evaluate((el) => { el.scrollIntoView({ block: "center" }); });
     const [a2, c2, area2] = [await rect("Batch A"), await rect("Batch C"), await graph.boundingBox()];
     if (area2 === null) throw new Error("the graph is not on screen");
     await page.mouse.move(area2.x + 4, a2.y - 6);
     await page.mouse.down();
     await page.mouse.move(c2.x + c2.width / 2, a2.y + a2.height / 2, { steps: 8 });
     await page.mouse.up();
+    await expect(graph.getByText("Ticked")).toHaveCount(3);
     await bar.getByRole("button", { name: /^Queue 3/ }).click();
     await expect.poll(() => queuedKeys(page)).toEqual([...before, "demo/batch#1", "demo/batch#2", "demo/batch#3"]);
     await expect(bar).toHaveCount(0);
