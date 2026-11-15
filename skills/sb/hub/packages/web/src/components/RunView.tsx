@@ -15,7 +15,7 @@ import { helperCards, sessionCards, type SessionCard } from "@/lib/sessions.ts";
 import { setLink, useLink } from "@/lib/link.ts";
 import { cn } from "@/lib/utils";
 import { Empty, FileLinks, MapName, SectionTitle, TicketTitle, ToneIcon } from "./bits.tsx";
-import { AccountPicker } from "./AccountPicker.tsx";
+import { Limits, RowMenu, TickBar, TickBox, WaitReason } from "./RunControls.tsx";
 import { TicketTable } from "./TicketTable.tsx";
 import { useBoard } from "./context.tsx";
 
@@ -48,10 +48,12 @@ export function RunView(): React.JSX.Element {
         )}
         {state.queue.paused && <Badge tone="warn">paused</Badge>}
       </p>
+      <Limits />
       <RunningNow />
       <section aria-label="The night, map by map" data-testid="blocks" className="flex flex-col gap-3">
         {night.blocks.length === 0 ? <Empty>Nothing is running, queued or ended today.</Empty> : night.blocks.map((b) => <Block key={b.map || "jobs"} b={b} queued={night.queuedMaps} pair={pairing.maps.get(b.map)} />)}
       </section>
+      <TickBar items={state.queue.items} />
       <OtherChats pairing={pairing} />
       <QueueAMap />
       {!(scope.map !== "" && link.mv === "table") && <TicketTable />}
@@ -286,12 +288,14 @@ function Row({ r, worker }: { r: NightRow; worker: SessionCard | undefined }): R
   const account = i.runner ?? i.agent ?? state.queue.agent ?? "";
   return (
     <li data-key={i.key} data-mark={r.mark} {...(worker ? { "data-worker": healthOf(worker) } : {})} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-sm">
+      {r.mark === "next" && <TickBox itemKey={i.key} title={title} />}
       <ToneIcon icon={Ic} tone={tone} label={MARK_WORDS[r.mark]} spin={r.mark === "running"} />
       <div className="min-w-0 flex-1 basis-48">
         <TicketTitle itemKey={i.key} links={i.links} className="line-clamp-2">
           {title}
         </TicketTitle>
         {(r.mark === "short" || r.mark === "stopped" || r.mark === "recheck") && <p className={cn("truncate text-xs", r.mark === "short" ? "text-destructive" : "text-warn")}>{plainReason(i)}</p>}
+        {r.mark === "next" && <WaitReason item={i} />}
         {r.mark === "running" && worker === undefined && (
           <p className="truncate text-xs text-muted-foreground" title={firstLine(i.note)}>
             {(agentNote(state, i.key) || firstLine(i.note) || "starting")}
@@ -311,7 +315,7 @@ function Row({ r, worker }: { r: NightRow; worker: SessionCard | undefined }): R
         {r.mark === "next" && (
           <>
             <span className="tabular-nums" title="its place in the whole line">{`#${String(r.place ?? 0)}`}</span>
-            <AccountPicker itemKey={i.key} chosen={i.agent} title={title} />
+            <RowMenu item={i} title={title} />
             <Button
               variant="ghost"
               size="icon-sm"

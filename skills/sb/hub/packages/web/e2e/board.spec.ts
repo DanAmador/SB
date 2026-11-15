@@ -816,3 +816,81 @@ test.describe("Ticket table", () => {
     });
   }
 });
+
+test.describe("Run tab: why it waits, how many at once, which account and model", () => {
+  interface Calls { parallel: { repo: string; n: number }[]; agents: string[][]; itemAgent: Record<string, unknown>[] }
+  const calls = async (page: Page): Promise<Calls> => (await page.request.get("/api/__calls")).json() as Promise<Calls>;
+  const noSideways = (page: Page): Promise<boolean> => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
+
+  test("a waiting row says what it waits for; plus calls the parallel route and the line changes", async ({ page }) => {
+    await page.goto("/next/");
+    const row = page.locator("li[data-key='demo/board#3']");
+    await expect(row.getByTestId("wait-reason")).toHaveText("waits for Run the board against the real hub: both change src/");
+    const line = page.getByTestId("repo-line").first();
+    await expect(line.getByTestId("repo-words")).toHaveText("2 running of 2 at once · 0 more could run side by side");
+    await line.getByRole("button", { name: /one more at once/ }).click();
+    await expect(line.getByTestId("repo-words")).toHaveText("2 running of 3 at once · 1 more could run side by side");
+    expect((await calls(page)).parallel).toEqual([{ repo: "/demo", n: 3 }]);
+    await line.getByRole("button", { name: /one fewer at once/ }).click();
+    await expect(line.getByTestId("repo-words")).toContainText("of 2 at once");
+  });
+
+  test("an account's two bars, and its switch calls the agents route", async ({ page }) => {
+    await page.goto("/next/");
+    const spare = page.locator("[data-testid=account-line][data-account='spare']");
+    await expect(spare.getByRole("progressbar", { name: "5 hours use" })).toHaveAttribute("aria-valuenow", "90");
+    await expect(spare.getByRole("progressbar", { name: "week use" })).toHaveAttribute("aria-valuenow", "70");
+    await expect(spare.getByRole("switch")).toHaveAttribute("aria-checked", "false");
+    await spare.getByRole("switch").click();
+    await expect(spare.getByRole("switch")).toHaveAttribute("aria-checked", "true");
+    expect((await calls(page)).agents.at(-1)).toEqual(["main", "spare"]);
+    await spare.getByRole("switch").click();
+    await expect(spare.getByRole("switch")).toHaveAttribute("aria-checked", "false");
+    // the last account cannot be switched off
+    await expect(page.locator("[data-testid=account-line][data-account='main']").getByRole("switch")).toBeDisabled();
+  });
+
+  test("a row's menu sets its account and model; the row shows them; ticked rows get the same from the bar", async ({ page }) => {
+    await page.goto("/next/");
+    const row = page.locator("li[data-key='demo/board#3']");
+    await row.getByRole("button", { name: /the account and model for/ }).click();
+    await page.getByRole("option", { name: /^spare/ }).click();
+    await expect(row.getByTestId("row-agent")).toHaveText("spare");
+    await row.getByRole("button", { name: /the account and model for/ }).click();
+    await page.getByRole("listbox", { name: "Model" }).getByRole("option", { name: "opus" }).click();
+    await expect(row.getByTestId("row-agent")).toHaveText("spare · opus");
+    const c = (await calls(page)).itemAgent;
+    expect(c.slice(-2)).toEqual([{ key: "demo/board#3", name: "spare" }, { key: "demo/board#3", model: "opus" }]);
+    await row.getByRole("checkbox").check();
+    const bar = page.getByTestId("tick-bar");
+    await expect(bar).toContainText("1 ticket ticked");
+    await bar.getByRole("button", { name: "Set account and model" }).click();
+    await page.getByRole("option", { name: /^Tonight's accounts/ }).click();
+    await expect(row.getByTestId("row-agent")).toHaveText("pool · opus");
+    await expect(bar).toHaveCount(0);
+  });
+
+  test("at 375 px nothing scrolls sideways, with a row ticked", async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 800 });
+    await page.goto("/next/");
+    await page.locator("li[data-key='demo/board#3']").getByRole("checkbox").check();
+    await expect(page.getByTestId("tick-bar")).toBeVisible();
+    expect(await noSideways(page)).toBe(true);
+  });
+
+  for (const [scheme, w] of [["light", 1440], ["dark", 375]] as const) {
+    test(`axe is clean and a picture is taken (${scheme}, ${String(w)} px)`, async ({ page }) => {
+      const { default: AxeBuilder } = await import("@axe-core/playwright");
+      await page.setViewportSize({ width: w, height: w === 375 ? 800 : 900 });
+      await page.emulateMedia({ colorScheme: scheme });
+      await page.goto("/next/");
+      await page.locator("li[data-key='demo/board#3']").getByRole("checkbox").check();
+      await page.waitForTimeout(500);
+      const dir = process.env.SB_SHOTS;
+      if (dir !== undefined) await page.screenshot({ path: `${dir}/limits-${String(w)}-${scheme}.png`, fullPage: true });
+      const r = await new AxeBuilder({ page }).analyze();
+      const bad = r.violations.filter((v) => v.impact === "serious" || v.impact === "critical");
+      expect(bad.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`)).toEqual([]);
+    });
+  }
+});

@@ -1,5 +1,5 @@
 /** The Run tab's grouping: the night map by map. Pure: no React, no DOM. */
-import type { QueueItem, State } from "@sb-hub/contract";
+import type { Queue, QueueItem, State, Waits } from "@sb-hub/contract";
 import type { SessionCard } from "./sessions.ts";
 import { agentOf, dur, endedToday, itemInScope, itemMap, mapTitle, projOf, type Scope, type TicketIndex, itemProject, EVERYTHING } from "./board.ts";
 
@@ -190,4 +190,78 @@ export function pairNight(state: State, night: Night, cards: readonly SessionCar
   }
   const others = chats.filter((c) => !used.has(c.id) && c.agent.state !== "done").map((chat) => ({ chat, helpers: helpers.get(chat.id) ?? [] }));
   return { maps, chats: others, liveChats: others.filter((o) => !o.chat.idle).length };
+}
+
+// ---- why a queued item waits, and the limits the Run tab sets ----
+
+/** A waiting item's reason in plain words. `name` turns a ticket key or a map into its title (the key itself when unknown). */
+export function waitWords(w: Waits, name: (keyOrMap: string) => string): string {
+  const who = w.with === null ? "" : name(w.with);
+  switch (w.kind) {
+    case "paused": return "the queue is paused";
+    case "time": return w.text.startsWith("starts at") ? `waits: ${w.text}` : `waits until ${w.text}`;
+    case "after": return w.with === null ? w.text : w.with.includes("#") ? `waits for ${who}` : `waits for the map ${who}`;
+    case "files": {
+      const shared = /^shares (.+?) with /.exec(w.text)?.[1];
+      return `waits for ${who}${shared === undefined ? "" : `: both change ${shared}`}`;
+    }
+    case "limit": {
+      const n = /(\d+)/.exec(w.text)?.[1];
+      return n === undefined ? w.text : `this repo runs ${n} at once`;
+    }
+    case "account": return w.text.startsWith("no account") ? w.text : `no account has room: ${w.text}`;
+  }
+}
+
+/** One repo with work: its limit, what runs, and how many more could run beside them. */
+export interface RepoLine {
+  readonly repo: string;
+  readonly name: string;
+  readonly running: number;
+  readonly atOnce: number;
+  readonly more: number;
+  readonly words: string;
+}
+
+export function repoLines(queue: Pick<Queue, "repos">): RepoLine[] {
+  return Object.entries(queue.repos ?? {})
+    .map(([repo, l]) => {
+      const more = Math.max(0, Math.min(l.side_by_side, l.at_once - l.running));
+      return { repo, name: repo.split("/").filter(Boolean).pop() ?? repo, running: l.running, atOnce: l.at_once, more, words: `${String(l.running)} running of ${String(l.at_once)} at once · ${String(more)} more could run side by side` };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** One account of the pool, and of those installed that are not in it: its two windows and whether it takes work. */
+export interface AccountLine {
+  readonly name: string;
+  readonly inPool: boolean;
+  /** 0 to 100, or null when no reading. */
+  readonly five: number | null;
+  readonly fiveResets: number | null;
+  readonly week: number | null;
+  readonly weekResets: number | null;
+}
+
+export function accountLines(state: Pick<State, "queue" | "installed" | "now">): AccountLine[] {
+  const pool = new Set(state.queue.agents && state.queue.agents.length > 0 ? state.queue.agents : state.queue.agent !== null ? [state.queue.agent] : []);
+  return Object.entries(state.installed).map(([name, e]) => {
+    const u = e.usage;
+    const five = u && (u.five_hour_resets ?? 0) > state.now ? u : null;
+    const week = u && u.seven_day !== null && (u.seven_day_resets ?? 0) > state.now ? u : null;
+    return {
+      name,
+      inPool: pool.has(name),
+      five: five ? Math.round(100 * five.five_hour) : null,
+      fiveResets: five?.five_hour_resets ?? null,
+      week: week && week.seven_day !== null ? Math.round(100 * week.seven_day) : null,
+      weekResets: week?.seven_day_resets ?? null,
+    };
+  });
+}
+
+/** The pool after one account is taken in or out; null when that would leave it empty. */
+export function poolWith(pool: readonly string[], name: string, on: boolean): string[] | null {
+  const next = on ? [...pool.filter((n) => n !== name), name] : pool.filter((n) => n !== name);
+  return next.length === 0 ? null : next;
 }

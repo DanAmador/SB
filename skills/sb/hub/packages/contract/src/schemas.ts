@@ -551,7 +551,8 @@ export const QueueJobBody = z.strictObject({
 });
 export const QueueRemoveJobBody = z.strictObject({ key: z.string(), version: z.number().int().nullable() });
 export const QueueClearFinishedBody = z.strictObject({ version: z.number().int().nullable().optional() });
-export const QueueItemAgentBody = z.strictObject({ key: z.string(), name: z.string().nullable().optional() });
+/** `name`: the account (null: the pool); `model`: sonnet or opus (null: the ticket's own tier). Left out stays as it is. */
+export const QueueItemAgentBody = z.strictObject({ key: z.string(), name: z.string().nullable().optional(), model: z.enum(["sonnet", "opus"]).nullable().optional() });
 /** `<run key>@<ended>`: one ended run, once. */
 export const RunSeenBody = z.strictObject({ key: z.string().min(1) });
 export const AgentsDismissBody = z.strictObject({ agent: z.string() });

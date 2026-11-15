@@ -63,6 +63,7 @@ type QueueRoute =
   | "POST /api/queue/move_map"
   | "POST /api/queue/pause"
   | "POST /api/queue/agents"
+  | "POST /api/queue/parallel"
   | "POST /api/queue/options"
   | "POST /api/queue/job"
   | "POST /api/queue/remove_job"
