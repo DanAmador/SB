@@ -1,6 +1,6 @@
 import type { QueueItem, State, TicketRow } from "@sb-hub/contract";
 import { describe, expect, it } from "vitest";
-import { sidebarTree } from "./sidebar.ts";
+import { activeOnly, sidebarTree } from "./sidebar.ts";
 
 const NO_LINKS = { ticket: null, map: null, board: null, report: null, log: null };
 const ticket = (map: string, num: number, more: Partial<TicketRow> = {}): TicketRow =>
@@ -69,5 +69,24 @@ describe("sidebarTree", () => {
     const t = sidebarTree(state([job]), tickets, none);
     expect(t.projects.find((p) => p.project === "sb")?.queued).toBe(1);
     expect(t.all.queued).toBe(1);
+  });
+});
+
+describe("activeOnly", () => {
+  it("keeps only the projects and maps with something queued or running, and no quiet fold", () => {
+    const t = activeOnly(sidebarTree(s, tickets, none), none);
+    expect(t.projects.map((p) => [p.project, p.maps.map((m) => m.map), p.quiet.length])).toEqual([["other", ["other/live"], 0], ["sb", ["sb/busy"], 0]]);
+    // the totals on Everything stay those of the whole board
+    expect([t.all.canRun, t.all.queued]).toEqual([3, 3]);
+  });
+
+  it("keeps a picked quiet map, and a picked project with nothing in play", () => {
+    const picked = { project: "sb", map: "sb/idle" };
+    const t = activeOnly(sidebarTree(s, tickets, picked), picked);
+    expect(t.projects.find((p) => p.project === "sb")?.maps.map((m) => m.map)).toEqual(["sb/busy", "sb/idle"]);
+    const idle = state([]);
+    const lone = { project: "sb", map: "" };
+    expect(activeOnly(sidebarTree(idle, tickets, lone), lone).projects.map((p) => p.project)).toEqual(["sb"]);
+    expect(activeOnly(sidebarTree(idle, tickets, none), none).projects).toEqual([]);
   });
 });

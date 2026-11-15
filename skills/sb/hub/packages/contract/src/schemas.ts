@@ -185,6 +185,9 @@ const itemFields = {
   checked: z.string().nullable().optional(),
   /** Set each time the hub looks for work, on a queued item only. */
   waits: Waits.optional(),
+  /** How many actions the worker's hook refused so far, and the last few; absent until the first refusal. */
+  refused: z.number().int().optional(),
+  refused_lines: z.array(z.string()).optional(),
   /** obsidian:// links to its notes, added by the TypeScript server (links.ts). */
   links: Links,
 };

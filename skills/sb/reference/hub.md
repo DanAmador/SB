@@ -38,7 +38,8 @@ the vault. Only the running hub writes the queue (`$SB_HUB_HOME/state.json`); CL
 - **Pool and pacing**: the night's agents are a pool (`sbhub queue agents assembio personal`); a
   ticket's own `agent` override pins it. Each Claude worker streams its account's usage (5-hour and
   weekly window, reset times); with nothing running the hub reads it with a one-line Haiku call. An
-  item starts on the pool agent where it fits with the most room: the account's use, plus what its
+  item starts on the pool agent where it fits whose week resets soonest (then whose five hours reset
+  soonest, then the most room), so what is about to expire is spent first: the account's use, plus what its
   running items still need, plus this item's cost (learned per account and tier from finished
   items), stays under 90% of the 5-hour window (a reset before the item would need the rest counts),
   and weekly use is under 80%. Up to 4 workers per account (one per repo still holds); one until its cost is learned. An item

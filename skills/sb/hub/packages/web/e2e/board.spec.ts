@@ -192,6 +192,24 @@ test("the sidebar picks a map and every view narrows; the pick lives in the page
   await expect(page.getByRole("searchbox")).toBeFocused();
 });
 
+test("Active only leaves the projects and maps with something running or queued, and survives a reload", async ({ page }) => {
+  await page.goto("/next/");
+  const side = page.getByRole("navigation", { name: "Projects and maps" });
+  const sw = side.getByRole("switch", { name: "Active only" });
+  await expect(sw).toHaveAttribute("aria-checked", "false");
+  await expect(side.getByRole("button", { name: "1 quiet map" })).toBeVisible();
+  await sw.click();
+  await expect(page).toHaveURL(/act=1/);
+  await expect(sw).toHaveAttribute("aria-checked", "true");
+  await expect(side.getByRole("button", { name: /quiet map/ })).toHaveCount(0);
+  await expect(side.getByRole("button", { name: /^board / })).toBeVisible();
+  await page.reload();
+  await expect(side.getByRole("switch", { name: "Active only" })).toHaveAttribute("aria-checked", "true");
+  await side.getByRole("switch", { name: "Active only" }).click();
+  await expect(page).not.toHaveURL(/act=/);
+  await expect(side.getByRole("button", { name: "1 quiet map" })).toBeVisible();
+});
+
 test("quiet maps fold under one line that opens; a picked quiet map stays shown after a reload", async ({ page }) => {
   await page.goto("/next/");
   const side = page.getByRole("navigation", { name: "Projects and maps" });
@@ -501,7 +519,7 @@ test.describe("Map view", () => {
     await expect(graph.locator(".react-flow__edge")).toHaveCount(6);
     await expect(page.getByRole("list", { name: "Legend" }).getByRole("listitem")).toHaveCount(9);
     // the queued one shows its place; the other map's blocker is named by its map
-    await expect(graph.getByRole("button", { name: /Show the queue in order\s*3 · Queued 1/ })).toBeVisible();
+    await expect(graph.getByRole("button", { name: /Show the queue in order\s*3 · Queued\s*next 1/ })).toBeVisible();
     await expect(graph.getByRole("button", { name: /other\/site/ })).toBeVisible();
     // keyboard: Tab reaches a node, Enter opens its panel
     const node = graph.getByRole("button", { name: /^Drag a ticket into the queue 2 / });
@@ -515,13 +533,39 @@ test.describe("Map view", () => {
     expect(errors).toEqual([]);
   });
 
+  test("the legend counts each state; a pressed chip dims the boxes of every other state and lives in the page link", async ({ page }) => {
+    await page.goto("/next/?project=demo&map=demo%2Fboard");
+    const graph = page.getByTestId("map-graph");
+    const legend = page.getByRole("list", { name: "Legend" });
+    const queued = legend.getByRole("button", { name: /^Queued/ });
+    await expect(queued).toContainText("1");
+    const box = graph.getByRole("button", { name: /Show the queue in order/ });
+    const other = graph.getByRole("button", { name: /^Drag a ticket into the queue 2 / });
+    await expect(other).not.toHaveClass(/opacity-25/);
+    // each state reads in words: running, a place in line, and not queued
+    await expect(other).toContainText("2 · Running");
+    await expect(box).toContainText("next 1");
+    await expect(graph.getByRole("button", { name: /· Not queued/ }).first()).toBeVisible();
+    await expect(graph.getByRole("button", { name: "Show running" })).toBeVisible();
+    await queued.click();
+    await expect(page).toHaveURL(/ms=queued/);
+    await expect(queued).toHaveAttribute("aria-pressed", "true");
+    await expect(box).not.toHaveClass(/opacity-25/);
+    await expect(other).toHaveClass(/opacity-25/);
+    await page.reload();
+    await expect(graph.getByRole("button", { name: /^Drag a ticket into the queue 2 / })).toHaveClass(/opacity-25/);
+    await legend.getByRole("button", { name: /^Queued/ }).click();
+    await expect(page).not.toHaveURL(/ms=/);
+    await expect(graph.getByRole("button", { name: /^Drag a ticket into the queue 2 / })).not.toHaveClass(/opacity-25/);
+  });
+
   test("at 375 px a plain list shows instead of the graph, and nothing scrolls sideways", async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 800 });
     await page.goto("/next/?project=demo&map=demo%2Fboard");
     const list = page.getByRole("list", { name: "Tickets of the map" });
     await expect(list.getByRole("listitem")).toHaveCount(8);
     await expect(page.getByTestId("map-graph")).toHaveCount(0);
-    await expect(list.getByRole("listitem").nth(2)).toContainText("Queued 1");
+    await expect(list.getByRole("listitem").nth(2)).toContainText("next 1");
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await list.getByRole("button", { name: /Show the queue in order/ }).click();
     await expect(page.getByRole("dialog")).toBeVisible();

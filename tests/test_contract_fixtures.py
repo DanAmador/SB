@@ -288,6 +288,13 @@ class ContractFixturesTest(unittest.TestCase):
         for f in old.rglob("*"):
             os.utime(f, (START - 86400, START - 86400))
 
+        # the guard hook refused a queued worker twice: the item carries refused and refused_lines
+        for why in ("`git push` is refused", "`git stash` is refused"):
+            self.hub.report({"agent": "repo/one#2", "role": "worker", "parent": "queue",
+                             "trail": {"kind": "refused", "tool": "Bash", "label": why}})
+        refused = next(i for i in self.hub.state()["queue"]["items"] if i["key"] == "repo/one#2")
+        self.assertEqual(refused["refused"], 2)
+
         # every GET, in the state above
         self.record("state", "/api/state")
         self.record("runs", "/api/runs")

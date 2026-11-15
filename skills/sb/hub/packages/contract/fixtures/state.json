@@ -12,6 +12,15 @@
         "state": "done",
         "ticket": "A"
       },
+      "repo/one#2": {
+        "agent": "repo/one#2",
+        "at": 1794528060.0,
+        "in_charge": "sess-1",
+        "map": "repo/one",
+        "parent": "queue",
+        "role": "worker",
+        "ticket": "B"
+      },
       "sess-1": {
         "agent": "sess-1",
         "asked": "chart it",
@@ -274,6 +283,11 @@
           "key": "repo/one#2",
           "kind": "ticket",
           "note": "",
+          "refused": 2,
+          "refused_lines": [
+            "refused: Bash: `git push` is refused",
+            "refused: Bash: `git stash` is refused"
+          ],
           "started": null,
           "state": "queued",
           "tries": 0,
@@ -338,7 +352,7 @@
       "runs": {},
       "seeded": true,
       "stop_at": 1794549600.0,
-      "version": 22
+      "version": 24
     },
     "seen": []
   },

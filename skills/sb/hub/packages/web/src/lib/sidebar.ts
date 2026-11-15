@@ -31,6 +31,16 @@ export interface Sidebar {
 const NO_CHECKS = "no check commands";
 const isQuiet = (c: Counts): boolean => c.canRun === 0 && c.queued === 0 && !c.running;
 
+const isActive = (c: Counts): boolean => c.queued > 0 || c.running;
+
+/** Only what is in play: the projects and maps with something queued or running. A picked project or map stays shown. */
+export function activeOnly(tree: Sidebar, scope: Scope): Sidebar {
+  const projects = tree.projects
+    .filter((p) => isActive(p) || p.project === scope.project)
+    .map((p): SidebarProject => ({ ...p, maps: [...p.maps, ...p.quiet].filter((m) => isActive(m) || m.map === scope.map), quiet: [] }));
+  return { all: tree.all, projects };
+}
+
 export function sidebarTree(state: State, tickets: readonly TicketRow[] | null, scope: Scope): Sidebar {
   const live = new Set<string>();
   for (const i of state.queue.items) if (i.state === "queued" || i.state === "running") live.add(i.key);

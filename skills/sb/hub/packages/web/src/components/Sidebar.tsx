@@ -1,11 +1,11 @@
 /** The sidebar: Everything, then each project with its maps (collapsible, quiet ones folded), each row with can-run and queued counts. On a phone it is a sheet. */
-import { IconChevronDown, IconChevronRight, IconMenu2, IconX } from "@tabler/icons-react";
+import { IconChevronDown, IconChevronRight, IconFilter, IconMenu2, IconX } from "@tabler/icons-react";
 import { useState } from "react";
 import type * as React from "react";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { isScoped, type Scope } from "@/lib/board.ts";
-import type { Counts, Sidebar as Tree, SidebarMap } from "@/lib/sidebar.ts";
-import { setLink } from "@/lib/link.ts";
+import { activeOnly, type Counts, type Sidebar as Tree, type SidebarMap } from "@/lib/sidebar.ts";
+import { setLink, useLink } from "@/lib/link.ts";
 import { cn } from "@/lib/utils";
 
 const rowCls = (on: boolean): string =>
@@ -50,7 +50,9 @@ function MapRow({ m, project, on, pick }: { m: SidebarMap; project: string; on: 
   );
 }
 
-function ProjectTree({ tree, scope, onPick }: { tree: Tree; scope: Scope; onPick: () => void }): React.JSX.Element {
+function ProjectTree({ tree: whole, scope, onPick }: { tree: Tree; scope: Scope; onPick: () => void }): React.JSX.Element {
+  const active = useLink().act === "1";
+  const tree = active ? activeOnly(whole, scope) : whole;
   const [shut, setShut] = useState<ReadonlySet<string>>(new Set());
   const [quietOpen, setQuietOpen] = useState<ReadonlySet<string>>(new Set());
   const flip = (set: ReadonlySet<string>, p: string): Set<string> => {
@@ -68,7 +70,21 @@ function ProjectTree({ tree, scope, onPick }: { tree: Tree; scope: Scope; onPick
   };
   return (
     <nav aria-label="Projects and maps" className="flex flex-col gap-0.5 text-sm">
-      <div className="flex px-2 pb-1 text-[11px] text-muted-foreground">
+      <div className="flex items-center px-2 pb-1 text-[11px] text-muted-foreground">
+        <button
+          type="button"
+          role="switch"
+          aria-checked={active}
+          title="Show only the projects and maps with something running or queued"
+          onClick={() => { setLink({ act: active ? "" : "1" }); }}
+          className={cn(
+            "inline-flex h-6 items-center gap-1.5 rounded-full border px-2 text-[11px] transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+            active ? "border-foreground bg-foreground text-background" : "hover:text-foreground",
+          )}
+        >
+          <IconFilter className="size-3" aria-hidden />
+          Active only
+        </button>
         <span className="ml-auto">can run · queued</span>
       </div>
       <div className="flex">
@@ -78,6 +94,7 @@ function ProjectTree({ tree, scope, onPick }: { tree: Tree; scope: Scope; onPick
           <CountPair c={tree.all} />
         </button>
       </div>
+      {active && tree.projects.length === 0 && <p className="px-2 py-1.5 text-xs text-muted-foreground">Nothing is running or queued.</p>}
       {tree.projects.map((p) => {
         const open = !shut.has(p.project) || scope.project === p.project;
         const onProject = scope.project === p.project && scope.map === "";

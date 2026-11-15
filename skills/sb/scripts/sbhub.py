@@ -2964,7 +2964,8 @@ class Supervisor:
     def _fit(name, inst, tier, load, now):
         """(score, need, why) for one more item of `tier` on agent `name`: score is None when it does not fit,
         why then a plain reason (empty when the agent is only busy). With no reading (agy, or a probe not yet
-        answered) an agent runs one worker; measured agents rank first, then by the room left after it."""
+        answered) an agent runs one worker; measured agents rank first, then by the soonest weekly reset, the soonest
+        five-hour reset and the room left after it."""
         if inst is None:
             return None, 0.0, "{} is not an installed agent".format(name)
         if inst.get("login") == "expired":
@@ -2988,16 +2989,20 @@ class Supervisor:
         five, left = (u["five_hour"], resets - now) if resets > now else (0.0, WINDOW)  # a reset window is empty
         need = min(NEED_CAP, cost * min(1.0, left / TICKET_SECONDS))
         room = GATE_5H - five - owed - need
+        # among accounts that fit: the week that resets soonest first (none known: after), then the five hours
+        # that reset soonest (an empty, already reset window: after), then the most room
+        order = (1, -(week_resets if week_resets and week_resets > now else float("inf")),
+                 -(resets if resets > now else float("inf")), room)
         if n == 0 and five < IDLE_FLOOR:
-            return (1, room), need, ""  # an idle, nearly empty account is never left waiting
+            return order, need, ""  # an idle, nearly empty account is never left waiting
         if room < -1e-9:
             return None, need, "{} {} used{}, needs about {}; resets {}".format(
                 name, _pct(five), ", {} more held by its running work".format(_pct(owed)) if owed >= 0.005 else "",
                 _pct(need), _hm(resets))
-        return (1, room), need, ""
+        return order, need, ""
 
     def _pick(self, q, item, t, load, now):
-        """(agent, its entry, need) for the agent the item fits on with the most room left (ties: pool order),
+        """(agent, its entry, need) for the agent the item fits on whose week resets soonest, then five hours, then most room (ties: pool order),
         or (None, None, why): why is a note naming each agent's use and reset when usage alone stops it,
         empty when an agent is only busy. An item's own agent wins and never falls back to the pool."""
         names = [item["agent"]] if item.get("agent") else pool(q)
