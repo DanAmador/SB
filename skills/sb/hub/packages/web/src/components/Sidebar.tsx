@@ -38,7 +38,7 @@ function MapRow({ m, project, on, pick }: { m: SidebarMap; project: string; on: 
     <div className="flex pl-6">
       <button type="button" aria-current={on ? "page" : undefined} title={m.map} className={rowCls(on)} onClick={() => { pick(project, m.map); }}>
         <span className="truncate text-muted-foreground">{m.title}</span>
-        {m.reason !== "" && <span className="shrink-0 text-[10px] text-muted-foreground/80">{m.reason}</span>}
+        {m.reason !== "" && <span className="shrink-0 text-xs text-muted-foreground">{m.reason}</span>}
         <Dot on={m.running} />
         <CountPair c={m} />
       </button>

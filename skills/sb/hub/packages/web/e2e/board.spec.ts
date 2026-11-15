@@ -416,34 +416,29 @@ test("Active only leaves the projects and maps with something running or queued,
   const side = page.getByRole("navigation", { name: "Projects and maps" });
   const sw = side.getByRole("switch", { name: "Active only" });
   await expect(sw).toHaveAttribute("aria-checked", "false");
-  await expect(side.getByRole("button", { name: "1 quiet map" })).toBeVisible();
+  await expect(side.getByRole("button", { name: /^old/ })).toBeVisible();
   await sw.click();
   await expect(page).toHaveURL(/act=1/);
   await expect(sw).toHaveAttribute("aria-checked", "true");
-  await expect(side.getByRole("button", { name: /quiet map/ })).toHaveCount(0);
+  await expect(side.getByRole("button", { name: /^old/ })).toHaveCount(0);
   await expect(side.getByRole("button", { name: /^board / })).toBeVisible();
   await page.reload();
   await expect(side.getByRole("switch", { name: "Active only" })).toHaveAttribute("aria-checked", "true");
   await side.getByRole("switch", { name: "Active only" }).click();
   await expect(page).not.toHaveURL(/act=/);
-  await expect(side.getByRole("button", { name: "1 quiet map" })).toBeVisible();
+  await expect(side.getByRole("button", { name: /^old/ })).toBeVisible();
 });
 
-test("quiet maps fold under one line that opens; a picked quiet map stays shown after a reload", async ({ page }) => {
+test("every map shows in one list with no fold; a picked map stays picked after a reload", async ({ page }) => {
   await page.goto("/next/");
   const side = page.getByRole("navigation", { name: "Projects and maps" });
   await expect(side.getByRole("button", { name: /^site/ })).toBeVisible();
-  await expect(side.getByRole("button", { name: /^old/ })).toHaveCount(0);
-  const fold = side.getByRole("button", { name: "1 quiet map" });
-  await expect(fold).toHaveAttribute("aria-expanded", "false");
-  await fold.click();
-  await expect(fold).toHaveAttribute("aria-expanded", "true");
+  await expect(side.getByRole("button", { name: /^old/ })).toBeVisible();
+  await expect(side.getByRole("button", { name: /quiet map/ })).toHaveCount(0);
   await side.getByRole("button", { name: /^old/ }).click();
   await expect(page).toHaveURL(/map=other%2Fold/);
   await page.reload();
   await expect(side.getByRole("button", { name: /^old/ })).toHaveAttribute("aria-current", "page");
-  // picked, so it is shown and the fold line is gone
-  await expect(side.getByRole("button", { name: /quiet map/ })).toHaveCount(0);
 });
 
 test("Cmd-K jumps to a map or a ticket", async ({ page }) => {
@@ -802,7 +797,6 @@ test("screenshots of the sidebar", async ({ page }) => {
   });
   await page.goto("/next/");
   const side = page.getByRole("navigation", { name: "Projects and maps" });
-  await side.getByRole("button", { name: /quiet map/ }).first().click();
   await expect(side.getByText("no checks")).toBeVisible();
   await page.waitForTimeout(400);
   await page.screenshot({ path: to("sidebar-1440.png") });
@@ -814,7 +808,6 @@ test("screenshots of the sidebar", async ({ page }) => {
   await page.goto("/next/");
   await page.getByRole("button", { name: "Projects and maps" }).click();
   const sheet = page.getByRole("dialog", { name: "Projects" });
-  await sheet.getByRole("button", { name: /quiet map/ }).first().click();
   await expect(sheet.getByText("no checks")).toBeVisible();
   // the sheet itself does not scroll sideways
   expect(await sheet.evaluate((e) => e.scrollWidth <= e.clientWidth)).toBe(true);
