@@ -156,6 +156,11 @@ const closeOff = {
 key: "job:close-off", kind: "job", agent: null, state: "landed", note: "", commit: null, tries: 0, started: start - 700, ended: null, model: null,
 project: "/demo", repo: "/demo", prompt: "close the night", hash: "abc", name: "close-off", title: "Close off the night", created: start - 3000, night: "n-live",
 } as Raw<QueueItem>;
+/** Two tickets between a worker and done, one in its checks and one in its second pass: only the Running now test asks for them. */
+const between = [
+  { ...item("other/site#5", "landed"), title: "Stock the shop's shelves", started: start - 600, run: RUN, log: `${RUN}/s5.log` },
+  { ...item("demo/board#4", "review"), title: "Second look at the drag", started: start - 500, run: RUN, log: `${RUN}/4.log` },
+] as Raw<QueueItem>[];
 /** For the live test: the queued ticket starts and a running one ends done; then put it back. */
 const advance = (): void => {
   queue.items = queue.items.map((i) => (i.key === "demo/board#3" ? { ...i, state: "running" as const, started: now() } : i.key === "demo/board#5" ? { ...i, state: "done" as const, ended: now(), commit: "0123456789abcdef" } : i));
@@ -440,6 +445,7 @@ createServer((req, res) => {
     if (req.method === "GET" && path === "/api/__night-stops") { send(res, 200, stopCalls); return; }
     if (req.method === "GET" && path === "/api/__stops") { send(res, 200, stops); return; }
     if (req.method === "GET" && path === "/api/__calls") { send(res, 200, calls); return; }
+    if (req.method === "POST" && path === "/api/__between") { queue.items = [...queue.items.filter((i) => !between.some((b) => b.key === i.key)), ...between]; queue.version += 1; send(res, 200, { ok: true }); return; }
     if (req.method === "POST" && path === "/api/__job") { queue.items = [...queue.items.filter((i) => i.key !== closeOff.key), closeOff]; queue.version += 1; send(res, 200, { ok: true }); return; }
     if (req.method === "POST" && path === "/api/__advance") { advance(); send(res, 200, { ok: true }); return; }
     if (req.method === "POST" && path === "/api/__restore") { liveId = "n-live"; queue.night = "n-live"; nights = freshNights(); oldRun = oldItems(); queue.items = JSON.parse(first) as Raw<QueueItem>[]; syncMaps(); queue.version += 1; send(res, 200, { ok: true }); return; }

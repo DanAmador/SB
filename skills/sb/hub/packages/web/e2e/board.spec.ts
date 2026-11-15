@@ -223,6 +223,18 @@ test.describe("Run tab", () => {
     await expect(page.getByRole("button", { name: /Unqueue this map: The demo board/ })).toBeVisible();
   });
 
+  test("Running now also holds the tickets in their checks and second pass, and still no unqueued one", async ({ page, request }) => {
+    await request.post("/api/__between");
+    await page.goto("/next/");
+    const now = page.getByRole("list", { name: "Running now" });
+    await expect(now.getByRole("listitem")).toHaveCount(5);
+    await expect(now.locator("li[data-key='other/site#5']")).toContainText("in checks");
+    await expect(now.locator("li[data-key='demo/board#4']")).toContainText("second pass");
+    await expect(now).not.toContainText("Drag a ticket into the queue");
+    await expect(page.getByTestId("blocks")).not.toContainText("Drag a ticket into the queue");
+    await request.post("/api/__restore");
+  });
+
   test("moving a map up calls the route and moves its block", async ({ page }) => {
     await page.goto("/next/");
     const before = await calls(page);
