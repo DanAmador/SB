@@ -434,7 +434,7 @@ def repo_tickets(repo):
 
 def sibling_ticket(m, num):
     """A number not in this map: shared across repo maps."""
-    hits = [f for f in repo_tickets(m.repo) if re.match(rf"0*{num}-", f.name)]
+    hits = [f for f in repo_tickets(m.repo) if re.match(rf"0*{num}[- ]", f.name)]
     return Ticket(hits[0]) if len(hits) == 1 else None
 
 

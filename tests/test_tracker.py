@@ -40,6 +40,15 @@ class NewTicketsAndMaps(VaultCase):
             self.assertIn(f"priority: {letter}", (self.vault / path).read_text(), word)
         self.sb("new", "monorepo/overrides", "--why", "Because.", "--title", "Bad", "--priority", "whenever", ok=False)
 
+    def test_a_ticket_waits_on_another_maps_ticket_by_its_number(self):
+        self.sb("init", "monorepo/elsewhere", "--why", "Because.", "--title", "Elsewhere", "--destination", "There.",
+                "--repo", "/code/monorepo")
+        here = self.sb("new", "monorepo/overrides", "--why", "Because.", "--title", "Here", "--no-sync").stdout.strip()
+        there = self.sb("new", "monorepo/elsewhere", "--why", "Because.", "--title", "There", "--no-sync").stdout.strip()
+        num = Path(there).name.split(" ")[0]
+        self.sb("block", "monorepo/overrides", Path(here).name.split(" ")[0], num, "--no-sync")
+        self.assertIn(f"wayfinder/monorepo/elsewhere/issues/{num} There", (self.vault / here).read_text())
+
     def test_aliases_are_text_so_obsidian_reads_them_as_aliases(self):
         path = self.sb("new", "monorepo/overrides", "--why", "Because.", "--title", "First", "--no-sync").stdout.strip()
         self.assertIn('aliases:\n  - "#001"\n  - "001"\n', (self.vault / path).read_text())
