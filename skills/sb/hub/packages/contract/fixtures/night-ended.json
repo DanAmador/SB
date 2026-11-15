@@ -1,0 +1,75 @@
+{
+  "body": {
+    "night": {
+      "by": null,
+      "counts": {
+        "done": 0,
+        "failed": 0,
+        "items": 1,
+        "not_reached": 4,
+        "queued": 0,
+        "running": 0,
+        "skipped": 1
+      },
+      "ended": 1794528060.0,
+      "how": "stopped",
+      "id": "night-fixture",
+      "items": [
+        {
+          "agent": "spare",
+          "commit": null,
+          "ended": 1794528060.0,
+          "key": "repo/one#2",
+          "kind": "ticket",
+          "night": "night-fixture",
+          "note": "stopped by you: It edits the wrong checkout.. No file is left changed in the checkout /fixture/repo.",
+          "pid": null,
+          "pid_start": null,
+          "refused": 2,
+          "refused_lines": [
+            "refused: Bash: `git push` is refused",
+            "refused: Bash: `git stash` is refused"
+          ],
+          "repo": "/fixture/repo",
+          "runner": "spare",
+          "started": 1794528060.0,
+          "state": "skipped",
+          "stop_asked": {
+            "at": 1794528060.0,
+            "reason": "It edits the wrong checkout."
+          },
+          "tries": 0,
+          "waits": {
+            "kind": "paused",
+            "text": "the queue is paused: nothing new starts",
+            "with": null
+          }
+        }
+      ],
+      "name": "Night of 2026-11-13, 01:01",
+      "not_reached": [
+        {
+          "key": "repo/two#5",
+          "title": "E"
+        },
+        {
+          "key": "repo/two#6",
+          "title": "F"
+        },
+        {
+          "key": "repo/one#3",
+          "title": "C"
+        },
+        {
+          "key": "job:aaaaaaaaaaaa:1",
+          "title": "audit"
+        }
+      ],
+      "started": 1794528060.0,
+      "state": "ended"
+    }
+  },
+  "contentType": "application/json",
+  "route": "GET /api/night",
+  "status": 200
+}

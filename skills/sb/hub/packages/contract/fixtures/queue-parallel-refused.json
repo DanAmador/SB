@@ -7,7 +7,7 @@
   "request": {
     "n": 9,
     "repo": "/fixture/repo",
-    "version": 20
+    "version": 21
   },
   "route": "POST /api/queue/parallel",
   "status": 400

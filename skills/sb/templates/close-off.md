@@ -27,10 +27,6 @@ For each map in the list above:
 - Run `python3 ~/.agents/skills/sb/scripts/sbmap.py check <map>` and put any finding in the note under its project.
 - Rewrite the map's In plain words with `python3 ~/.agents/skills/sb/scripts/sbmap.py summary <map> --text "<why, where it stands after tonight, what the owner decides next>"`. Write it in the owner's words as the map already has them; keep any owner quote.
 
-## 3. Clear the board
-
-Last, take the finished items off the queue list. They stay in the hub's log and in the vault:
-
-`curl -s -X POST -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:{port}/api/queue/clear-finished`
+The night's finished items already left the live line for the night's own record when it ended; there is nothing to clear.
 
 End with the note's path and one line per project: landed, failed and waiting counts. Whoever relays the note to the owner in chat sends the visual tickets' pictures with it, and only those.

@@ -1,0 +1,130 @@
+{
+  "body": {
+    "night": {
+      "by": null,
+      "counts": {
+        "done": 0,
+        "failed": 0,
+        "items": 5,
+        "not_reached": 0,
+        "queued": 4,
+        "running": 0,
+        "skipped": 1
+      },
+      "ended": null,
+      "how": null,
+      "id": "night-fixture",
+      "items": [
+        {
+          "agent": null,
+          "commit": null,
+          "ended": null,
+          "key": "repo/two#5",
+          "kind": "ticket",
+          "night": "night-fixture",
+          "note": "",
+          "started": null,
+          "state": "queued",
+          "tries": 0,
+          "waits": {
+            "kind": "paused",
+            "text": "the queue is paused: nothing new starts",
+            "with": null
+          }
+        },
+        {
+          "agent": null,
+          "commit": null,
+          "ended": null,
+          "key": "repo/two#6",
+          "kind": "ticket",
+          "night": "night-fixture",
+          "note": "",
+          "started": null,
+          "state": "queued",
+          "tries": 0,
+          "waits": {
+            "kind": "paused",
+            "text": "the queue is paused: nothing new starts",
+            "with": null
+          }
+        },
+        {
+          "agent": null,
+          "commit": null,
+          "ended": null,
+          "key": "repo/one#3",
+          "kind": "ticket",
+          "night": "night-fixture",
+          "note": "",
+          "started": null,
+          "state": "queued",
+          "tries": 0,
+          "waits": {
+            "kind": "paused",
+            "text": "the queue is paused: nothing new starts",
+            "with": null
+          }
+        },
+        {
+          "agent": "spare",
+          "commit": null,
+          "ended": 1794528060.0,
+          "key": "repo/one#2",
+          "kind": "ticket",
+          "night": "night-fixture",
+          "note": "stopped by you: It edits the wrong checkout.. No file is left changed in the checkout /fixture/repo.",
+          "pid": null,
+          "pid_start": null,
+          "refused": 2,
+          "refused_lines": [
+            "refused: Bash: `git push` is refused",
+            "refused: Bash: `git stash` is refused"
+          ],
+          "repo": "/fixture/repo",
+          "runner": "spare",
+          "started": 1794528060.0,
+          "state": "skipped",
+          "stop_asked": {
+            "at": 1794528060.0,
+            "reason": "It edits the wrong checkout."
+          },
+          "tries": 0,
+          "waits": {
+            "kind": "paused",
+            "text": "the queue is paused: nothing new starts",
+            "with": null
+          }
+        },
+        {
+          "agent": "main",
+          "commit": null,
+          "created": 1794528060.0,
+          "ended": null,
+          "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "key": "job:aaaaaaaaaaaa:1",
+          "kind": "job",
+          "model": "opus",
+          "name": "audit",
+          "night": "night-fixture",
+          "not_before": 1794609000.0,
+          "note": "",
+          "project": "/fixture/repo",
+          "prompt": "Audit the hub",
+          "repo": "/fixture/repo",
+          "started": null,
+          "state": "queued",
+          "title": "audit",
+          "tries": 0
+        }
+      ],
+      "name": "Night of 2026-11-13, 01:01",
+      "not_reached": [],
+      "started": 1794528060.0,
+      "state": "live"
+    }
+  },
+  "contentType": "application/json",
+  "route": "GET /api/night",
+  "status": 200
+}

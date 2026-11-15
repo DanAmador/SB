@@ -11,53 +11,11 @@
       "items": [
         {
           "agent": null,
-          "base_sha": "3fea00e95453cf271189dc8924ebcd942426162f",
-          "branch": null,
-          "checked": null,
-          "checks": [
-            {
-              "cmd": "true",
-              "code": 0,
-              "secs": 0.0,
-              "tail": ""
-            }
-          ],
-          "commit": "d8d88e8049de73d87e5d3ef7dbd589ee7cda6720",
-          "digested": true,
-          "ended": 1794528000.0,
-          "first_base": "3fea00e95453cf271189dc8924ebcd942426162f",
-          "key": "repo/one#1",
-          "kind": "ticket",
-          "log": "/fixture/Vault/wayfinder/repo/runs/2026-11-13-one/1.log",
-          "log_start": 0,
-          "map": "repo/one",
-          "media": [
-            "board.png"
-          ],
-          "model": "sonnet",
-          "note": "resolved, commit d8d88e804",
-          "paths": null,
-          "pid": null,
-          "pid_start": null,
-          "recheck_at": null,
-          "rechecks": null,
-          "repo": "/fixture/repo",
-          "review": "/fixture/Vault/wayfinder/repo/runs/2026-11-13-one/1-review.md",
-          "run": "/fixture/Vault/wayfinder/repo/runs/2026-11-13-one",
-          "runner": "main",
-          "started": 1794528000.0,
-          "state": "done",
-          "title": "A",
-          "tree": null,
-          "tries": 0,
-          "verdict": "finished"
-        },
-        {
-          "agent": null,
           "commit": null,
           "ended": null,
           "key": "repo/one#3",
           "kind": "ticket",
+          "night": "night-20261113-010100",
           "note": "",
           "started": null,
           "state": "queued",
@@ -69,6 +27,7 @@
           "ended": null,
           "key": "repo/one#2",
           "kind": "ticket",
+          "night": "night-20261113-010100",
           "note": "",
           "started": null,
           "state": "queued",
@@ -78,18 +37,19 @@
       "maps": [
         "repo/one"
       ],
+      "night": "night-20261113-010100",
       "paused": true,
       "repos": {},
       "runs": {},
       "seeded": true,
-      "version": 15
+      "version": 16
     }
   },
   "contentType": "application/json",
   "request": {
     "key": "repo/one#3",
     "to": 0,
-    "version": 14
+    "version": 15
   },
   "route": "POST /api/queue/move",
   "status": 200

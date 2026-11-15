@@ -1,0 +1,47 @@
+{
+  "body": {
+    "night": {
+      "by": null,
+      "counts": {
+        "done": 0,
+        "failed": 0,
+        "items": 1,
+        "not_reached": 4,
+        "queued": 0,
+        "running": 0,
+        "skipped": 1
+      },
+      "ended": 1794528060.0,
+      "how": "stopped",
+      "id": "night-fixture",
+      "name": "Night of 2026-11-13, 01:01",
+      "not_reached": [
+        {
+          "key": "repo/two#5",
+          "title": "E"
+        },
+        {
+          "key": "repo/two#6",
+          "title": "F"
+        },
+        {
+          "key": "repo/one#3",
+          "title": "C"
+        },
+        {
+          "key": "job:aaaaaaaaaaaa:1",
+          "title": "audit"
+        }
+      ],
+      "started": 1794528060.0,
+      "state": "ended"
+    },
+    "ok": true
+  },
+  "contentType": "application/json",
+  "request": {
+    "mode": "after"
+  },
+  "route": "POST /api/night/stop",
+  "status": 200
+}

@@ -236,12 +236,18 @@ class ContractFixturesTest(unittest.TestCase):
         (media / "board.png").write_bytes(b"\x89PNG\r\n\x1a\nfixture")
         Path(item["run"], "1.md").write_text("# A\n\n## Self-checks\n\n- `true`: exit 0\n", encoding="utf-8")
         end = self.clock.t
+
+        def a_state():  # when A is judged the night ends and A moves to the night's record
+            q = self.hub.state()["queue"]
+            return next((i["state"] for i in q["items"]), None) or self.hub.night(self.hub.nights()["nights"][0]["id"])["night"]["items"][0]["state"]
         for _ in range(400):
             self.sup.tick()
-            if self.hub.state()["queue"]["items"][0]["state"] not in ("running", "landed", "review"):
+            if a_state() not in ("running", "landed", "review"):
                 break
             threading.Event().wait(0.03)
-        self.assertEqual(self.hub.state()["queue"]["items"][0]["state"], "done", self.hub.state()["queue"])
+        self.assertEqual(a_state(), "done", self.hub.state()["queue"])
+        self.assertEqual(self.hub.state()["queue"]["night"], None)  # the only item was judged: the night ended as finished
+        self.assertEqual(self.hub.nights()["nights"][0]["how"], "finished")
         self.clock.t = end + 60  # the ticket list's cache is read afresh
         self.sup.stop()
         r("queue_pause", {"paused": True})
@@ -322,7 +328,34 @@ class ContractFixturesTest(unittest.TestCase):
         # the answers that take things away
         r("queue_remove_job", {"key": spare, "version": self.hub.state()["queue"]["version"]})
         self.assertTrue(job)
-        r("queue_clear-finished", {"version": self.hub.state()["queue"]["version"]})
+        # the owner's Stop on a running ticket (B, made running by hand: no worker): marked, then ended by the
+        # supervisor as stopped by you; a Stop with no reason is refused
+        with self.hub._lock:
+            b = next(i for i in self.hub._data["queue"]["items"] if i["key"] == "repo/one#2")
+            b.update(state="running", started=self.clock.t, repo=str(self.repo), runner="spare")
+        self.record("queue-stop-no-reason", "/api/queue/stop",
+                    {"key": "repo/one#2", "reason": "", "version": self.hub.state()["queue"]["version"]}, 400)
+        r("queue_stop", {"key": "repo/one#2", "reason": "It edits the wrong checkout.",
+                         "version": self.hub.state()["queue"]["version"]})
+        self.sup._reap()
+        b = next(i for i in self.hub.state()["queue"]["items"] if i["key"] == "repo/one#2")
+        self.assertEqual(b["state"], "skipped")
+        self.assertTrue(b["note"].startswith("stopped by you: It edits the wrong checkout."), b["note"])
+        # the night:the first queue write started it; a second start is refused; a stop after ends it as stopped
+        nights = self.record("nights", "/api/nights")["nights"]
+        self.assertEqual([n["state"] for n in nights], ["live", "ended"])
+        live = nights[0]["id"]
+        self.subs[live] = "night-fixture"
+        self.subs[nights[1]["id"]] = "night-fixture-first"
+        self.record("night", "/api/night?id=" + live)
+        self.record("night-unknown", "/api/night?id=nope", status=404)
+        self.record("night-start-refused", "/api/night/start", {"name": 5}, 400)  # a second start is refused too: test_hub_queue
+        stopped = self.record("night-stop", "/api/night/stop", {"mode": "after"})["night"]
+        self.assertEqual((stopped["state"], stopped["how"]), ("ended", "stopped"))
+        self.assertTrue(stopped["not_reached"])
+        self.record("night-stop-none", "/api/night/stop", {"mode": "now"}, 400)
+        self.record("night-ended", "/api/night?id=" + live)
+        self.record("night-start", "/api/night/start", {"name": "Second night", "by": "sess-1"})
         r("unsend", {"id": pending})
         r("unlock", {"key": "port:5173", "by": "sess-1"})
         r("run_seen", {"key": "repo/one#1@1000"})

@@ -58,7 +58,9 @@ Without a running hub, see *No hub* at the end.
 5. Write the contract into each map's Notes from
    [templates/launch-contract.md](../templates/launch-contract.md), dated.
 6. `sbhub report --agent <your id> --map <project>/<map>` (or `sb_report` with `map`), so the hub knows
-   which session is in charge of the map. Then `sbhub queue agents <pool>`, then
+   which session is in charge of the map. Then `sbhub night start --name "<what tonight is for>"` (the
+   hub refuses a second while one is live; if it refuses, say so and join that night, do not stop it),
+   then `sbhub queue agents <pool>`, then
    `sbhub queue add <map> <NNN>... --by <your id>` (or `sb_queue` with `agent`, or tick them
    on the page), then `sbhub queue resume`. Keep the machine awake if the host offers it.
 7. Chat, one line: how many tickets, on which accounts, about when the queue ends, and the board's

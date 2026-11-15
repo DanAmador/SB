@@ -5,13 +5,17 @@ import type { RouteName } from "./routes.ts";
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === "object" && v !== null && !Array.isArray(v);
 
+const linkItems =
+  (ctx: LinkContext) =>
+  (list: unknown): unknown =>
+    Array.isArray(list) ? list.map((i: unknown) => (isObj(i) && typeof i.key === "string" ? { ...i, links: itemLinks(i as unknown as Parameters<typeof itemLinks>[0], ctx) } : i)) : list;
+
 function linkQueue(q: unknown, ctx: LinkContext): unknown {
   if (!isObj(q)) return q;
   if (isObj(q.runs)) {
     for (const [map, board] of Object.entries(q.runs)) if (typeof board === "string") ctx.runs[map] = board;
   }
-  const items = (list: unknown): unknown =>
-    Array.isArray(list) ? list.map((i: unknown) => (isObj(i) && typeof i.key === "string" ? { ...i, links: itemLinks(i as unknown as Parameters<typeof itemLinks>[0], ctx) } : i)) : list;
+  const items = linkItems(ctx);
   return { ...q, items: items(q.items), ...(q.cleared === undefined ? {} : { cleared: items(q.cleared) }) };
 }
 
@@ -39,6 +43,9 @@ function addRowLinks(route: RouteName, body: unknown, ctx: LinkContext): unknown
   if (route === "GET /api/map" && isObj(body) && typeof body.map === "string" && Array.isArray(body.tickets)) {
     const map = body.map;
     return { ...body, tickets: body.tickets.map((r: unknown) => (isObj(r) && typeof r.file === "string" ? { ...r, links: rowLinks({ map, file: r.file }, ctx) } : r)) };
+  }
+  if (route === "GET /api/night" && isObj(body) && isObj(body.night)) {
+    return { ...body, night: { ...body.night, items: linkItems(ctx)(body.night.items) } };
   }
   if (!isObj(body) || body.queue === undefined) return body;
   return { ...body, queue: linkQueue(body.queue, ctx) };

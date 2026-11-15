@@ -8,51 +8,6 @@
         "spare"
       ],
       "bases": {},
-      "cleared": [
-        {
-          "agent": null,
-          "base_sha": "3fea00e95453cf271189dc8924ebcd942426162f",
-          "branch": null,
-          "checked": null,
-          "checks": [
-            {
-              "cmd": "true",
-              "code": 0,
-              "secs": 0.0,
-              "tail": ""
-            }
-          ],
-          "commit": "d8d88e8049de73d87e5d3ef7dbd589ee7cda6720",
-          "digested": true,
-          "ended": 1794528000.0,
-          "first_base": "3fea00e95453cf271189dc8924ebcd942426162f",
-          "key": "repo/one#1",
-          "kind": "ticket",
-          "log": "/fixture/Vault/wayfinder/repo/runs/2026-11-13-one/1.log",
-          "log_start": 0,
-          "map": "repo/one",
-          "media": [
-            "board.png"
-          ],
-          "model": "sonnet",
-          "note": "resolved, commit d8d88e804",
-          "paths": null,
-          "pid": null,
-          "pid_start": null,
-          "recheck_at": null,
-          "rechecks": null,
-          "repo": "/fixture/repo",
-          "review": "/fixture/Vault/wayfinder/repo/runs/2026-11-13-one/1-review.md",
-          "run": "/fixture/Vault/wayfinder/repo/runs/2026-11-13-one",
-          "runner": "main",
-          "started": 1794528000.0,
-          "state": "done",
-          "title": "A",
-          "tree": null,
-          "tries": 0,
-          "verdict": "finished"
-        }
-      ],
       "final_review": true,
       "items": [
         {
@@ -61,6 +16,7 @@
           "ended": null,
           "key": "repo/two#5",
           "kind": "ticket",
+          "night": "night-20261113-010100",
           "note": "",
           "started": null,
           "state": "queued",
@@ -77,6 +33,7 @@
           "ended": null,
           "key": "repo/two#6",
           "kind": "ticket",
+          "night": "night-20261113-010100",
           "note": "",
           "started": null,
           "state": "queued",
@@ -93,6 +50,7 @@
           "ended": null,
           "key": "repo/one#3",
           "kind": "ticket",
+          "night": "night-20261113-010100",
           "note": "",
           "started": null,
           "state": "queued",
@@ -109,14 +67,21 @@
           "ended": null,
           "key": "repo/one#2",
           "kind": "ticket",
-          "note": "",
+          "night": "night-20261113-010100",
+          "note": "stopping, by you: It edits the wrong checkout.",
           "refused": 2,
           "refused_lines": [
             "refused: Bash: `git push` is refused",
             "refused: Bash: `git stash` is refused"
           ],
-          "started": null,
-          "state": "queued",
+          "repo": "/fixture/repo",
+          "runner": "spare",
+          "started": 1794528060.0,
+          "state": "running",
+          "stop_asked": {
+            "at": 1794528060.0,
+            "reason": "It edits the wrong checkout."
+          },
           "tries": 0,
           "waits": {
             "kind": "paused",
@@ -134,6 +99,7 @@
           "kind": "job",
           "model": "opus",
           "name": "audit",
+          "night": "night-20261113-010100",
           "not_before": 1794609000.0,
           "note": "",
           "project": "/fixture/repo",
@@ -149,6 +115,7 @@
         "repo/two",
         "repo/one"
       ],
+      "night": "night-20261113-010100",
       "paused": true,
       "repos": {
         "/fixture/repo": {
@@ -160,13 +127,15 @@
       "runs": {},
       "seeded": true,
       "stop_at": 1794549600.0,
-      "version": 26
+      "version": 27
     }
   },
   "contentType": "application/json",
   "request": {
-    "version": 25
+    "key": "repo/one#2",
+    "reason": "It edits the wrong checkout.",
+    "version": 26
   },
-  "route": "POST /api/queue/clear-finished",
+  "route": "POST /api/queue/stop",
   "status": 200
 }

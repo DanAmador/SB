@@ -447,7 +447,7 @@ class Batch2Test(PacingCase):
         self.assertIn("none reported", sbhub.hub_checks_section(False, "no commit after abc", None, [], "", "now"))
         self.assertIn("No check ran", sbhub.hub_checks_section(False, "no commit after abc", None, [], "", "now"))
 
-    def test_clear_finished_dismiss_and_clear_quiet_change_only_what_the_board_shows(self):
+    def test_a_night_end_dismiss_and_clear_quiet_change_only_what_the_board_shows(self):
         self.tick_all()
         log = self.root / "1.log"
         log.write_text("argv: x\n")
@@ -455,10 +455,13 @@ class Batch2Test(PacingCase):
             first, second = self.hub._data["queue"]["items"]
             first.update(state="done", ended=self.clock.t, log=str(log))
             second.update(state="running", runner="main", started=self.clock.t)
-        out = self.hub.queue_clear_finished(self.hub.state()["queue"]["version"])
+        self.sup.tick()  # the night is not over: the finished item stays on the line beside the running one
+        self.assertEqual(len(self.hub.state()["queue"]["items"]), 2)
+        with self.hub._lock:
+            second.update(state="done", ended=self.clock.t)
+        self.sup.tick()  # every item is judged: the night ends and its items leave the line
         q = self.hub.state()["queue"]
-        self.assertEqual(([i["key"] for i in q["items"]], [i["key"] for i in q["cleared"]]), (["repo/one#2"], ["repo/one#1"]))
-        self.assertTrue(self.hub.queue_clear_finished(out["queue"]["version"] - 1)["stale"])
+        self.assertEqual(q["items"], [])
         self.assertTrue(self.hub.item_file("repo/one#1", "log")[0].endswith("1.log"))  # still reachable
         now = self.clock.t
         rows = {"idle-old": ("idle", now - 3 * 3600, None), "turn-new": ("your turn", now - 3600, None),
@@ -510,7 +513,7 @@ class Batch2Test(PacingCase):
                          ("job", None, "sonnet", datetime(2026, 11, 13, 9, 0).timestamp()))
         self.assertIn("# Close off the night: 2026-11-13", job["prompt"])
         self.assertIn("- repo/one", job["prompt"])
-        self.assertIn("http://127.0.0.1:4321/api/queue/clear-finished", job["prompt"])
+        self.assertNotIn("clear-finished", job["prompt"])
         self.assertNotIn("{port}", job["prompt"])
         self.assertTrue(sbhub.CLOSE_OFF.is_file())
 

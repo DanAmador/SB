@@ -20,6 +20,9 @@ and never fail a session when it is down.
                                       the next prompt)
   sbhub.py queue                      tonight's ticket queue in run order, with each ticket's state
   sbhub.py queue add|rm <map> <NNN>...   tick or untick tickets (running and finished items stay)
+  sbhub.py night start [--name N]     open tonight's night (queuing with none live opens one too); a second start is refused
+  sbhub.py night stop [--mode after]  start nothing new, let what runs finish, end the night as stopped; lists what it never reached
+  sbhub.py night [show]               every night, newest first, with its counts
   sbhub.py queue pause|resume         hold or release the queue
   sbhub.py queue job --project P --agent A [--model M] [--name N] [--at HH:MM] (--prompt T | --prompt-file F)
                                       queue a one-off job (never started before --at);
@@ -136,6 +139,7 @@ class Hub:
             saved = None
         if isinstance(saved, dict):
             self._data.update(saved)
+        self._migrate_nights()
         self._sync_maps(self._data["queue"])  # a queue saved before maps: its maps in their first tickets' order
         with self._lock:
             self._end_rows()  # rows of items that ended while no hub was watching
@@ -455,7 +459,7 @@ class Hub:
     def state(self):
         with self._lock:
             self._settle()
-            out = json.loads(json.dumps(self._data))
+            out = json.loads(json.dumps({k: v for k, v in self._data.items() if k != "nights"}))
             charge = out.setdefault("charge", {})
             for k, v in out["agents"].items():
                 v["agent"] = k
@@ -547,7 +551,8 @@ class Hub:
             items = [i for i in q["items"] if i["kind"] == "ticket"]
             place = {i["key"]: n for n, i in enumerate((i for i in items if i["state"] == "queued"), 1)}
             ran = {}
-            for i in [i for i in q.get("cleared") or [] if i["kind"] == "ticket"] + items:  # the newest wins
+            past = [i for n in self._data.get("nights") or [] for i in n.get("items") or [] if i["kind"] == "ticket"]
+            for i in [i for i in q.get("cleared") or [] if i["kind"] == "ticket"] + past + items:  # the newest wins
                 if i["state"] != "queued":
                     ran[i["key"]] = {"state": i["state"], "note": i.get("note") or "", "ended": i.get("ended")}
         out = []
@@ -614,13 +619,14 @@ class Hub:
         if item is None or item["state"] == "queued":
             return item
         for f in ("retry", "digested", "runner", "pid", "pid_start", "result", "base_sha", "first_base", "resume", "stops",
-                  "log_start", "checked", "verdict", "review", "redo"):
+                  "log_start", "checked", "verdict", "review", "redo", "stop_asked"):
             item.pop(f, None)
         item.update(state="queued", note="", ended=None, tries=0, started=None, commit=None)
         return item
 
-    def _queue_write(self, version, change, needs_tickets=False):
-        """One accepted queue write: stale versions are refused, the rest bump the version once."""
+    def _queue_write(self, version, change, needs_tickets=False, by=None):
+        """One accepted queue write: stale versions are refused, the rest bump the version once. What it adds
+        joins the live night; with none live, it starts one (by `by`, the session that queued)."""
         rows = []
         if needs_tickets:
             rows = self._open_tickets()
@@ -630,12 +636,172 @@ class Hub:
             q = self._data["queue"]
             if version is not None and version != q["version"]:
                 return {"ok": False, "stale": True, "queue": json.loads(json.dumps(q))}
+            live = self._night_live()
+            backup = json.loads(json.dumps(q)) if live and live["state"] == "stopping" else None
             change(q, rows)
+            new = [i for i in q["items"] if not i.get("night") and not i.get("close_off")]
+            if new and backup is not None:
+                self._data["queue"] = backup
+                raise ValueError("the night is stopping: queue again once it has ended")
+            if new:
+                live = live or self._night_start(by=by)
+                for i in new:
+                    i["night"] = live["id"]
             self._sync_maps(q)
+            self._night_settle()
             q["version"] += 1
             self._save()
             self.queue_kick.set()
             return {"ok": True, "queue": json.loads(json.dumps(q))}
+
+    # ---- nights: one sb tonight, with a start, an end and the items that belong to it ----
+
+    NIGHT_ENDED = ("done", "failed", "skipped")
+
+    def _ever(self, q):
+        """Every item the hub still holds, the live line first, then each night's record newest first, then cleared."""
+        past = [i for n in reversed(self._data.get("nights") or []) for i in n.get("items") or []]
+        return q["items"] + past + (q.get("cleared") or [])
+
+    def _night_live(self):
+        """The night that is live or stopping, or None."""
+        nid = self._data["queue"].get("night")
+        return next((n for n in self._data.get("nights") or [] if n["id"] == nid), None)
+
+    def _night_start(self, name=None, by=None):
+        """Open a night (the lock is held). ValueError while another is live or stopping."""
+        live = self._night_live()
+        if live:
+            raise ValueError("a night is already {}: {} ({})".format(live["state"], live["name"], live["id"]))
+        now = self.now()
+        stamp = datetime.fromtimestamp(now)
+        ids = {n["id"] for n in self._data["nights"]}
+        base = "night-" + stamp.strftime("%Y%m%d-%H%M%S")
+        nid, k = base, 1
+        while nid in ids:
+            k += 1
+            nid = "{}-{}".format(base, k)
+        night = {"id": nid, "name": (str(name).strip() if name else "") or stamp.strftime("Night of %Y-%m-%d, %H:%M"),
+                 "started": now, "by": self._resolve(by) if isinstance(by, str) and by else None, "state": "live",
+                 "ended": None, "how": None, "not_reached": []}
+        self._data["nights"].append(night)
+        self._data["queue"]["night"] = nid
+        return night
+
+    def _migrate_nights(self):
+        """A state saved before nights: its ended items become one ended night, 'Before runs'; what is queued or
+        at work becomes a live night started now."""
+        d, now = self._data, self.now()
+        q = d["queue"]
+        if "nights" in d:
+            q.setdefault("night", None)
+            return
+        d["nights"], q["night"] = [], None
+        items = q.setdefault("items", [])
+        ended = [i for i in items if i.get("state") in self.NIGHT_ENDED]
+        rest = [i for i in items if i.get("state") not in self.NIGHT_ENDED]
+        if ended:
+            stamps = [i[f] for i in ended for f in ("started", "created") if i.get(f)] or [now]
+            done = max([i["ended"] for i in ended if i.get("ended")] or [now])
+            for i in ended:
+                i["night"] = "night-before-runs"
+            d["nights"].append({"id": "night-before-runs", "name": "Before runs", "started": min(stamps), "by": None,
+                                "state": "ended", "ended": done, "how": "finished", "not_reached": [], "items": ended})
+        q["items"] = rest
+        live = [i for i in rest if not i.get("close_off")]
+        if live:
+            night = self._night_start()
+            for i in live:
+                i["night"] = night["id"]
+        if items:
+            self._save()
+
+    @staticmethod
+    def _night_counts(items, not_reached):
+        states = [i.get("state") for i in items]
+        return {"items": len(items), "queued": states.count("queued"), "done": states.count("done"),
+                "failed": states.count("failed"), "skipped": states.count("skipped"),
+                "running": sum(1 for s in states if s not in ("queued", "done", "failed", "skipped")),
+                "not_reached": len(not_reached)}
+
+    def _night_view(self, night, with_items=False):
+        items = night.get("items")
+        if items is None:
+            items = [i for i in self._data["queue"]["items"] if i.get("night") == night["id"]]
+        out = {k: night[k] for k in ("id", "name", "started", "by", "state", "ended", "how", "not_reached")}
+        out["counts"] = self._night_counts(items, night["not_reached"])
+        if with_items:
+            out["items"] = items
+        return json.loads(json.dumps(out))
+
+    def nights(self):
+        """Every night, newest first, with its counts and without its items."""
+        with self._lock:
+            return {"nights": [self._night_view(n) for n in reversed(self._data["nights"])]}
+
+    def night(self, nid):
+        """One night with its items; KeyError when there is none."""
+        with self._lock:
+            n = next((n for n in self._data["nights"] if n["id"] == nid), None)
+            if n is None:
+                raise KeyError(nid)
+            return {"night": self._night_view(n, with_items=True)}
+
+    def night_start(self, name=None, by=None):
+        with self._lock:
+            night = self._night_start(name, by)
+            self._data["queue"]["version"] += 1
+            self._save()
+            return {"ok": True, "night": self._night_view(night)}
+
+    def night_stop(self, mode):
+        """Stop after: nothing new starts, what runs finishes and is judged, then the night ends as stopped by
+        you. What it never reached leaves the line, stays open and is listed on the night."""
+        if mode != "after":
+            raise ValueError("mode must be 'after'")
+        with self._lock:
+            night = self._night_live()
+            if night is None:
+                raise ValueError("no night is live")
+            night["state"] = "stopping"
+            self._night_settle()
+            self._data["queue"]["version"] += 1
+            self._save()
+            self.queue_kick.set()
+            return {"ok": True, "night": self._night_view(night)}
+
+    def _night_settle(self, ending=True):
+        """(the lock is held) Look at the live night: while it stops, what is queued leaves the line as not
+        reached; once none of its items is queued or at work it ends, and its items leave the line for its record.
+        Finished close-off jobs, which belong to no night, go to the cleared log. True when anything changed."""
+        q = self._data["queue"]
+        changed = False
+        gone = [i for i in q["items"] if not i.get("night") and i.get("state") in self.NIGHT_ENDED]
+        if gone:
+            q["items"] = [i for i in q["items"] if i not in gone]
+            q["cleared"] = ((q.get("cleared") or []) + gone)[-CLEARED_KEPT:]
+            changed = True
+        night = self._night_live()
+        if night is None:
+            return changed
+        mine = [i for i in q["items"] if i.get("night") == night["id"]]
+        stopping = night["state"] == "stopping"
+        if stopping:
+            for i in [i for i in mine if i["state"] == "queued"]:
+                night["not_reached"].append({"key": i["key"], "title": i.get("title") or self._queue_title(i["key"]) or ""})
+                q["items"].remove(i)
+                mine.remove(i)
+                changed = True
+            q["maps"] = [m for m in q.get("maps") or [] if any(sbqueue.map_of(i["key"]) == m for i in q["items"])]
+        if not ending or any(i["state"] not in self.NIGHT_ENDED for i in mine) or not (stopping or mine):
+            return changed
+        how = "stopped" if stopping else "stop_time" if night.get("stop_time") else "finished"
+        night.pop("stop_time", None)
+        night.update(state="ended", ended=self.now(), how=how, items=mine)
+        q["items"] = [i for i in q["items"] if i not in mine]
+        q["night"] = None
+        q["version"] += 1
+        return True
 
     def _take_charge(self, agent, maps):
         """Session `agent` is in charge of each of `maps` that no other live session is in charge of."""
@@ -655,7 +821,7 @@ class Hub:
             self._apply_selection(q, list(keys), rows)
             q["seeded"] = True
             self._take_charge(agent, {sbqueue.map_of(k) for k in keys if k not in queued})
-        return self._queue_write(version, change, needs_tickets=True)
+        return self._queue_write(version, change, needs_tickets=True, by=agent)
 
     def queue_move(self, key, to_index, version):
         """Move a queued ticket among the queued tickets, clamped by its blockers and dependents."""
@@ -687,7 +853,7 @@ class Hub:
             q["seeded"] = True
             if keys:
                 self._take_charge(agent, {name})
-        out = self._queue_write(version, change, needs_tickets=True)
+        out = self._queue_write(version, change, needs_tickets=True, by=agent)
         return {**out, "left_out": left} if out["ok"] else out
 
     def queue_move_map(self, name, to_index, version):
@@ -714,14 +880,20 @@ class Hub:
             q["items"].remove(item)
         return self._queue_write(version, change)
 
-    def queue_clear_finished(self, version):
-        """Take done, failed and skipped items off the queue list; they stay in `cleared` (the page's log) and
-        in the vault. Nothing running or queued is touched."""
+    def queue_stop(self, key, reason, version):
+        """The owner's Stop: a running item is marked `stop_asked` with the reason; the supervisor's next tick (at
+        once: the write kicks it) kills its worker's whole process group and ends it as stopped by you (_stop_asked).
+        Its work is never stashed, reset or deleted."""
+        words = " ".join(str(reason or "").split())
+        if not words:
+            raise ValueError("say why it stops")
+
         def change(q, rows):
-            gone = [i for i in q["items"] if i["state"] in ("done", "failed", "skipped")]
-            q["items"] = [i for i in q["items"] if i["state"] not in ("done", "failed", "skipped")]
-            q["cleared"] = (q.get("cleared") or []) + gone
-            q["cleared"] = q["cleared"][-CLEARED_KEPT:]
+            item = next((i for i in q["items"] if i["key"] == key), None)
+            if item is None or item["state"] != "running":
+                raise ValueError("not a running item: {}".format(key))
+            item["stop_asked"] = {"reason": words, "at": self.now()}
+            item["note"] = "stopping, by you: " + words
         return self._queue_write(version, change)
 
     def run_seen(self, key):
@@ -765,7 +937,7 @@ class Hub:
         the path is the item's own, never one from the request. KeyError when it has none."""
         with self._lock:
             q = self._data["queue"]
-            item = next((i for i in q["items"] + (q.get("cleared") or []) if i["key"] == key), None)
+            item = next((i for i in self._ever(q) if i["key"] == key), None)
         if item is None:
             raise KeyError(key)
         if what == "log":
@@ -781,7 +953,7 @@ class Hub:
     def _run_items(self):
         with self._lock:
             q = self._data["queue"]
-            return json.loads(json.dumps(q["items"] + (q.get("cleared") or [])))
+            return json.loads(json.dumps(self._ever(q)))
 
     def runs(self, since=0, offset=0, limit=100):
         """Every run for History: the queue's finished ticket items and the vault's run folders, newest first."""
@@ -809,7 +981,7 @@ class Hub:
         with a path in it, or a file that now resolves outside its media folder."""
         with self._lock:
             q = self._data["queue"]
-            item = next((dict(i) for i in q["items"] + (q.get("cleared") or []) if i["key"] == key), None)
+            item = next((dict(i) for i in self._ever(q) if i["key"] == key), None)
         if item is None or not name or name not in (item.get("media") or []) or any(c in name for c in ("/", "\\", "..")):
             raise KeyError(name)
         d = self._media_dir(item)
@@ -2316,6 +2488,7 @@ class Supervisor:
         self._reviews()  # a review that ended is judged before the night's end is looked for
         self._final_review()
         self._close_off()
+        self._settle_night(False)  # a night that stops starts nothing new
         if not self.stopped:
             self._rechecks()
             self._reviews()  # and one a recheck asked for starts at once
@@ -2323,7 +2496,15 @@ class Supervisor:
             self._start()
         self._set_waits()
         self._digest()
+        self._settle_night()
         self._night_note()
+
+    def _settle_night(self, ending=True):
+        """A stopping night drops what is queued; with `ending`, a night whose items are all judged ends. The tick
+        ends it only after the board and the digest have read its items."""
+        with self.hub._lock:
+            if self.hub._night_settle(ending):
+                self.hub._save()
 
     def _night_note(self):
         """Keep the vault's hub-now.md current: on a start or an end, and every NOTE_EVERY s while something
@@ -2573,6 +2754,9 @@ class Supervisor:
             running = [dict(i) for i in self.hub._data["queue"]["items"]
                        if i["state"] == "running"]
         for item in running:
+            if item.get("stop_asked"):  # the owner's Stop, before a restart's recovery could queue it again
+                self._stop_asked(item)
+                continue
             run = self.procs.get(item["key"])
             if run is None:
                 self._recover(item)
@@ -2598,6 +2782,62 @@ class Supervisor:
             # only finished work says what an item costs: a worker whose checks passed (it landed) counts
             if now_item.get("state") in ("done", "landed"):
                 self._learn(run, item.get("model") or "sonnet")
+
+    def _stop_asked(self, item):
+        """The owner's Stop (Hub.queue_stop): kill the worker's whole process group, its helpers included (one an
+        earlier hub started too, known by the pid and start time on the item), then end the item as stopped by you:
+        never tried again, never sent to Opus, not a usage stop and not a failure. A ticket's claim is released and
+        a comment names the reason and where the work is; that work is left exactly where it is."""
+        key, asked = item["key"], item["stop_asked"]
+        run = self.procs.pop(key, None)
+        if run is None and item.get("pid"):  # this hub did not start it (it restarted): the item knows the worker
+            pid, started = item["pid"], item.get("pid_start")
+            sure = bool(started) and _proc_start(pid) == started
+            run = {"p": _Adopted(pid, started if sure else None), "adopted": True, "agent": item.get("runner"),
+                   "log": item.get("log"), "start": item.get("log_start") or 0}
+        left = False
+        if run is not None:
+            if getattr(run["p"], "sure", True):  # a pid ps could not tie to the worker is never killed
+                _kill_group(run["p"], grace=3)
+                left = run["p"].poll() is None
+            else:
+                left = _pid_exists(run["p"].pid)
+            if run.get("log") and run.get("agent"):
+                try:
+                    self._consume(run, final=True)  # its usage readings still pace its account
+                except Exception:
+                    pass
+        where = self._work_left(item)
+        note = "stopped by you: " + asked["reason"]
+        if left:
+            note += "; its process {} could not be confirmed as the worker, so it was left alone".format(
+                run["p"].pid)
+        if item["kind"] == "ticket":
+            num = "{:03d}".format(int(key.rsplit("#", 1)[1]))
+            self.sbmap("comment", sbqueue.map_of(key), num, "--text",
+                       "Stopped by you from the hub page: {}. {}".format(asked["reason"].rstrip("."), where))
+            self._release(key)
+        self._end(key, "skipped", note=note + ". " + where)
+
+    def _work_left(self, item):
+        """Where a stopped worker's work is, in words: its branch and worktree, else the checkout's changed files."""
+        if item.get("tree"):
+            return "Its work stays on branch {} in the worktree {}.".format(item.get("branch"), item["tree"])
+        repo = item.get("repo")
+        if not repo:
+            return "It had no checkout yet."
+        names = []
+        for args in (("diff", "--name-only", "HEAD"), ("ls-files", "--others", "--exclude-standard")):
+            rc, out, _ = _git_run(repo, *args)
+            names += [n for n in out.splitlines() if n and n not in names] if rc == 0 else []
+        made = ""
+        if item.get("base_sha"):
+            rc, out, _ = _git_run(repo, "rev-list", "--count", "{}..HEAD".format(item["base_sha"]))
+            if rc == 0 and out.strip() not in ("", "0"):
+                made = " Commits since it started: {} (on the checkout's branch).".format(out.strip())
+        files = ("Files left changed in the checkout {}: {}.".format(repo, ", ".join(names)) if names else
+                 "No file is left changed in the checkout {}.".format(repo))
+        return files + made
 
     def _job_stopped(self, item, run):
         """True when a job's own output shows a logout or a usage limit: its agent waits and the job goes back to
@@ -3040,6 +3280,9 @@ class Supervisor:
                 waiting = [i for i in q["items"] if i["state"] == "queued"]
                 for i in waiting:
                     i.update(state="skipped", note="past the stop time", ended=now)
+                night = self.hub._night_live()
+                if waiting and night:
+                    night["stop_time"] = True
                 ended = not any(i["state"] == "running" for i in q["items"])
                 if ended:  # the night is over: tomorrow's items are not skipped at once
                     q["stop_at"] = None
@@ -3611,6 +3854,14 @@ def make_handler(hub):
                     self.send_file(*found)
                 except (KeyError, OSError):
                     self.send(404, b"", "text/plain")
+            elif path == "/api/nights":
+                self.send(200, hub.nights())
+            elif path == "/api/night":
+                from urllib.parse import parse_qs, urlsplit
+                try:
+                    self.send(200, hub.night((parse_qs(urlsplit(self.path).query).get("id") or [""])[0]))
+                except KeyError:
+                    self.send(404, {"ok": False, "error": "no such night"})
             elif path == "/api/runs":
                 from urllib.parse import parse_qs, urlsplit
                 qs = parse_qs(urlsplit(self.path).query)
@@ -3701,8 +3952,12 @@ def make_handler(hub):
                                         d.get("at") or None)
                 elif path == "/api/queue/remove_job":
                     out = hub.queue_remove_job(d["key"], d["version"])
-                elif path == "/api/queue/clear-finished":
-                    out = hub.queue_clear_finished(d.get("version"))
+                elif path == "/api/queue/stop":
+                    out = hub.queue_stop(d["key"], d["reason"], d["version"])
+                elif path == "/api/night/start":
+                    out = hub.night_start(d.get("name"), d.get("by"))
+                elif path == "/api/night/stop":
+                    out = hub.night_stop(d["mode"])
                 elif path == "/api/run/seen":
                     out = hub.run_seen(d["key"])
                 elif path == "/api/agents/dismiss":
@@ -4159,6 +4414,37 @@ def cmd_queue(a):
     return 1
 
 
+def cmd_night(a):
+    """sbhub night start [--name N] [--by SESSION] | stop [--mode after] | show"""
+    if a.action == "start":
+        code, out = call(a.port, "/api/night/start", {"name": a.name, "by": a.by or os.environ.get("SB_HUB_AGENT")})
+    elif a.action == "stop":
+        code, out = call(a.port, "/api/night/stop", {"mode": a.mode})
+    elif a.action == "show":
+        code, out = call(a.port, "/api/nights")
+        if code == 200:
+            for n in out["nights"]:
+                c = n["counts"]
+                print("{}  {}  {}{}  {} done, {} failed, {} skipped, {} queued, {} running, {} not reached".format(
+                    n["id"], n["state"], n["name"], " (" + n["how"] + ")" if n["how"] else "", c["done"], c["failed"],
+                    c["skipped"], c["queued"], c["running"], c["not_reached"]))
+            return 0
+    else:
+        print("usage: night start|stop|show", file=sys.stderr)
+        return 1
+    if code == 0:
+        print("sbhub: not running", file=sys.stderr)
+        return 2
+    if code != 200:
+        print("sbhub: {}".format(out.get("error") if isinstance(out, dict) else out), file=sys.stderr)
+        return 1
+    n = out["night"]
+    print("{} {}: {}".format(n["id"], n["state"], n["name"]))
+    for x in n["not_reached"]:
+        print("  not reached: {}  {}".format(x["key"], x["title"]))
+    return 0
+
+
 def cmd_agents(a):
     if a.scan:
         code, out = call(a.port, "/api/agents/scan", {}, timeout=30)
@@ -4387,6 +4673,8 @@ def main(argv=None):
     add("queue", ("action", {"nargs": "?", "default": "show"}), ("rest", {"nargs": "*"}),
         ("--project", {}), ("--agent", {}), ("--model", {}), ("--name", {}), ("--prompt", {}),
         ("--prompt-file", {}), ("--at", {}), ("--by", {}))
+    add("night", ("action", {"nargs": "?", "default": "show"}), ("--name", {}), ("--by", {}),
+        ("--mode", {"default": "after"}))
     add("agents", ("--scan", {"action": "store_true"}))
     add("trust", ("project", {}))
     add("untrust", ("project", {}))
@@ -4412,6 +4700,8 @@ def main(argv=None):
         return cmd_send(a)
     if a.cmd == "queue":
         return cmd_queue(a)
+    if a.cmd == "night":
+        return cmd_night(a)
     if a.cmd == "agents":
         return cmd_agents(a)
     if a.cmd == "run-ticket":

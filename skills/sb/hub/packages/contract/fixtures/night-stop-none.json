@@ -1,0 +1,12 @@
+{
+  "body": {
+    "error": "mode must be 'after'",
+    "ok": false
+  },
+  "contentType": "application/json",
+  "request": {
+    "mode": "now"
+  },
+  "route": "POST /api/night/stop",
+  "status": 400
+}
