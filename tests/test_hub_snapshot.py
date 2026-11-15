@@ -70,7 +70,6 @@ class NightNoteTest(unittest.TestCase):
         self.assertIn("1 running \u00b7 1 queued \u00b7 1 done", t)
         self.assertIn("1 queued \u00b7 1 failed", t)
         self.assertIn("- [[wayfinder/a/one/issues/002 Beta|002 Beta]] \u00b7 12 min \u00b7 Edit sbhub.py", t)
-        self.assertIn("1. 003 Gamma", t) if "[[" not in t.split("**Next**")[1].splitlines()[1] else None
         self.assertIn("1. 003 Gamma", t)  # no file known: the title shows as plain text
         self.assertIn("- [[wayfinder/a/one/issues/001 Alpha|001 Alpha]] \u00b7 done \u2014 all checks passed"
                       " \u00b7 [[wayfinder/a/one/runs/n/1|report]]", t)
@@ -81,6 +80,14 @@ class NightNoteTest(unittest.TestCase):
         self.assertIn("008 Grill me", owner)
         self.assertIn("failed, needs a look", owner)
         self.assertNotIn("Idle", owner)
+
+    def test_ended_ticket_not_in_rows_shows_its_title(self):
+        item = {"key": "a/one#50", "kind": "ticket", "state": "done", "ended": NOW - 5, "title": "Shipped thing"}
+        t = sbhub_snapshot.night_note({"paused": False, "items": [item]}, ROWS, NOW, {})
+        self.assertIn("- 050 Shipped thing \u00b7 done", t)
+        gone = dict(item, key="a/one#51", title=None)
+        t = sbhub_snapshot.night_note({"paused": False, "items": [gone]}, ROWS, NOW, {"a/one#51": "wayfinder/a/one/issues/done/051 From file"})
+        self.assertIn("|051 From file]]", t)
 
     def test_queue_word(self):
         self.assertTrue(self.note(paused=True).splitlines()[4].endswith("queue paused"))
@@ -129,6 +136,43 @@ class NightNoteWriteTest(unittest.TestCase):
                 sup._night_note()
                 self.assertEqual(w.call_count, 2)
                 self.assertIn("1 queued", sup.note_path.read_text())
+
+    def test_new_wait_and_new_day_rewrite_while_nothing_runs_and_same_shape_leaves_the_disk_note(self):
+        with tempfile.TemporaryDirectory() as d:
+            vault = Path(d) / "V"
+            (vault / "wayfinder").mkdir(parents=True)
+            hub = sbhub.Hub(Path(d) / "home", run=lambda: json.dumps([]))
+            hub.tickets()
+            sup = sbhub.Supervisor(hub, port=1)
+            sup.note_path = vault / "wayfinder" / "runs" / "hub-now.md"
+            clock = [NOW]
+            hub.now = lambda: clock[0]
+            with hub._lock:
+                hub._data["queue"]["items"] += [{"key": "r/m#1", "kind": "ticket", "state": "queued"},
+                                                {"key": "r/m#3", "kind": "ticket", "state": "done", "ended": NOW - 60}]
+            with mock.patch.dict("os.environ", {"SB_VAULT": str(vault)}), \
+                    mock.patch.object(sbhub_snapshot, "write_whole", wraps=sbhub_snapshot.write_whole) as w:
+                sup._night_note()
+                self.assertEqual(w.call_count, 1)
+                # no-rewrite path against the note on disk: the supervisor forgets its text, the shape is the same
+                clock[0] += 60
+                sup.note_seen = (None, 0, "")
+                sup._night_note()
+                self.assertEqual(w.call_count, 1)  # same text on disk: not rewritten
+                self.assertIn("Written 2026-11-14 15:00", sup.note_path.read_text())
+                # a new grilling ticket waits: rewritten although nothing runs
+                hub._tcache = (hub._tcache[0], [{"map": "r/m", "num": 2, "title": "Grill", "state": "waits for you", "reason": "a grilling ticket needs you"}])
+                sup._night_note()
+                self.assertEqual(w.call_count, 2)
+                self.assertIn("002 Grill", sup.note_path.read_text())
+                sup._night_note()
+                self.assertEqual(w.call_count, 2)
+                # a new day: only the date moved, and yesterday's ended ticket drops out of the note
+                self.assertIn("r/m#3", sup.note_path.read_text())
+                clock[0] += 86400
+                sup._night_note()
+                self.assertEqual(w.call_count, 3)
+                self.assertNotIn("r/m#3", sup.note_path.read_text())
 
 
 if __name__ == "__main__":

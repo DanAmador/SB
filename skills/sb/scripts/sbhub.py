@@ -2505,7 +2505,9 @@ class Supervisor:
             now = self.hub.now()
             with self.hub._lock:
                 q = json.loads(json.dumps(self.hub._data["queue"]))
-            shape = (q["paused"], tuple((i["key"], i["state"]) for i in q["items"]))
+            waiting = tuple(sorted("{}#{}".format(t["map"], int(t["num"])) for t in self.hub._tcache[1] or []
+                                   if t.get("state") == "waits for you"))
+            shape = (q["paused"], tuple((i["key"], i["state"]) for i in q["items"]), waiting, time.strftime("%Y-%m-%d", time.localtime(now)))
             old, at, text = self.note_seen
             running = any(i["state"] == "running" for i in q["items"])
             if shape == old and not (running and now - at >= NOTE_EVERY):
@@ -2542,7 +2544,10 @@ class Supervisor:
             if not sbhub_snapshot.same_note(text or self._note_on_disk(), new):
                 sbhub_snapshot.write_whole(self.note_path, new)
         except Exception as e:  # the phone note is a convenience: a tick goes on without it
-            print("sbhub: hub-now.md not written: {}: {}".format(type(e).__name__, e), file=sys.stderr)
+            err = "{}: {}".format(type(e).__name__, e)
+            if err != getattr(self, "note_err", None):  # once per error, not once per tick
+                self.note_err = err
+                print("sbhub: hub-now.md not written: " + err, file=sys.stderr)
 
     def _note_on_disk(self):
         try:

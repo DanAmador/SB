@@ -40,9 +40,17 @@ def night_note(queue, rows, now, files=None, steps=None, reports=None):
     day = time.mktime(time.localtime(now)[:3] + (0, 0, 0, 0, 0, -1))
     title = {"{}#{}".format(t["map"], int(t["num"])): t.get("title") for t in rows or []}
 
+    by_key = {i["key"]: i for i in items}
+
     def link(key):
         num = key.rsplit("#", 1)[1]
-        label = _one("{:03d} {}".format(int(num), title[key])) if title.get(key) else key
+        t = title.get(key) or by_key.get(key, {}).get("title")  # rows hold open tickets only: an ended one has the queue item's title
+        if t:
+            label = _one("{:03d} {}".format(int(num), t))
+        elif files.get(key):
+            label = _one(files[key].rsplit("/", 1)[-1])  # the ticket file's name, "075 Title"
+        else:
+            label = key
         return "[[{}|{}]]".format(files[key], label) if key in files else label
 
     live = [i for i in items if i["state"] in ("queued", "running", "review", "recheck")]
