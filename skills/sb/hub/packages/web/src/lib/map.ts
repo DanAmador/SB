@@ -109,3 +109,23 @@ export function layoutMap(route: Pick<MapRoute, "map" | "checks" | "tickets">): 
   }
   return { nodes: [...nodes.values()], edges, width: width + 16, height: height + 16 };
 }
+
+/**
+ * The tickets of this map on one side of a node along the arrows, the node itself included: "before" is everything it
+ * comes after (its blockers, and theirs), "after" everything that comes after it. A blocker in another map is not a
+ * ticket here and is left out. Returns the ticket keys (`<map>#<num>`).
+ */
+export function reachKeys(layout: Pick<MapLayout, "nodes" | "edges">, map: string, id: string, way: "before" | "after"): string[] {
+  const seen = new Set<string>([id]);
+  const todo = [id];
+  for (let at = todo.pop(); at !== undefined; at = todo.pop()) {
+    for (const e of layout.edges) {
+      const next = way === "before" ? (e.to === at ? e.from : null) : e.from === at ? e.to : null;
+      if (next !== null && !seen.has(next)) {
+        seen.add(next);
+        todo.push(next);
+      }
+    }
+  }
+  return layout.nodes.filter((n) => seen.has(n.id) && n.ticket !== null).map((n) => `${map}#${String(n.ticket?.num ?? 0)}`);
+}

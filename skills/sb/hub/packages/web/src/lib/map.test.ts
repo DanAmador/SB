@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MapRoute, MapTicket } from "@sb-hub/contract";
-import { dimmed, layoutMap, mapState, minutesOf, pickedState, stateCounts } from "./map.ts";
+import { dimmed, layoutMap, reachKeys, mapState, minutesOf, pickedState, stateCounts } from "./map.ts";
 
 const t = (num: number, after: number[] = [], more: Partial<MapTicket> = {}): MapTicket => ({
   num, title: `Ticket ${String(num)}`, type: "task", status: "open", state: "ready", why: "", priority: null, tier: "sonnet", place: null,
@@ -98,5 +98,23 @@ describe("the legend's counts and the picked state", () => {
     expect(minutesOf(1000, 990)).toBe(0);
     expect(minutesOf(null, 1000)).toBeNull();
     expect(minutesOf(undefined, 1000)).toBeNull();
+  });
+});
+
+describe("reachKeys: tick everything this comes after / that comes after this", () => {
+  const out = layoutMap(fixture);
+  it("walks back through every blocker, the node itself included", () => {
+    expect(reachKeys(out, "sb/one", "5", "before").sort()).toEqual(["sb/one#1", "sb/one#2", "sb/one#3", "sb/one#4", "sb/one#5"]);
+    expect(reachKeys(out, "sb/one", "3", "before").sort()).toEqual(["sb/one#1", "sb/one#3"]);
+  });
+  it("walks forward through every ticket that follows", () => {
+    expect(reachKeys(out, "sb/one", "1", "after").sort()).toEqual(["sb/one#1", "sb/one#2", "sb/one#3", "sb/one#4", "sb/one#5"]);
+    expect(reachKeys(out, "sb/one", "4", "after").sort()).toEqual(["sb/one#4", "sb/one#5"]);
+  });
+  it("is just the node when nothing is on that side, and leaves out blockers in other maps", () => {
+    expect(reachKeys(out, "sb/one", "6", "before")).toEqual(["sb/one#6"]);
+    expect(reachKeys(out, "sb/one", "6", "after")).toEqual(["sb/one#6"]);
+    expect(reachKeys(out, "sb/one", "7", "before")).toEqual(["sb/one#7"]);
+    expect(reachKeys(out, "sb/one", "x:other/map#3", "after")).toEqual(["sb/one#7"]);
   });
 });

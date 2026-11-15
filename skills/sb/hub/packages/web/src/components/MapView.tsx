@@ -2,18 +2,19 @@
  * A map's landing: its tickets as a graph, one box each, an arrow for every "after", the colour for the state. Below
  * 768 px the same tickets show as a plain list. A box opens the ticket panel; a blocker in another map opens that map.
  */
-import { IconFocusCentered, IconCircleCheck, IconLayoutList, IconTopologyStar3, IconClock, IconListNumbers, IconLock, IconMessageQuestion, IconPlayerPlay, IconPlayerSkipForward, IconSquareCheck, IconTicket, IconAlertTriangle, IconBan } from "@tabler/icons-react";
-import { Background, Controls, Handle, MarkerType, Panel, Position, ReactFlow, useReactFlow, type Edge, type Node, type NodeProps } from "@xyflow/react";
+import { IconFocusCentered, IconCircleCheck, IconLayoutList, IconTopologyStar3, IconClock, IconListNumbers, IconLock, IconMessageQuestion, IconPlayerPlay, IconPlayerSkipForward, IconSquareCheck, IconTicket, IconAlertTriangle, IconBan, IconCheck } from "@tabler/icons-react";
+import { Background, Controls, Handle, MarkerType, Panel, Position, ReactFlow, SelectionMode, useReactFlow, type Edge, type Node, type NodeProps } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type * as React from "react";
 import type { MapTicket } from "@sb-hub/contract";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useMapRoute } from "@/lib/hub.ts";
 import { setLink, useLink } from "@/lib/link.ts";
-import { dimmed, layoutMap, MAP_STATES, MAP_STATE_WORDS, minutesOf, pickedState, stateCounts, type MapNode, type MapState } from "@/lib/map.ts";
+import { dimmed, layoutMap, reachKeys, MAP_STATES, MAP_STATE_WORDS, minutesOf, pickedState, stateCounts, type MapNode, type MapState } from "@/lib/map.ts";
 import { cn } from "@/lib/utils";
 import { useBoard } from "./context.tsx";
+import { clearSelection, selected, tick, useSelection } from "@/lib/select.ts";
 import { TicketTable } from "./TicketTable.tsx";
 
 const WIDE = "(min-width: 768px)";
@@ -80,12 +81,19 @@ interface Data extends Record<string, unknown> {
   mins: number | null;
   /** Another state is picked: the box steps back. */
   dim: boolean;
+  /** Ticked: the same tick the table's row has. */
+  ticked: boolean;
 }
 
 function Box({ data }: NodeProps<Node<Data>>): React.JSX.Element {
-  const { n, map, mins, dim } = data;
+  const { n, map, mins, dim, ticked } = data;
   const t = n.ticket;
-  const open = (): void => {
+  const open = (ev: React.MouseEvent): void => {
+    // Shift-click ticks; a plain click opens the panel
+    if (ev.shiftKey) {
+      if (t !== null) tick([keyOf(map, t)], !ticked);
+      return;
+    }
     if (t !== null) setLink({ t: keyOf(map, t) });
     else setLink({ project: n.other.split("/")[0] ?? "", map: n.other });
   };
@@ -96,9 +104,10 @@ function Box({ data }: NodeProps<Node<Data>>): React.JSX.Element {
         type="button"
         onClick={open}
         className={cn(
-          "flex size-full flex-col justify-between rounded-lg border-2 px-2.5 py-1.5 text-left text-xs shadow-sm focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none",
+          "relative flex size-full flex-col justify-between rounded-lg border-2 px-2.5 py-1.5 text-left text-xs shadow-sm focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none",
           t === null ? "border-dashed border-border bg-background text-muted-foreground" : TONE[n.state],
           n.state === "running" && "motion-safe:animate-pulse",
+          ticked && "ring-4 ring-foreground/40",
           dim && "opacity-25",
         )}
       >
@@ -111,6 +120,12 @@ function Box({ data }: NodeProps<Node<Data>>): React.JSX.Element {
           <span className={cn("truncate", n.state === "running" && "font-semibold")}>{footOf(n, mins)}</span>
           <Place n={n} />
         </span>
+        {ticked && (
+          <span className="absolute -top-2 -right-2 flex size-5 items-center justify-center rounded-full bg-foreground text-background">
+            <IconCheck className="size-3.5" aria-hidden />
+            <span className="sr-only">Ticked</span>
+          </span>
+        )}
       </button>
       <Handle type="source" position={Position.Bottom} isConnectable={false} className="!pointer-events-none !opacity-0" />
     </>
@@ -223,6 +238,20 @@ export function MapView({ map }: { map: string }): React.JSX.Element {
   const pick = pickedState(link.ms);
   const wide = useWide();
   const { state } = useBoard();
+  const keys = useSelection();
+  const boxing = useRef(false);
+  const box = useRef<HTMLDivElement>(null);
+  const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  // Escape closes the node menu first, then clears the ticks; a dialog that is open keeps its own Escape
+  useEffect(() => {
+    const onKey = (ev: KeyboardEvent): void => {
+      if (ev.key !== "Escape" || document.querySelector('[role="dialog"]') !== null) return;
+      if (menu !== null) setMenu(null);
+      else if (selected().size > 0) clearSelection();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => { window.removeEventListener("keydown", onKey); };
+  }, [menu]);
   const route = q.data;
   if (route === undefined) {
     return q.isError ? (
@@ -241,7 +270,7 @@ export function MapView({ map }: { map: string }): React.JSX.Element {
   };
   const running = new Set(layout.nodes.filter((n) => n.state === "running" && n.ticket !== null).map((n) => n.id));
   const nodes: Node<Data>[] = layout.nodes.map((n) => ({
-    id: n.id, type: "box", position: { x: n.x, y: n.y }, width: n.w, height: n.h, data: { n, map, mins: minsOf(n), dim: dimmed(n, pick) }, draggable: false, connectable: false, focusable: false, style: { pointerEvents: "all" },
+    id: n.id, type: "box", position: { x: n.x, y: n.y }, width: n.w, height: n.h, data: { n, map, mins: minsOf(n), dim: dimmed(n, pick), ticked: keys.has(keyOf(map, n.ticket ?? { num: -1 })) }, selected: n.ticket !== null && keys.has(keyOf(map, n.ticket)), draggable: false, connectable: false, focusable: false, style: { pointerEvents: "all" },
   }));
   // an arrow into or out of a running box takes the accent, so the eye follows what the run feeds
   const edges: Edge[] = layout.edges.map((e) => {
@@ -264,7 +293,7 @@ export function MapView({ map }: { map: string }): React.JSX.Element {
       {table ? (
         <TicketTable />
       ) : wide ? (
-        <div data-testid="map-graph" className="h-[min(70dvh,720px)] min-h-80 w-full rounded-lg border bg-card">
+        <div ref={box} data-testid="map-graph" className="relative h-[min(70dvh,720px)] min-h-80 w-full rounded-lg border bg-card [&_.react-flow__nodesselection]:hidden">
           <ReactFlow
             nodes={nodes}
             edges={edges}
@@ -277,13 +306,51 @@ export function MapView({ map }: { map: string }): React.JSX.Element {
             nodesConnectable={false}
             nodesFocusable={false}
             edgesFocusable={false}
-            elementsSelectable={false}
+            elementsSelectable
+            selectionOnDrag
+            selectionMode={SelectionMode.Partial}
+            panOnDrag={[1, 2]}
+            multiSelectionKeyCode="Shift"
+            onSelectionStart={() => { boxing.current = true; }}
+            onSelectionEnd={() => { boxing.current = false; }}
+            onNodesChange={(changes) => {
+              // only a box drawn over the graph ticks; a plain click opens the panel and a Shift-click is the box's own
+              if (!boxing.current) return;
+              for (const c of changes) if (c.type === "select" && !c.id.startsWith("x:")) tick([keyOf(map, { num: Number(c.id) })], c.selected);
+            }}
+            onNodeContextMenu={(ev, node) => {
+              ev.preventDefault();
+              const at = box.current?.getBoundingClientRect();
+              setMenu({ id: node.id, x: ev.clientX - (at?.left ?? 0), y: ev.clientY - (at?.top ?? 0) });
+            }}
+            onPaneClick={() => { setMenu(null); }}
+            onMoveStart={() => { setMenu(null); }}
             colorMode={document.documentElement.classList.contains("dark") ? "dark" : "light"}
           >
             <Background gap={24} />
             <Controls showInteractive={false} />
             <ShowRunning ids={[...running]} />
           </ReactFlow>
+          {menu !== null && !menu.id.startsWith("x:") && (
+            <div role="menu" aria-label="Tick along the arrows" style={{ left: menu.x, top: menu.y }} className="absolute z-10 flex w-72 flex-col rounded-lg border bg-popover p-1 text-xs text-popover-foreground shadow-md">
+              {([["before", "Tick everything this comes after"], ["after", "Tick everything that comes after this"]] as const).map(([way, words], i) => (
+                <button
+                  key={way}
+                  type="button"
+                  role="menuitem"
+                  autoFocus={i === 0}
+                  onClick={() => {
+                    tick(reachKeys(layout, map, menu.id, way), true);
+                    setMenu(null);
+                  }}
+                  className="flex h-8 items-center gap-2 rounded-md px-2 text-left hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                >
+                  <IconCheck className="size-3.5 shrink-0" aria-hidden />
+                  {words}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       ) : (
         <List map={map} tickets={route.tickets} states={own} pick={pick} minsOf={minsOf} />

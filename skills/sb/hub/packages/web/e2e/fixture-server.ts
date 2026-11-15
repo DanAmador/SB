@@ -35,11 +35,16 @@ const tickets = (): TicketRow[] => Tickets.parse(addLinks("GET /api/tickets", [
 ], ctx));
 
 // ---- a map with every shape the Map view draws: a diamond, a chain, a lone ticket, a blocker in another map ----
-const mt = (num: number, title: string, after: number[], more: Record<string, unknown> = {}): Record<string, unknown> => ({
+const mt = (num: number, title: string, after: number[], more: Record<string, unknown> = {}, map = "demo/board"): Record<string, unknown> => ({
   num, title, type: "task", status: "open", state: "ready", why: "So the map can be drawn.", priority: null, tier: "sonnet", place: null, last_run: null,
-  blocked_by: after.map((n) => ({ map: "demo/board", num: n, title: `Ticket ${String(n)}`, status: "open" })),
-  file: `/vault/demo/board/issues/${String(num)}.md`, ...more,
+  blocked_by: after.map((n) => ({ map, num: n, title: `Ticket ${String(n)}`, status: "open" })),
+  file: `/vault/${map}/issues/${String(num)}.md`, ...more,
 });
+// the batch map as a graph: A, B and C in the first row, D after A, E after D
+const batchRoute = (): unknown => MapRoute.parse(addLinks("GET /api/map", {
+  map: "demo/batch", title: "The batch map", status: "open", words: "Five tickets that can run.", checks: ["pnpm test"], uri: "obsidian://open?path=%2Fvault%2Fdemo%2Fbatch%2Fmap.md",
+  tickets: [mt(1, "Batch A", [], {}, "demo/batch"), mt(2, "Batch B", [], {}, "demo/batch"), mt(3, "Batch C", [], {}, "demo/batch"), mt(4, "Batch D", [1], {}, "demo/batch"), mt(5, "Batch E", [4], {}, "demo/batch")],
+}, ctx));
 const mapRoute = (): unknown => MapRoute.parse(addLinks("GET /api/map", {
   map: "demo/board", title: "The demo board", status: "open", words: "A board for the test.", checks: ["pnpm test"], uri: "obsidian://open?path=%2Fvault%2Fdemo%2Fboard%2Fmap.md",
   tickets: [
@@ -196,8 +201,9 @@ createServer((req, res) => {
     }
     if (req.method === "GET" && path === "/api/tickets") { send(res, 200, tickets().map((t) => ({ ...t, queued: queue.items.some((i) => i.key === `${t.map}#${String(t.num)}`) }))); return; }
     if (req.method === "GET" && path === "/api/map") {
-      if (new URL(req.url ?? "", "http://x").searchParams.get("map") !== "demo/board") { send(res, 404, { ok: false, error: "no such map" }); return; }
-      send(res, 200, mapRoute());
+      const which = new URL(req.url ?? "", "http://x").searchParams.get("map");
+      if (which !== "demo/board" && which !== "demo/batch") { send(res, 404, { ok: false, error: "no such map" }); return; }
+      send(res, 200, which === "demo/batch" ? batchRoute() : mapRoute());
       return;
     }
     if (req.method === "GET" && path === "/api/ticket") {

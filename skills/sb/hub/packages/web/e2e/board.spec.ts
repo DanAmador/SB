@@ -680,6 +680,81 @@ test.describe("Map view", () => {
     await expect(graph.getByRole("button", { name: /^Drag a ticket into the queue 2 / })).not.toHaveClass(/opacity-25/);
   });
 
+  test("a box dragged over three nodes ticks them; the bar says 3, Queue queues those three, Table shows them ticked; Escape clears", async ({ page }) => {
+    const before = await queuedKeys(page);
+    await page.goto("/next/?project=demo&map=demo%2Fbatch");
+    const graph = page.getByTestId("map-graph");
+    await expect(graph.locator(".react-flow__node")).toHaveCount(5);
+    await page.waitForTimeout(500);
+    const rect = async (name: string) => {
+      const b = await graph.getByRole("button", { name: new RegExp(`^${name} `) }).boundingBox();
+      if (b === null) throw new Error(`${name} is not on screen`);
+      return b;
+    };
+    const [a, c, d] = [await rect("Batch A"), await rect("Batch C"), await rect("Batch D")];
+    const area = await graph.boundingBox();
+    if (area === null) throw new Error("the graph is not on screen");
+    // from the empty corner above the first row to the middle of the last box of that row: A, B and C only
+    await page.mouse.move(area.x + 4, a.y - 6);
+    await page.mouse.down();
+    await page.mouse.move(c.x + c.width / 2, a.y + a.height / 2, { steps: 8 });
+    await page.mouse.up();
+    const bar = page.getByTestId("selection-bar");
+    await expect(bar).toBeVisible();
+    await expect(bar).toContainText("3");
+    await expect(graph.getByText("Ticked")).toHaveCount(3);
+    expect(d.y).toBeGreaterThan(a.y + a.height);
+    const shots = process.env.SB_SHOTS;
+    if (shots !== undefined) await page.screenshot({ path: `${shots}/box-ticked-light.png`, fullPage: true });
+    // Shift-click ticks a fourth, a second one unticks it
+    await graph.getByRole("button", { name: /^Batch D / }).click({ modifiers: ["Shift"] });
+    await expect(graph.getByText("Ticked")).toHaveCount(4);
+    await graph.getByRole("button", { name: /^Batch D / }).click({ modifiers: ["Shift"] });
+    await expect(graph.getByText("Ticked")).toHaveCount(3);
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    if (shots !== undefined) {
+      await page.emulateMedia({ colorScheme: "dark" });
+      await page.reload();
+      await expect(graph.getByText("Ticked")).toHaveCount(0);
+      await page.mouse.move(area.x + 4, a.y - 6);
+      await page.mouse.down();
+      await page.mouse.move(c.x + c.width / 2, a.y + a.height / 2, { steps: 8 });
+      await page.mouse.up();
+      await expect(graph.getByText("Ticked")).toHaveCount(3);
+      await page.screenshot({ path: `${shots}/box-ticked-dark.png`, fullPage: true });
+    }
+    // Table keeps the three ticked
+    await page.getByRole("radio", { name: "Table" }).click();
+    const rows = page.getByTestId("ticket-rows");
+    await expect(rows.getByRole("checkbox", { checked: true })).toHaveCount(3);
+    for (const l of ["A", "B", "C"]) await expect(rows.getByRole("checkbox", { name: `Tick Batch ${l}` })).toBeChecked();
+    await page.getByRole("radio", { name: "Graph" }).click();
+    await expect(graph.getByText("Ticked")).toHaveCount(3);
+    // Escape clears
+    await page.keyboard.press("Escape");
+    await expect(bar).toHaveCount(0);
+    await expect(graph.getByText("Ticked")).toHaveCount(0);
+    // the node menu
+    await graph.getByRole("button", { name: /^Batch E / }).click({ button: "right" });
+    await page.getByRole("menuitem", { name: "Tick everything this comes after" }).click();
+    await expect(graph.getByText("Ticked")).toHaveCount(3);
+    await page.keyboard.press("Escape");
+    await graph.getByRole("button", { name: /^Batch D / }).click({ button: "right" });
+    if (shots !== undefined) await page.screenshot({ path: `${shots}/node-menu.png` });
+    await page.getByRole("menuitem", { name: "Tick everything that comes after this" }).click();
+    await expect(graph.getByText("Ticked")).toHaveCount(2);
+    await page.keyboard.press("Escape");
+    // queue three by a box again
+    await page.mouse.move(area.x + 4, a.y - 6);
+    await page.mouse.down();
+    await page.mouse.move(c.x + c.width / 2, a.y + a.height / 2, { steps: 8 });
+    await page.mouse.up();
+    await bar.getByRole("button", { name: /^Queue 3/ }).click();
+    await expect.poll(() => queuedKeys(page)).toEqual([...before, "demo/batch#1", "demo/batch#2", "demo/batch#3"]);
+    await expect(bar).toHaveCount(0);
+    await page.request.post("/api/queue/set", { data: { keys: before, version: null } });
+  });
+
   test("at 375 px a plain list shows instead of the graph, and nothing scrolls sideways", async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 800 });
     await page.goto("/next/?project=demo&map=demo%2Fboard");
