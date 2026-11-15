@@ -368,7 +368,7 @@ blocked_by:
 """)
         out = json.loads(self.sb("tickets", "--json", "--map", "repo/night").stdout)
         self.assertEqual((out["map"], out["title"], out["status"]), ("repo/night", "Night map", "claimed"))
-        self.assertTrue(out["uri"].startswith("obsidian://open?path="))
+        self.assertTrue(out["uri"].startswith("obsidian://open?vault="))
         rows = {t["num"]: t for t in out["tickets"]}
         self.assertEqual({n: t["status"] for n, t in rows.items()}, {1: "resolved", 2: "out-of-scope", 3: "open"})
         t = rows[3]

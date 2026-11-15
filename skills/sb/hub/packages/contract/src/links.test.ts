@@ -2,7 +2,7 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { Links, addLinks, itemLinks, mapNote, obsidianUri, rowLinks, vaultUri, type LinkContext } from "./index.ts";
 
@@ -33,7 +33,14 @@ const NAMES = [
 describe("obsidianUri", () => {
   it.each(NAMES)("matches sbmap uri for %s", (rel) => {
     const f = note(rel);
-    expect(obsidianUri(f)).toBe(sbmapUri(f));
+    expect(obsidianUri(f, { root: vault, name: basename(vault) })).toBe(sbmapUri(f));
+  });
+  it("a file outside the vault keeps the path form, as sbmap uri does", () => {
+    const out = realpathSync(mkdtempSync(join(tmpdir(), "outside-")));
+    const f = join(out, "a b.md");
+    writeFileSync(f, "x");
+    expect(obsidianUri(f, { root: vault, name: basename(vault) })).toBe(sbmapUri(f));
+    expect(sbmapUri(f)).toMatch(/^obsidian:\/\/open\?path=/);
   });
 });
 
@@ -47,6 +54,7 @@ describe("links", () => {
   writeFileSync(log, "log");
   const ctx = (): LinkContext => ({
     real: realpathSync,
+    vault: { root: vault, name: basename(vault) },
     exists: (p) => p.startsWith(vault) && (p === ticket || p === map || p === board || p === report || p === log),
     findTicket: (m, n) => (m === "repo/one" && n === 39 ? ticket : null),
     runs: { "repo/one": board },

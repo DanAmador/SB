@@ -68,7 +68,7 @@
       }
     ],
     "title": "One",
-    "uri": "obsidian://open?path=%2Ffixture%2FVault%2Fwayfinder%2Frepo%2Fone%2Fmap.md",
+    "uri": "obsidian://open?vault=Vault&file=wayfinder%2Frepo%2Fone%2Fmap.md",
     "words": "Why."
   },
   "contentType": "application/json",

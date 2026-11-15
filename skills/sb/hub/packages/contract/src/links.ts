@@ -1,7 +1,7 @@
 /**
  * The obsidian:// links the API carries on every ticket row and queue item. The hub runs next to the vault, so a ticket's
  * text, report, log, run board and map open in Obsidian instead of being copied into the board.
- * `obsidianUri` builds them the way `sbmap uri` does (the absolute path, fully encoded); links.test.ts holds it to sbmap's output.
+ * `obsidianUri` builds them the way `sbmap uri` does (by vault name and vault path inside the vault, the absolute path outside it); links.test.ts holds it to sbmap's output.
  */
 import { z } from "zod";
 

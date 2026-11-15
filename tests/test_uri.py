@@ -1,12 +1,15 @@
-"""sbmap uri: the one link format that opens a vault file in Obsidian from Claude Code Desktop."""
+"""sbmap uri: a vault file links by vault name and vault-relative path (opens on Mac and phone); a file outside keeps the path form."""
 from urllib.parse import quote, unquote
 
-from helpers import VaultCase
+import subprocess
+import sys
+
+from helpers import SBMAP, VaultCase
 
 
 class UriTest(VaultCase):
     def uri(self, p):
-        return "obsidian://open?path=" + quote(str(p.resolve()), safe="")
+        return "obsidian://open?vault=" + quote(self.vault.name, safe="") + "&file=" + quote(str(p.resolve().relative_to(self.vault.resolve())), safe="")
 
     def test_relative_path_gets_full_uri(self):
         p = self.write("wayfinder/README.md", "# Rules\n")
@@ -31,10 +34,10 @@ class UriTest(VaultCase):
         for name in ("a #1 & b?.md", "Café.md", "100%.md"):
             p = self.write(f"odd/{name}", "x\n")
             out = self.sb("uri", f"odd/{name}").stdout.strip()
-            encoded = out.split("path=", 1)[1][:-1]
+            encoded = out.split("&file=", 1)[1][:-1]
             for ch in " #&?/":
                 self.assertNotIn(ch, encoded, f"{name}: {out}")
-            self.assertEqual(str(p.resolve()), unquote(encoded))
+            self.assertEqual(str(p.resolve().relative_to(self.vault.resolve())), unquote(encoded))
 
     def test_missing_file_fails(self):
         r = self.sb("uri", "nope.md", ok=False)
@@ -45,4 +48,23 @@ class UriTest(VaultCase):
         self.sb("new", "repo/one", "--title", "First step", "--why", "Because.", "--no-sync")
         line = self.sb("show", "repo/one", "1").stdout.splitlines()[1]
         self.assertTrue(line.startswith("link: [001 First step]("), line)
-        self.assertIn("obsidian://open?path=", line)
+        self.assertIn("obsidian://open?vault=", line)
+
+    def test_spaces_colons_slashes_are_encoded_in_the_vault_form(self):
+        p = self.write("wayfinder/My Repo/e: one/issues/001 A: b.md", "x\n")
+        out = self.sb("uri", str(p)).stdout.strip()
+        self.assertIn(f"(obsidian://open?vault={self.vault.name}&file=wayfinder%2FMy%20Repo%2Fe%3A%20one%2Fissues%2F001%20A%3A%20b.md)", out)
+
+    def test_vault_name_with_a_space_is_encoded(self):
+        spaced = self.vault.parent / "Second Brain"
+        spaced.mkdir()
+        (spaced / "n.md").write_text("x\n")
+        r = subprocess.run([sys.executable, str(SBMAP), "uri", "n.md"], capture_output=True, text=True,
+                           env=self.env(SB_VAULT=str(spaced)), cwd=spaced)
+        self.assertEqual("[n](obsidian://open?vault=Second%20Brain&file=n.md)", r.stdout.strip(), r.stderr)
+
+    def test_file_outside_the_vault_keeps_the_path_form(self):
+        out_file = self.vault.parent / "elsewhere.md"
+        out_file.write_text("x\n")
+        out = self.sb("uri", str(out_file)).stdout.strip()
+        self.assertEqual(f"[elsewhere](obsidian://open?path={quote(str(out_file.resolve()), safe='')})", out)

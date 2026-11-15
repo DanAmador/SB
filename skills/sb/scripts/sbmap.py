@@ -725,8 +725,14 @@ def cmd_next(args):
 
 
 def obsidian_uri(path):
-    """The one link format Claude Code Desktop opens in Obsidian: the absolute path, fully encoded."""
-    return "obsidian://open?path=" + url_encode(str(Path(path).resolve()), safe="")
+    """The link that opens a file in Obsidian. A file in the vault is named by the vault's name and its path in the vault,
+    which opens on the Mac and on a phone with the same vault; a file outside the vault keeps the absolute path, fully encoded."""
+    real = Path(path).resolve()
+    try:
+        rel = real.relative_to(VAULT.resolve())
+    except ValueError:
+        return "obsidian://open?path=" + url_encode(str(real), safe="")
+    return "obsidian://open?vault=" + url_encode(VAULT.name, safe="") + "&file=" + url_encode(rel.as_posix(), safe="")
 
 
 def note_label(path):
