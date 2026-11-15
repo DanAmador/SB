@@ -117,13 +117,14 @@ const queue = {
     { ...item("other/site#3", "running"), runner: "main", started: start - 240, run: RUN, log: `${RUN}/s3.log` },
     { ...item("other/site#4", "failed"), title: "Check the shop's checkout", ended: start - 800, note: "check failed: pnpm test", run: RUN, log: `${RUN}/s4.log` },
     item("demo/board#3", "queued"),
-    {
-      key: "job:close-off", kind: "job", agent: null, state: "landed", note: "", commit: null, tries: 0, started: start - 700, ended: null, model: null,
-      project: "/demo", repo: "/demo", prompt: "close the night", hash: "abc", name: "close-off", title: "Close off the night", created: start - 3000, close_off: true,
-    },
   ] as Raw<QueueItem>[],
 };
 const first = JSON.stringify(queue.items);
+/** The close-off job, between landing and its checks: only the run's graph tests ask for it. */
+const closeOff = {
+key: "job:close-off", kind: "job", agent: null, state: "landed", note: "", commit: null, tries: 0, started: start - 700, ended: null, model: null,
+project: "/demo", repo: "/demo", prompt: "close the night", hash: "abc", name: "close-off", title: "Close off the night", created: start - 3000, close_off: true,
+} as Raw<QueueItem>;
 /** For the live test: the queued ticket starts and a running one ends done; then put it back. */
 const advance = (): void => {
   queue.items = queue.items.map((i) => (i.key === "demo/board#3" ? { ...i, state: "running" as const, started: now() } : i.key === "demo/board#5" ? { ...i, state: "done" as const, ended: now(), commit: "0123456789abcdef" } : i));
@@ -321,6 +322,7 @@ createServer((req, res) => {
     }
     if (req.method === "GET" && path === "/api/__stops") { send(res, 200, stops); return; }
     if (req.method === "GET" && path === "/api/__calls") { send(res, 200, calls); return; }
+    if (req.method === "POST" && path === "/api/__job") { queue.items = [...queue.items.filter((i) => i.key !== closeOff.key), closeOff]; queue.version += 1; send(res, 200, { ok: true }); return; }
     if (req.method === "POST" && path === "/api/__advance") { advance(); send(res, 200, { ok: true }); return; }
     if (req.method === "POST" && path === "/api/__restore") { queue.items = JSON.parse(first) as Raw<QueueItem>[]; queue.version += 1; send(res, 200, { ok: true }); return; }
     if (req.method === "GET" && path === "/api/__actions") { send(res, 200, actions); return; }

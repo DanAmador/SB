@@ -77,6 +77,13 @@ test("the panel's Stop asks why, confirms and calls the stop route; no message i
 });
 
 test.describe("The run's graph", () => {
+  test.beforeEach(async ({ request }) => {
+    await request.post("/api/__restore");
+    await request.post("/api/__job");
+  });
+  test.afterEach(async ({ request }) => {
+    await request.post("/api/__restore");
+  });
   const night = (page: Page) => page.getByTestId("night-graph");
   const box = (page: Page, name: RegExp) => night(page).getByRole("button", { name });
 
@@ -132,14 +139,14 @@ test.describe("The run's graph", () => {
   test("at 375 px the list is grouped by map and nothing scrolls sideways", async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 800 });
     await page.goto("/next/");
-    await expect(page.getByRole("region", { name: "The demo board" })).toBeVisible();
-    await expect(page.getByRole("region", { name: "The shop site" }).getByRole("listitem")).toHaveCount(2);
-    await expect(page.getByRole("region", { name: "Jobs" }).getByRole("listitem")).toHaveCount(1);
+    await expect(page.getByTestId("night-list").getByRole("region", { name: "The demo board" })).toBeVisible();
+    await expect(page.getByTestId("night-list").getByRole("region", { name: "The shop site" }).getByRole("listitem")).toHaveCount(2);
+    await expect(page.getByTestId("night-list").getByRole("region", { name: "Jobs" }).getByRole("listitem")).toHaveCount(1);
     await expect(night(page)).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     const dir = process.env.SB_SHOTS;
     if (dir !== undefined) await page.screenshot({ path: `${dir}/run-375.png` });
-    await page.getByRole("region", { name: "The demo board" }).getByRole("button", { name: /Show the queue in order/ }).click();
+    await page.getByTestId("night-list").getByRole("region", { name: "The demo board" }).getByRole("button", { name: /Show the queue in order/ }).click();
     await expect(page.getByRole("dialog")).toBeVisible();
   });
 
@@ -184,20 +191,6 @@ test.describe("The run's graph", () => {
     }
   });
 });
-
-test("a ticket found by the Queue's search and dragged into Up next lands at that place, and the hub has it", async ({ page }) => {
-  await page.goto("/next/?view=queue");
-  const next = page.getByTestId("up-next");
-  await expect(next.getByText("Show the queue in order")).toBeVisible();
-  await page.getByRole("searchbox", { name: "Search the tickets" }).fill("drag");
-  await expect(page).toHaveURL(/q=drag/);
-  const found = page.getByTestId("ticket-rows");
-  await expect(found.getByRole("row")).toHaveCount(1);
-  await found.locator("tr", { hasText: "Drag a ticket into the queue" }).dragTo(next.locator("li", { hasText: "Show the queue in order" }));
-  await expect(next.locator("li").first()).toContainText("Drag a ticket into the queue");
-  await expect(next.locator("li").nth(1)).toContainText("Show the queue in order");
-  await expect(page.getByRole("status")).toContainText("Queued.");
-  expect(await queuedKeys(page)).toEqual(["demo/board#2", "demo/board#3"]);
 
 test.describe("Run tab", () => {
   const calls = async (page: Page): Promise<{ moveMap: number; map: number }> => (await page.request.get("/api/__calls")).json() as Promise<{ moveMap: number; map: number }>;

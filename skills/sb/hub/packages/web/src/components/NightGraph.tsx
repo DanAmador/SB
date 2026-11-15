@@ -60,7 +60,7 @@ const nodeTypes = { box: Box, frame: Frame };
 
 function List({ frames }: { frames: readonly NightFrame[] }): React.JSX.Element {
   return (
-    <div className="flex flex-col gap-4">
+    <div data-testid="night-list" className="flex flex-col gap-4">
       {frames.map((f) => (
         <section key={f.id} aria-label={f.title} className="flex flex-col gap-1.5">
           <h3 className="flex flex-wrap items-baseline gap-x-2 text-sm font-semibold">
