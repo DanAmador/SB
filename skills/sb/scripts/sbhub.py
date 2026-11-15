@@ -1048,7 +1048,7 @@ class Hub:
         except KeyError:
             raise ValueError("no such ticket") from None
         words = " ".join(str(text or "").split())
-        if action in ("done", "drop", "comment", "checks", "tier") and not words:
+        if action in ("done", "drop", "comment", "checks", "tier", "done_when") and not words:
             raise ValueError("type a line first")
         if action != "comment" and row is None:
             raise ValueError("the ticket is no longer open")
@@ -1070,6 +1070,21 @@ class Hub:
             calls = [["comment", name, nnn, "--text", words]]
         elif action == "tier":
             calls = [["set", name, nnn, "tier=" + words]]
+        elif action in STEER:
+            label, old_key = STEER[action]
+            old = row.get(old_key) or ""
+            old = "; ".join(str(x) for x in old) if isinstance(old, list) else str(old)
+            if action == "done_when":
+                change = ["set", name, nnn, "done_when=" + str(text).strip().replace("\n", "\\n")]
+            elif action == "paths":
+                change = ["set", name, nnn, "paths=" + ",".join(p.strip() for p in str(text or "").splitlines() if p.strip())]
+            else:
+                change = ["block", name, nnn, ",".join(r.strip() for r in re.split(r"[,\s]+", str(text or "")) if r.strip()) or "none"]
+            rc, out, err = sbmap_call(*change)
+            if rc != 0:
+                raise ValueError(err or out or "sbmap failed")
+            calls = [["comment", name, nnn, "--text", "Owner changed {} from the hub; it was: {}".format(
+                label, " ".join(old.split()) or "empty")]]
         else:
             calls = [["mapset", name, "checks=" + str(text).strip()]]
         for c in calls:
@@ -1295,7 +1310,9 @@ def hub_checks_section(passed, reason, sha, checks, report_text, stamp):
     return "\n".join(lines)
 
 
-TICKET_ACTIONS = ("done", "drop", "release", "comment", "tier", "checks", "recheck")
+TICKET_ACTIONS = ("done", "drop", "release", "comment", "tier", "checks", "recheck", "done_when", "paths", "after")
+# the steering fields: action -> (what the comment calls it, the ticket row's key for its old value)
+STEER = {"done_when": ("Done when", "done_when"), "paths": ("files", "paths"), "after": ("what it comes after", "blocked_by")}
 
 
 def sbmap_call(*args):

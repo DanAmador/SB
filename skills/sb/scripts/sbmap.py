@@ -1256,6 +1256,19 @@ def cmd_comment(args):
     print(f"added comment to {t.id}")
 
 
+def replace_section(body, name, text):
+    """The body with the text of its `## <name>` section replaced (the heading and every other section stay
+    as they are); a body without the section gets it before `## Comments`, or at the end."""
+    m = re.search(rf"^## {re.escape(name)}[ \t]*\n", body, re.M)
+    if not m:
+        c = re.search(r"^## Comments", body, re.M)
+        at = c.start() if c else len(body)
+        return body[:at].rstrip() + f"\n\n## {name}\n\n{text}\n" + (f"\n{body[at:]}" if c else "")
+    nxt = re.search(r"^## ", body[m.end():], re.M)
+    end = m.end() + nxt.start() if nxt else len(body)
+    return body[:m.end()] + f"\n{text}\n" + ("\n" + body[end:] if nxt else "")
+
+
 def cmd_set(args):
     no_sync = "--no-sync" in args
     kv_args = [a for a in args[2:] if a != "--no-sync"]
@@ -1264,8 +1277,12 @@ def cmd_set(args):
     props = dict(t.props) if t.has_fm else None
     if props is None:
         sys.exit("sbmap: legacy ticket; run `sbmap migrate` first")
+    body = None
     for kv in kv_args:
         k, _, v = kv.partition("=")
+        if k == "done_when":
+            body = replace_section(body if body is not None else t.body, "Done when", v.replace("\\n", "\n").strip())
+            continue
         if k == "status":
             wf_stat = OPERON_TO_WF_STATUS.get(v.lower(), v.lower())
             if wf_stat not in STATUSES:
@@ -1290,7 +1307,7 @@ def cmd_set(args):
     curr_wf = OPERON_TO_WF_STATUS.get(str(props.get("status", "")).lower(), str(props.get("status", "")).lower())
     if curr_wf != "claimed":
         props.pop("claimed_by", None)
-    t.save(props)
+    t.save(props, body) if body is not None else t.save(props)
     print(f"{t.id}: " + ", ".join(kv_args))
     if any(kv.startswith("status=") for kv in kv_args):
         m = load(args[0])
@@ -1378,12 +1395,32 @@ def cmd_claim(args):
         os.close(lock)  # closing frees the kernel lock
 
 
+def loops_back(m, start, goal):
+    """True when ticket `goal` already waits (directly or through others) for ticket `start`, in this map."""
+    todo, seen = [goal], set()
+    while todo:
+        n = todo.pop()
+        if n == start:
+            return True
+        if n in seen or n not in m.tickets:
+            continue
+        seen.add(n)
+        todo += [x.num for x in (m.resolve_ref(b) for b in m.tickets[n].blocked_by) if isinstance(x, Ticket)]
+    return False
+
+
 def cmd_block(args):
     m = load(args[0])
     t = m.ticket(args[1])
     refs = [] if args[2] == "none" else [r for r in args[2].split(",") if r.strip()]
     props = dict(t.props)
     props["blocked_by"] = blocked_links(m, refs)
+    for r in refs:
+        x = m.resolve_ref(r)
+        if isinstance(x, Ticket) and x.path == t.path:
+            sys.exit(f"sbmap: {t.id} cannot wait for itself")
+        if isinstance(x, Ticket) and x.num in m.tickets and loops_back(m, t.num, x.num):
+            sys.exit(f"sbmap: {t.id} cannot wait for {x.id}: {x.id} already waits for {t.id}, so it would be a loop")
     t.save(props)
     print(f"{t.id} blocked by: {', '.join(props['blocked_by']) or 'nothing'}")
     if "--no-sync" not in args:

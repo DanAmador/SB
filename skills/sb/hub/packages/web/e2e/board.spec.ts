@@ -177,7 +177,7 @@ test("the table's filters live in the page link; the panel opens as a sheet; one
   await expect(sheet.getByRole("heading", { name: "Draw the header" })).toBeVisible();
   // a digest: Open in Obsidian first, no ticket body of its own
   await expect(sheet.getByRole("navigation", { name: "In Obsidian" }).getByRole("link").first()).toHaveText("Open in Obsidian");
-  await expect(sheet.getByText("Done when")).toHaveCount(0);
+  await expect(sheet.getByText("Not this ticket")).toHaveCount(0); // the three steering words are shown (Steer), the ticket body is not
   await expect(sheet.getByRole("button", { name: "Queue it" })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(sheet).toHaveCount(0);

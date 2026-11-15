@@ -1,5 +1,6 @@
 """The hub's ticket queue and installed agents: Hub direct with fake tickets, then over HTTP and the CLI."""
 import http.server
+from datetime import date
 import json
 import os
 import subprocess
@@ -418,11 +419,37 @@ class TicketActionTest(unittest.TestCase):
         self.h.ticket_action("checks", "repo/one#1", "true; echo ok")
         self.assertEqual(self.row(2)["checks"], ["true", "echo ok"])
 
+    def test_done_when_files_and_what_it_comes_after_change_and_each_leaves_a_dated_comment(self):
+        today = date.today().isoformat()
+        self.h.ticket_action("done_when", "repo/one#1", "It works\nand is tested.")
+        self.assertEqual(self.row(1)["done_when"], "It works\nand is tested.")
+        self.assertIn("- **{}**: Owner changed Done when from the hub; it was: It works.".format(today), self.text(1))
+        self.h.ticket_action("paths", "repo/one#1", "src/a.py\n docs/\n")
+        self.assertEqual(self.row(1)["paths"], ["src/a.py", "docs/"])
+        self.h.ticket_action("paths", "repo/one#1", "")
+        self.assertEqual(self.row(1)["paths"], [])
+        self.assertIn("Owner changed files from the hub; it was: src/a.py; docs/", self.text(1))
+        self.h.ticket_action("after", "repo/one#2", "1")
+        self.assertEqual(self.row(2)["blocked_by"], [1])
+        self.assertIn("Owner changed what it comes after from the hub; it was: empty", self.text(2))
+        self.h.ticket_action("after", "repo/one#2", "")
+        self.assertEqual(self.row(2)["blocked_by"], [])
+        self.assertIn("it was: 1", self.text(2))
+
+    def test_a_loop_or_an_unknown_ticket_is_sbmaps_error_and_leaves_no_comment(self):
+        self.h.ticket_action("after", "repo/one#2", "1")
+        before = self.text(1)
+        with self.assertRaisesRegex(ValueError, "loop"):
+            self.h.ticket_action("after", "repo/one#1", "2")
+        with self.assertRaisesRegex(ValueError, "names no ticket"):
+            self.h.ticket_action("after", "repo/one#1", "97")
+        self.assertEqual(self.text(1), before)
+
     def test_a_ticket_a_worker_runs_is_left_alone_and_empty_words_are_refused(self):
         with self.h._lock:
             self.h._data["queue"]["items"].append({**Hub._item("repo/one#1"), "state": "running"})
         before = self.text(1)
-        for action in ("done", "drop", "release", "comment", "tier", "checks"):
+        for action in ("done", "drop", "release", "comment", "tier", "checks", "done_when", "paths", "after"):
             with self.assertRaisesRegex(ValueError, "a worker is running it", msg=action):
                 self.h.ticket_action(action, "repo/one#1", "opus")
         self.assertEqual(self.text(1), before)

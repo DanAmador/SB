@@ -605,12 +605,13 @@ export const QueueItemAgentBody = z.strictObject({ key: z.string(), name: z.stri
 export const RunSeenBody = z.strictObject({ key: z.string().min(1) });
 export const AgentsDismissBody = z.strictObject({ agent: z.string() });
 export const EmptyBody = z.strictObject({});
-export const TICKET_ACTIONS = ["done", "drop", "release", "comment", "tier", "checks", "recheck"] as const;
+export const TICKET_ACTIONS = ["done", "drop", "release", "comment", "tier", "checks", "recheck", "done_when", "paths", "after"] as const;
 export const TicketAction = z.enum(TICKET_ACTIONS);
 export type TicketAction = z.infer<typeof TicketAction>;
 export const TicketActionBody = z.strictObject({
   key: z.string(),
-  /** The typed line: needed by every action but release. */
+  /** The typed line: needed by every action but release. For done_when the new Done when text; for paths one file per
+   * line (empty clears them); for after the ticket numbers of its map, separated by commas (empty clears them). */
   text: z.string().optional(),
   /** done only: the commit to stamp on the ticket. */
   commit: z.string().optional(),

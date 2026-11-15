@@ -1,0 +1,134 @@
+/**
+ * Steer: the three words of a ticket that fix a worker which drifted. Done when, its files and what it comes after,
+ * each with Edit, a field, and Save with a confirmation. The hub writes them through sbmap and leaves a dated comment
+ * with the old value; a loop in the order or an unknown ticket comes back as sbmap's own words. Read-only while the
+ * ticket's worker runs. Title and why stay in Obsidian.
+ */
+import { IconPencil } from "@tabler/icons-react";
+import { useState } from "react";
+import type * as React from "react";
+import type { TicketAction, TicketRow } from "@sb-hub/contract";
+import { Button } from "@/components/ui/button";
+import { Label, Textarea } from "@/components/ui/input";
+import { say } from "@/lib/notice.ts";
+import { useBoard } from "./context.tsx";
+
+type Field = "done_when" | "paths" | "after";
+const NAMES: Readonly<Record<Field, string>> = { done_when: "Done when", paths: "Files", after: "Comes after" };
+const SAVED: Readonly<Record<Field, string>> = { done_when: "Done when changed.", paths: "Files changed.", after: "Order changed." };
+const num = (b: number | string): string => String(b);
+
+export function SteerBlock({ t, running }: { t: TicketRow; running: boolean }): React.JSX.Element {
+  const { ix, writes, down } = useBoard();
+  const [field, setField] = useState<Field | null>(null);
+  const [text, setText] = useState("");
+  const [picked, setPicked] = useState<readonly string[]>([]);
+  const [confirm, setConfirm] = useState(false);
+  const [working, setWorking] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const sameMap = [...ix.byKey.values()].filter((o) => o.map === t.map && o.num !== t.num).sort((a, b) => a.num - b.num);
+  const listed = new Set(sameMap.map((o) => String(o.num)));
+  const kept = t.blocked_by.map(num).filter((b) => !listed.has(b)); // a finished ticket or another map's: kept as it is
+  const titleOf = (n: string): string => ix.byKey.get(`${t.map}#${n}`)?.title ?? `ticket ${n}`;
+  const current: Readonly<Record<Field, string>> = {
+    done_when: t.done_when.trim(),
+    paths: t.paths.join("\n"),
+    after: t.blocked_by.map((b) => titleOf(num(b))).join("; "),
+  };
+  const open = (f: Field): void => {
+    setField(f);
+    setConfirm(false);
+    setErr(null);
+    setText(f === "done_when" ? t.done_when : t.paths.join("\n"));
+    setPicked(t.blocked_by.map(num).filter((b) => listed.has(b)));
+  };
+  const value = (f: Field): string => (f === "after" ? [...kept, ...picked].join(",") : text);
+  const save = async (): Promise<void> => {
+    if (field === null) return;
+    setWorking(true);
+    const out = await writes.ticket(field satisfies TicketAction, { key: `${t.map}#${String(t.num)}`, text: value(field) }, SAVED[field]);
+    setWorking(false);
+    setConfirm(false);
+    say(out);
+    if (out.ok) setField(null);
+    else setErr(out.words);
+  };
+  return (
+    <section className="flex flex-col gap-1.5" aria-label="Steer">
+      <h3 className="text-xs font-medium text-muted-foreground">Steer</h3>
+      {running && <p className="text-sm text-warn">Stop it first: its worker is running, so these cannot change now.</p>}
+      <ul className="flex flex-col gap-2">
+        {(["done_when", "paths", "after"] as const).map((f) => (
+          <li key={f} className="flex flex-col gap-1 rounded-lg border bg-card p-2.5" data-field={f}>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-medium">{NAMES[f]}</span>
+              <Button size="xs" variant="outline" disabled={running || down} aria-label={`Edit ${NAMES[f]}`} onClick={() => { open(f); }}>
+                <IconPencil aria-hidden />
+                {running ? "Stop it first" : "Edit"}
+              </Button>
+            </div>
+            <p className="line-clamp-3 whitespace-pre-line break-words text-sm text-muted-foreground" data-testid={`steer-${f}`}>
+              {current[f] || "none"}
+            </p>
+            {field === f && !running && (
+              <form
+                className="mt-1 flex flex-col gap-2"
+                onSubmit={(ev) => {
+                  ev.preventDefault();
+                  if (f === "done_when" && !text.trim()) {
+                    setErr("Type it first.");
+                    return;
+                  }
+                  setErr(null);
+                  setConfirm(true);
+                }}
+              >
+                {f === "after" ? (
+                  <fieldset className="flex flex-col gap-1">
+                    <legend className="text-xs font-medium text-muted-foreground">Tickets of this map it waits for</legend>
+                    {sameMap.length === 0 && <p className="text-sm text-muted-foreground">No other open ticket in this map.</p>}
+                    {sameMap.map((o) => (
+                      <label key={o.num} className="flex items-start gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          className="mt-1"
+                          checked={picked.includes(String(o.num))}
+                          onChange={(ev) => { setPicked(ev.currentTarget.checked ? [...picked, String(o.num)] : picked.filter((p) => p !== String(o.num))); }}
+                        />
+                        <span className="min-w-0 break-words">{o.title}</span>
+                      </label>
+                    ))}
+                  </fieldset>
+                ) : (
+                  <Label>
+                    {f === "done_when" ? "What has to be true when it is done" : "One file or folder per line, empty for none"}
+                    <Textarea value={text} maxLength={4000} onChange={(ev) => { setText(ev.currentTarget.value); setConfirm(false); }} />
+                  </Label>
+                )}
+                {err !== null && <p role="alert" className="text-sm text-destructive">{err}</p>}
+                {confirm ? (
+                  <div role="alert" className="flex flex-col gap-2 rounded-md bg-warn-soft p-2.5 text-sm">
+                    <span>Change {NAMES[f]}? The old value stays as a comment on the ticket.</span>
+                    <div className="flex gap-2">
+                      <Button type="button" size="xs" disabled={working || down} autoFocus onClick={() => void save()}>
+                        {working ? "Working…" : "Yes, save it"}
+                      </Button>
+                      <Button type="button" size="xs" variant="ghost" disabled={working} onClick={() => { setConfirm(false); }}>
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex gap-2">
+                    <Button type="submit" size="xs" disabled={down}>Save…</Button>
+                    <Button type="button" size="xs" variant="ghost" onClick={() => { setField(null); }}>Cancel</Button>
+                  </div>
+                )}
+              </form>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}

@@ -104,6 +104,27 @@ class NewTicketsAndMaps(VaultCase):
         out = self.sb("check", "monorepo/overrides").stdout
         self.assertIn("note: 001: no `why`", out)
 
+    def test_set_done_when_replaces_that_section_and_nothing_else(self):
+        self.sb("new", "monorepo/overrides", "--why", "Because.", "--title", "First", "--done-when", "Old line.",
+                "--question", "Q?", "--no-sync")
+        self.sb("comment", "monorepo/overrides", "1", "--text", "A note.")
+        path = "wayfinder/monorepo/overrides/issues/001 First.md"
+        before = self.read(path)
+        self.sb("set", "monorepo/overrides", "1", "done_when=New line.\\nSecond line.", "--no-sync")
+        after = self.read(path)
+        self.assertEqual(after, before.replace("Old line.", "New line.\nSecond line."))
+        self.assertNotIn("done_when:", after.split("---\n", 2)[1])
+
+    def test_block_refuses_a_loop_and_a_ticket_waiting_for_itself(self):
+        for n in ("A", "B"):
+            self.sb("new", "monorepo/overrides", "--why", "Because.", "--title", n, "--no-sync")
+        self.sb("block", "monorepo/overrides", "2", "1", "--no-sync")
+        r = self.sb("block", "monorepo/overrides", "1", "2", "--no-sync", ok=False)
+        self.assertIn("loop", r.stderr)
+        r = self.sb("block", "monorepo/overrides", "1", "1", "--no-sync", ok=False)
+        self.assertIn("itself", r.stderr)
+        self.assertNotIn("blocked_by", self.read("wayfinder/monorepo/overrides/issues/001 A.md"))
+
     def test_set_maps_priority_too(self):
         self.sb("new", "monorepo/overrides", "--why", "Because.", "--title", "First", "--no-sync")
         self.sb("set", "monorepo/overrides", "1", "priority=high", "--no-sync")

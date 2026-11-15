@@ -2,11 +2,23 @@
  * A small hub for the Playwright test: the routes the board reads, a queue it can write, every answer checked
  * against the contract before it leaves. Run with `node e2e/fixture-server.ts` (Node strips the types).
  */
+import { execFileSync } from "node:child_process";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { QueueMapBody, QueueMoveBody, QueueMoveMapBody, QueueSetBody, QueueStopBody, TicketActionBody, RunDetail, RunSeenBody, MapRoute, RunsPage, SendBody, State, Tickets, Trail, addLinks, type LinkContext, type Message, type QueueItem, type TicketRow } from "@sb-hub/contract";
 
 /** Every file the fixtures name exists; the server's own vault lookup is covered by the server's tests. */
 const ctx: LinkContext = { exists: () => true, real: (p) => p, findTicket: (map, num) => `/vault/${map}/issues/${String(num)}.md`, runs: {} };
+
+// ---- the real half: one map on a throwaway vault, steered by the real Hub through sbmap ----
+const STEER_HUB = new URL("./steer_hub.py", import.meta.url).pathname;
+const vault = mkdtempSync(join(tmpdir(), "sb-steer-"));
+const steerEnv = { ...process.env, SB_VAULT: vault, SB_HUB_HOME: join(vault, ".hub"), PATH: "/usr/bin:/bin:/opt/homebrew/bin" };
+const py = (...a: string[]): string => execFileSync("python3", [STEER_HUB, ...a], { env: steerEnv, encoding: "utf8" });
+py("setup", vault);
+const steerRows = (): unknown[] => (JSON.parse(py("rows")) as Record<string, unknown>[]).map((r) => ({ state: "ready", reason: "ready", queued: false, ...r }));
 
 const PORT = Number(process.env.FIXTURE_PORT ?? "8799");
 const now = (): number => Date.now() / 1000;
@@ -215,7 +227,8 @@ createServer((req, res) => {
       res.end(svg(new URL(req.url ?? "", "http://x").searchParams.get("name") ?? ""));
       return;
     }
-    if (req.method === "GET" && path === "/api/tickets") { send(res, 200, tickets().map((t) => ({ ...t, queued: queue.items.some((i) => i.key === `${t.map}#${String(t.num)}`) }))); return; }
+    if (req.method === "GET" && path === "/api/tickets") { send(res, 200, Tickets.parse(addLinks("GET /api/tickets", [...tickets(), ...steerRows()], ctx)).map((t) => ({ ...t, queued: queue.items.some((i) => i.key === `${t.map}#${String(t.num)}`) }))); return; }
+    if (req.method === "GET" && path === "/api/__vault") { send(res, 200, { vault }); return; }
     if (req.method === "GET" && path === "/api/map") {
       const which = new URL(req.url ?? "", "http://x").searchParams.get("map");
       if (which !== "demo/board" && which !== "demo/batch" && which !== "demo/bare") { send(res, 404, { ok: false, error: "no such map" }); return; }
@@ -292,6 +305,11 @@ createServer((req, res) => {
     if (req.method === "GET" && path === "/api/__actions") { send(res, 200, actions); return; }
     if (req.method === "POST" && path?.startsWith("/api/ticket/") === true) {
       const b = TicketActionBody.parse(await body(req));
+      if (b.key.startsWith("steer/lab#")) {
+        const out = JSON.parse(py("act", path.slice("/api/ticket/".length), b.key, b.text ?? "")) as { ok: boolean };
+        send(res, out.ok ? 200 : 400, out);
+        return;
+      }
       if (b.text === "fail") { send(res, 400, { ok: false, error: "refused for the test" }); return; }
       actions.push({ action: path.slice("/api/ticket/".length), key: b.key, text: b.text ?? "" });
       if (path.endsWith("/checks") && b.key.startsWith("demo/bare#")) bareChecks = (b.text ?? "").split(";").map((c) => c.trim()).filter((c) => c !== "");

@@ -16,6 +16,7 @@ import { setLink, useLink } from "@/lib/link.ts";
 import { say } from "@/lib/notice.ts";
 import { cn } from "@/lib/utils";
 import { Checks, Pictures, StateIcon } from "./bits.tsx";
+import { SteerBlock } from "./SteerBlock.tsx";
 import { AccountPicker } from "./AccountPicker.tsx";
 import { useBoard } from "./context.tsx";
 
@@ -114,6 +115,7 @@ function TicketPanel({ itemKey }: { itemKey: string }): React.JSX.Element {
         )}
         {t?.checks.length === 0 && <p className="text-sm text-warn">It has no checks, so it cannot be queued until its map has some.</p>}
         <QueueActions itemKey={itemKey} />
+        {t && !isJob && <SteerBlock t={t} running={i?.state === "running" || i?.state === "review"} />}
         {!isJob && <TicketActions itemKey={itemKey} mapChecks={d?.map_checks ?? null} />}
       </div>
     </>
@@ -282,6 +284,9 @@ const ACTS: Readonly<Record<TicketAction, readonly [string, string, string]>> = 
   tier: ["Tier", "Run it on this tier", "Yes, set it"],
   recheck: ["Recheck", "Run its checks again now (its commit is kept, the worker does not run again)", "Yes, recheck"],
   checks: ["Map checks", "Set its map's checks (every ticket of the map)", "Yes, set them"],
+  done_when: ["Done when", "Replace its Done when", "Yes, replace it"],
+  paths: ["Files", "Replace its files", "Yes, replace them"],
+  after: ["Comes after", "Replace what it comes after", "Yes, replace it"],
 };
 
 function TicketActions({ itemKey, mapChecks }: { itemKey: string; mapChecks: readonly string[] | null }): React.JSX.Element | null {
