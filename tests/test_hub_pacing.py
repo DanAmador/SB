@@ -170,6 +170,36 @@ class FitTest(PacingCase):
         self.assertTrue(all(i["note"] == "" for i in self.items().values() if i["state"] == "queued"))  # busy only
 
 
+    def _first(self, main, spare, **kw):
+        self.probe_out = {"main": main, "spare": spare}
+        self.mode = "hang"
+        self.hub.queue_agents(["main", "spare"], None)
+        self.resume()
+        self.sup.tick()
+        return self.launched[0]["name"]
+
+    def test_the_week_that_resets_sooner_wins_though_the_other_has_more_room(self):
+        got = self._first(ev(0.20, week_resets=R + 5 * 86400), ev(0.50, week_resets=R + 2 * 86400))
+        self.assertEqual(got, "spare")
+
+    def test_equal_weeks_the_sooner_five_hour_reset_wins(self):
+        got = self._first(ev(0.20, resets=R + 3600), ev(0.50, resets=R))
+        self.assertEqual(got, "spare")
+
+    def test_an_account_past_a_gate_is_never_picked_for_its_early_reset(self):
+        got = self._first(ev(0.20, week_resets=R + 5 * 86400), ev(0.10, week=0.85, week_resets=R + 86400))
+        self.assertEqual(got, "main")
+
+    def test_an_items_own_account_wins_over_the_sooner_reset(self):
+        self.probe_out = {"main": ev(0.20, week_resets=R + 5 * 86400), "spare": ev(0.10, week_resets=R + 86400)}
+        self.mode = "hang"
+        self.tick_all()
+        self.hub.queue_item_agent("repo/one#1", "main")
+        self.hub.queue_pause(False)
+        self.sup.tick()
+        self.assertEqual([x["name"] for x in self.launched if x["key"] == "repo/one#1"], ["main"])
+
+
 class StopsTest(PacingCase):
     def test_a_logout_requeues_the_ticket_asks_the_owner_once_and_a_probe_clears_it(self):
         self.hub.queue_agents(["main"], None)
