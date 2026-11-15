@@ -1683,6 +1683,38 @@ def _result_ok(text):
     return False
 
 
+def log_spend(path, start=0):
+    """{tokens_in, tokens_out, cache_read, cost_usd} summed over the `result` lines of a worker log from byte
+    `start` (one try's output), read from each line's per-model usage (modelUsage, or
+    model_usage_since_last_result); None when the log has no result line or cannot be read."""
+    try:
+        with open(path, "rb") as f:
+            f.seek(start)
+            text = f.read().decode("utf-8", "replace")
+    except (OSError, TypeError):
+        return None
+    out, seen = {"tokens_in": 0, "tokens_out": 0, "cache_read": 0, "cost_usd": 0.0}, False
+    for line in text.splitlines():
+        try:
+            d = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(d, dict) or d.get("type") != "result":
+            continue
+        use = d.get("model_usage_since_last_result") or d.get("modelUsage")
+        if not isinstance(use, dict):
+            continue
+        seen = True
+        for u in use.values():
+            if isinstance(u, dict):
+                out["tokens_in"] += int(u.get("inputTokens") or 0)
+                out["tokens_out"] += int(u.get("outputTokens") or 0)
+                out["cache_read"] += int(u.get("cacheReadInputTokens") or 0)
+                out["cost_usd"] += float(u.get("costUSD") or 0)
+    out["cost_usd"] = round(out["cost_usd"], 4)
+    return out if seen else None
+
+
 def _git(repo, *args):
     try:
         r = subprocess.run(["git", "-c", "core.fsmonitor=false", "-C", str(repo), *args], capture_output=True,
@@ -2822,9 +2854,51 @@ class Supervisor:
             q["version"] += 1
             self.hub._save()
 
+    def _add_spend(self, item, run, res=None, over=False):
+        """Add this try's cost (worker minutes, check minutes, tokens from its part of the log) to the item's
+        `spend`; it goes on the ticket's note when the item ends (_note_spend)."""
+        now = self.hub.now()
+        began = item.get("started")
+        got = log_spend(run.get("log"), run.get("start") or 0) if run.get("log") else None
+        with self.hub._lock:
+            cur = next((i for i in self.hub._data["queue"]["items"] if i["key"] == item["key"]), None)
+            prev = dict((cur or {}).get("spend") or {})
+        spend = {"run_minutes": prev.get("run_minutes", 0) + (max(0, now - began) / 60 if began else 0),
+                 "check_minutes": prev.get("check_minutes", 0) + sum(c.get("secs") or 0 for c in (res or {}).get("checks") or []) / 60,
+                 "tries": prev.get("tries", 0) + 1, "model": item.get("model") or (run.get("t") or {}).get("tier") or "sonnet",
+                 "account": run.get("agent") or item.get("runner")}
+        for k in ("tokens_in", "tokens_out", "cache_read", "cost_usd"):
+            if prev.get(k) is not None or got:
+                spend[k] = (prev.get(k) or 0) + (got[k] if got else 0)
+        self._update(item["key"], spend=spend)
+
+    def _note_spend(self, key, state):
+        """The item's `spend` on its ticket's note (sbmap spend adds to what the note has), then cleared."""
+        with self.hub._lock:
+            item = next((dict(i) for i in self.hub._data["queue"]["items"] if i["key"] == key), None)
+        spend = (item or {}).get("spend")
+        if item is None or item["kind"] != "ticket" or not spend:
+            return
+        try:
+            m, _, num = key.rpartition("#")
+            args = ["{}={}".format(k, round(spend[k], 4) if isinstance(spend[k], float) else spend[k])
+                    for k in ("run_minutes", "check_minutes", "tries", "tokens_in", "tokens_out", "cache_read", "cost_usd")
+                    if spend.get(k) is not None]
+            args += ["{}={}".format(k, v) for k, v in (("model", spend.get("model")), ("account", spend.get("account")),
+                                                      ("night", item.get("night")), ("outcome", state)) if v]
+            rc, out, err = self.runner.sbmap("spend", m, num, *args)
+            if rc != 0:
+                print("sb hub queue: spend for {}: {}".format(key, err or out), file=sys.stderr, flush=True)
+                return
+        except Exception as e:  # the note is a record: never blocks the item's end
+            print("sb hub queue: spend for {}: {}".format(key, e), file=sys.stderr, flush=True)
+            return
+        self._update(key, drop=("spend",))
+
     def _end(self, key, state, **fields):
         if state in ("done", "failed"):
             fields.setdefault("media", self.hub.media_of(key))
+        self._note_spend(key, state)
         self._update(key, state=state, ended=self.hub.now(), pid=None, pid_start=None, **fields)
 
     def _row(self, key):
@@ -2893,6 +2967,8 @@ class Supervisor:
                     self._consume(run, final=True)  # its usage readings still pace its account
                 except Exception:
                     pass
+        if run is not None and run.get("log"):
+            self._add_spend(item, run)
         where = self._work_left(item)
         note = "stopped by you: " + asked["reason"]
         if left:
@@ -3055,6 +3131,7 @@ class Supervisor:
                 return
             run["t"] = row
         res = self.runner.finish(item, run, over)
+        self._add_spend(item, run, res, over)
         if not over:
             self._update(key, checks=res["checks"])
         self._apply(item, res)

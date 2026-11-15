@@ -380,6 +380,55 @@ class TicketLoopTest(RunnerCase):
         return f.read_text(encoding="utf-8")
 
 
+class SpendTest(RunnerCase):
+    """A ticket's note says what it cost (sbmap spend), written when the hub ends the item."""
+
+    def props(self, num=1, folder="repo/one"):
+        f = next((self.vault / "wayfinder" / folder / "issues").glob("**/{:03d}*.md".format(num)))
+        head = f.read_text(encoding="utf-8").split("---")[1]
+        return dict(l.split(": ", 1) for l in head.splitlines() if ": " in l)
+
+    def line(self, i, o, c, cost):
+        return json.dumps({"type": "result", "is_error": False, "modelUsage": {"claude-opus-5-5": {
+            "inputTokens": i, "outputTokens": o, "cacheReadInputTokens": c, "costUSD": cost}}}) + "\n"
+
+    def test_two_tries_of_one_log_add_up_on_the_note_and_a_second_run_adds_again(self):
+        key, log = "repo/one#1", self.root / "w.log"
+        first = self.line(10, 20, 30, 1.5)
+        log.write_text(first + "noise\n" + self.line(1, 2, 3, 0.25), encoding="utf-8")
+        got = sbhub.log_spend(str(log))
+        self.assertEqual(got, {"tokens_in": 11, "tokens_out": 22, "cache_read": 33, "cost_usd": 1.75})
+        self.hub.queue_set([key], self.hub.state()["queue"]["version"])
+        with self.hub._lock:
+            item = self.hub._data["queue"]["items"][0]
+            item.update(started=self.clock(), night="n1", model="opus", runner="main")
+        q = self.sup
+        item = dict(item)
+        for start, mins in ((0, 10), (len(first), 30)):  # the second try's output begins after the first's
+            item["started"] = self.clock() - mins * 60
+            q._add_spend(item, {"log": str(log), "start": start, "agent": "spare" if start else "main"},
+                         {"checks": [{"secs": 60}]})
+        q._note_spend(key, "done")
+        p = self.props()
+        self.assertEqual((p["run_minutes"], p["check_minutes"], p["tries"]), ("40", "2", "2"))
+        self.assertEqual((p["tokens_in"], p["tokens_out"], p["cache_read"], p["cost_usd"]), ("12", "24", "36", "2"))  # try 1 read both lines, try 2 the last
+        self.assertEqual((p["model"], p["account"], p["night"], p["outcome"]), ("opus", "spare", "n1", "done"))
+        self.assertNotIn("spend", self.items()[key])
+        self.sb("spend", "repo/one", "1", "run_minutes=5", "tries=1", "outcome=failed")  # a run again adds
+        p = self.props()
+        self.assertEqual((p["run_minutes"], p["tries"], p["tokens_in"], p["outcome"]), ("45", "3", "12", "failed"))
+
+    def test_a_ticket_with_no_usage_in_its_log_gets_the_times_and_no_tokens(self):
+        self.only(1)
+        self.until(lambda: self.state_of("repo/one#1") in ("done", "failed"))
+        p = self.props()
+        self.assertEqual((p["tries"], p["outcome"], p["account"], p["model"]), ("1", "done", "main", "sonnet"))
+        self.assertIn("run_minutes", p)
+        self.assertIn("check_minutes", p)
+        for k in ("tokens_in", "tokens_out", "cache_read", "cost_usd"):
+            self.assertNotIn(k, p)
+
+
 class ReviewTest(RunnerCase):
     """The second pass: once a ticket's commit and checks passed, an Opus session (the fake reviewer) judges it
     against its Done when, and only `finished` resolves it."""

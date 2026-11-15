@@ -1264,6 +1264,40 @@ def cmd_comment(args):
     print(f"added comment to {t.id}")
 
 
+SPEND_ADD = ("run_minutes", "check_minutes", "tries", "tokens_in", "tokens_out", "cache_read", "cost_usd")
+SPEND_SET = ("model", "account", "night", "outcome")
+
+
+def cmd_spend(args):
+    """sbmap spend <map> <num> key=value ...: what a ticket's run cost. The numbers (SPEND_ADD) are added to the
+    ones already on the note, so a ticket run again adds to them; model, account, night and outcome are the last
+    run's. A key left out (no tokens read) stays as it was, blank when it never had one."""
+    m = load(args[0])
+    t = m.ticket(args[1])
+    if not t.has_fm:
+        sys.exit("sbmap: legacy ticket; run `sbmap migrate` first")
+    props = dict(t.props)
+    for kv in args[2:]:
+        k, _, v = kv.partition("=")
+        if k in SPEND_ADD:
+            try:
+                new = float(v)
+            except ValueError:
+                sys.exit(f"sbmap: {k} must be a number")
+            try:
+                old = float(props.get(k) or 0)
+            except (TypeError, ValueError):
+                old = 0.0
+            total = round(old + new, 4)
+            props[k] = int(total) if total == int(total) else total
+        elif k in SPEND_SET:
+            props[k] = v
+        else:
+            sys.exit(f"sbmap: spend takes {', '.join(SPEND_ADD + SPEND_SET)}")
+    t.save(props)
+    print(f"{t.id}: spend " + ", ".join(args[2:]))
+
+
 def replace_section(body, name, text):
     """The body with the text of its `## <name>` section replaced (the heading and every other section stay
     as they are); a body without the section gets it before `## Comments`, or at the end."""
@@ -2440,7 +2474,7 @@ def cmd_tickets(args):
 COMMANDS = {"info": cmd_info, "maps": cmd_maps, "status": cmd_status, "frontier": cmd_frontier, "lanes": cmd_lanes, "show": cmd_show,
             "next": cmd_next, "mapset": cmd_mapset, "tickets": cmd_tickets, "link": cmd_link, "uri": cmd_uri, "check": cmd_check, "verify": cmd_verify,
             "init": cmd_init, "summary": cmd_summary, "new": cmd_new, "set": cmd_set, "claim": cmd_claim,
-            "comment": cmd_comment, "ruling": cmd_comment, "block": cmd_block,
+            "comment": cmd_comment, "spend": cmd_spend, "ruling": cmd_comment, "block": cmd_block,
             "resolve": cmd_resolve, "diagram": cmd_diagram, "board": cmd_board, "migrate": cmd_migrate,
             "close": cmd_close, "run": cmd_run, "wiki": cmd_wiki}
 
