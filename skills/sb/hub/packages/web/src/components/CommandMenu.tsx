@@ -1,5 +1,5 @@
 /** Cmd-K: jump to a project, map or ticket; New job, Message, the views, the projects' panels; and the two forms it opens. */
-import { IconActivity, IconFolder, IconInbox, IconListNumbers, IconMail, IconMap2, IconMessage, IconTerminal2, IconTicket } from "@tabler/icons-react";
+import { IconActivity, IconFolder, IconInbox, IconMail, IconMap2, IconMessage, IconTerminal2, IconTicket } from "@tabler/icons-react";
 import { useState } from "react";
 import type * as React from "react";
 import { Button } from "@/components/ui/button";
@@ -73,13 +73,9 @@ export function CommandMenu({ open, onClose, go, tree }: { open: boolean; onClos
               </CommandGroup>
             )}
             <CommandGroup heading="Go to">
-              <CommandItem onSelect={() => { run(() => { setLink({ view: "runs" }); }); }}>
+              <CommandItem onSelect={() => { run(() => { setLink({ view: "run" }); }); }}>
                 <IconActivity aria-hidden />
-                Runs
-              </CommandItem>
-              <CommandItem onSelect={() => { run(() => { setLink({ view: "queue" }); }); }}>
-                <IconListNumbers aria-hidden />
-                Queue
+                Run
               </CommandItem>
               <CommandItem onSelect={() => { run(() => { setLink({ view: "waits" }); }); }}>
                 <IconInbox aria-hidden />

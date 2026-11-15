@@ -59,6 +59,8 @@ export type Outcome = { ok: true; words: string } | { ok: false; words: string }
 type QueueRoute =
   | "POST /api/queue/set"
   | "POST /api/queue/move"
+  | "POST /api/queue/map"
+  | "POST /api/queue/move_map"
   | "POST /api/queue/pause"
   | "POST /api/queue/agents"
   | "POST /api/queue/options"
@@ -72,7 +74,7 @@ function putQueue(qc: QueryClient, queue: Queue): void {
 }
 
 export interface Writes {
-  queue: <K extends QueueRoute>(route: K, body: RouteBody<K>, done: string) => Promise<Outcome>;
+  queue: <K extends QueueRoute>(route: K, body: RouteBody<K>, done: string | ((answer: RouteAnswer<K>) => string)) => Promise<Outcome>;
   ticket: (action: TicketAction, body: RouteBody<"POST /api/ticket/:action">, done: string) => Promise<Outcome>;
   answer: (qid: string, answer: string) => Promise<Outcome>;
   send: (to: string, text: string) => Promise<Outcome>;
@@ -98,7 +100,7 @@ export function useWrites(): Writes {
         // every queue route answers with the queue (QueueAnswer, or QueueJobAnswer which extends it)
         putQueue(qc, (out.data as RouteAnswer<"POST /api/queue/pause">).queue);
         refresh(true);
-        return { ok: true, words: done };
+        return { ok: true, words: typeof done === "string" ? done : done(out.data) };
       }
       const stale = QueueStale.safeParse(out.data);
       if (stale.success) {

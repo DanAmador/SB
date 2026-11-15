@@ -1,6 +1,6 @@
 /** What every part of the board reads: the hub's state, the open tickets, the grouping rules' answers and the writes. */
 import { createContext, use } from "react";
-import type { RouteBody, State, TicketRow } from "@sb-hub/contract";
+import type { RouteAnswer, RouteBody, State, TicketRow } from "@sb-hub/contract";
 import type { Scope, Agents, TicketIndex, QueueView } from "@/lib/board.ts";
 import type { Outcome, Writes } from "@/lib/hub.ts";
 
@@ -21,7 +21,7 @@ export interface BoardData {
   /** A queue write is in flight: the queue's controls wait for it. */
   readonly busy: boolean;
   /** One queue write, with the queue's version where the hub checks it; its outcome is said. */
-  readonly queueWrite: <K extends QueueRoute>(route: K, body: RouteBody<K>, done: string) => Promise<Outcome>;
+  readonly queueWrite: <K extends QueueRoute>(route: K, body: RouteBody<K>, done: string | ((answer: RouteAnswer<K>) => string)) => Promise<Outcome>;
   /** Queue a ticket with the open tickets it waits on, optionally at a place in the list. */
   readonly enqueue: (key: string, at?: number) => Promise<void>;
   readonly unqueue: (key: string) => Promise<void>;

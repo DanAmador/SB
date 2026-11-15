@@ -28,7 +28,7 @@ export function Toolbar({ onCommand, view }: { onCommand: () => void; view: stri
         <RunIcon paused={q.paused} />
         {q.paused ? "Resume" : "Pause"}
       </Button>
-      {view === "queue" && <Accounts />}
+      {view === "run" && <Accounts />}
       <Pace />
       <StopTime />
       <Button variant="outline" size="sm" onClick={onCommand} aria-label="Commands" aria-keyshortcuts="Meta+K" className="hidden gap-1 text-muted-foreground sm:inline-flex">

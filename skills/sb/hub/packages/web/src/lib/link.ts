@@ -3,10 +3,10 @@ import { useSyncExternalStore } from "react";
 import { SHOWS, type Show } from "./board.ts";
 import { Store } from "./store.ts";
 
-/** Runs is the landing view. Sessions is key 4; History is key 5. */
-export const VIEWS = ["runs", "queue", "waits", "sessions", "history"] as const;
+/** Run is the landing view: the night map by map. The old ?view=runs and ?view=queue land on it. */
+export const VIEWS = ["run", "waits", "sessions", "history"] as const;
 export type View = (typeof VIEWS)[number];
-export const DEFAULT_VIEW: View = "runs";
+export const DEFAULT_VIEW: View = "run";
 
 export interface Link {
   readonly view: View;
@@ -51,7 +51,7 @@ export function readLink(search: string): Link {
   const v = s.get("view");
   const show = s.get("s");
   return {
-    view: VIEWS.find((x) => x === v) ?? DEFAULT_VIEW,
+    view: v === "runs" || v === "queue" ? "run" : (VIEWS.find((x) => x === v) ?? DEFAULT_VIEW),
     q: s.get("q") ?? "",
     project: s.get("project") ?? "",
     map: s.get("map") ?? "",

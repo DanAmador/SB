@@ -18,9 +18,8 @@ import { BoardContext, type BoardData } from "./context.tsx";
 import { Breadcrumb, MenuButton, SidebarColumn, SidebarSheet } from "./Sidebar.tsx";
 import { HistoryView } from "./HistoryView.tsx";
 import { MapView } from "./MapView.tsx";
-import { QueueView } from "./QueueView.tsx";
 import { SessionsView } from "./SessionsView.tsx";
-import { RunsView } from "./RunsView.tsx";
+import { RunView } from "./RunView.tsx";
 import { DetailSheet } from "./TicketSheet.tsx";
 import { Toolbar } from "./Toolbar.tsx";
 import { WaitsView } from "./WaitsView.tsx";
@@ -48,7 +47,7 @@ function openRow(el: HTMLElement | null): void {
   go?.click();
 }
 
-const VIEW_WORDS: Readonly<Record<View, string>> = { runs: "Runs", queue: "Queue", waits: "Waits for you", sessions: "Sessions", history: "History" };
+const VIEW_WORDS: Readonly<Record<View, string>> = { run: "Run", waits: "Waits for you", sessions: "Sessions", history: "History" };
 
 export function Board(): React.JSX.Element {
   const stateQ = useHubState();
@@ -78,8 +77,7 @@ function Loaded({ state, tickets, down, lastOk }: { state: State; tickets: Board
   const alerts = waits.count;
   const sessions = sessionCards(state, ix, agents).filter((c) => !c.idle);
   const counts: Readonly<Record<View, number>> = {
-    runs: qv.running.filter((i) => itemInScope(scope, i)).length,
-    queue: scopeItems(scope, qv.next).length,
+    run: qv.running.filter((i) => itemInScope(scope, i)).length + scopeItems(scope, qv.next).length,
     waits: alerts,
     sessions: sessions.length,
     history: 0,
@@ -152,7 +150,7 @@ function Loaded({ state, tickets, down, lastOk }: { state: State; tickets: Board
           ev.preventDefault();
           find.focus();
         }
-      } else if (ev.key >= "1" && ev.key <= "5") {
+      } else if (ev.key >= "1" && ev.key <= "4") {
         const view = VIEWS[Number(ev.key) - 1];
         if (view) setLink({ view });
       } else if (ev.key === "j" || ev.key === "k") {
@@ -230,12 +228,9 @@ function Loaded({ state, tickets, down, lastOk }: { state: State; tickets: Board
               This hub is read-only: {state.queue_lock.holder} holds the queue lock and runs the queue, not the server answering here.
             </div>
           )}
-          <TabsContent value="runs" className="flex flex-col gap-6 outline-none">
+          <TabsContent value="run" className="flex flex-col gap-6 outline-none">
             {scope.map !== "" && <MapView map={scope.map} />}
-            <RunsView />
-          </TabsContent>
-          <TabsContent value="queue" className="outline-none">
-            <QueueView />
+            <RunView />
           </TabsContent>
           <TabsContent value="waits" className="outline-none">
             <WaitsView w={waits} />

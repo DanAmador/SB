@@ -3,7 +3,7 @@
  * against the contract before it leaves. Run with `node e2e/fixture-server.ts` (Node strips the types).
  */
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { QueueMoveBody, QueueSetBody, TicketActionBody, RunDetail, RunSeenBody, MapRoute, RunsPage, SendBody, State, Tickets, Trail, addLinks, type LinkContext, type Message, type QueueItem, type TicketRow } from "@sb-hub/contract";
+import { QueueMapBody, QueueMoveBody, QueueMoveMapBody, QueueSetBody, TicketActionBody, RunDetail, RunSeenBody, MapRoute, RunsPage, SendBody, State, Tickets, Trail, addLinks, type LinkContext, type Message, type QueueItem, type TicketRow } from "@sb-hub/contract";
 
 /** Every file the fixtures name exists; the server's own vault lookup is covered by the server's tests. */
 const ctx: LinkContext = { exists: () => true, real: (p) => p, findTicket: (map, num) => `/vault/${map}/issues/${String(num)}.md`, runs: {} };
@@ -64,6 +64,7 @@ const actions: { action: string; key: string; text: string }[] = [];
 const queue = {
   version: 1, seeded: true, paused: false, agent: "main", agents: ["main"],
   runs: { "demo/board": `${RUN}/2026-11-13-board.md` },
+  maps: ["demo/board", "other/site"],
   items: [
     { ...item("demo/board#5", "running"), runner: "main", model: "opus", started: start - 720, run: RUN, log: `${RUN}/5.log` },
     { ...item("demo/board#8", "running"), runner: "main", started: start - 1500, run: RUN, log: `${RUN}/8.log` },
@@ -78,6 +79,14 @@ const queue = {
   ] as Raw<QueueItem>[],
 };
 
+const calls = { moveMap: 0, map: 0 };
+/** The queued maps in run order: the ones kept that still have something live, then new ones. */
+const syncMaps = (): void => {
+  const mapOf = (k: string): string => k.replace(/#\d+$/, "");
+  const live = queue.items.filter((i) => i.state === "queued" || i.state === "running").map((i) => mapOf(i.key));
+  const kept = (queue.maps).filter((m) => live.includes(m));
+  queue.maps = [...kept, ...[...new Set(live)].filter((m) => !kept.includes(m))];
+};
 const messages: Record<string, Message> = {};
 const seen: string[] = [];
 
@@ -194,6 +203,7 @@ createServer((req, res) => {
       if (b.version !== null && b.version !== queue.version) { send(res, 409, addLinks("POST /api/queue/set", { ok: false, stale: true, queue }, ctx)); return; }
       const others = queue.items.filter((i) => i.state !== "queued");
       queue.items = [...others, ...b.keys.map((k) => queue.items.find((i) => i.key === k && i.state === "queued") ?? item(k, "queued"))];
+      syncMaps();
       queue.version += 1;
       { send(res, 200, addLinks("POST /api/queue/set", { ok: true, queue }, ctx)); return; }
     }
@@ -207,6 +217,27 @@ createServer((req, res) => {
       queue.version += 1;
       { send(res, 200, addLinks("POST /api/queue/set", { ok: true, queue }, ctx)); return; }
     }
+    if (req.method === "POST" && path === "/api/queue/move_map") {
+      const b = QueueMoveMapBody.parse(await body(req));
+      const maps = (queue.maps).filter((m) => m !== b.map);
+      maps.splice(b.to, 0, b.map);
+      queue.maps = maps;
+      calls.moveMap += 1;
+      queue.version += 1;
+      send(res, 200, addLinks("POST /api/queue/set", { ok: true, queue }, ctx));
+      return;
+    }
+    if (req.method === "POST" && path === "/api/queue/map") {
+      const b = QueueMapBody.parse(await body(req));
+      const add = tickets().filter((t) => t.map === b.map && t.state === "ready").map((t) => `${t.map}#${String(t.num)}`);
+      queue.items = [...queue.items, ...add.map((k) => item(k, "queued"))];
+      syncMaps();
+      calls.map += 1;
+      queue.version += 1;
+      send(res, 200, { ...(addLinks("POST /api/queue/set", { ok: true, queue }, ctx) as object), left_out: [] });
+      return;
+    }
+    if (req.method === "GET" && path === "/api/__calls") { send(res, 200, calls); return; }
     if (req.method === "GET" && path === "/api/__actions") { send(res, 200, actions); return; }
     if (req.method === "POST" && path?.startsWith("/api/ticket/") === true) {
       const b = TicketActionBody.parse(await body(req));

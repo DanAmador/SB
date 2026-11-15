@@ -329,13 +329,14 @@ describe("open tickets", () => {
 describe("the page link", () => {
   it("keeps the view, the search and the open ticket, and leaves the defaults out", () => {
     const link = readLink("?view=queue&q=rope&project=sb&map=sb%2Fone&s=later&t=sb%2Fone%231");
-    expect(link).toEqual({ view: "queue", q: "rope", project: "sb", map: "sb/one", s: "later", t: "sb/one#1", run: "", pic: "", range: "", out: "", pics: "", acct: "", model: "", sess: "", kind: "", mv: "", ms: "", act: "", ts: "", tt: "", tp: "", sort: "", page: "" });
+    expect(link).toEqual({ view: "run", q: "rope", project: "sb", map: "sb/one", s: "later", t: "sb/one#1", run: "", pic: "", range: "", out: "", pics: "", acct: "", model: "", sess: "", kind: "", mv: "", ms: "", act: "", ts: "", tt: "", tp: "", sort: "", page: "" });
     expect(readLink(writeLink(link))).toEqual(link);
     const table = readLink("?map=sb%2Fone&mv=table&ts=queued&tt=task&tp=A&sort=-title&page=2");
     expect(table).toMatchObject({ mv: "table", ts: "queued", tt: "task", tp: "A", sort: "-title", page: "2" });
     expect(readLink(writeLink(table))).toEqual(table);
     expect(readLink("?mv=other").mv).toBe("");
-    expect(readLink("").view).toBe("runs");
+    expect(readLink("").view).toBe("run");
+    expect(readLink("?view=runs").view).toBe("run");
     expect(writeLink(readLink("?view=bogus"))).toBe("");
   });
 });
