@@ -1,0 +1,6 @@
+{
+  "name": "hub-board",
+  "version": "0.1.0",
+  "description": "/board opens the sb hub's queue, questions and failed runs in a pane, phone included, with no model tokens",
+  "types": "./types/index.d.ts"
+}

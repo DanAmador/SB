@@ -90,6 +90,7 @@ class RunsTest(unittest.TestCase):
         self.assertEqual(r("check failed: pnpm test\nmore", "failed"), "pnpm test failed")
         self.assertEqual(r("", "failed"), "no reason recorded")
         self.assertEqual(r("blocked: after Draw", "skipped"), "waited on “Draw”")
+        self.assertEqual(r("no longer open: dropped: merged into 12", "skipped"), "its ticket was dropped while it waited: merged into 12")
 
 
 if __name__ == "__main__":

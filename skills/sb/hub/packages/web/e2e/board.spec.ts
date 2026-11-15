@@ -327,6 +327,12 @@ test("Waits for you: the question first, then the failed run in plain words, the
   await expect(failed.getByRole("button", { name: "Run again" })).toBeVisible();
   const done = page.getByRole("region", { name: "Done" });
   await expect(done.getByText("1 check passed")).toBeVisible();
+  // a picture opens over the page, not in a new tab, and Esc returns to the list
+  await done.getByRole("link", { name: "Open board-after.png" }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  expect(page.context().pages()).toHaveLength(1);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
   await done.getByRole("button", { name: "Looks good" }).click();
   await expect(page.getByRole("region", { name: "Done" })).toHaveCount(0);
   await expect(page.getByRole("tab", { name: /Waits for you/ })).toContainText("3");
@@ -334,7 +340,8 @@ test("Waits for you: the question first, then the failed run in plain words, the
   // Open the run: it is marked seen, so it leaves Waits for you and sits in History
   await page.getByRole("region", { name: "Failed" }).getByRole("button", { name: "Open the run" }).first().click();
   await expect(page).toHaveURL(/view=history/);
-  await page.goto("/next/?view=waits");
+  await page.goBack(); // Back returns to Waits for you
+  await expect(page).toHaveURL(/view=waits/);
   await expect(page.getByRole("region", { name: "Failed" }).getByRole("listitem")).toHaveCount(1);
   await expect(page.getByRole("tab", { name: /Waits for you/ })).toContainText("2");
 });

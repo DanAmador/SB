@@ -114,7 +114,7 @@ const queue = {
     { ...item("demo/board#6", "failed"), ended: start - 900, note: "no commit after 85bfcc87b", run: RUN, log: `${RUN}/6.log` },
     {
       ...item("demo/board#7", "done"), title: "Show who runs what", ended: start - 1200, commit: "0123456789abcdef", run: RUN, log: `${RUN}/7.log`,
-      checks: [{ cmd: "pnpm test", code: 0, secs: 12, tail: "" }],
+      checks: [{ cmd: "pnpm test", code: 0, secs: 12, tail: "" }], media: ["board-before.png", "board-after.png"],
     },
     { ...item("other/site#3", "running"), runner: "main", started: start - 240, run: RUN, log: `${RUN}/s3.log` },
     { ...item("other/site#4", "failed"), title: "Check the shop's checkout", ended: start - 800, note: "check failed: pnpm test", run: RUN, log: `${RUN}/s4.log` },

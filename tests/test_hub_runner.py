@@ -901,7 +901,8 @@ class StopsTest(RunnerCase):
         self.sup.tick()
         items = self.items()
         self.assertEqual((items["repo/one#1"]["state"], items["repo/one#2"]["state"]), ("skipped", "skipped"))
-        self.assertIn("no longer open", items["repo/one#1"]["note"])
+        self.assertTrue(items["repo/one#1"]["note"].startswith("no longer open: resolved"), items["repo/one#1"]["note"])  # read from its closed note
+        self.assertTrue(items["repo/one#1"].get("title"))  # the closed ticket keeps its name on the board
         self.assertIn("claimed by a live session", items["repo/one#2"]["note"])
         self.assertEqual(self.launched, [])
         self.assertEqual(self.open_tickets()[2]["status"], "claimed")

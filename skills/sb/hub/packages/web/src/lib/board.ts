@@ -504,7 +504,7 @@ export const seenKey = (i: Pick<QueueItem, "key" | "ended">): string => `${i.key
 export interface Waits {
   /** Open questions first by deadline, then ones answered in the last 20 s. */
   readonly questions: readonly (readonly [string, Question])[];
-  /** Failed or skipped runs still on the list, newest first. */
+  /** Failed or skipped runs still on the list, newest first; not those skipped because their ticket closed. */
   readonly failed: readonly QueueItem[];
   /** Runs done in the last week, newest first. */
   readonly done: readonly QueueItem[];
@@ -531,7 +531,8 @@ export function waitsFor(state: State, tickets: readonly TicketRow[] | null, ix:
     .sort(([, x], [, y]) => Number(x.answer !== null) - Number(y.answer !== null) || x.deadline - y.deadline);
   const qv = queueView(state);
   const fresh = (i: QueueItem): boolean => !seen.has(seenKey(i));
-  const failed = qv.failed.filter(fresh);
+  // A run skipped because its ticket closed asks nothing of the owner: it stays in History, not here.
+  const failed = qv.failed.filter((i) => fresh(i) && !(i.state === "skipped" && i.note.startsWith("no longer open")));
   const done = qv.done.filter(fresh);
   const waiting = (tickets ?? []).filter((t) => t.state === "waits for you" && !ix.live.has(tkey(t)));
   const badWidgets: Waits["badWidgets"][number][] = [];
@@ -579,6 +580,11 @@ export function plainReason(i: Pick<QueueItem, "note" | "state">): string {
   const after = /^blocked: after (.+)$/.exec(first);
   if (after) return `waited on “${after[1] ?? ""}”`;
   if (first.startsWith("claimed: ")) return "someone else had claimed it";
+  const gone = /^no longer open: (dropped|resolved|closed): (.+)$/.exec(first);
+  if (gone) {
+    const why = `its ticket was ${gone[1] ?? ""} while it waited: ${gone[2] ?? ""}`;
+    return why.length > 140 ? `${why.slice(0, 139)}…` : why;
+  }
   if (first.startsWith("no longer open")) return "its ticket was closed after it was queued";
   return first.length > 140 ? `${first.slice(0, 139)}…` : first;
 }

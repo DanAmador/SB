@@ -96,11 +96,12 @@ if [ -z "$claude" ]; then
     exit 0
 fi
 # Opt-in mods. quiet-tests trims agents' test and Unity output to failures and totals; hub-report
-# makes every Claude Code session report to the sb hub. Each is installed only on its flag
+# makes every Claude Code session report to the sb hub, and hub-board (with it) adds /board, the hub's
+# night in a few lines and a pane, read with no model turn. Each is installed only on its flag
 # (--quiet-tests, --hub), or a y at its prompt (asked only when run from a terminal).
 extra=""
 for a in "$@"; do
-    case "$a" in --quiet-tests) extra="$extra quiet-tests" ;; --hub) extra="$extra hub-report" ;; esac
+    case "$a" in --quiet-tests) extra="$extra quiet-tests" ;; --hub) extra="$extra hub-report hub-board" ;; esac
 done
 case "$extra" in *quiet-tests*) ;; *)
     if [ -t 0 ]; then
@@ -110,8 +111,8 @@ case "$extra" in *quiet-tests*) ;; *)
 esac
 case "$extra" in *hub-report*) ;; *)
     if [ -t 0 ]; then
-        read -r -p "Install hub-report (sessions report to the sb hub)? [y/N] " a
-        case "$a" in [Yy]*) extra="$extra hub-report" ;; esac
+        read -r -p "Install hub-report and hub-board (sessions report to the sb hub; /board shows it)? [y/N] " a
+        case "$a" in [Yy]*) extra="$extra hub-report hub-board" ;; esac
     fi ;;
 esac
 for dir in "$HOME/.claude" "$HOME"/.claude-*; do

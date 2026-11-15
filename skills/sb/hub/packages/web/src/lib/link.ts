@@ -107,8 +107,11 @@ export function setLink(change: Partial<Link>): void {
   // a new project drops the map, which belonged to the old one
   const pChanged = change.project !== undefined && change.project !== now.project && change.map === undefined;
   const next: Link = { ...now, ...change, ...(pChanged ? { map: "" } : {}) };
+  // Going somewhere (another view, opening a run, a ticket or a picture) is a step Back returns from; a filter is not.
+  const opens = (k: "run" | "t" | "pic"): boolean => now[k] === "" && next[k] !== "";
+  const step = next.view !== now.view || opens("run") || opens("t") || opens("pic");
   try {
-    history.replaceState(null, "", `${location.pathname}${writeLink(next)}${location.hash}`);
+    history[step ? "pushState" : "replaceState"](null, "", `${location.pathname}${writeLink(next)}${location.hash}`);
   } catch {
     // a widget's frame (about:srcdoc, a blob) has no address to change: the view still switches in memory
   }

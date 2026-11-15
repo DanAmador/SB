@@ -159,6 +159,14 @@ describe("waits for you", () => {
     expect(w.count).toBe(waitsFor(s, tickets, ix, new Set()).count + 1);
   });
 
+  it("leaves out a run skipped because its ticket closed: it asks nothing of you", () => {
+    const gone = item("sb/one#9", "skipped", { ended: NOW - 5, note: "no longer open: dropped: merged into 12" });
+    const s2 = { ...s, queue: { ...s.queue, items: [...s.queue.items, gone] } };
+    const w = waitsFor(s2, tickets, ticketIndex(tickets, s2), new Set());
+    expect(w.failed.map((i) => i.key)).not.toContain("sb/one#9");
+    expect(w.count).toBe(waitsFor(s, tickets, ix, new Set()).count);
+  });
+
   it("drops a run once it is looked at, and only that run", () => {
     const done = s.queue.items[1];
     if (!done) throw new Error("fixture");
@@ -238,6 +246,8 @@ describe("failure reasons", () => {
       "its commits conflict with the branch in sbhub_service.sh",
     );
     expect(r("blocked: after The new board", "skipped")).toBe("waited on “The new board”");
+    expect(r("no longer open: dropped: out of scope, merged into 1242", "skipped")).toBe("its ticket was dropped while it waited: out of scope, merged into 1242");
+    expect(r("no longer open: resolved or out of scope since it was queued", "skipped")).toBe("its ticket was closed after it was queued");
     expect(r("", "failed")).toBe("no reason recorded");
   });
 });

@@ -38,6 +38,10 @@ def plain_reason(note, outcome):
         return "waited on “{}”".format(m[1])
     if first.startswith("claimed: "):
         return "someone else had claimed it"
+    m = re.fullmatch(r"no longer open: (dropped|resolved|closed): (.+)", first)
+    if m:
+        why = "its ticket was {} while it waited: {}".format(m[1], m[2])
+        return why if len(why) <= 140 else why[:139] + "…"
     if first.startswith("no longer open"):
         return "its ticket was closed after it was queued"
     return first if len(first) <= 140 else first[:139] + "…"

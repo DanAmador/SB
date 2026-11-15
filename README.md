@@ -120,7 +120,10 @@ follows the bad one. Both are read from `mods/` in place: edit them, then `/relo
 
 `sbhub` is an optional local page showing every sb session, its workers, the run's progress, and
 the questions waiting on you. Install its hooks with `./install.sh --hub` (the `hub-report` mod:
-each Claude Code session reports with no command), then start it:
+each Claude Code session reports with no command; and the `hub-board` mod: `/board [n]` puts the night
+in a few chat lines, phone included, with what runs, the next n tickets (5) with their start time and
+model, the questions and the failed runs, and opens a live pane with answer buttons; no model turn),
+then start it:
 
 ```bash
 python3 skills/sb/scripts/sbhub.py serve

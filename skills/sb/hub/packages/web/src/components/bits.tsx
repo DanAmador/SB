@@ -15,12 +15,14 @@ import {
   IconZzz,
   type Icon,
 } from "@tabler/icons-react";
+import { useState } from "react";
 import type * as React from "react";
 import type { CheckRun, Links, QueueItem } from "@sb-hub/contract";
 import { mediaUrl } from "@/lib/api.ts";
 import { plural } from "@/lib/board.ts";
 import { setLink } from "@/lib/link.ts";
 import { cn } from "@/lib/utils";
+import { isClip, PictureViewer } from "./PictureViewer.tsx";
 
 type Tone = "brand" | "ok" | "warn" | "bad" | "muted";
 const TONE: Readonly<Record<Tone, string>> = {
@@ -136,12 +138,22 @@ export function Checks({ checks }: { checks: readonly CheckRun[] }): React.JSX.E
 }
 
 const MEDIA = /\.(png|jpe?g|gif|webp|mp4|webm)$/i;
-const isClip = (n: string): boolean => /\.(mp4|webm)$/i.test(n);
 
 /** A worker's pictures and clips: three thumbnails in a row, or every one full width. */
+/**
+ * A run's pictures: a click opens the picture viewer over the page (Esc closes it), so nothing leaves the board;
+ * Cmd- or Ctrl-click still opens the file in its own tab.
+ */
 export function Pictures({ item, full }: { item: QueueItem; full?: boolean }): React.JSX.Element | null {
+  const [open, setOpen] = useState("");
   const ms = (item.media ?? []).filter((n) => MEDIA.test(n));
   if (ms.length === 0) return null;
+  const show = (n: string) => (ev: React.MouseEvent): void => {
+    if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.button !== 0) return;
+    ev.preventDefault();
+    setOpen(n);
+  };
+  const viewer = open !== "" && <PictureViewer runKey={item.key} names={ms} name={open} onPick={setOpen} onClose={() => { setOpen(""); }} />;
   if (full === true) {
     return (
       <div className="flex flex-col gap-3">
@@ -150,13 +162,14 @@ export function Pictures({ item, full }: { item: QueueItem; full?: boolean }): R
             {isClip(n) ? (
               <video src={`${mediaUrl(item.key, n)}#t=0.1`} controls preload="metadata" playsInline aria-label={n} className="w-full rounded-md border bg-muted" />
             ) : (
-              <a href={mediaUrl(item.key, n)} target="_blank" rel="noopener noreferrer">
+              <a href={mediaUrl(item.key, n)} onClick={show(n)} aria-label={`Open ${n}`}>
                 <img loading="lazy" src={mediaUrl(item.key, n)} alt={n} className="max-h-[60vh] w-full rounded-md border bg-muted object-contain" />
               </a>
             )}
             <figcaption className="mt-1 text-xs break-all text-muted-foreground">{n}</figcaption>
           </figure>
         ))}
+        {viewer}
       </div>
     );
   }
@@ -164,7 +177,7 @@ export function Pictures({ item, full }: { item: QueueItem; full?: boolean }): R
   return (
     <div className="grid max-w-72 grid-cols-3 gap-1.5">
       {ms.slice(0, 3).map((n) => (
-        <a key={n} href={mediaUrl(item.key, n)} target="_blank" rel="noopener noreferrer" title={n} className="relative block aspect-[3/2] overflow-hidden rounded-md border bg-muted">
+        <a key={n} href={mediaUrl(item.key, n)} onClick={show(n)} aria-label={`Open ${n}`} title={n} className="relative block aspect-[3/2] overflow-hidden rounded-md border bg-muted">
           {isClip(n) ? (
             <video src={`${mediaUrl(item.key, n)}#t=0.1`} preload="metadata" muted playsInline aria-label={n} className="size-full object-cover" />
           ) : (
@@ -172,7 +185,12 @@ export function Pictures({ item, full }: { item: QueueItem; full?: boolean }): R
           )}
         </a>
       ))}
-      {more > 0 && <span className="col-span-3 text-xs text-muted-foreground">{plural(more, "more picture")}</span>}
+      {more > 0 && (
+        <button type="button" onClick={() => { setOpen(ms[3] ?? ""); }} className="col-span-3 text-left text-xs text-muted-foreground hover:text-foreground hover:underline">
+          {plural(more, "more picture")}
+        </button>
+      )}
+      {viewer}
     </div>
   );
 }

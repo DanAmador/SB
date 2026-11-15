@@ -1883,6 +1883,28 @@ def _vault():
     return Path(os.environ.get("SB_VAULT") or Path.home() / "Documents" / "Second Brain")
 
 
+def closed_note(key):
+    """(title, words) of a ticket that left the open list: how it closed and its last comment, so a run skipped for
+    it says why (dropped and merged into another, resolved elsewhere) and not only that it closed. (None, "") when
+    its note cannot be found."""
+    m = re.fullmatch(r"([\w.-]+(?:/[\w.-]+)*)#(\d+)", str(key))
+    if not m or any(p in ("", ".", "..") for p in m.group(1).split("/")):
+        return None, ""
+    issues = _vault() / "wayfinder" / m.group(1) / "issues"
+    found = sorted(p for d in (issues / "done", issues) for p in d.glob("{:03d}[ -]*.md".format(int(m.group(2)))))
+    try:
+        text = found[0].read_text(encoding="utf-8", errors="replace") if found else ""
+    except OSError:
+        return None, ""
+    head = text.split("\n---", 1)[0] if text.startswith("---\n") else ""
+    title = re.search(r"^title:\s*[\"']?(.+?)[\"']?\s*$", head, re.M)
+    status = re.search(r"^status:\s*Project\.(\w+)", head, re.M)
+    said = re.findall(r"^- \*\*[\d-]+\*\*: (.+)$", text, re.M)
+    how = {"Dropped": "dropped", "Finished": "resolved"}.get(status.group(1) if status else "", "closed")
+    last = re.sub(r"^(?:R|Ruling):\s*", "", said[-1]).strip() if said else ""
+    return (title.group(1) if title else None), (how + ": " + last if last else how) if text else ""
+
+
 def project_repo(project):
     """The repo folder a wayfinder project's maps name (`repo:` in a map.md), or None."""
     if not re.fullmatch(r"[\w.-]+", str(project)):
@@ -3590,9 +3612,10 @@ class Supervisor:
                     if item.get("resume") and t is not None and not item.get("tree"):
                         busy.setdefault(t.get("repo"), []).append(None)  # its last try's work is in the checkout
                     continue  # no agent has room for it now (the first pass noted why)
-                skip = None
+                skip, gone = None, None
                 if t is None:
-                    skip = "no longer open: resolved or out of scope since it was queued"
+                    gone, why = closed_note(item["key"])
+                    skip = "no longer open: " + (why or "resolved or out of scope since it was queued")
                 else:
                     state, reason = sbqueue.classify(mine[item["key"]], live, rows)
                     if state != "ready":
@@ -3600,7 +3623,7 @@ class Supervisor:
                     elif not usable_project(t.get("repo")):
                         skip = "its map's repo is not a folder here: {}".format(t.get("repo") or "none")
                 if skip:
-                    item.update(state="skipped", note=skip, ended=now, **({"title": t["title"]} if t else {}))
+                    item.update(state="skipped", note=skip, ended=now, **({"title": t["title"] if t else gone} if t or gone else {}))
                     changed = True
                     continue
                 if any(sbqueue._blocker_key(t, b) not in landed for b in t["blocked_by_open"]):
