@@ -520,6 +520,16 @@ class ReviewTest(RunnerCase):
         self.until(lambda: self.state_of("repo/one#1") == "done")  # the restarted hub's review
         self.assertEqual((self.calls, len(tries)), (["build", "restart"], 2))
 
+    def test_the_same_unfillable_template_after_the_restart_falls_back_to_the_recheck(self):
+        # the restarted hub is a new process: what was asked is kept in the hub's home, so no restart loop
+        _, repo = self.own_rebuild()
+        err = "review-brief.md names diff_max, which the hub cannot fill"
+        self.assertTrue(self.sup._restart_once(repo, err))
+        self.assertFalse(self.sup._restart_once(repo, err))
+        again = Supervisor(self.hub, port=4321)
+        self.assertFalse(again._restart_once(repo, err))
+        self.assertTrue(again._restart_once(repo, err.replace("diff_max", "lines")))  # a new field: one more
+
     def test_a_ticket_that_waits_on_a_landed_one_starts_and_both_are_judged_at_the_map_end(self):
         # the owner's default: what comes after a landed-but-unjudged ticket may start, the review judging it later
         self.sb("block", "repo/one", "002", "1", "--no-sync")

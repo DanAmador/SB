@@ -82,6 +82,14 @@ class RebuildTest(unittest.TestCase):
         self.assertEqual(self.during, [True, True])  # busy through the build and the restart
         self.assertFalse(self.rb.busy(repo))  # done (or failed): reviews start again
 
+    def test_an_ask_after_the_thread_ended_starts_a_new_one(self):
+        self.commit("skills/sb/scripts/sbqueue.py")
+        self.rb.after(self.repo, ["skills/sb/scripts/sbqueue.py"]).join(10)
+        th = self.rb.after(self.repo, ["skills/sb/templates/x.md"])
+        th.join(10)
+        self.assertEqual(self.calls, ["build", "restart", "build", "restart"])
+        self.assertFalse(self.rb.busy(str(self.repo)))
+
     def test_hub_paths_build_and_restart(self):
         self.landed("skills/sb/scripts/sbhub.py")
         self.assertEqual(self.calls, ["build", "restart"])

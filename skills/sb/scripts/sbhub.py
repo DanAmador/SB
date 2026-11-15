@@ -62,12 +62,12 @@ Haiku probe reads an idle one, and an item starts only where its learned cost fi
 GATE_7D); one cut off by a limit or a logout goes back to the front for another account of the pool.
 """
 import argparse
+import ast
 import fcntl
 import hashlib
 import json
 import math
 import os
-import ast
 import re
 import shlex
 import shutil
@@ -1948,6 +1948,7 @@ HUB_DIR = "skills/sb/hub"
 HUB_WEB = HUB_DIR + "/packages/web/"
 REBUILD_TAIL = 12  # lines of a failed build shown to the owner
 SERVICE_SH = Path(__file__).resolve().parent / "sbhub_service.sh"
+RESTART_HOLD = 120  # seconds no review starts after the real restart was sent, while the service ends this process
 
 
 SCRIPTS = "skills/sb/scripts/"
@@ -2009,6 +2010,7 @@ class Rebuild:
         self.landing = {}  # repo -> tickets landing now
         self.pending = {}  # repo -> "web" | "restart", waiting for the build
         self.working = set()  # repos whose build or restart is under way
+        self.going = {}  # repo -> until when this process, restarted by the service, is about to end
         self.thread = None
 
     def mine(self, repo):
@@ -2030,7 +2032,7 @@ class Rebuild:
         """A rebuild or restart is waiting or under way for `repo`: nothing may start a review on it."""
         repo = os.path.realpath(str(repo))
         with self.cond:
-            return repo in self.pending or repo in self.working
+            return repo in self.pending or repo in self.working or self.going.get(repo, 0) > time.time()
 
     def ask(self, repo, kind):
         """Queue a rebuild of `kind` for `repo` (after() and a review that needs a restart both come here)."""
@@ -2038,8 +2040,8 @@ class Rebuild:
         with self.cond:
             old = self.pending.get(repo)
             self.pending[repo] = "restart" if "restart" in (old, kind) else kind
-            if self.thread and self.thread.is_alive():
-                return self.thread  # the running one takes it
+            if self.thread:
+                return self.thread  # the running one takes it (it clears self.thread under the lock as it ends)
             self.thread = threading.Thread(target=self._run, args=(repo,), daemon=True)
             self.thread.start()
             return self.thread
@@ -2054,8 +2056,8 @@ class Rebuild:
                     self.working.add(repo)
                 else:
                     self.working.discard(repo)
-            if not kind:
-                return
+                    self.thread = None  # under the lock: a later ask() starts a new one, none is lost
+                    return
             ok, text = self.build()
             if not ok:
                 self._tell("The hub's page did not build after a merge; the running hub is unchanged. Last lines:\n"
@@ -2065,6 +2067,9 @@ class Rebuild:
                 ok, text = self.restart()
                 if not ok:
                     self._tell("The hub was rebuilt but did not restart: " + firstline(text))
+                elif self.restart == self._restart:
+                    with self.cond:  # the service is ending this process: no review starts on the old code meanwhile
+                        self.going[repo] = time.time() + RESTART_HOLD
 
     def _tell(self, text):
         try:
@@ -2508,7 +2513,6 @@ class Supervisor:
         # u0/u1 (its first and newest usage reading), alone (no other worker on its agent overlapped it), braked}
         self.procs = {}
         self.reviews = {}  # map -> its second pass's {p, agent, inst, log, start, files, keys, limit, at}, while it runs
-        self.restart_asked = set()  # repos whose hub was asked to restart for a review template it could not fill
         self.streak = (None, 0)  # the failure class of the last failed items in a row, and how many
         self.stopped = False
         self.note_path = None  # wayfinder/runs/hub-now.md: `serve` sets it; tests leave the vault alone
@@ -3168,10 +3172,9 @@ class Supervisor:
                 rv = self.runner.review_start(entries)
             except (OSError, ValueError, KeyError, subprocess.SubprocessError) as e:
                 repo = entries[0][1]["t"]["repo"]
-                if (isinstance(e, KeyError) and "cannot fill" in str(e) and repo not in self.restart_asked
-                        and self.runner.rebuild.mine(repo)):
+                if (isinstance(e, KeyError) and "cannot fill" in str(e) and self.runner.rebuild.mine(repo)
+                        and self._restart_once(repo, str(e))):
                     # the template names a field this running code lacks: restart once, then try again, no 10-minute wait
-                    self.restart_asked.add(repo)
                     self.runner.rebuild.ask(repo, "restart")
                     continue
                 for item, _, _ in entries:
@@ -3182,6 +3185,24 @@ class Supervisor:
             for item, _, _ in entries:
                 self._update(item["key"], state="review", review=rv["files"][item["key"]],
                              note="the Opus review runs on {}".format(rv["agent"]))
+
+    def _restart_once(self, repo, error):
+        """True the first time `error` (a template naming a field the hub cannot fill) is seen for `repo`, and noted
+        in the hub's home so the restarted hub, meeting the same error, falls back to the recheck instead of looping."""
+        path = self.hub.home / "restart-asked.json"
+        try:
+            seen = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            seen = {}
+        if not isinstance(seen, dict) or seen.get(repo) == error:
+            return False
+        seen[repo] = error
+        try:
+            self.hub.home.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(seen), encoding="utf-8")
+        except OSError:
+            return False  # it could not be noted: no restart that might repeat
+        return True
 
     def _review_run(self, item, row):
         return {"t": row, "agent": item.get("runner"), "inst": {}, "base": item.get("base_sha"),
