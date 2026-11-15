@@ -15,6 +15,7 @@ import { dimmed, layoutMap, reachKeys, MAP_STATES, MAP_STATE_WORDS, minutesOf, p
 import { cn } from "@/lib/utils";
 import { useBoard } from "./context.tsx";
 import { clearSelection, selected, tick, useSelection } from "@/lib/select.ts";
+import { MapHead } from "./MapHead.tsx";
 import { TicketTable } from "./TicketTable.tsx";
 
 const WIDE = "(min-width: 768px)";
@@ -284,6 +285,7 @@ export function MapView({ map }: { map: string }): React.JSX.Element {
   });
   return (
     <section aria-label={`Route of ${route.title}`} className="flex flex-col gap-2">
+      <MapHead map={map} route={route} counts={counts} />
       <h2 className="flex items-center gap-2 text-sm font-semibold">
         <IconClock className="size-4 text-muted-foreground" aria-hidden />
         Route of {route.title}

@@ -129,3 +129,23 @@ export function reachKeys(layout: Pick<MapLayout, "nodes" | "edges">, map: strin
   }
   return layout.nodes.filter((n) => seen.has(n.id) && n.ticket !== null).map((n) => `${map}#${String(n.ticket?.num ?? 0)}`);
 }
+
+/** The head's one line of counts: '3 done · 1 running · 2 can run'. Zeros are left out; tickets without checks are named last. */
+export function countsLine(c: Readonly<Record<MapState, number>>): string {
+  const parts: [number, string][] = [[c.done, "done"], [c.running, "running"], [c.queued, "queued"], [c["can run"], "can run"], [c.stuck, "stuck"], [c.decision, "need a decision"], [c["no checks"], "without checks"]];
+  const out = parts.filter(([n]) => n > 0).map(([n, w]) => `${String(n)} ${w}`);
+  return out.length === 0 ? "No tickets" : out.join(" · ");
+}
+
+/** What 'Queue this map' would take: tickets that can run now, and the ones that wait on an earlier ticket of the map. */
+export const queueable = (c: Readonly<Record<MapState, number>>): number => c["can run"] + c.stuck;
+
+/** The map's runs that ended on the local day of `now` (seconds): how many ended done and how many fell short. Null when none ran. */
+export function ranToday(tickets: readonly Pick<MapTicket, "last_run">[], now: number): { done: number; short: number } | null {
+  const d = new Date(now * 1000);
+  const from = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() / 1000;
+  const runs = tickets.flatMap((t) => (t.last_run?.ended != null && t.last_run.ended >= from ? [t.last_run] : []));
+  if (runs.length === 0) return null;
+  const done = runs.filter((r) => r.state === "done").length;
+  return { done, short: runs.length - done };
+}

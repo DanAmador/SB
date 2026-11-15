@@ -59,6 +59,22 @@ const mapRoute = (): unknown => MapRoute.parse(addLinks("GET /api/map", {
   ],
 }, ctx));
 
+// a map with no checks, served by /api/map only: four tickets, the third after the first, the fourth waits for the owner
+let bareChecks: string[] = [];
+const bareRoute = (): unknown => {
+  const placeOf = (n: number): number | null => {
+    const at = queue.items.filter((i) => i.state === "queued").findIndex((i) => i.key === `demo/bare#${String(n)}`);
+    return at < 0 ? null : at + 1;
+  };
+  return MapRoute.parse(addLinks("GET /api/map", {
+    map: "demo/bare", title: "The bare map", status: "open", words: "Four tickets and no checks yet.", checks: bareChecks, uri: "obsidian://open?path=%2Fvault%2Fdemo%2Fbare%2Fmap.md",
+    tickets: [
+      mt(1, "Bare one", [], { place: placeOf(1) }, "demo/bare"), mt(2, "Bare two", [], { place: placeOf(2) }, "demo/bare"),
+      mt(3, "Bare three", [1], { state: "blocked", place: placeOf(3) }, "demo/bare"), mt(4, "Bare four", [], { state: "waits for you", type: "grilling" }, "demo/bare"),
+    ],
+  }, ctx));
+};
+
 const item = (key: string, state: QueueItem["state"]): Raw<QueueItem> => ({
   key, kind: "ticket", agent: null, state, note: "", commit: null, tries: 0, started: state === "running" ? now() - 300 : null, ended: null,
 });
@@ -202,8 +218,8 @@ createServer((req, res) => {
     if (req.method === "GET" && path === "/api/tickets") { send(res, 200, tickets().map((t) => ({ ...t, queued: queue.items.some((i) => i.key === `${t.map}#${String(t.num)}`) }))); return; }
     if (req.method === "GET" && path === "/api/map") {
       const which = new URL(req.url ?? "", "http://x").searchParams.get("map");
-      if (which !== "demo/board" && which !== "demo/batch") { send(res, 404, { ok: false, error: "no such map" }); return; }
-      send(res, 200, which === "demo/batch" ? batchRoute() : mapRoute());
+      if (which !== "demo/board" && which !== "demo/batch" && which !== "demo/bare") { send(res, 404, { ok: false, error: "no such map" }); return; }
+      send(res, 200, which === "demo/bare" ? bareRoute() : which === "demo/batch" ? batchRoute() : mapRoute());
       return;
     }
     if (req.method === "GET" && path === "/api/ticket") {
@@ -241,6 +257,15 @@ createServer((req, res) => {
     }
     if (req.method === "POST" && path === "/api/queue/map") {
       const b = QueueMapBody.parse(await body(req));
+      if (b.map === "demo/bare") {
+        const add = bareChecks.length === 0 ? [] : ["demo/bare#1", "demo/bare#2", "demo/bare#3"].filter((k) => !queue.items.some((i) => i.key === k && i.state === "queued"));
+        queue.items = [...queue.items, ...add.map((k) => item(k, "queued"))];
+        syncMaps();
+        calls.map += 1;
+        queue.version += 1;
+        send(res, 200, { ...(addLinks("POST /api/queue/set", { ok: true, queue }, ctx) as object), left_out: [{ key: "demo/bare#4", reason: "needs your decision" }] });
+        return;
+      }
       const add = tickets().filter((t) => t.map === b.map && t.state === "ready").map((t) => `${t.map}#${String(t.num)}`);
       queue.items = [...queue.items, ...add.map((k) => item(k, "queued"))];
       syncMaps();
@@ -269,6 +294,7 @@ createServer((req, res) => {
       const b = TicketActionBody.parse(await body(req));
       if (b.text === "fail") { send(res, 400, { ok: false, error: "refused for the test" }); return; }
       actions.push({ action: path.slice("/api/ticket/".length), key: b.key, text: b.text ?? "" });
+      if (path.endsWith("/checks") && b.key.startsWith("demo/bare#")) bareChecks = (b.text ?? "").split(";").map((c) => c.trim()).filter((c) => c !== "");
       send(res, 200, { ok: true });
       return;
     }

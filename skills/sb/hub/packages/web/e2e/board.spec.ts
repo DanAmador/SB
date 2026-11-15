@@ -783,6 +783,60 @@ test.describe("Map view", () => {
   }
 });
 
+test.describe("Map head", () => {
+  const bare = "/next/?project=demo&map=demo%2Fbare";
+  test("a map without checks shows the warning and no Queue this map; setting checks removes the warning; Queue this map queues what can run", async ({ page }) => {
+    await page.goto(bare);
+    const head = page.getByTestId("map-head");
+    await expect(head.getByRole("heading", { name: "The bare map" })).toBeVisible();
+    await expect(head.getByText("Four tickets and no checks yet.")).toBeVisible();
+    await expect(head.getByText("No checks: nothing here can be queued")).toBeVisible();
+    await expect(head.getByRole("button", { name: "Queue this map" })).toHaveCount(0);
+    await expect(page.getByTestId("map-counts")).toHaveText("1 stuck · 1 need a decision · 2 without checks");
+    const dir = process.env.SB_SHOTS;
+    if (dir !== undefined) {
+      await page.screenshot({ path: `${dir}/maphead-1440-nochecks.png` });
+      await page.setViewportSize({ width: 375, height: 800 });
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      await page.screenshot({ path: `${dir}/maphead-375-nochecks.png` });
+      await page.setViewportSize({ width: 1440, height: 900 });
+    }
+    // set the checks: the warning goes, the button comes
+    await head.getByRole("button", { name: "Set them" }).click();
+    await head.getByLabel("Checks of this map, separated by ;").fill("pnpm test; pnpm lint");
+    await head.getByRole("button", { name: "Save checks" }).click();
+    await expect(head.getByText("No checks: nothing here can be queued")).toHaveCount(0);
+    await expect(page.getByTestId("map-counts")).toHaveText("2 can run · 1 stuck · 1 need a decision");
+    await expect(head.getByText("Checks (2)")).toBeVisible();
+    // queue the whole map: the third, after the first, is in line too
+    const before = (await queuedKeys(page)).length;
+    await head.getByRole("button", { name: "Queue this map" }).click();
+    await expect(page.getByTestId("map-queued")).toHaveText("Queued 3 tickets; left 1 ticket: needs your decision.");
+    await expect(page.getByTestId("map-counts")).toHaveText("3 queued · 1 need a decision");
+    expect((await queuedKeys(page)).length).toBe(before + 3);
+    expect(await queuedKeys(page)).toEqual(expect.arrayContaining(["demo/bare#1", "demo/bare#2", "demo/bare#3"]));
+    await expect(head.getByRole("button", { name: "Queue this map" })).toBeDisabled();
+  });
+
+  test("the head holds at 375 px and in dark: one column, nothing scrolls sideways; screenshots", async ({ page }) => {
+    const dir = process.env.SB_SHOTS;
+    await page.goto("/next/?project=demo&map=demo%2Fboard");
+    await expect(page.getByTestId("map-head")).toBeVisible();
+    await expect(page.getByTestId("map-counts")).toHaveText("1 done · 1 running · 1 queued · 1 can run · 2 stuck · 1 need a decision");
+    await page.waitForTimeout(800);
+    if (dir !== undefined) await page.screenshot({ path: `${dir}/maphead-1440.png` });
+    await page.setViewportSize({ width: 375, height: 800 });
+    await page.goto(bare);
+    await expect(page.getByTestId("map-head")).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await page.emulateMedia({ colorScheme: "dark" });
+    await page.goto("/next/?project=demo&map=demo%2Fboard");
+    await expect(page.getByTestId("map-head")).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    if (dir !== undefined) await page.screenshot({ path: `${dir}/maphead-375-dark.png` });
+  });
+});
+
 test.describe("Ticket table", () => {
   const rowsOf = (page: Page) => page.getByTestId("ticket-rows").getByRole("row");
   const bar = (page: Page) => page.getByTestId("selection-bar");

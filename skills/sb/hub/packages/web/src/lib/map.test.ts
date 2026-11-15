@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MapRoute, MapTicket } from "@sb-hub/contract";
-import { dimmed, layoutMap, reachKeys, mapState, minutesOf, pickedState, stateCounts } from "./map.ts";
+import { countsLine, queueable, ranToday, MAP_STATES, type MapState, dimmed, layoutMap, reachKeys, mapState, minutesOf, pickedState, stateCounts } from "./map.ts";
 
 const t = (num: number, after: number[] = [], more: Partial<MapTicket> = {}): MapTicket => ({
   num, title: `Ticket ${String(num)}`, type: "task", status: "open", state: "ready", why: "", priority: null, tier: "sonnet", place: null,
@@ -116,5 +116,30 @@ describe("reachKeys: tick everything this comes after / that comes after this", 
     expect(reachKeys(out, "sb/one", "6", "after")).toEqual(["sb/one#6"]);
     expect(reachKeys(out, "sb/one", "7", "before")).toEqual(["sb/one#7"]);
     expect(reachKeys(out, "sb/one", "x:other/map#3", "after")).toEqual(["sb/one#7"]);
+  });
+});
+
+describe("the map head's counts", () => {
+  const none = Object.fromEntries(MAP_STATES.map((s) => [s, 0])) as Record<MapState, number>;
+  it("names each state with tickets, in the head's order, and leaves zeros out", () => {
+    const c = stateCounts(layoutMap(fixture).nodes);
+    expect(countsLine(c)).toBe("1 done · 1 running · 1 queued · 3 can run · 1 stuck");
+    expect(countsLine({ ...none, decision: 2, done: 1 })).toBe("1 done · 2 need a decision");
+    expect(countsLine({ ...none, "no checks": 3 })).toBe("3 without checks");
+    expect(countsLine(none)).toBe("No tickets");
+  });
+  it("a map without checks counts its tickets as without checks, and queues none", () => {
+    const c = stateCounts(layoutMap({ ...fixture, checks: [] }).nodes);
+    expect(c["no checks"]).toBe(3);
+    expect(c["can run"]).toBe(0);
+  });
+  it("queueable is what can run plus what waits on a ticket of the map", () => {
+    expect(queueable({ ...none, "can run": 2, stuck: 1, decision: 4 })).toBe(3);
+  });
+  it("ranToday counts the runs that ended today, done and fell short apart", () => {
+    const now = Math.floor(new Date(2026, 10, 15, 12).getTime() / 1000);
+    const run = (state: string, ended: number): Pick<MapTicket, "last_run"> => ({ last_run: { state, note: "", ended } });
+    expect(ranToday([run("done", now - 60), run("failed", now - 120), run("done", now - 86400 * 2), { last_run: null }], now)).toEqual({ done: 1, short: 1 });
+    expect(ranToday([run("done", now - 86400 * 2)], now)).toBeNull();
   });
 });
