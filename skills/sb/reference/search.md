@@ -25,8 +25,9 @@ without `.md`, or a unique file name.
 
 - **JSON when piped**, a `hits` list: `path`, `cosine` (0 to 1), and for `search` the `passage`
   that matched. Read the passage before you open the note.
-- **Scores are close together.** On this vault a real match scores about 0.5 to 0.6, and unrelated
-  notes about 0.45. Treat the top 3 to 5 as leads to open, not answers.
+- **Hits come in meaning-plus-keyword order**, so the list is not sorted by `cosine`. Cosines sit
+  close together: on this vault a real match scores about 0.5 to 0.6, and unrelated notes about
+  0.45. Treat the top 3 to 5 as leads to open, not answers.
 - **Run notes crowd the hits** (`wayfinder/*/runs/`). Skip them unless you want what a night did.
 
 ## When it is slow
@@ -43,7 +44,8 @@ without `.md`, or a unique file name.
 
 ## Where it comes from
 
-The CLI is built in the owner's `semantic-graph` repo (`pnpm run build:cli`), and
+The CLI is built in the owner's `semantic-graph-plugin-release` checkout (`pnpm run build:cli`; the
+`plugin-release` branch, the only one whose search mixes in keyword matching), and
 `~/.local/bin/semantra` links to its `packages/cli/dist/semantra.mjs`. It shares one index file
 with the Obsidian plugin (`<vault>/.semantra/`). How it is shipped beyond this machine is still
 open: the `semantra/agent-cli` map.
