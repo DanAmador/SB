@@ -42,14 +42,14 @@
       "repos": {},
       "runs": {},
       "seeded": true,
-      "version": 16
+      "version": 18
     }
   },
   "contentType": "application/json",
   "request": {
     "key": "repo/one#3",
     "to": 0,
-    "version": 15
+    "version": 17
   },
   "route": "POST /api/queue/move",
   "status": 200

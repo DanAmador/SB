@@ -7,7 +7,7 @@
   "request": {
     "key": "repo/one#2",
     "reason": "",
-    "version": 26
+    "version": 28
   },
   "route": "POST /api/queue/stop",
   "status": 400

@@ -42,7 +42,7 @@
       "repos": {},
       "runs": {},
       "seeded": true,
-      "version": 15
+      "version": 17
     }
   },
   "contentType": "application/json",
@@ -51,7 +51,7 @@
       "repo/one#2",
       "repo/one#3"
     ],
-    "version": 14
+    "version": 16
   },
   "route": "POST /api/queue/set",
   "status": 200

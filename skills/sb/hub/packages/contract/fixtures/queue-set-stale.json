@@ -42,7 +42,7 @@
       "repos": {},
       "runs": {},
       "seeded": true,
-      "version": 15
+      "version": 17
     },
     "stale": true
   },
@@ -51,7 +51,7 @@
     "keys": [
       "repo/one#2"
     ],
-    "version": 14
+    "version": 16
   },
   "route": "POST /api/queue/set",
   "status": 409
