@@ -88,28 +88,39 @@ test.describe("The run's graph", () => {
   const night = (page: Page) => page.getByTestId("night-graph");
   const box = (page: Page, name: RegExp) => night(page).getByRole("button", { name });
 
-  test("Everything shows every ticket of the run as one graph, a frame per map, a job apart", async ({ page }) => {
+  test("Everything shows the run as one timeline: a column per project, a chip per map, the now line and one Done box", async ({ page }) => {
     const errors: string[] = [];
     page.on("pageerror", (e) => errors.push(String(e)));
     await page.goto("/next/");
     await expect(night(page)).toBeVisible();
     for (const f of ["The demo board", "The shop site", "Jobs"]) await expect(night(page).getByText(f, { exact: true })).toBeVisible();
-    // the demo board: 1 done, 2 running, 1 fell short, 1 next; the shop site: 1 running, 1 fell short
-    await expect(night(page).getByText("1 done · 2 running · 1 next · 1 fell short")).toBeVisible();
+    for (const p of ["demo", "other"]) await expect(night(page).locator(".react-flow__node-head", { hasText: p })).toBeVisible();
+    await expect(night(page).locator(".react-flow__node-now")).toHaveCount(1);
+    await expect(night(page).getByTestId("night-done")).toContainText("of 8 finished");
     await expect(page.getByTestId("run-counts")).toHaveText("1 done · 3 running · 1 in checks · 1 next · 2 fell short");
     await expect(night(page).locator(".react-flow__node-box")).toHaveCount(8);
     // a ticket the run never queued is not there
     await expect(night(page).getByText("Draw the shop window")).toHaveCount(0);
     await expect(night(page).getByText("Draw the header")).toHaveCount(0);
-    // the queued one has its place; an arrow crosses from the demo board to the shop site
+    // the queued one has its place, drawn dashed below now; an arrow crosses from the demo board to the shop site,
+    // and each project's last ticket points at Done
     await expect(box(page, /Show the queue in order.*Queued\s*next 1/)).toBeVisible();
-    await expect(night(page).locator(".react-flow__edge")).toHaveCount(1);
+    await expect(box(page, /Show the queue in order/)).toHaveClass(/border-dashed/);
+    await expect(night(page).locator(".react-flow__edge")).toHaveCount(1 + 2);
     // the graph sits above the running tickets
     await expect(page.getByRole("list", { name: "Running now" })).toBeVisible();
     // any box opens the ticket's panel
     await box(page, /Run the board against the real hub/).click();
     await expect(page.getByRole("dialog")).toBeVisible();
     await expect(page).toHaveURL(/t=demo%2Fboard%235/);
+    await page.keyboard.press("Escape");
+    // a map chip hides that map's boxes and its arrows; pressed again they come back
+    const chip = night(page).getByRole("group", { name: "Maps" }).getByRole("button", { pressed: true }).filter({ hasText: "The shop site" });
+    await chip.click();
+    await expect(night(page).locator(".react-flow__node-box")).toHaveCount(6);
+    await expect(night(page).locator(".react-flow__edge")).toHaveCount(1);
+    await night(page).getByRole("group", { name: "Maps" }).getByRole("button", { pressed: false }).filter({ hasText: "The shop site" }).click();
+    await expect(night(page).locator(".react-flow__node-box")).toHaveCount(8);
     expect(errors).toEqual([]);
   });
 
@@ -125,13 +136,13 @@ test.describe("The run's graph", () => {
     await expect(night(page).getByText("The shop site", { exact: true })).toHaveCount(0);
   });
 
-  test("a finished box shows its outcome and opens its report; a frame's title picks the map", async ({ page }) => {
+  test("a finished box shows its outcome and opens its report; a map chip's arrow picks the map", async ({ page }) => {
     await page.goto("/next/");
     const done = night(page).locator(".react-flow__node-box", { hasText: "Wait on the shop's fonts" });
     await expect(done).toContainText("Done");
     await expect(done.getByRole("link", { name: "Report" })).toHaveAttribute("href", /^obsidian:\/\/open\?path=/);
     await expect(night(page).locator(".react-flow__node-box", { hasText: "Fix the sheet's focus" })).toContainText("Fell short");
-    await night(page).getByRole("button", { name: "The demo board" }).click();
+    await page.getByRole("button", { name: "Open the map The demo board" }).click();
     await expect(page).toHaveURL(/map=demo%2Fboard/);
     await expect(page.getByTestId("map-graph")).toBeVisible();
     await expect(night(page)).toHaveCount(0);

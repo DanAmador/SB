@@ -89,6 +89,9 @@ export interface Data extends Record<string, unknown> {
   key?: string;
   report?: string | null;
   flash?: boolean;
+  /** The run's graph: its map's colour, a thick left edge; dashed for a ticket still to come. */
+  hue?: string;
+  dashed?: boolean;
 }
 
 export function Box({ data }: NodeProps<Node<Data>>): React.JSX.Element {
@@ -120,7 +123,9 @@ export function Box({ data }: NodeProps<Node<Data>>): React.JSX.Element {
           ticked && "ring-4 ring-foreground/40",
           dim && "opacity-25",
           data.flash === true && "motion-safe:animate-[flash_1.2s_ease-out_1]",
+          data.dashed === true && "border-dashed",
         )}
+        style={data.hue !== undefined ? { borderLeftColor: data.hue, borderLeftWidth: 6, borderLeftStyle: "solid" } : undefined}
       >
         <span className="flex items-start gap-1.5">
           <TypeGlyph type={t?.type ?? null} />
