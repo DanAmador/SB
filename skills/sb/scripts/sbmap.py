@@ -63,6 +63,9 @@ Bases see the whole route. It answers what an agent should never compute or type
                                         tier=sonnet|opus and checks="..." on a ticket
     sbmap.py claim    <map> <NNN> --by "<session or harness/model>" [--no-sync]
     sbmap.py block    <map> <NNN> <refs, comma separated: numbers, map folder names, or none> [--no-sync]
+    sbmap.py move     <map> <NNN> --to <map> [--no-sync]
+                                        the ticket to another map of its project: same number, every
+                                        link in the vault rewritten, a Moved from comment; refuses a claimed one
     sbmap.py resolve  <map> <NNN> --gist "<one line>" [--answer "..."] [--commit <sha>]
                             [--repo-root <clone>] [--paths a,b] [--no-sync]
                                         records ## Answer, marks resolved, moves it to issues/done/,
@@ -1548,6 +1551,30 @@ def cmd_block(args):
         cmd_diagram([args[0], "--write"])
 
 
+def cmd_move(args):
+    """A ticket to another map of its project: same number and file, every link in the vault rewritten."""
+    m, dst = load(args[0]), load(opt(args, "--to") or sys.exit("sbmap: move needs --to <map>"))
+    t = m.ticket(args[1])
+    if dst.repo != m.repo:
+        sys.exit(f"sbmap: {dst.rel_name} is another project's map; a ticket number is unique only in its project")
+    if dst.folder.resolve() == m.folder.resolve():
+        sys.exit(f"sbmap: {t.id} is already on {m.rel_name}")
+    if t.status == "claimed":
+        sys.exit(f"sbmap: {t.id} is claimed by {t.claimed_by or 'someone'}; move it once the claim is released")
+    new = dst.folder / "issues" / ("done" if t.status in CLEARED else "") / t.path.name
+    rewrites, _ = move_files([(t.path, new)])
+    t = Ticket(new)
+    props = dict(t.props, map=dst.link())
+    props["tags"] = [f"wayfinder/map/{dst.effort_slug}" if str(x) == f"wayfinder/map/{m.effort_slug}" else x
+                     for x in props.get("tags", [])]
+    t.save(props)
+    cmd_comment([dst.rel_name, str(t.num), "--text", f"Moved from {m.link()} to {dst.link()}."])
+    print(f"{t.id} moved to {rel(new)}; {rewrites} link(s) rewritten")
+    if "--no-sync" not in args:
+        cmd_diagram([m.rel_name, "--write"])
+        cmd_diagram([dst.rel_name, "--write"])
+
+
 def commit_stamp(m, commit, root, paths):
     """The ticket properties a resolving commit gives: repo, full sha, branch, changed files, PR."""
     if not root:
@@ -2627,7 +2654,7 @@ def cmd_tickets(args):
 COMMANDS = {"info": cmd_info, "maps": cmd_maps, "status": cmd_status, "frontier": cmd_frontier, "lanes": cmd_lanes, "show": cmd_show,
             "next": cmd_next, "mapset": cmd_mapset, "tickets": cmd_tickets, "link": cmd_link, "uri": cmd_uri, "check": cmd_check, "verify": cmd_verify,
             "init": cmd_init, "summary": cmd_summary, "new": cmd_new, "set": cmd_set, "claim": cmd_claim,
-            "comment": cmd_comment, "spend": cmd_spend, "ruling": cmd_comment, "block": cmd_block,
+            "comment": cmd_comment, "spend": cmd_spend, "ruling": cmd_comment, "block": cmd_block, "move": cmd_move,
             "resolve": cmd_resolve, "diagram": cmd_diagram, "board": cmd_board, "migrate": cmd_migrate,
             "close": cmd_close, "run": cmd_run, "wiki": cmd_wiki}
 
