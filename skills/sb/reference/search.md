@@ -16,7 +16,7 @@ every option. Without it, the keyword fallbacks below still work.
 | brief a worker or pick up a ticket | `semantra related "<ticket path>" --vault "$SB_VAULT" --limit 5` | the notes closest to that ticket: earlier tickets, research, runs on the same problem |
 | see what blocks, links to or sits next to a note | `semantra links "<note>" --vault "$SB_VAULT" [--relation blocked_by]` | the note's neighbours in the vault's graph, under a second, no model |
 | list every note under a tag | `semantra tag "<tag>" --vault "$SB_VAULT"` | the notes, nested tags included (`--exact` leaves them out) |
-| find an exact string (a file name, an error, a number) | `grep -rl` / `sbmap show` | meaning search is the wrong tool for exact text |
+| find an exact string (a file name, an error, a number) or a ruling in a ticket's comments | `grep -rl` / `sbmap show` | meaning search is the wrong tool for exact text, and it never reads a `## Comments` section |
 
 `$SB_VAULT` unset means `~/Documents/Second Brain`. A note is named by its vault path, the path
 without `.md`, or a unique file name.
