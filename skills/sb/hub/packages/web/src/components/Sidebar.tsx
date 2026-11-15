@@ -1,4 +1,4 @@
-/** The sidebar: Everything, then each project with its maps (collapsible, quiet ones folded), each row with can-run and queued counts. On a phone it is a sheet. */
+/** The sidebar: Everything, then each project with its maps (collapsible, one list, busiest first), each row with can-run and queued counts. On a phone it is a sheet. */
 import { IconChevronDown, IconChevronRight, IconFilter, IconMenu2, IconX } from "@tabler/icons-react";
 import { useState } from "react";
 import type * as React from "react";
@@ -38,12 +38,8 @@ function MapRow({ m, project, on, pick }: { m: SidebarMap; project: string; on: 
     <div className="flex pl-6">
       <button type="button" aria-current={on ? "page" : undefined} title={m.map} className={rowCls(on)} onClick={() => { pick(project, m.map); }}>
         <span className="truncate text-muted-foreground">{m.title}</span>
+        {m.reason !== "" && <span className="shrink-0 text-[10px] text-muted-foreground/80">{m.reason}</span>}
         <Dot on={m.running} />
-        {m.noChecks && (
-          <span className="shrink-0 rounded border px-1 text-[10px] leading-4 text-muted-foreground" title="its tickets cannot run: the map has no checks">
-            no checks
-          </span>
-        )}
         <CountPair c={m} />
       </button>
     </div>
@@ -54,7 +50,6 @@ function ProjectTree({ tree: whole, scope, onPick }: { tree: Tree; scope: Scope;
   const active = useLink().act === "1";
   const tree = active ? activeOnly(whole, scope) : whole;
   const [shut, setShut] = useState<ReadonlySet<string>>(new Set());
-  const [quietOpen, setQuietOpen] = useState<ReadonlySet<string>>(new Set());
   const flip = (set: ReadonlySet<string>, p: string): Set<string> => {
     const n = new Set(set);
     if (n.has(p)) n.delete(p);
@@ -117,20 +112,6 @@ function ProjectTree({ tree: whole, scope, onPick }: { tree: Tree; scope: Scope;
               </button>
             </div>
             {open && p.maps.map((m) => <MapRow key={m.map} m={m} project={p.project} on={scope.map === m.map} pick={pick} />)}
-            {open && p.quiet.length > 0 && (
-              <div className="flex flex-col pl-6">
-                <button
-                  type="button"
-                  aria-expanded={quietOpen.has(p.project)}
-                  className="flex items-center gap-1 rounded-md px-2 py-1 text-left text-xs text-muted-foreground hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-                  onClick={() => { setQuietOpen((q) => flip(q, p.project)); }}
-                >
-                  {quietOpen.has(p.project) ? <IconChevronDown className="size-3" aria-hidden /> : <IconChevronRight className="size-3" aria-hidden />}
-                  {String(p.quiet.length)} quiet {p.quiet.length === 1 ? "map" : "maps"}
-                </button>
-                {quietOpen.has(p.project) && p.quiet.map((m) => <MapRow key={m.map} m={m} project={p.project} on={false} pick={pick} />)}
-              </div>
-            )}
           </div>
         );
       })}

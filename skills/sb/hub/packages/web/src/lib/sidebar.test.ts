@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { QueueItem, State, TicketRow } from "@sb-hub/contract";
 import { describe, expect, it } from "vitest";
 import { activeOnly, sidebarTree } from "./sidebar.ts";
@@ -43,24 +45,43 @@ describe("sidebarTree", () => {
     const t = sidebarTree(s, tickets, none);
     expect(t.all.running).toBe(true);
     expect(t.projects.map((p) => [p.project, p.running])).toEqual([["other", false], ["sb", true]]);
-    expect(t.projects[1]?.maps.map((m) => [m.map, m.running])).toEqual([["sb/busy", true], ["sb/idle", false]]);
+    expect(t.projects[1]?.maps.map((m) => [m.map, m.running])).toEqual([["sb/busy", true], ["sb/idle", false], ["sb/nocheck", false], ["sb/quiet", false]]);
     expect(sidebarTree(state([]), tickets, none).all.running).toBe(false);
   });
 
-  it("folds maps with 0 and 0 and nothing running; a picked quiet map stays shown", () => {
+  it("has no quiet list: every map is listed, running, can run, queued, stuck, ties by name", () => {
     const t = sidebarTree(s, tickets, none);
     const sb = t.projects.find((p) => p.project === "sb");
-    expect(sb?.maps.map((m) => m.map)).toEqual(["sb/busy", "sb/idle"]);
-    expect(sb?.quiet.map((m) => m.map)).toEqual(["sb/nocheck", "sb/quiet"]);
-    expect(t.projects.find((p) => p.project === "other")?.quiet.map((m) => m.map)).toEqual(["other/old"]);
-    const picked = sidebarTree(s, tickets, { project: "sb", map: "sb/quiet" }).projects.find((p) => p.project === "sb");
-    expect(picked?.maps.map((m) => m.map)).toEqual(["sb/busy", "sb/idle", "sb/quiet"]);
-    expect(picked?.quiet.map((m) => m.map)).toEqual(["sb/nocheck"]);
+    expect(sb?.maps.map((m) => m.map)).toEqual(["sb/busy", "sb/idle", "sb/nocheck", "sb/quiet"]);
+    expect(Object.keys(sb ?? {})).not.toContain("quiet");
+    expect(t.projects.find((p) => p.project === "other")?.maps.map((m) => m.map)).toEqual(["other/live", "other/old"]);
+  });
+
+  it("orders every tier: running, can run, queued, stuck", () => {
+    const rows = [ticket("z/a-stuck", 1, { state: "waits for you" }), ticket("z/b-queued", 1, { state: "blocked" }), ticket("z/c-can", 1), ticket("z/d-run", 1, { state: "blocked" })];
+    const t = sidebarTree(state([item("z/b-queued#1", "queued"), item("z/d-run#1", "running")]), rows, none);
+    expect(t.projects[0]?.maps.map((m) => m.map)).toEqual(["z/d-run", "z/c-can", "z/b-queued", "z/a-stuck"]);
+  });
+
+  it("a stuck map carries its reason; a busy one has none", () => {
+    const sb = sidebarTree(s, tickets, none).projects.find((p) => p.project === "sb");
+    expect(Object.fromEntries((sb?.maps ?? []).map((m) => [m.map, m.reason]))).toEqual({ "sb/busy": "", "sb/idle": "", "sb/nocheck": "no checks", "sb/quiet": "claimed" });
+    expect(sidebarTree(s, tickets, none).projects.find((p) => p.project === "other")?.maps.map((m) => m.reason)).toEqual(["", "waits for you"]);
+  });
+
+  it("reads the recorded contract fixture: a ticket that waits for you makes its map stuck", () => {
+    const body = (JSON.parse(readFileSync(join(import.meta.dirname, "../../../contract/fixtures/tickets.json"), "utf8")) as { body: TicketRow[] }).body;
+    const waiting = body.filter((r) => r.state === "waits for you");
+    expect(waiting.length).toBeGreaterThan(0);
+    const t = sidebarTree(state([item("repo/one#2", "running")]), body.filter((r) => r.state !== "ready" || r.map === "repo/one"), none);
+    const maps = t.projects[0]?.maps ?? [];
+    expect(maps.map((m) => [m.map, m.reason])).toEqual([["repo/one", ""], ["repo/two", "waits for you"]]);
+    expect(maps[0]?.running).toBe(true);
   });
 
   it("marks a map whose tickets cannot run only for want of checks", () => {
     const sb = sidebarTree(s, tickets, none).projects.find((p) => p.project === "sb");
-    const flags = Object.fromEntries([...(sb?.maps ?? []), ...(sb?.quiet ?? [])].map((m) => [m.map, m.noChecks]));
+    const flags = Object.fromEntries((sb?.maps ?? []).map((m) => [m.map, m.noChecks]));
     expect(flags).toEqual({ "sb/busy": false, "sb/idle": false, "sb/nocheck": true, "sb/quiet": false });
   });
 
@@ -73,9 +94,9 @@ describe("sidebarTree", () => {
 });
 
 describe("activeOnly", () => {
-  it("keeps only the projects and maps with something queued or running, and no quiet fold", () => {
+  it("keeps only the projects and maps with something queued or running", () => {
     const t = activeOnly(sidebarTree(s, tickets, none), none);
-    expect(t.projects.map((p) => [p.project, p.maps.map((m) => m.map), p.quiet.length])).toEqual([["other", ["other/live"], 0], ["sb", ["sb/busy"], 0]]);
+    expect(t.projects.map((p) => [p.project, p.maps.map((m) => m.map)])).toEqual([["other", ["other/live"]], ["sb", ["sb/busy"]]]);
     // the totals on Everything stay those of the whole board
     expect([t.all.canRun, t.all.queued]).toEqual([3, 3]);
   });

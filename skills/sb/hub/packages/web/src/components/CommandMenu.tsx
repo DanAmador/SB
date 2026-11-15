@@ -53,7 +53,7 @@ export function CommandMenu({ open, onClose, go, tree }: { open: boolean; onClos
                   <IconFolder aria-hidden />
                   <span className="truncate">{p.project}</span>
                 </CommandItem>,
-                ...[...p.maps, ...p.quiet].map((m) => (
+                ...p.maps.map((m) => (
                   <CommandItem key={m.map} value={`map ${m.map} ${m.title}`} onSelect={() => { run(() => { setLink({ project: p.project, map: m.map }); }); }}>
                     <IconMap2 aria-hidden />
                     <span className="truncate">{m.map}</span>

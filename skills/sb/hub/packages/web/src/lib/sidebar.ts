@@ -1,4 +1,4 @@
-/** The sidebar's tree: per map and project, what can run now and what is queued; a running dot; quiet maps folded. Pure. */
+/** The sidebar's tree: per map and project, what can run now and what is queued; a running dot; every map in one list, busiest first. Pure. */
 import type { QueueItem, State, TicketRow } from "@sb-hub/contract";
 import { folder, itemMapKey, projOf, tkey, type Scope } from "./board.ts";
 
@@ -15,13 +15,13 @@ export interface SidebarMap extends Counts {
   readonly title: string;
   /** Its tickets cannot run only because the map has no checks. */
   readonly noChecks: boolean;
+  /** Why a map with open tickets has nothing to run or queue, in a few words; "" when it is busy or has no open tickets. */
+  readonly reason: string;
 }
 export interface SidebarProject extends Counts {
   readonly project: string;
-  /** The maps with work, running, or picked. */
+  /** Every map: running, can run, queued, stuck, then nothing left; ties by name. */
   readonly maps: readonly SidebarMap[];
-  /** The maps folded under "N quiet maps". */
-  readonly quiet: readonly SidebarMap[];
 }
 export interface Sidebar {
   readonly all: Counts;
@@ -29,19 +29,19 @@ export interface Sidebar {
 }
 
 const NO_CHECKS = "no check commands";
-const isQuiet = (c: Counts): boolean => c.canRun === 0 && c.queued === 0 && !c.running;
-
 const isActive = (c: Counts): boolean => c.queued > 0 || c.running;
 
 /** Only what is in play: the projects and maps with something queued or running. A picked project or map stays shown. */
 export function activeOnly(tree: Sidebar, scope: Scope): Sidebar {
   const projects = tree.projects
     .filter((p) => isActive(p) || p.project === scope.project)
-    .map((p): SidebarProject => ({ ...p, maps: [...p.maps, ...p.quiet].filter((m) => isActive(m) || m.map === scope.map), quiet: [] }));
+    .map((p): SidebarProject => ({ ...p, maps: p.maps.filter((m) => isActive(m) || m.map === scope.map) }));
   return { all: tree.all, projects };
 }
 
-export function sidebarTree(state: State, tickets: readonly TicketRow[] | null, scope: Scope): Sidebar {
+// ponytail: scope is unused now (every map is listed); Board.tsx, not mine to edit here, still passes it.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export function sidebarTree(state: State, tickets: readonly TicketRow[] | null, _scope?: Scope): Sidebar {
   const live = new Set<string>();
   for (const i of state.queue.items) if (i.state === "queued" || i.state === "running") live.add(i.key);
   const proj = new Map<string, Set<string>>();
@@ -56,6 +56,9 @@ export function sidebarTree(state: State, tickets: readonly TicketRow[] | null, 
   const inLine = new Map<string, number>();
   const runs = new Map<string, number>();
   const titles = new Map<string, string>();
+  const open = new Map<string, number>();
+  const waits = new Map<string, number>();
+  const claimed = new Map<string, number>();
   const bump = (m: Map<string, number>, k: string): void => {
     m.set(k, (m.get(k) ?? 0) + 1);
   };
@@ -64,6 +67,9 @@ export function sidebarTree(state: State, tickets: readonly TicketRow[] | null, 
     see(projOf(t.map), t.map);
     titles.set(t.map, t.map.split("/").pop() ?? t.map);
     if (t.state === "ready" && !live.has(tkey(t))) bump(canRun, t.map);
+    bump(open, t.map);
+    if (t.state === "waits for you") bump(waits, t.map);
+    if (t.state === "claimed") bump(claimed, t.map);
     if (t.reason === NO_CHECKS) bump(noChecks, t.map);
   }
   const jobsLine = new Map<string, number>();
@@ -83,27 +89,32 @@ export function sidebarTree(state: State, tickets: readonly TicketRow[] | null, 
   }
   const mapRow = (map: string): SidebarMap => {
     const c = canRun.get(map) ?? 0;
+    const q = inLine.get(map) ?? 0;
+    const stuck = c === 0 && q === 0 && (runs.get(map) ?? 0) === 0 && (open.get(map) ?? 0) > 0;
+    const noC = c === 0 && (noChecks.get(map) ?? 0) > 0;
+    let reason = "";
+    if (stuck) reason = noC ? "no checks" : waits.has(map) ? "waits for you" : claimed.has(map) ? "claimed" : "blocked";
     return {
       map,
       title: titles.get(map) ?? map.split("/").pop() ?? map,
       canRun: c,
       queued: inLine.get(map) ?? 0,
       running: (runs.get(map) ?? 0) > 0,
-      noChecks: c === 0 && (noChecks.get(map) ?? 0) > 0,
+      noChecks: noC,
+      reason,
     };
   };
   const projects = [...proj.entries()]
     .sort(([x], [y]) => x.localeCompare(y))
     .map(([project, maps]): SidebarProject => {
-      const rows = [...maps].sort((x, y) => x.localeCompare(y)).map(mapRow);
-      const shown = (m: SidebarMap): boolean => !isQuiet(m) || m.map === scope.map;
+      const rank = (m: SidebarMap): number => (m.running ? 0 : m.canRun > 0 ? 1 : m.queued > 0 ? 2 : m.reason !== "" ? 3 : 4);
+      const rows = [...maps].sort((x, y) => x.localeCompare(y)).map(mapRow).sort((x, y) => rank(x) - rank(y)); // stable: ties stay by name
       return {
         project,
         canRun: rows.reduce((n, m) => n + m.canRun, 0),
         queued: rows.reduce((n, m) => n + m.queued, 0) + (jobsLine.get(project) ?? 0),
         running: rows.some((m) => m.running) || (jobsRun.get(project) ?? 0) > 0,
-        maps: rows.filter(shown),
-        quiet: rows.filter((m) => !shown(m)),
+        maps: rows,
       };
     });
   return {
