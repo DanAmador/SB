@@ -6,8 +6,7 @@ import type { RouteBody, State } from "@sb-hub/contract";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { sidebarTree } from "@/lib/sidebar.ts";
-import { itemInScope, plural, projOf, queueView, scopeItems, scopeWaits, splitAgents, ticketIndex, waitsFor, withBlockers } from "@/lib/board.ts";
-import { sessionCards } from "@/lib/sessions.ts";
+import { itemInScope, plural, projOf, queueView, scopeWaits, splitAgents, ticketIndex, waitsFor, withBlockers } from "@/lib/board.ts";
 import { READONLY } from "@/lib/api.ts";
 import { useHubState, useTickets, useWrites, type Outcome } from "@/lib/hub.ts";
 import { setLink, useLink, VIEWS, type View } from "@/lib/link.ts";
@@ -18,7 +17,7 @@ import { BoardContext, type BoardData } from "./context.tsx";
 import { Breadcrumb, MenuButton, SidebarColumn, SidebarSheet } from "./Sidebar.tsx";
 import { HistoryView } from "./HistoryView.tsx";
 import { MapView } from "./MapView.tsx";
-import { SessionsView } from "./SessionsView.tsx";
+import { SessionSheet } from "./SessionPanel.tsx";
 import { RunView } from "./RunView.tsx";
 import { DetailSheet } from "./TicketSheet.tsx";
 import { Toolbar } from "./Toolbar.tsx";
@@ -47,7 +46,7 @@ function openRow(el: HTMLElement | null): void {
   go?.click();
 }
 
-const VIEW_WORDS: Readonly<Record<View, string>> = { run: "Run", waits: "Waits for you", sessions: "Sessions", history: "History" };
+const VIEW_WORDS: Readonly<Record<View, string>> = { run: "Run", waits: "Waits for you", history: "History" };
 
 export function Board(): React.JSX.Element {
   const stateQ = useHubState();
@@ -75,11 +74,9 @@ function Loaded({ state, tickets, down, lastOk }: { state: State; tickets: Board
   const tree = sidebarTree(state, tickets, scope);
   const waits = scopeWaits(allWaits, scope, state);
   const alerts = waits.count;
-  const sessions = sessionCards(state, ix, agents).filter((c) => !c.idle);
   const counts: Readonly<Record<View, number>> = {
-    run: qv.running.filter((i) => itemInScope(scope, i)).length + scopeItems(scope, qv.next).length,
+    run: qv.running.filter((i) => itemInScope(scope, i)).length,
     waits: alerts,
-    sessions: sessions.length,
     history: 0,
   };
 
@@ -150,7 +147,7 @@ function Loaded({ state, tickets, down, lastOk }: { state: State; tickets: Board
           ev.preventDefault();
           find.focus();
         }
-      } else if (ev.key >= "1" && ev.key <= "4") {
+      } else if (ev.key >= "1" && ev.key <= "3") {
         const view = VIEWS[Number(ev.key) - 1];
         if (view) setLink({ view });
       } else if (ev.key === "j" || ev.key === "k") {
@@ -235,9 +232,6 @@ function Loaded({ state, tickets, down, lastOk }: { state: State; tickets: Board
           <TabsContent value="waits" className="outline-none">
             <WaitsView w={waits} />
           </TabsContent>
-          <TabsContent value="sessions" className="outline-none">
-            <SessionsView />
-          </TabsContent>
           <TabsContent value="history" className="outline-none">
             <HistoryView />
           </TabsContent>
@@ -246,6 +240,7 @@ function Loaded({ state, tickets, down, lastOk }: { state: State; tickets: Board
       </Tabs>
       <SidebarSheet tree={tree} scope={scope} open={menu} onOpenChange={setMenu} />
       <DetailSheet />
+      <SessionSheet />
       <CommandMenu open={dialog.kind === "command"} onClose={close} go={setDialog} tree={tree} />
       <JobDialog open={dialog.kind === "job"} onClose={close} />
       {dialog.kind === "message" && <MessageDialog key={dialog.to} to={dialog.to} onClose={close} />}

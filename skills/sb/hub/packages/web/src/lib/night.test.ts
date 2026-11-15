@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { QueueItem, State, TicketRow } from "@sb-hub/contract";
 import { ticketIndex } from "./board.ts";
-import { countsLine, nightBlocks, nightLine } from "./night.ts";
+import { countsLine, healthOf, nightBlocks, nightLine, pairNight, QUEUE_HEAD } from "./night.ts";
+import { helperCards, sessionCards } from "./sessions.ts";
 
 const NOW = 1_800_000_000;
 const item = (key: string, state: QueueItem["state"], more: Record<string, unknown> = {}): QueueItem =>
@@ -45,5 +46,54 @@ describe("nightBlocks", () => {
     const job = { ...item("job:1", "queued"), kind: "job", title: "Close off", project: "/w/p", repo: "/w/p", name: "close" } as unknown as QueueItem;
     const n = nightBlocks(state([...items, job], ["p/b", "p/a"]), ticketIndex(tickets, { queue: { items } } as never));
     expect(n.blocks.at(-1)?.title).toBe("Jobs");
+  });
+});
+
+describe("pairNight: who is on each ticket", () => {
+  const agent = (id: string, more: Record<string, unknown>): [string, unknown] => [id, { agent: id, project: "/w/p", state: "working", at: NOW - 30, ...more }];
+  const items = [
+    item("p/a#1", "running", { started: NOW - 600, runner: "main" }),
+    item("p/a#2", "running", { started: NOW - 1200, runner: "main" }),
+    item("p/a#3", "done", { ended: NOW - 100 }),
+    item("p/b#1", "queued"),
+  ];
+  const st = {
+    ...state(items, ["p/a", "p/b"]),
+    aliases: {},
+    charge: { "p/a": "c-1" },
+    agents: Object.fromEntries([
+      agent("c-1", { title: "Charting a", map: "p/a", at: NOW - 240 }),
+      agent("c-2", { title: "Loose chat", state: "your turn" }),
+      agent("p/a#1", { role: "worker", parent: "queue", note: "running tests", at: NOW - 20 }),
+      agent("p/a#2", { role: "worker", parent: "queue", note: "reading", at: NOW - 400 }),
+      agent("p/a#3", { role: "worker", parent: "queue", state: "done" }),
+      agent("h-1", { title: "Scout", role: "worker", parent: "c-1" }),
+      agent("h-2", { title: "Notes", role: "worker", parent: "c-2" }),
+    ]),
+  } as unknown as State;
+  const tickets = [ticket("p/a", 1, 1), ticket("p/b", 1, 2)];
+  const ix = ticketIndex(tickets, st);
+  const night = nightBlocks(st, ix);
+  const pair = pairNight(st, night, sessionCards(st, ix), helperCards(st, ix));
+
+  it("names the session in charge in the head, or says the queue runs the map", () => {
+    expect(pair.maps.get("p/a")?.charge?.id).toBe("c-1");
+    expect(pair.maps.get("p/a")?.head).toBe("Charting a · working · quiet 4m");
+    expect(pair.maps.get("p/b")?.charge).toBeNull();
+    expect(pair.maps.get("p/b")?.head).toBe(QUEUE_HEAD);
+  });
+  it("pairs each row with its worker and tells live, silent and ended apart", () => {
+    const w = pair.maps.get("p/a")?.workers;
+    expect([...(w?.keys() ?? [])].sort()).toEqual(["p/a#1", "p/a#2", "p/a#3"]);
+    expect(["p/a#1", "p/a#2", "p/a#3"].map((k) => healthOf(w?.get(k) as never))).toEqual(["live", "silent", "ended"]);
+    expect(pair.maps.get("p/b")?.workers.size).toBe(0);
+  });
+  it("lists under Helpers what the session in charge started, and leaves the queue's workers out of it", () => {
+    expect(pair.maps.get("p/a")?.helpers.map((h) => h.id)).toEqual(["h-1"]);
+    expect(pair.maps.get("p/b")?.helpers).toEqual([]);
+  });
+  it("puts chats in charge of no map under Other chats with their helpers, and counts the live ones", () => {
+    expect(pair.chats.map((c) => [c.chat.id, c.helpers.map((h) => h.id)])).toEqual([["c-2", ["h-2"]]]);
+    expect(pair.liveChats).toBe(1);
   });
 });

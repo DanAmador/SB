@@ -3,15 +3,16 @@
  * ticket now, then a block per map (a checklist of its tickets in run order), then the maps that can be queued and
  * the search that finds one ticket to queue.
  */
-import { IconArrowBackUp, IconBan, IconChevronDown, IconChevronRight, IconChevronUp, IconCircleCheck, IconCircleDashed, IconClock, IconGripVertical, IconHourglass, IconLoader2, IconMail, IconPlus, IconRobot, IconX } from "@tabler/icons-react";
+import { IconArrowBackUp, IconBan, IconChevronDown, IconChevronRight, IconChevronUp, IconCircleCheck, IconCircleDashed, IconClock, IconGripVertical, IconHourglass, IconLoader2, IconMail, IconMessages, IconPlus, IconRobot, IconX, IconZzz } from "@tabler/icons-react";
 import { useState } from "react";
 import type * as React from "react";
 import type { QueueItem } from "@sb-hub/contract";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ago, blockerTitles, dur, endsAt, firstLine, hm, itemTitle, mapTitle, plainReason, plural, projOf, runRows, showOf, type RunRow, type RunTone, itemInScope, ticketInScope } from "@/lib/board.ts";
-import { MARK_WORDS, nightBlocks, nightLine, type Mark, type NightBlock, type NightRow } from "@/lib/night.ts";
-import { useLink } from "@/lib/link.ts";
+import { healthOf, MARK_WORDS, nightBlocks, nightLine, pairNight, type MapPair, type Mark, type NightBlock, type NightRow, type Pairing } from "@/lib/night.ts";
+import { helperCards, sessionCards, type SessionCard } from "@/lib/sessions.ts";
+import { setLink, useLink } from "@/lib/link.ts";
 import { cn } from "@/lib/utils";
 import { Empty, FileLinks, MapName, SectionTitle, TicketTitle, ToneIcon } from "./bits.tsx";
 import { AccountPicker } from "./AccountPicker.tsx";
@@ -29,9 +30,10 @@ const DOT: Readonly<Record<RunTone, [string, string]>> = {
 const DRAG_MAP = "application/x-sb-map";
 
 export function RunView(): React.JSX.Element {
-  const { state, ix, scope } = useBoard();
+  const { state, ix, scope, agents } = useBoard();
   const link = useLink();
   const night = nightBlocks(state, ix, scope);
+  const pairing = pairNight(state, night, sessionCards(state, ix, agents), helperCards(state, ix, agents));
   const stop = night.line.stopAt ?? endsAt(state, ix);
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
@@ -48,8 +50,9 @@ export function RunView(): React.JSX.Element {
       </p>
       <RunningNow />
       <section aria-label="The night, map by map" data-testid="blocks" className="flex flex-col gap-3">
-        {night.blocks.length === 0 ? <Empty>Nothing is running, queued or ended today.</Empty> : night.blocks.map((b) => <Block key={b.map || "jobs"} b={b} queued={night.queuedMaps} />)}
+        {night.blocks.length === 0 ? <Empty>Nothing is running, queued or ended today.</Empty> : night.blocks.map((b) => <Block key={b.map || "jobs"} b={b} queued={night.queuedMaps} pair={pairing.maps.get(b.map)} />)}
       </section>
+      <OtherChats pairing={pairing} />
       <QueueAMap />
       {!(scope.map !== "" && link.mv === "table") && <TicketTable />}
     </div>
@@ -159,7 +162,7 @@ const MARKS: Readonly<Record<Mark, [typeof IconCircleCheck, "ok" | "bad" | "warn
   recheck: [IconBan, "warn"],
 };
 
-function Block({ b, queued }: { b: NightBlock; queued: readonly string[] }): React.JSX.Element {
+function Block({ b, queued, pair }: { b: NightBlock; queued: readonly string[]; pair: MapPair | undefined }): React.JSX.Element {
   const { state, queueWrite, down, busy } = useBoard();
   const [open, setOpen] = useState(b.open);
   const [over, setOver] = useState(false);
@@ -242,19 +245,38 @@ function Block({ b, queued }: { b: NightBlock; queued: readonly string[] }): Rea
             </Button>
           )}
         </div>
+        {!isJobs && pair !== undefined && (
+          <p data-testid="in-charge" className="basis-full pl-6 text-xs text-muted-foreground">
+            {pair.charge === null ? (
+              <span className="inline-flex items-center gap-1">
+                <IconRobot className="size-3.5" aria-hidden />
+                {pair.head}
+              </span>
+            ) : (
+              <SessionButton c={pair.charge} label="Session in charge: ">
+                <IconMessages className="size-3.5 shrink-0" aria-hidden />
+                <span className="truncate">{pair.head}</span>
+                {pair.charge.silent && <IconZzz className="size-3.5 shrink-0 text-warn" aria-hidden />}
+              </SessionButton>
+            )}
+          </p>
+        )}
       </header>
       {open && (
-        <ul id={id} className="flex flex-col divide-y border-t">
-          {b.rows.map((r) => (
-            <Row key={`${r.item.key}@${String(r.item.ended ?? r.item.started ?? "")}${r.mark}`} r={r} />
-          ))}
-        </ul>
+        <>
+          <ul id={id} className="flex flex-col divide-y border-t">
+            {b.rows.map((r) => (
+              <Row key={`${r.item.key}@${String(r.item.ended ?? r.item.started ?? "")}${r.mark}`} r={r} worker={pair?.workers.get(r.item.key)} />
+            ))}
+          </ul>
+          {pair !== undefined && pair.helpers.length > 0 && <Helpers list={pair.helpers} />}
+        </>
       )}
     </section>
   );
 }
 
-function Row({ r }: { r: NightRow }): React.JSX.Element {
+function Row({ r, worker }: { r: NightRow; worker: SessionCard | undefined }): React.JSX.Element {
   const { state, ix, openMessage, queueWrite, unqueue, down, busy } = useBoard();
   const i = r.item;
   const t = ix.byKey.get(i.key);
@@ -263,23 +285,24 @@ function Row({ r }: { r: NightRow }): React.JSX.Element {
   const can = !down && !busy;
   const account = i.runner ?? i.agent ?? state.queue.agent ?? "";
   return (
-    <li data-key={i.key} data-mark={r.mark} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-sm">
+    <li data-key={i.key} data-mark={r.mark} {...(worker ? { "data-worker": healthOf(worker) } : {})} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-sm">
       <ToneIcon icon={Ic} tone={tone} label={MARK_WORDS[r.mark]} spin={r.mark === "running"} />
       <div className="min-w-0 flex-1 basis-48">
         <TicketTitle itemKey={i.key} links={i.links} className="line-clamp-2">
           {title}
         </TicketTitle>
         {(r.mark === "short" || r.mark === "stopped" || r.mark === "recheck") && <p className={cn("truncate text-xs", r.mark === "short" ? "text-destructive" : "text-warn")}>{plainReason(i)}</p>}
-        {r.mark === "running" && (
+        {r.mark === "running" && worker === undefined && (
           <p className="truncate text-xs text-muted-foreground" title={firstLine(i.note)}>
             {(agentNote(state, i.key) || firstLine(i.note) || "starting")}
           </p>
         )}
       </div>
-      <div className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
+      <div className="flex max-w-full shrink-0 items-center gap-2 text-xs text-muted-foreground">
+        {worker !== undefined && <WorkerChip c={worker} item={i} title={title} />}
         {r.mark === "running" && (
           <>
-            <span className="tabular-nums">{`${String(Math.floor((state.now - (i.started ?? state.now)) / 60))} min`}</span>
+            {worker === undefined && <span className="tabular-nums">{`${String(Math.floor((state.now - (i.started ?? state.now)) / 60))} min`}</span>}
             <Button variant="ghost" size="icon-sm" disabled={down} aria-label={`Message the worker on ${title}`} title="Message this worker" onClick={() => { openMessage(i.key); }}>
               <IconMail aria-hidden />
             </Button>
@@ -315,6 +338,108 @@ function Row({ r }: { r: NightRow }): React.JSX.Element {
         {r.mark === "next" && account !== "" && <span className="sr-only">{`on ${account}`}</span>}
       </div>
     </li>
+  );
+}
+
+/** A button that opens the session panel (?sess=). */
+function SessionButton({ c, label, children, className }: { c: SessionCard; label: string; children: React.ReactNode; className?: string }): React.JSX.Element {
+  return (
+    <button
+      type="button"
+      title="Open the session"
+      onClick={() => {
+        setLink({ sess: c.id });
+      }}
+      className={cn("inline-flex min-w-0 max-w-full items-center gap-1 rounded-md hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none", className)}
+    >
+      <span className="sr-only">{label}</span>
+      {children}
+    </button>
+  );
+}
+
+/** The worker on a ticket: account, last step, minutes, and a mark when it is silent or ended. */
+function WorkerChip({ c, item, title }: { c: SessionCard; item: NightRow["item"]; title: string }): React.JSX.Element {
+  const { state } = useBoard();
+  const h = healthOf(c);
+  const mins = Math.floor(((item.ended ?? state.now) - (item.started ?? state.now)) / 60);
+  const step = c.now || firstLine(item.note);
+  return (
+    <SessionButton c={c} label={`Open the worker on ${title}: `} className="max-w-48 flex-col items-end gap-0 py-0.5 sm:max-w-72">
+      <span className="flex max-w-full items-center gap-1">
+        <IconRobot className="size-3.5 shrink-0" aria-hidden />
+        <span className="truncate">{c.account || "worker"}</span>
+        <span className="tabular-nums">{`${String(mins)} min`}</span>
+        {h === "silent" && (
+          <span data-testid="silent" className="inline-flex items-center gap-0.5 text-warn">
+            <IconZzz className="size-3.5" aria-hidden />
+            {`silent ${dur(c.quiet)}`}
+          </span>
+        )}
+        {h === "ended" && <span>ended</span>}
+        {h === "live" && <span className="sr-only">live</span>}
+      </span>
+      {step !== "" && <span className="max-w-full truncate" title={step}>{step}</span>}
+    </SessionButton>
+  );
+}
+
+/** What the session in charge started that belongs to no ticket. */
+function Helpers({ list }: { list: readonly SessionCard[] }): React.JSX.Element {
+  return (
+    <details data-testid="helpers" className="border-t px-3 py-2 text-sm">
+      <summary className="cursor-pointer text-xs text-muted-foreground">{`Helpers (${String(list.length)})`}</summary>
+      <HelperList list={list} />
+    </details>
+  );
+}
+
+function HelperList({ list }: { list: readonly SessionCard[] }): React.JSX.Element {
+  const { state } = useBoard();
+  return (
+    <ul className="mt-1 flex flex-col divide-y">
+      {list.map((h) => (
+        <li key={h.id} data-worker={healthOf(h)} className="flex items-center gap-2 py-1.5 text-xs">
+          <SessionButton c={h} label="Open the helper: " className="flex-1 justify-between gap-2">
+            <span className="truncate text-sm">{h.title}</span>
+            <span className="inline-flex shrink-0 items-center gap-1 text-muted-foreground">
+              {healthOf(h) === "silent" && <IconZzz className="size-3.5 text-warn" aria-hidden />}
+              {healthOf(h) === "ended" ? "ended" : healthOf(h) === "silent" ? `silent ${dur(h.quiet)}` : ago(state.now, h.agent.at)}
+            </span>
+          </SessionButton>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** Chats in charge of no map, each with its helpers folded under it. */
+function OtherChats({ pairing }: { pairing: Pairing }): React.JSX.Element | null {
+  if (pairing.chats.length === 0) return null;
+  return (
+    <section aria-label="Other chats" data-testid="other-chats" className="rounded-xl border bg-card">
+      <header className="flex items-center gap-2 px-3 py-2">
+        <IconMessages className="size-4 text-muted-foreground" aria-hidden />
+        <h3 className="font-medium">Other chats</h3>
+        <span className="text-xs text-muted-foreground">{`${String(pairing.liveChats)} live`}</span>
+      </header>
+      <ul className="flex flex-col divide-y border-t">
+        {pairing.chats.map(({ chat, helpers }) => (
+          <li key={chat.id} className="px-3 py-2 text-sm">
+            <SessionButton c={chat} label="Open the chat: " className="gap-2">
+              <span className="truncate font-medium">{chat.title}</span>
+              <span className="shrink-0 text-xs text-muted-foreground">{`${chat.project !== "" ? `${chat.project} · ` : ""}${chat.agent.state ?? "working"}${chat.silent ? ` · silent ${dur(chat.quiet)}` : ""}`}</span>
+            </SessionButton>
+            {helpers.length > 0 && (
+              <details className="mt-1">
+                <summary className="cursor-pointer text-xs text-muted-foreground">{`Helpers (${String(helpers.length)})`}</summary>
+                <HelperList list={helpers} />
+              </details>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 

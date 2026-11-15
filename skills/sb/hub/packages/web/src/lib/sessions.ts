@@ -112,36 +112,37 @@ const clock = (sec: number): string => new Date(sec * 1000).toLocaleTimeString("
 
 const projectName = (p: string | undefined): string => (p ?? "").split("/").filter(Boolean).pop() ?? "";
 
+function cardOf(state: State, ix: TicketIndex, a: AgentRow, kind: Kind): SessionCard {
+  const quiet = Math.max(0, state.now - a.at);
+  const item = state.queue.items.find((i) => i.key === a.agent);
+  const ended = a.state === "done";
+  const stale = quiet >= IDLE;
+  // a helper a chat started has no queue item to say it ended: quiet for IDLE while "working" is all there is to go by
+  const lost = a.role === "worker" && item === undefined && !ended && a.state === "working" && stale;
+  return {
+    id: a.agent,
+    kind,
+    agent: a,
+    title: kind === "worker" ? (item ? itemTitle(item, ix.byKey.get(item.key)) : agentLabel(a)) : agentLabel(a),
+    project: projectName(a.project),
+    account: kind === "worker" ? (item?.runner ?? item?.agent ?? state.queue.agent ?? "") : "",
+    ticketKey: /#\d+$/.test(a.agent) ? a.agent : null,
+    quiet,
+    silent: !ended && quiet >= SILENT,
+    idle: a.state === "idle" || a.state === "done" || (stale && (kind === "chat" || item === undefined)),
+    silentSince: lost ? clock(a.at) : null,
+    now: a.note ?? a.asked ?? "",
+    links: item?.links,
+  };
+}
+
 /** Every live session, workers and the owner's chats: awake ones first (blocked, then by recency), idle ones (ended or quiet chats and helper workers) last. */
 export function sessionCards(state: State, ix: TicketIndex, ags: Agents = splitAgents(state)): SessionCard[] {
-  const ticketOf = (a: AgentRow): string | null => (/#\d+$/.test(a.agent) ? a.agent : null);
-  const make = (a: AgentRow, kind: Kind): SessionCard => {
-    const quiet = Math.max(0, state.now - a.at);
-    const item = state.queue.items.find((i) => i.key === a.agent);
-    const ended = a.state === "done";
-    const stale = quiet >= IDLE;
-    // a helper a chat started has no queue item to say it ended: quiet for IDLE while "working" is all there is to go by
-    const lost = a.role === "worker" && item === undefined && !ended && a.state === "working" && stale;
-    return {
-      id: a.agent,
-      kind,
-      agent: a,
-      title: kind === "worker" ? (item ? itemTitle(item, ix.byKey.get(item.key)) : agentLabel(a)) : agentLabel(a),
-      project: projectName(a.project),
-      account: kind === "worker" ? (item?.runner ?? item?.agent ?? state.queue.agent ?? "") : "",
-      ticketKey: ticketOf(a),
-      quiet,
-      silent: !ended && quiet >= SILENT,
-      idle: a.state === "idle" || a.state === "done" || (stale && (kind === "chat" || item === undefined)),
-      silentSince: lost ? clock(a.at) : null,
-      now: a.note ?? a.asked ?? "",
-      links: item?.links,
-    };
-  };
-  const all = [...ags.workers.map((a) => make(a, "worker")), ...ags.sessions.map((a) => make(a, "chat"))];
+  const all = [...ags.workers.map((a) => cardOf(state, ix, a, "worker")), ...ags.sessions.map((a) => cardOf(state, ix, a, "chat"))];
   return all.sort((x, y) => Number(x.idle) - Number(y.idle) || rank(x.agent) - rank(y.agent) || x.quiet - y.quiet);
 }
 
-export const KINDS = ["all", "worker", "chat"] as const;
-export type KindFilter = (typeof KINDS)[number];
-export const KIND_WORDS: Readonly<Record<KindFilter, string>> = { all: "All", worker: "Workers", chat: "Chats" };
+/** The helpers each chat started (workers under it that are not queue workers), by the chat's id. */
+export function helperCards(state: State, ix: TicketIndex, ags: Agents = splitAgents(state)): ReadonlyMap<string, readonly SessionCard[]> {
+  return new Map([...ags.kids].map(([chat, list]) => [chat, list.map((a) => cardOf(state, ix, a, "worker"))] as const));
+}

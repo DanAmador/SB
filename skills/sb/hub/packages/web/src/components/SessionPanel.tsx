@@ -1,22 +1,20 @@
 /**
- * Sessions, view 4: one card per live session, workers and your chats, each with a small lot-map style map fed by the
- * hub's trail every 2 s. A card opens a Sheet with the big map and the last 16 actions. Red dot: a failure in the last
- * five minutes. Amber ring: silent for five minutes or more. The drawing is lot-map's (src/vendor/lot-map, MIT).
+ * The panel a session or a worker opens from the Run tab: the big map and the last 16 actions. Red dot: a failure in
+ * the last five minutes; "silent": no report for five minutes or more. The drawing is lot-map's (src/vendor/lot-map, MIT).
  */
-import { IconMail, IconNotebook, IconRobot, IconUser } from "@tabler/icons-react";
+import { IconMail, IconNotebook } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
 import type * as React from "react";
 import type { Trail } from "@sb-hub/contract";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { ago, dur, SILENT } from "@/lib/board.ts";
 import { useTrail } from "@/lib/hub.ts";
 import { setLink, useLink } from "@/lib/link.ts";
-import { entryOf, FEED_ROWS, KIND_WORDS, KINDS, mapSvg, sessionCards, type KindFilter, type SessionCard } from "@/lib/sessions.ts";
+import { entryOf, FEED_ROWS, helperCards, mapSvg, sessionCards, type SessionCard } from "@/lib/sessions.ts";
 import { cn } from "@/lib/utils";
 import { STATIONS } from "@/vendor/lot-map/setup.ts";
-import { Checks, Empty } from "./bits.tsx";
+import { Checks } from "./bits.tsx";
 import { useBoard } from "./context.tsx";
 
 /** Whether the page is dark now: the html element's class, which the theme toggle and the system both set. */
@@ -40,54 +38,6 @@ const NAMES: Readonly<Record<string, string>> = Object.fromEntries(STATIONS.map(
 /** A failure that ended in the last five minutes. */
 const failedLately = (t: Trail | null | undefined, now: number): boolean => (t?.actions ?? []).some((a) => a.ok === false && now - (a.end ?? a.start) < SILENT);
 
-export function SessionsView(): React.JSX.Element {
-  const { state, ix, scope } = useBoard();
-  const link = useLink();
-  const kind: KindFilter = KINDS.find((k) => k === link.kind) ?? "all";
-  const all = sessionCards(state, ix).filter((c) => c.kind === "chat" || c.ticketKey === null || scopeHas(scope, c));
-  const cards = all.filter((c) => kind === "all" || c.kind === kind);
-  const open = all.find((c) => c.id === link.sess) ?? null;
-  return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4">
-      <h2 className="sr-only">Sessions</h2>
-      <div role="group" aria-label="Show" className="flex items-center gap-1.5">
-        {KINDS.map((k) => (
-          <Button
-            key={k}
-            size="xs"
-            variant={k === kind ? "default" : "outline"}
-            aria-pressed={k === kind}
-            onClick={() => {
-              setLink({ kind: k === "all" ? "" : k });
-            }}
-          >
-            {KIND_WORDS[k]}
-            <span className="tabular-nums opacity-70">{k === "all" ? all.length : all.filter((c) => c.kind === k).length}</span>
-          </Button>
-        ))}
-      </div>
-      {cards.length === 0 ? (
-        <Empty>No session is live right now.</Empty>
-      ) : (
-        <ul aria-label="Live sessions" className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-          {cards.map((c) => (
-            <Card key={c.id} c={c} />
-          ))}
-        </ul>
-      )}
-      <SessionSheet c={open} />
-    </div>
-  );
-}
-
-/** A worker's ticket belongs to a map: the sidebar's pick narrows to it. */
-function scopeHas(scope: { project: string; map: string }, c: SessionCard): boolean {
-  if (scope.project === "" && scope.map === "") return true;
-  const map = (c.ticketKey ?? "").replace(/#\d+$/, "");
-  if (scope.map !== "") return map === scope.map;
-  return map.startsWith(`${scope.project}/`) || c.project === scope.project;
-}
-
 const EMPTY: Trail = { agent: "", ctx: null, ended: null, actions: [] };
 
 function Map_({ trail, className }: { trail: Trail | null | undefined; className?: string }): React.JSX.Element {
@@ -96,7 +46,7 @@ function Map_({ trail, className }: { trail: Trail | null | undefined; className
   return <div role="img" aria-label="What the session is doing, as a map" className={cn("w-full [&>svg]:h-auto [&>svg]:w-full", className)} dangerouslySetInnerHTML={{ __html: mapSvg(trail ?? EMPTY, state.now, dark) }} />;
 }
 
-function Dots({ c, bad }: { c: SessionCard; bad: boolean }): React.JSX.Element {
+export function Dots({ c, bad }: { c: SessionCard; bad: boolean }): React.JSX.Element {
   return (
     <>
       {bad && <span role="img" aria-label="a failure in the last 5 minutes" title="a failure in the last 5 minutes" className="size-2.5 shrink-0 rounded-full bg-destructive" />}
@@ -109,67 +59,11 @@ function Dots({ c, bad }: { c: SessionCard; bad: boolean }): React.JSX.Element {
   );
 }
 
-function Card({ c }: { c: SessionCard }): React.JSX.Element {
-  const { state } = useBoard();
-  const trail = useTrail(c.id).data;
-  const bad = failedLately(trail, state.now);
-  const href = c.links?.ticket ?? null;
-  return (
-    <li
-      aria-label={c.title}
-      className={cn("group relative flex flex-col gap-2 rounded-xl border bg-card p-3 hover:bg-accent/30", c.silent && !c.idle && "ring-2 ring-warn", c.idle && "opacity-60 grayscale")}
-    >
-      <div className="flex items-start gap-2">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            {href === null ? (
-              <button
-                type="button"
-                onClick={() => {
-                  setLink({ sess: c.id });
-                }}
-                className="line-clamp-2 min-w-0 text-left text-sm font-medium after:absolute after:inset-0 after:content-[''] focus-visible:underline focus-visible:outline-none"
-              >
-                {c.title}
-              </button>
-            ) : (
-              <a href={href} title="Open the ticket in Obsidian" className="relative z-10 line-clamp-2 min-w-0 text-sm font-medium hover:underline">
-                {c.title}
-              </a>
-            )}
-            <Dots c={c} bad={bad} />
-          </div>
-          <p className="truncate text-xs text-muted-foreground">
-            {c.project}
-            {c.account !== "" && ` · ${c.account}`}
-            {` · ${ago(state.now, c.agent.at)}`}
-          </p>
-        </div>
-        <Badge className="shrink-0">
-          {c.kind === "worker" ? <IconRobot aria-hidden /> : <IconUser aria-hidden />}
-          {c.kind === "worker" ? "worker" : "chat"}
-        </Badge>
-      </div>
-      <button
-        type="button"
-        title="Open the big map"
-        onClick={() => {
-          setLink({ sess: c.id });
-        }}
-        className="relative z-10 rounded-lg focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-      >
-        <Map_ trail={trail} />
-      </button>
-      {c.now !== "" && (
-        <p className="truncate text-xs text-muted-foreground" title={c.now}>
-          {c.now}
-        </p>
-      )}
-    </li>
-  );
-}
-
-function SessionSheet({ c }: { c: SessionCard | null }): React.JSX.Element {
+/** The panel of the session `?sess=` names, over whichever view is on screen. */
+export function SessionSheet(): React.JSX.Element {
+  const { state, ix, agents } = useBoard();
+  const link = useLink();
+  const c = [...sessionCards(state, ix, agents), ...[...helperCards(state, ix, agents).values()].flat()].find((x) => x.id === link.sess) ?? null;
   return (
     <Sheet
       open={c !== null}

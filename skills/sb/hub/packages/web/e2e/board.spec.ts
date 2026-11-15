@@ -32,7 +32,7 @@ test("Run is the landing page: one row per worker run, the silent one amber, nev
   await expect(busy.getByRole("link", { name: "Run the board against the real hub" })).toHaveAttribute("href", "obsidian://open?path=%2Fvault%2Fdemo%2Fboard%2Fissues%2F5.md");
   await expect(busy.getByRole("link", { name: "Log" })).toHaveAttribute("href", /^obsidian:\/\/open\?path=%2Fvault%2Fruns%2F2026-11-13-board%2F5\.log$/);
   // your chat session is not a run
-  await expect(page.getByText("Charting the board")).toHaveCount(0);
+  await expect(page.getByRole("list", { name: "Running now" }).getByText("Charting the board")).toHaveCount(0);
   // the Waits for you count is the page's alarm: a question, a failed run, a done run
   await expect(page.getByRole("tab", { name: /Waits for you/ })).toContainText("4");
   // a row opens the ticket's panel, with Message and Stop
@@ -317,7 +317,7 @@ test("History lists every run by day, filters them, opens one beside the list an
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(String(e)));
   await page.goto("/next/");
-  await page.keyboard.press("4");
+  await page.keyboard.press("3");
   await expect(page.getByRole("tab", { name: "History" })).toHaveAttribute("aria-selected", "true");
   const list = page.getByRole("main");
   // 7 days is the default range: the 20-day-old run is not there
@@ -438,7 +438,7 @@ test("screenshots of Waits for you", async ({ page }) => {
   await page.screenshot({ path: to("waits-after.png") });
 });
 
-for (const [view, scheme] of [["run", "light"], ["run", "dark"], ["waits", "light"], ["waits", "dark"], ["history", "light"], ["history", "dark"], ["sessions", "light"], ["sessions", "dark"]] as const) {
+for (const [view, scheme] of [["run", "light"], ["run", "dark"], ["waits", "light"], ["waits", "dark"], ["history", "light"], ["history", "dark"]] as const) {
   test(`axe finds no serious or critical issue on ${view} (${scheme})`, async ({ page }) => {
     const { default: AxeBuilder } = await import("@axe-core/playwright");
     await page.emulateMedia({ colorScheme: scheme });
@@ -451,60 +451,90 @@ for (const [view, scheme] of [["run", "light"], ["run", "dark"], ["waits", "ligh
   });
 }
 
-test("Sessions: one card per live session with its map, flags, and a Sheet with the feed", async ({ page }) => {
-  const errors: string[] = [];
-  page.on("pageerror", (e) => errors.push(String(e)));
-  await page.goto("/next/");
-  await page.keyboard.press("3");
-  await expect(page.getByRole("tab", { name: /Sessions/ })).toHaveAttribute("aria-selected", "true");
-  const cards = page.getByRole("list", { name: "Live sessions" }).getByRole("listitem");
-  // three workers and the owner's chat
-  await expect(cards).toHaveCount(4);
-  await expect(cards.first().getByRole("img", { name: "What the session is doing, as a map" }).locator("svg")).toBeVisible();
-  // a failure shows the red dot; a session silent 5+ minutes wears the amber ring
-  const failing = cards.filter({ hasText: "Run the board against the real hub" });
-  await expect(failing.getByRole("img", { name: "a failure in the last 5 minutes" })).toBeVisible();
-  await expect(cards.filter({ hasText: "Read the accounts' usage" })).toHaveClass(/ring-warn/);
-  await expect(cards.filter({ hasText: "Write the shop's copy" }).getByRole("img", { name: /failure/ })).toHaveCount(0);
-  // project and account on the card
-  await expect(failing).toContainText("demo · main");
-  // the filter
-  await page.getByRole("button", { name: /^Chats/ }).click();
-  await expect(cards).toHaveCount(1);
-  await expect(cards.first()).toContainText("Charting the board");
-  await page.getByRole("button", { name: /^All/ }).click();
-  // a card opens the Sheet: the big map and the last actions
-  await failing.getByRole("button", { name: "What the session is doing, as a map" }).click();
-  const sheet = page.getByRole("dialog");
-  await expect(sheet.getByRole("img", { name: "What the session is doing, as a map" }).locator("svg")).toBeVisible();
-  const feed = sheet.getByRole("list", { name: "Last actions" });
-  await expect(feed.getByRole("listitem")).toHaveCount(5);
-  await expect(feed.getByRole("listitem").first()).toContainText("pnpm test");
-  await expect(feed.getByRole("img", { name: "failed" })).toHaveCount(1);
-  await expect(sheet).toContainText("context 72%");
-  await page.keyboard.press("Escape");
-  await expect(sheet).toHaveCount(0);
-  expect(errors).toEqual([]);
-});
+test.describe("Run tab: who is on each ticket", () => {
+  test("the head names the session in charge, a row with a worker opens its panel, Helpers and Other chats", async ({ page }) => {
+    const errors: string[] = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await page.goto("/next/");
+    await expect(page.getByRole("tab", { name: /Sessions/ })).toHaveCount(0);
+    const demo = page.locator("[data-testid=map-block][data-map='demo/board']");
+    await expect(demo.getByTestId("in-charge")).toContainText("Charting the board");
+    await expect(page.locator("[data-testid=map-block][data-map='other/site']").getByTestId("in-charge")).toContainText("run by the queue");
+    const row = demo.locator("li[data-key='demo/board#5']");
+    await expect(row).toHaveAttribute("data-worker", "live");
+    await row.getByRole("button", { name: /^Open the worker on/ }).click();
+    const sheet = page.getByRole("dialog");
+    await expect(sheet.getByRole("img", { name: "What the session is doing, as a map" }).locator("svg")).toBeVisible();
+    const feed = sheet.getByRole("list", { name: "Last actions" });
+    await expect(feed.getByRole("listitem")).toHaveCount(5);
+    await expect(feed.getByRole("img", { name: "failed" })).toHaveCount(1);
+    await expect(sheet).toContainText("context 72%");
+    await page.keyboard.press("Escape");
+    await expect(sheet).toHaveCount(0);
+    // helpers, folded
+    const helpers = demo.getByTestId("helpers");
+    await expect(helpers).not.toHaveAttribute("open", "");
+    await helpers.locator("summary").click();
+    await helpers.getByRole("button", { name: /Scout the tests/ }).click();
+    await expect(page.getByRole("dialog")).toContainText("Scout the tests");
+    await page.keyboard.press("Escape");
+    const other = page.getByTestId("other-chats");
+    await expect(other).toContainText("1 live");
+    await expect(other).toContainText("Reading the old notes");
+    await expect(other).toContainText("Helpers (1)");
+    // the tab counts running workers
+    await expect(page.getByRole("tab", { name: /^Run/ })).toContainText("3");
+    expect(errors).toEqual([]);
+  });
 
-test("screenshots of Sessions", async ({ page }) => {
-  const dir = process.env.SB_SHOTS;
-  test.skip(dir === undefined, "SB_SHOTS names the folder to write to");
-  const to = (n: string): string => `${dir ?? ""}/${n}`;
-  const shoot = async (scheme: "light" | "dark", name: string, sheet: boolean): Promise<void> => {
-    await page.emulateMedia({ colorScheme: scheme });
-    await page.goto(sheet ? "/next/?view=sessions&sess=demo%2Fboard%235" : "/next/?view=sessions");
-    if (sheet) await expect(page.getByRole("dialog").getByRole("list", { name: "Last actions" })).toBeVisible();
-    else await expect(page.getByRole("list", { name: "Live sessions" }).getByRole("listitem")).toHaveCount(4);
-    await page.waitForTimeout(600);
-    await page.screenshot({ path: to(name) });
-  };
-  await shoot("light", "sessions-1440.png", false);
-  await shoot("dark", "sessions-dark-1440.png", false);
-  await shoot("light", "sessions-sheet-1440.png", true);
-  await page.setViewportSize({ width: 390, height: 800 });
-  await shoot("light", "sessions-phone.png", false);
-  await shoot("dark", "sessions-sheet-phone.png", true);
+  test("a silent worker's row carries the silent mark", async ({ page }) => {
+    await page.goto("/next/");
+    const row = page.locator("li[data-key='demo/board#8']");
+    await expect(row).toHaveAttribute("data-worker", "silent");
+    await expect(row.getByTestId("silent")).toBeVisible();
+    await expect(page.locator("li[data-key='demo/board#5']").getByTestId("silent")).toHaveCount(0);
+  });
+
+  test("?view=sessions and a sess link land on the Run tab with the panel open", async ({ page }) => {
+    await page.goto("/next/?view=sessions");
+    await expect(page.getByRole("tab", { selected: true })).toContainText("Run");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await page.goto("/next/?view=sessions&sess=demo%2Fboard%235");
+    // the panel is modal: the tabs behind it are hidden from the accessibility tree until it closes
+    await expect(page.getByRole("dialog").getByRole("list", { name: "Last actions" })).toBeVisible();
+    await expect(page.getByRole("tab", { selected: true, includeHidden: true })).toContainText("Run");
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(page.getByRole("tab", { selected: true })).toContainText("Run");
+  });
+
+  test("at 375 px nothing scrolls sideways", async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 800 });
+    await page.goto("/next/");
+    await expect(page.getByTestId("other-chats")).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+  });
+
+  test("screenshots of who is on each ticket", async ({ page }) => {
+    const dir = process.env.SB_SHOTS;
+    test.skip(dir === undefined, "SB_SHOTS names the folder to write to");
+    const to = (n: string): string => `${dir ?? ""}/${n}`;
+    const shoot = async (scheme: "light" | "dark", name: string, sheet: boolean): Promise<void> => {
+      await page.emulateMedia({ colorScheme: scheme });
+      await page.goto(sheet ? "/next/?sess=demo%2Fboard%235" : "/next/");
+      if (sheet) await expect(page.getByRole("dialog").getByRole("list", { name: "Last actions" })).toBeVisible();
+      else await page.locator("[data-testid=helpers] summary").click();
+      await expect(page.getByTestId("other-chats")).toBeVisible();
+      await page.waitForTimeout(600);
+      await page.screenshot({ path: to(name) });
+    };
+    await shoot("light", "run-who-1440.png", false);
+    await shoot("dark", "run-who-dark-1440.png", false);
+    await shoot("light", "run-panel-1440.png", true);
+    await page.setViewportSize({ width: 375, height: 800 });
+    await shoot("light", "run-who-375.png", false);
+    await shoot("dark", "run-panel-375.png", true);
+  });
 });
 
 test("screenshots of a check that could not run", async ({ page }) => {

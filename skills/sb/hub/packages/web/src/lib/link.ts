@@ -4,7 +4,7 @@ import { SHOWS, type Show } from "./board.ts";
 import { Store } from "./store.ts";
 
 /** Run is the landing view: the night map by map. The old ?view=runs and ?view=queue land on it. */
-export const VIEWS = ["run", "waits", "sessions", "history"] as const;
+export const VIEWS = ["run", "waits", "history"] as const;
 export type View = (typeof VIEWS)[number];
 export const DEFAULT_VIEW: View = "run";
 
@@ -27,9 +27,8 @@ export interface Link {
   readonly pics: string;
   readonly acct: string;
   readonly model: string;
-  /** Sessions: the open session's id, and the filter (workers or chats; empty is all). */
+  /** The open session's id: the Run tab opens its panel. */
   readonly sess: string;
-  readonly kind: string;
   /** A map's landing: "table" for the ticket table, else the graph. */
   readonly mv: string;
   /** The map graph's picked state chip: boxes of another state dim. Empty picks none. */
@@ -44,7 +43,7 @@ export interface Link {
   readonly page: string;
 }
 
-const KEYS = ["view", "q", "project", "map", "s", "t", "run", "pic", "range", "out", "pics", "acct", "model", "sess", "kind", "mv", "ms", "act", "ts", "tt", "tp", "sort", "page"] as const;
+const KEYS = ["view", "q", "project", "map", "s", "t", "run", "pic", "range", "out", "pics", "acct", "model", "sess", "mv", "ms", "act", "ts", "tt", "tp", "sort", "page"] as const;
 
 export function readLink(search: string): Link {
   const s = new URLSearchParams(search);
@@ -65,7 +64,6 @@ export function readLink(search: string): Link {
     acct: s.get("acct") ?? "",
     model: s.get("model") ?? "",
     sess: s.get("sess") ?? "",
-    kind: s.get("kind") ?? "",
     mv: s.get("mv") === "table" ? "table" : "",
     ms: s.get("ms") ?? "",
     act: s.get("act") === "1" ? "1" : "",

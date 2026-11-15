@@ -1,6 +1,7 @@
 /** The Run tab's grouping: the night map by map. Pure: no React, no DOM. */
 import type { QueueItem, State } from "@sb-hub/contract";
-import { endedToday, itemInScope, itemMap, mapTitle, projOf, type Scope, type TicketIndex, itemProject, EVERYTHING } from "./board.ts";
+import type { SessionCard } from "./sessions.ts";
+import { agentOf, dur, endedToday, itemInScope, itemMap, mapTitle, projOf, type Scope, type TicketIndex, itemProject, EVERYTHING } from "./board.ts";
 
 /** What a row's mark says. */
 export type Mark = "done" | "running" | "checking" | "next" | "short" | "stopped" | "recheck";
@@ -120,4 +121,73 @@ export function nightBlocks(state: State, ix: TicketIndex, scope: Scope = EVERYT
 export function nightLine(n: Night): string {
   const l = n.line;
   return [`${String(l.running)} running`, `${String(l.next)} next`, `${String(l.done)} done`, `${String(l.short)} fell short`].join(" · ");
+}
+
+// ---- who is on each ticket ----
+
+/** A worker or a session is live, silent for 5 minutes or more, or ended. */
+export type Health = "live" | "silent" | "ended";
+export const healthOf = (c: SessionCard): Health => (c.agent.state === "done" ? "ended" : c.silent ? "silent" : "live");
+
+export interface MapPair {
+  /** The session in charge of the map, or null: the queue runs it. */
+  readonly charge: SessionCard | null;
+  /** 'name · state · quiet 4m', or 'run by the queue'. */
+  readonly head: string;
+  /** The worker on each ticket row, by queue key. */
+  readonly workers: ReadonlyMap<string, SessionCard>;
+  /** What the session in charge started that belongs to no ticket of the block. */
+  readonly helpers: readonly SessionCard[];
+}
+
+export interface ChatPair {
+  readonly chat: SessionCard;
+  readonly helpers: readonly SessionCard[];
+}
+
+export interface Pairing {
+  /** By block (the map, "" for Jobs). */
+  readonly maps: ReadonlyMap<string, MapPair>;
+  /** Chats in charge of no map shown above, each with its helpers. */
+  readonly chats: readonly ChatPair[];
+  /** How many of those chats are live (not idle). */
+  readonly liveChats: number;
+}
+
+export const QUEUE_HEAD = "run by the queue";
+
+/**
+ * Pairs the night's rows with who is on them. `cards` are the queue workers and chats (sessionCards), `helpers` what
+ * each chat started (helperCards). The session in charge of a map is the hub's `charge`, else a chat that reports the map.
+ */
+export function pairNight(state: State, night: Night, cards: readonly SessionCard[], helpers: ReadonlyMap<string, readonly SessionCard[]>): Pairing {
+  const byId = new Map(cards.map((c) => [c.id, c] as const));
+  const chats = cards.filter((c) => c.kind === "chat");
+  const chargeOf = (map: string): SessionCard | null => {
+    if (map === "") return null;
+    const id = state.charge?.[map];
+    const a = id === undefined ? null : agentOf(state, id);
+    const named = a === null ? undefined : byId.get(a.agent);
+    return named?.kind === "chat" ? named : (chats.find((c) => c.agent.map === map && c.agent.state !== "done") ?? null);
+  };
+  const used = new Set<string>();
+  const maps = new Map<string, MapPair>();
+  for (const b of night.blocks) {
+    const charge = chargeOf(b.map);
+    const keys = new Set(b.rows.map((r) => r.item.key));
+    const workers = new Map<string, SessionCard>();
+    for (const r of b.rows) {
+      const w = byId.get(agentOf(state, r.item.key)?.agent ?? r.item.key);
+      if (w?.kind === "worker") workers.set(r.item.key, w);
+    }
+    if (charge !== null) used.add(charge.id);
+    maps.set(b.map, {
+      charge,
+      head: charge === null ? QUEUE_HEAD : `${charge.title} · ${charge.agent.state ?? "working"} · quiet ${dur(charge.quiet)}`,
+      workers,
+      helpers: charge === null ? [] : (helpers.get(charge.id) ?? []).filter((h) => !keys.has(h.id) && !(h.agent.ticket !== undefined && keys.has(h.agent.ticket))),
+    });
+  }
+  const others = chats.filter((c) => !used.has(c.id) && c.agent.state !== "done").map((chat) => ({ chat, helpers: helpers.get(chat.id) ?? [] }));
+  return { maps, chats: others, liveChats: others.filter((o) => !o.chat.idle).length };
 }

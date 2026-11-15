@@ -124,12 +124,15 @@ const detailOf = (key: string): unknown => {
 function state(): State {
   return State.parse({
     agents: {
-      "s-1": { agent: "s-1", title: "Charting the board", project: "/demo", state: "your turn", asked: "chart it", at: now() - 30 },
+      "s-1": { agent: "s-1", title: "Charting the board", project: "/demo", state: "your turn", asked: "chart it", at: now() - 30, map: "demo/board" },
+      "s-2": { agent: "s-2", title: "Reading the old notes", project: "/other", state: "your turn", at: now() - 90 },
+      "h-1": { agent: "h-1", name: "scout", title: "Scout the tests", role: "worker", parent: "s-1", project: "/demo", state: "working", note: "reading specs", at: now() - 40 },
+      "h-2": { agent: "h-2", name: "notes", title: "Skim the notes", role: "worker", parent: "s-2", project: "/other", state: "working", at: now() - 60 },
       "demo/board#5": { agent: "demo/board#5", role: "worker", parent: "queue", project: "/demo", state: "working", note: "running the tests", at: now() - 20 },
       "other/site#3": { agent: "other/site#3", role: "worker", parent: "queue", project: "/other", state: "working", note: "writing the copy", at: now() - 15 },
       "demo/board#8": { agent: "demo/board#8", role: "worker", parent: "queue", project: "/demo", state: "working", note: "reading the usage file", at: start - 400 },
     },
-    locks: {}, aliases: {}, messages, providers: {},
+    locks: {}, aliases: {}, charge: { "demo/board": "s-1" }, messages, providers: {},
     questions: { q1: { agent: "s-1", q: "Ship the new board tonight?", options: ["Yes", "Not yet"], default: "Yes", asked: now() - 10, deadline: now() + 600, answer: null, by: null } },
     installed: { main: { kind: "claude", dir: null, model: null, limited_until: null } },
     seen: [...seen],
@@ -156,6 +159,7 @@ const TRAILS: Record<string, Record<string, unknown>[]> = {
   "s-1": [act("prompt", "chart it", 40), act("Read", "docs/plan.md", 30), act("Bash", "git status", 20), act("WebSearch", "lot-map", 10), act("Edit", "src/App.tsx", 4, null)],
   "demo/board#5": [act("Read", "src/Board.tsx", 60), act("Edit", "src/Header.tsx", 45), act("Bash", "pnpm test", 30, false), act("Agent", "check the tests", 20, true, true), act("Bash", "pnpm test", 3, null)],
   "other/site#3": [act("Read", "copy/home.md", 50), act("Write", "copy/shop.md", 20), act("Skill", "wikibrain", 6)],
+  "h-1": [act("Read", "src/board.test.ts", 30)],
   "demo/board#8": [act("Read", "usage.json", 500), act("Grep", "usage", 450)],
 };
 
