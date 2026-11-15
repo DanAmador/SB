@@ -2368,9 +2368,11 @@ class TicketRun:
         if review:
             tail += " The Opus review judged it finished: {}.".format(review)
         nnn = "{:03d}".format(int(t["num"]))
+        # the second pass's verdict as properties a board shows; none given: sbmap marks a task `skipped`
+        judged_by = ["--review", "met", "--review-file", review] if review else []
         if not sha:  # research that needed no commit: its findings are the report
             rc, out, err = self.sbmap("resolve", t["map"], nnn, "--gist", t["title"], "--answer",
-                                      "Checked by the sb hub in code: {}. {}".format(reason, tail))
+                                      "Checked by the sb hub in code: {}. {}".format(reason, tail), *judged_by)
             if rc != 0:
                 return {**self.fail(item, run, "the report is written, but sbmap resolve failed: " + (err or out), None,
                                     checks), **judged}
@@ -2381,10 +2383,10 @@ class TicketRun:
                   "({n} of {n}): {}. {}{} {}").format(
             sha, t["map"], int(t["num"]), listed, reason[:1].upper(), reason[1:] + ".", tail, n=len(t["checks"]))
         rc, out, err = self.sbmap("resolve", t["map"], nnn, "--gist", t["title"], "--answer", answer,
-                                  "--commit", sha, "--repo-root", t["repo"])
+                                  "--commit", sha, "--repo-root", t["repo"], *judged_by)
         if rc != 0 and "remote" in err:  # sbmap stamps a commit only in a repo with an origin: name it in the gist
             rc, out, err = self.sbmap("resolve", t["map"], nnn, "--gist", "{} ({})".format(t["title"], sha[:9]),
-                                      "--answer", answer)
+                                      "--answer", answer, *judged_by)
         if rc != 0:
             return {**self.fail(item, run, "checks passed, but sbmap resolve failed: " + (err or out), sha, checks),
                     **judged}
@@ -2505,6 +2507,7 @@ class TicketRun:
                      verdict, item.get("model"), run.get("agent"), "" if first else ", second try", landed, then,
                      "\n  ".join(findings) or "(the review lists no item)", path)
         self.sbmap("comment", t["map"], "{:03d}".format(int(t["num"])), "--text", text_c)
+        self.sbmap("set", t["map"], "{:03d}".format(int(t["num"])), "review=" + verdict, "--no-sync")
         self.release(item["key"])
         if first:
             redo = {"commit": sha, "verdict": verdict, "findings": not_met or findings,

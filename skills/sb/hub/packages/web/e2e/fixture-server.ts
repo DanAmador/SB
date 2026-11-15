@@ -26,7 +26,7 @@ const now = (): number => Date.now() / 1000;
 type Raw<T> = Omit<T, "links">;
 const ticket = (num: number, title: string, more: Partial<Raw<TicketRow>> = {}): Raw<TicketRow> => ({
   map: "demo/board", num, title, why: "So the board can be tested.", type: "task", status: "open", priority: null,
-  blocked_by: [], blocked_by_open: [], paths: ["src/"], tier: "sonnet", has_done_when: true, done_when: "It shows.",
+  blocked_by: [], blocked_by_open: [], paths: ["src/"], tier: "sonnet", check: "tests", has_done_when: true, done_when: "It shows.",
   question: "", out: "", checks: ["pnpm test"], repo: "/demo", file: `/vault/demo/board/issues/${String(num)}.md`,
   map_title: "The demo board", map_order: 1, claimed_by: null, queued: false, state: "ready", reason: "ready", ...more,
 });

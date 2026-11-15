@@ -56,6 +56,7 @@ const ticket = (map: string, num: number, more: Partial<TicketRow> = {}): Ticket
   blocked_by_open: [],
   paths: [],
   tier: "sonnet",
+  check: "tests",
   has_done_when: true,
   done_when: "",
   question: "",

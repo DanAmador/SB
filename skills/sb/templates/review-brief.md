@@ -22,6 +22,14 @@ One line per item of the ticket's Done when, in its order, each starting `- `: t
 show, not what the report says: a claim the report makes and the change does not bear out is not met. A report
 that says "No change needed" is met only when its evidence shows the Done when already holds.
 
+Tests that pass on data the worker wrote (a fixture, a fake) show the code agrees with that data, not with the
+rest of the system. For each ticket, check at least one item against what the real code produces: call the part
+that makes the data, read the state the hub really writes, or compare the fixture with the code that serves it.
+Say which case you checked in that item's line. A case the real data has and no test covers is not met.
+
+Open each review file with two or three plain sentences for the owner, not a list: what works, what does not,
+and what they should look at. No file, function or class names there; they go in the item lines.
+
 The last line of each file is that ticket's verdict, exactly one of:
 
 Verdict: finished

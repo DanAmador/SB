@@ -27,8 +27,10 @@ class VaultCase(unittest.TestCase):
         self._tmp.cleanup()
 
     def env(self, path="/usr/bin:/bin", **extra):
-        # PATH without /usr/local/bin keeps the real Obsidian CLI out of the tests
-        return {**os.environ, "SB_VAULT": str(self.vault), "PATH": path, **extra}
+        # PATH without /usr/local/bin keeps the real Obsidian CLI out of the tests; SB_HUB_HOME keeps the real
+        # hub's state (a live night) out of them
+        hub = getattr(self, "hub_home", None) or str(Path(self._tmp.name) / "no-hub")
+        return {**os.environ, "SB_VAULT": str(self.vault), "SB_HUB_HOME": hub, "PATH": path, **extra}
 
     def sb(self, *args, stdin=None, ok=True, path="/usr/bin:/bin"):
         """Run sbmap; ok=True asserts exit 0, ok=False asserts non-zero, ok=None asserts nothing."""

@@ -82,6 +82,11 @@ class ClassifyTest(unittest.TestCase):
         self.assertEqual(classify(T(1, checks=[]), set())[1], "no check commands")
         self.assertEqual(classify(T(1, blocked_by_open=[3, 2]), set(), [T(3), T(2)])[1], "after T3")
         self.assertEqual(classify(T(1, blocked_by_open=[3]), set())[1], "after ticket 3")
+
+    def test_a_ticket_the_owner_checks_never_goes_to_a_worker(self):
+        self.assertEqual(classify(T(1, check="owner"), set()),
+                         ("waits for you", "you check this one: a worker cannot"))
+        self.assertEqual(classify(T(1, check="tests"), set())[0], "ready")
         self.assertEqual(classify(T(1, blocked_by_open=["map x"]), set())[1], "after map x")
 
     def test_missing_priority_is_c_and_num_may_be_text(self):

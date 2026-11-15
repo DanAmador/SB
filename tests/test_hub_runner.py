@@ -456,6 +456,8 @@ class ReviewTest(RunnerCase):
         done = next(self.vault.glob("wayfinder/repo/one/issues/done/001*.md")).read_text(encoding="utf-8")
         self.assertIn(sha, done)
         self.assertIn("The Opus review judged it finished: " + item["review"], done)
+        self.assertIn("review: met\n", done)  # the verdict and the review are properties a board shows
+        self.assertIn("review_note: ", done)
         # the review is briefed with the ticket, the commit's diff and the worker's report, and told to change nothing
         brief = self.reviewed[0]["brief"]
         self.assertIn("#1: A", brief)  # sbmap show
@@ -478,6 +480,7 @@ class ReviewTest(RunnerCase):
             text = self.ticket_text(num)
             self.assertIn("Opus review judged this ticket {} against its Done when".format(verdict), text)
             self.assertIn("- It works.: not met: the fake reviewer found no test for it", text)
+            self.assertIn("review: {}\n".format(verdict), text)
             first = item["redo"]["commit"]
             self.assertIn("Both tries' commits, {} and {}, are left where they landed.".format(first[:9], sha[:9]), text)
             log = git(self.repos["repo/one"], "log", "--format=%H")

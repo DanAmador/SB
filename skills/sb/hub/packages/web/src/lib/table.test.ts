@@ -82,7 +82,7 @@ describe("pageOf", () => {
 
 const tk = (num: number, more: Partial<TicketRow> = {}): TicketRow => ({
   map: "a/one", num, title: `T${String(num)}`, why: "", type: "task", status: "open", priority: null, blocked_by: [], blocked_by_open: [], paths: [], tier: "sonnet",
-  has_done_when: true, done_when: "x", question: "", out: "", checks: ["true"], repo: "/r", file: "", map_title: "One", map_order: 1, claimed_by: null, queued: false,
+  check: "tests", has_done_when: true, done_when: "x", question: "", out: "", checks: ["true"], repo: "/r", file: "", map_title: "One", map_order: 1, claimed_by: null, queued: false,
   state: "ready", reason: "", links: NO_LINKS, ...more,
 });
 describe("the state words", () => {

@@ -71,6 +71,22 @@ Intent that lives only in a dictation never reaches the ticket. So:
   the owner has not used gets five words of gloss the first time.
 - A question's options say what the owner will *see* or *feel*: a button they cannot read later is
   a decision they did not make.
+- 🔒 **Everything a worker, reviewer or operator writes opens for a human.** A report, review,
+  comment or `R:` ruling starts with plain sentences the owner can read on a phone: what works,
+  what does not, what to look at. File names, functions and commits come after.
+
+## A ticket's properties tell its story
+
+Read a ticket's properties, not its body, to know what happened to it; a board shows them as columns.
+
+| property | says | written by |
+|---|---|---|
+| `tier` | the model it runs on: `sonnet` or `opus` | `sbmap new --tier` (sonnet by default) |
+| `check` | who can tell it is done: `tests` or `owner` (never sent to a worker) | `sbmap new --check` |
+| `filed_during` | the night it was filed while that night ran | `sbmap new`, from the hub |
+| `review` | the second pass: `met`, `partly`, `not met`, or `skipped` (closed with no review) | the hub; `sbmap resolve` |
+| `review_note` | link to that review | the hub |
+| `run_minutes`, `tries`, `cost_usd`, … | what its runs cost | the hub (`sbmap spend`) |
 
 ## Every verb starts here
 

@@ -431,6 +431,8 @@ export const TicketRow = z.strictObject({
   blocked_by_open: z.array(z.union([z.number().int(), z.string()])),
   paths: z.array(z.string()),
   tier: z.string(),
+  /** Who can tell it is done: "tests" (a worker's checks) or "owner" (a ticket the owner checks; never run). */
+  check: z.enum(["tests", "owner"]),
   has_done_when: z.boolean(),
   done_when: z.string(),
   question: z.string(),

@@ -12,7 +12,9 @@ ticket an agent can later run from the ticket alone.
    `sbmap comment <map> <NNN> --text "<note>"`; a resolved ticket it contradicts is reopened with
    `sbmap set <map> <NNN> status=open`.
 4. **Create the rest:**
-   `sbmap new <map> --title "<sentence stating the behaviour>" --why "<the problem in one plain line>" --said "<the owner's words, verbatim>" --type task --question "<question>" --done-when "<done-when>" [--blocked-by 624,625]`
+   `sbmap new <map> --title "<sentence stating the behaviour>" --why "<the problem in one plain line>" --said "<the owner's words, verbatim>" --type task --question "<question>" --done-when "<done-when>" [--blocked-by 624,625] [--check owner] [--tier opus]`
+   Done when, title and `--check` follow [chart](chart.md) step 4: a numbered list, a real-data line
+   where it applies, and anything only the owner can check as its own `--check owner` ticket.
    (`--type architecture` for a structural question; the flags as in [SKILL.md](../SKILL.md#every-ticket-and-map-says-why-in-the-owners-words)).
 5. `sbmap check <map>` clean, `sbmap verify <map>`.
 6. Chat: one line of counts ("🆕 3 · 💬 1 · ♻️ 1 · 1 learned") and the map's link; the tickets say

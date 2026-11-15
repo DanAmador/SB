@@ -6,7 +6,7 @@ const NO_LINKS = { ticket: null, map: null, board: null, report: null, log: null
 const ticket = (map: string, num: number, more: Partial<TicketRow> = {}): TicketRow =>
   ({
     map, num, title: `${map} ${String(num)}`, why: "", type: "task", status: "open", priority: null, blocked_by: [], blocked_by_open: [], paths: [], tier: "sonnet",
-    has_done_when: true, done_when: "", question: "", out: "", checks: ["true"], repo: "/r", file: "/f.md", map_title: map, map_order: 1, claimed_by: null,
+    check: "tests", has_done_when: true, done_when: "", question: "", out: "", checks: ["true"], repo: "/r", file: "/f.md", map_title: map, map_order: 1, claimed_by: null,
     queued: false, state: "ready", reason: "ready", links: NO_LINKS, ...more,
   });
 const item = (key: string, state: QueueItem["state"], more: Partial<QueueItem> = {}): QueueItem =>

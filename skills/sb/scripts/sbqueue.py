@@ -33,6 +33,8 @@ def classify(t, queued, tickets=()):
         return "claimed", f"claimed by {t.get('claimed_by') or 'another session'}"
     if t["type"] in ("grilling", "architecture"):
         return "waits for you", f"a {t['type']} ticket needs you"
+    if t.get("check") == "owner":
+        return "waits for you", "you check this one: a worker cannot"
     if not t["has_done_when"]:
         return "not ready", "no done-when"
     if not t["checks"]:

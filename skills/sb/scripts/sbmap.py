@@ -145,7 +145,8 @@ SHAPES = {  # mermaid node shape per ticket type
     "architecture": ('{{"', '"}}'),
 }
 TICKET_KEYS = ["wayfinder", "operonId", "number", "title", "why", "project", "aliases", "status", "type",
-               "priority", "created", "completed", "map", "blocked_by", "claimed_by",
+               "priority", "tier", "check", "created", "filed_during", "completed", "review", "review_note",
+               "map", "blocked_by", "claimed_by",
                "paths", "repo", "commit", "ref", "pr", "github", "tags"]
 MAP_KEYS = ["wayfinder", "project", "status", "aliases", "repo", "github", "tags"]
 # Operon's priorities are letters, S highest, C its default; sbmap takes either the letter or a word
@@ -153,6 +154,28 @@ OPERON_PRIORITIES = ("S", "A", "B", "C", "D", "E", "F")
 PRIORITY_WORDS = {"urgent": "S", "critical": "S", "high": "A", "normal": "C", "medium": "C", "low": "E",
                   "someday": "F"}
 TIERS = ("sonnet", "opus")  # the model tier a queue runs a ticket on; sonnet when absent
+CHECKERS = ("tests", "owner")  # who can tell it is done: a command a worker runs, or the owner (never a worker)
+REVIEWS = ("met", "partly", "not met", "skipped")  # the second pass's verdict; skipped: closed without one
+REVIEWED_TYPES = ("task", "prototype")  # the types a second pass judges; the others close without one
+
+
+def live_night():
+    """The name of the night the hub is running now, from its state file; None when no night is live or there is
+    no hub here. Read only: a ticket filed during a night says so (`filed_during`)."""
+    home = Path(os.environ.get("SB_HUB_HOME") or Path.home() / ".sb-hub")
+    try:
+        d = json.loads((home / "state.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    nid = (d.get("queue") or {}).get("night")
+    night = next((n for n in d.get("nights") or [] if n.get("id") == nid), None) if nid else None
+    return night.get("name") or nid if night and night.get("state") != "ended" else None
+
+
+def one_of(name, value, allowed):
+    if value not in allowed:
+        sys.exit(f"sbmap: {name} must be one of {', '.join(allowed)}")
+    return value
 FINISHED = '["Project.Finished", "Project.Dropped"]'  # the statuses that clear a blocker, as Operon writes them
 LEGACY = {"Status": "status", "Type": "type", "Blocked by": "blocked_by", "GitHub": "github",
           "Claimed by": "claimed_by"}
@@ -1223,8 +1246,10 @@ def cmd_new(args):
     n = next_number(m)
     path = m.folder / "issues" / f"{n:03d} {file_title(title)}.md"
     path.parent.mkdir(exist_ok=True)
+    extra = {"title": title, "why": " ".join(why.split()), "tier": one_of("tier", opt(args, "--tier", "sonnet"), TIERS),
+             "check": one_of("check", opt(args, "--check", "tests"), CHECKERS), "filed_during": live_night()}
     props = ticket_props(m, n, status="open", type_=type_, priority=priority, blocked=blocked_links(m, refs),
-                         extra={"title": title, "why": " ".join(why.split())})
+                         extra=extra)
     if opt(args, "--paths"):
         props["paths"] = split_list(opt(args, "--paths"))
 
@@ -1341,8 +1366,12 @@ def cmd_set(args):
             v = operon_priority(v)
         if k == "paths":
             v = split_list(v)
-        if k == "tier" and v not in TIERS:
-            sys.exit(f"sbmap: tier must be one of {', '.join(TIERS)}")
+        if k == "tier":
+            one_of("tier", v, TIERS)
+        if k == "check":
+            one_of("check", v, CHECKERS)
+        if k == "review":
+            one_of("review", v, REVIEWS)
         if k == "checks":
             v = split_checks(v)
         props[k] = v
@@ -1510,6 +1539,11 @@ def cmd_resolve(args):
     t = m.ticket(args[1])
     gist = opt(args, "--gist") or sys.exit("sbmap: --gist is required")
     commit = opt(args, "--commit")
+    # the second pass's verdict: given by the hub's review, else `skipped` for a type a review should have judged
+    review = opt(args, "--review") or ("skipped" if t.type in REVIEWED_TYPES else None)
+    if review:
+        one_of("review", review, REVIEWS)
+    review_file = opt(args, "--review-file")
     # first, so an unknown sha is an error before anything is written
     stamp = commit_stamp(m, commit, opt(args, "--repo-root"),
                          split_list(opt(args, "--paths")) if "--paths" in args else None) if commit else {}
@@ -1541,6 +1575,11 @@ def cmd_resolve(args):
     t = m.ticket(args[1])  # now in issues/done/
     line = (f"- [{t.title}]({md_target(t.path.relative_to(m.folder).as_posix())}): {gist}"
             + (f", `{commit}`" if commit else ""))
+    if review:
+        stamp["review"] = review
+    if review_file:
+        stamp["review_note"] = wikilink(review_file, "review") if not Path(rel(review_file)).is_absolute() \
+            else review_file
     if stamp:
         t.save({**t.props, **stamp})
     body = m.body
@@ -1668,6 +1707,14 @@ properties:
     displayName: Blocked by
   claimed_by:
     displayName: Claimed by
+  tier:
+    displayName: Model
+  check:
+    displayName: Checked by
+  review:
+    displayName: Review
+  filed_during:
+    displayName: Filed during night
 views:
   - type: table
     name: Frontier
@@ -1694,6 +1741,10 @@ views:
       - blocked_by
       - formula.open_blockers
       - claimed_by
+      - tier
+      - check
+      - review
+      - filed_during
     sort:
       - property: file.name
         direction: ASC
@@ -1781,6 +1832,14 @@ properties:
     displayName: Open blockers
   claimed_by:
     displayName: Claimed by
+  tier:
+    displayName: Model
+  check:
+    displayName: Checked by
+  review:
+    displayName: Review
+  filed_during:
+    displayName: Filed during night
 views:
   - type: table
     name: Frontier
@@ -2464,6 +2523,7 @@ def cmd_tickets(args):
                 "blocked_by": [b for b, _ in blockers],
                 "blocked_by_open": [b for b, cleared in blockers if not cleared],
                 "paths": t.paths, "tier": str(t.props.get("tier") or "sonnet"),
+                "check": str(t.props.get("check") or "tests"),
                 "has_done_when": bool(sec.get("Done when")), "done_when": sec.get("Done when", ""),
                 "question": sec.get("Question", ""), "out": sec.get("Not this ticket", ""),
                 "checks": checks, "repo": str(m.props.get("repo", "")), "file": str(t.path),
