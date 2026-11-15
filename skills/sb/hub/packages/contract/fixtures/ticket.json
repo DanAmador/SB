@@ -8,7 +8,7 @@
     "map_checks": [
       "true"
     ],
-    "map_uri": "obsidian://open?vault=Vault&file=wayfinder%2Frepo%2Fone%2Fmap.md",
+    "map_uri": "obsidian://open?path=%2Ffixture%2FVault%2Fwayfinder%2Frepo%2Fone%2Fmap.md",
     "open": true,
     "title": "C",
     "trail": [
@@ -17,10 +17,10 @@
         "first": "Pick up at B.",
         "name": "handoff.md",
         "path": "/fixture/Vault/wayfinder/repo/one/handoff.md",
-        "uri": "obsidian://open?vault=Vault&file=wayfinder%2Frepo%2Fone%2Fhandoff.md"
+        "uri": "obsidian://open?path=%2Ffixture%2FVault%2Fwayfinder%2Frepo%2Fone%2Fhandoff.md"
       }
     ],
-    "uri": "obsidian://open?vault=Vault&file=wayfinder%2Frepo%2Fone%2Fissues%2F003%20C.md"
+    "uri": "obsidian://open?path=%2Ffixture%2FVault%2Fwayfinder%2Frepo%2Fone%2Fissues%2F003%20C.md"
   },
   "contentType": "application/json",
   "route": "GET /api/ticket",

@@ -10,8 +10,8 @@ const SBMAP = join(import.meta.dirname, "..", "..", "..", "..", "scripts", "sbma
 const vault = realpathSync(mkdtempSync(join(tmpdir(), "vault-")));
 
 /** What `sbmap uri <file>` prints between the parentheses. */
-function sbmapUri(file: string): string {
-  const out = execFileSync("python3", [SBMAP, "uri", file], { env: { ...process.env, SB_VAULT: vault }, encoding: "utf8" }).trim();
+function sbmapUri(file: string, ...flags: string[]): string {
+  const out = execFileSync("python3", [SBMAP, "uri", file, ...flags], { env: { ...process.env, SB_VAULT: vault }, encoding: "utf8" }).trim();
   return out.slice(out.lastIndexOf("](") + 2, -1);
 }
 
@@ -33,14 +33,15 @@ const NAMES = [
 describe("obsidianUri", () => {
   it.each(NAMES)("matches sbmap uri for %s", (rel) => {
     const f = note(rel);
-    expect(obsidianUri(f, { root: vault, name: basename(vault) })).toBe(sbmapUri(f));
+    expect(obsidianUri(f)).toBe(sbmapUri(f));
+    expect(obsidianUri(f, { root: vault, name: basename(vault) })).toBe(sbmapUri(f, "--vault"));
   });
-  it("a file outside the vault keeps the path form, as sbmap uri does", () => {
+  it("a file outside the vault keeps the path form, as sbmap uri --vault does", () => {
     const out = realpathSync(mkdtempSync(join(tmpdir(), "outside-")));
     const f = join(out, "a b.md");
     writeFileSync(f, "x");
-    expect(obsidianUri(f, { root: vault, name: basename(vault) })).toBe(sbmapUri(f));
-    expect(sbmapUri(f)).toMatch(/^obsidian:\/\/open\?path=/);
+    expect(obsidianUri(f, { root: vault, name: basename(vault) })).toBe(sbmapUri(f, "--vault"));
+    expect(sbmapUri(f, "--vault")).toMatch(/^obsidian:\/\/open\?path=/);
   });
 });
 
@@ -54,7 +55,6 @@ describe("links", () => {
   writeFileSync(log, "log");
   const ctx = (): LinkContext => ({
     real: realpathSync,
-    vault: { root: vault, name: basename(vault) },
     exists: (p) => p.startsWith(vault) && (p === ticket || p === map || p === board || p === report || p === log),
     findTicket: (m, n) => (m === "repo/one" && n === 39 ? ticket : null),
     runs: { "repo/one": board },

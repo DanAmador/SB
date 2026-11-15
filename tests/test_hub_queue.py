@@ -394,7 +394,7 @@ class TicketActionTest(unittest.TestCase):
         self.assertEqual(d["map_checks"], ["true"])
         self.assertEqual([(f["name"], f["first"]) for f in d["trail"]], [("handoff.md", "Pick up at B.")])
         for uri in (d["uri"], d["map_uri"], d["trail"][0]["uri"]):
-            self.assertTrue(uri.startswith("obsidian://open?vault="), uri)
+            self.assertTrue(uri.startswith("obsidian://open?path="), uri)
 
     def test_details_of_an_unknown_or_odd_key_are_a_key_error(self):
         for key in ("repo/one#9", "repo/none#1", "../one#1", "repo/one", "/etc#1"):

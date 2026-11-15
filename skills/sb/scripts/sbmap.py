@@ -30,8 +30,11 @@ Bases see the whole route. It answers what an agent should never compute or type
                                         name the map's by default; --shared: wayfinder/runs/, for a run
                                         across projects. The run's briefs and reports go in its folder
     sbmap.py link     <map> <NNN>       the wikilink to a ticket, to paste into prose
-    sbmap.py uri      <file> [label]    the markdown link that opens a vault file in Obsidian from chat:
-                                        paste it, never type one (the file: absolute, or vault-relative)
+    sbmap.py uri      <file> [label] [--vault]
+                                        the markdown link that opens a vault file in Obsidian from chat:
+                                        paste it, never type one (the file: absolute, or vault-relative).
+                                        --vault: by vault name and vault path, for the phone (the Mac's
+                                        Claude Desktop opens the default path form, not this one)
     sbmap.py check    <map>             lint: unknown blockers, cycles, missing Answers or Decisions,
                                         legacy fields, and (Obsidian running) broken links
     sbmap.py verify   <map>             every mermaid block parses in Obsidian's own renderer
@@ -724,15 +727,18 @@ def cmd_next(args):
     print(f"{next_number(load(args[0])):03d}")
 
 
-def obsidian_uri(path):
-    """The link that opens a file in Obsidian. A file in the vault is named by the vault's name and its path in the vault,
-    which opens on the Mac and on a phone with the same vault; a file outside the vault keeps the absolute path, fully encoded."""
+def obsidian_uri(path, by_vault=False):
+    """The link that opens a file in Obsidian. By default the absolute path, fully encoded: the one format Claude Code
+    Desktop opens in Obsidian (its vault= form opens the browser). by_vault=True names a vault file by the vault's name and its
+    path in the vault, which a phone with the same vault opens; a file outside the vault keeps the path form either way."""
     real = Path(path).resolve()
-    try:
-        rel = real.relative_to(VAULT.resolve())
-    except ValueError:
-        return "obsidian://open?path=" + url_encode(str(real), safe="")
-    return "obsidian://open?vault=" + url_encode(VAULT.name, safe="") + "&file=" + url_encode(rel.as_posix(), safe="")
+    if by_vault:
+        try:
+            rel = real.relative_to(VAULT.resolve())
+            return "obsidian://open?vault=" + url_encode(VAULT.name, safe="") + "&file=" + url_encode(rel.as_posix(), safe="")
+        except ValueError:
+            pass
+    return "obsidian://open?path=" + url_encode(str(real), safe="")
 
 
 def note_label(path):
@@ -741,13 +747,15 @@ def note_label(path):
 
 
 def cmd_uri(args):
+    by_vault = "--vault" in args  # the phone form: by vault name and vault path
+    args = [a for a in args if a != "--vault"]
     want = Path(args[0]).expanduser()
     tries = [want] if want.is_absolute() else [VAULT / want, Path.cwd() / want]
     found = next((c for t in tries for c in (t, t.with_name(t.name + ".md")) if c.is_file()), None)
     if found is None:
         sys.exit(f"sbmap: no such vault file: {args[0]}")
     label = args[1] if len(args) > 1 else note_label(found)
-    print(f"[{label}]({obsidian_uri(found)})")
+    print(f"[{label}]({obsidian_uri(found, by_vault)})")
 
 
 def cmd_link(args):
