@@ -7,6 +7,7 @@
       "checks": [
         "true"
       ],
+      "checks_from": "map",
       "claimed_by": null,
       "done_when": "It works.",
       "file": "/fixture/Vault/wayfinder/repo/one/issues/002 B.md",
@@ -38,6 +39,7 @@
       "checks": [
         "true"
       ],
+      "checks_from": "map",
       "claimed_by": null,
       "done_when": "It works.",
       "file": "/fixture/Vault/wayfinder/repo/one/issues/003 C.md",
@@ -69,6 +71,7 @@
       "checks": [
         "true"
       ],
+      "checks_from": "map",
       "claimed_by": null,
       "done_when": "It works.",
       "file": "/fixture/Vault/wayfinder/repo/one/issues/004 D.md",
@@ -100,6 +103,7 @@
       "checks": [
         "true"
       ],
+      "checks_from": "map",
       "claimed_by": null,
       "done_when": "It works.",
       "file": "/fixture/Vault/wayfinder/repo/two/issues/005 E.md",
@@ -131,6 +135,7 @@
       "checks": [
         "true"
       ],
+      "checks_from": "map",
       "claimed_by": null,
       "done_when": "It works.",
       "file": "/fixture/Vault/wayfinder/repo/two/issues/006 F.md",
@@ -162,6 +167,7 @@
       "checks": [
         "true"
       ],
+      "checks_from": "map",
       "claimed_by": null,
       "done_when": "",
       "file": "/fixture/Vault/wayfinder/repo/two/issues/007 G.md",

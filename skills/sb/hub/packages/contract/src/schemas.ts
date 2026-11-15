@@ -450,6 +450,8 @@ export const TicketRow = z.strictObject({
   question: z.string(),
   out: z.string(),
   checks: z.array(z.string()),
+  /** Where its checks came from: its own, its map's, the repo's .sb/checks, or "" when it has none. */
+  checks_from: z.enum(["ticket", "map", "repo", ""]).optional(),
   repo: z.string(),
   file: z.string(),
   map_title: z.string(),

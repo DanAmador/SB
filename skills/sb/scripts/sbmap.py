@@ -2611,6 +2611,14 @@ def map_tickets(m):
     return {"map": m.rel_name, "title": m.title, "status": m.status, "words": short(" ".join(l for l in plain_words(m).splitlines() if not l.startswith(">")).strip(), 300),
             "checks": m.props.get("checks") or [], "uri": obsidian_uri(m.md_path), "tickets": rows}
 
+def repo_checks(repo):
+    """The commands of <repo>/.sb/checks, one per line; blank lines and # comments skipped. [] when there is none."""
+    try:
+        lines = (Path(str(repo)) / ".sb" / "checks").read_text().splitlines()
+    except (OSError, UnicodeDecodeError):
+        return []
+    return [x.strip() for x in lines if x.strip() and not x.strip().startswith("#")]
+
 
 def cmd_tickets(args):
     """Every open or claimed ticket of every open map, as the facts a queue decides on; with --map, one map
@@ -2636,7 +2644,9 @@ def cmd_tickets(args):
                         for ref in t.blocked_by for _, cleared, t_b in [m.blocker(ref)]]
             sec = sections(t.body)
             own = t.props.get("checks") or []
-            checks = own if isinstance(own, list) and own else m.props.get("checks") or []
+            checks, checks_from = (own, "ticket") if isinstance(own, list) and own else (m.props.get("checks") or [], "map")
+            if not checks:
+                checks, checks_from = repo_checks(m.props.get("repo", "")), "repo"
             rows.append({
                 "map": m.rel_name, "num": t.num, "title": t.title, "why": t.props.get("why", ""),
                 "type": t.type, "status": t.status, "priority": t.props.get("priority") or None,
@@ -2646,7 +2656,8 @@ def cmd_tickets(args):
                 "check": str(t.props.get("check") or "tests"),
                 "has_done_when": bool(sec.get("Done when")), "done_when": sec.get("Done when", ""),
                 "question": sec.get("Question", ""), "out": sec.get("Not this ticket", ""),
-                "checks": checks, "repo": str(m.props.get("repo", "")), "file": str(t.path),
+                "checks": checks, "checks_from": checks_from if checks else "",
+                "repo": str(m.props.get("repo", "")), "file": str(t.path),
                 "map_title": m.title, "map_order": i, "claimed_by": t.claimed_by or None})
     print(json.dumps(rows, indent=1))
 
