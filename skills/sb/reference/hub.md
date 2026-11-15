@@ -20,7 +20,10 @@ the vault. Only the running hub writes the queue (`$SB_HUB_HOME/state.json`); CL
   `not ready` (no done-when, no check commands), `claimed`.
 - **Checks**: shell commands, run in the ticket's repo after the worker exits, that all exit 0:
   `sbmap mapset <map> checks="cmd one; cmd two"` on the map, or `sbmap set <map> <NNN> checks="…"`
-  on one ticket. The repo's fast loop only: they run once per ticket.
+  on one ticket. The repo's fast loop only: they run once per ticket. Three layers, first found wins:
+  the ticket's own, the map's, then the repo's `.sb/checks` (one command per line, `#` lines and
+  blanks skipped; the owner agrees it in the design session and it is committed). A Done when item
+  no command can check is judged by the reviewer.
 - **Tier**: `sbmap set <map> <NNN> tier=opus` on a complex ticket; Sonnet when absent. A failed
   Sonnet ticket retries once on Opus.
 - **Order**, fixed: after its blockers; then priority S→F; then the ticket that unblocks the most

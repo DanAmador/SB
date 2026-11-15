@@ -1,0 +1,7 @@
+# The repo's fast loop: sb runs these, one per line, for any ticket with no checks of its own or its map's.
+pnpm --dir skills/sb/hub install --frozen-lockfile
+pnpm --dir skills/sb/hub typecheck
+pnpm --dir skills/sb/hub lint
+pnpm --dir skills/sb/hub test
+pnpm --dir skills/sb/hub build
+python3 -m unittest discover tests

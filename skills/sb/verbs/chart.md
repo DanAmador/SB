@@ -23,8 +23,11 @@ later run alone. This replaces the wayfinder skill's *Chart the map*: load no ot
      the next, `--blocked-by` the first. Tickets that edit the same file get a `--blocked-by` chain now,
      so they never meet at landing.
    - `--done-when` names something a command can check (a test, a script's output, a file), so the
-     hub's queue can run the ticket alone; set the map's checks once,
-     `sbmap mapset <map> checks="cmd; cmd"`, from the repo's fast loop ([hub.md](../reference/hub.md)).
+     hub's queue can run the ticket alone. Checks have three layers: the ticket's own, the map's,
+     then the repo's `.sb/checks` ([hub.md](../reference/hub.md)). If the repo has no `.sb/checks`,
+     agree its fast loop with the owner in the design session, then write and commit the file (one
+     command per line). Set the map's `checks` (`sbmap mapset <map> checks="cmd; cmd"`) only when this
+     map needs something different. A Done when item no command can check is judged by the reviewer.
      Write it as a numbered list (`1. …\n2. …`), one test or command per item, so a reviewer ticks
      each one. Then:
      - **A real-data line** whenever the code reads what another part makes: "Real data: a test

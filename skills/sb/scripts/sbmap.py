@@ -834,6 +834,11 @@ def cmd_check(args):
     notes = []
     if "## In plain words" not in m.body:
         notes.append("map.md: no '## In plain words' (why the map exists, where it stands); write it")
+    if not m.props.get("checks") and not repo_checks(m.props.get("repo", "")):
+        bare = [t for t in m.order() if t.status == "open" and t.type == "task" and not t.props.get("checks")]
+        if bare:
+            notes.append(f"no checks anywhere: {len(bare)} open task ticket(s) have none of their own, the map has none, "
+                         "and the repo has no .sb/checks; agree the fast loop and write .sb/checks")
     for t in m.order():
         if t.status in ("open", "claimed") and not t.props.get("why"):
             notes.append(f"{t.id}: no `why`; `sbmap set {m.rel_folder} {t.num} why=\"...\"`")
