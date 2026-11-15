@@ -3,7 +3,7 @@
  * against the contract before it leaves. Run with `node e2e/fixture-server.ts` (Node strips the types).
  */
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { QueueMapBody, QueueMoveBody, QueueMoveMapBody, QueueSetBody, TicketActionBody, RunDetail, RunSeenBody, MapRoute, RunsPage, SendBody, State, Tickets, Trail, addLinks, type LinkContext, type Message, type QueueItem, type TicketRow } from "@sb-hub/contract";
+import { QueueMapBody, QueueMoveBody, QueueMoveMapBody, QueueSetBody, QueueStopBody, TicketActionBody, RunDetail, RunSeenBody, MapRoute, RunsPage, SendBody, State, Tickets, Trail, addLinks, type LinkContext, type Message, type QueueItem, type TicketRow } from "@sb-hub/contract";
 
 /** Every file the fixtures name exists; the server's own vault lookup is covered by the server's tests. */
 const ctx: LinkContext = { exists: () => true, real: (p) => p, findTicket: (map, num) => `/vault/${map}/issues/${String(num)}.md`, runs: {} };
@@ -80,6 +80,8 @@ const queue = {
 };
 
 const calls = { moveMap: 0, map: 0 };
+/** Every Stop the page posted, for the test to read. */
+const stops: { key: string; reason: string }[] = [];
 /** The queued maps in run order: the ones kept that still have something live, then new ones. */
 const syncMaps = (): void => {
   const mapOf = (k: string): string => k.replace(/#\d+$/, "");
@@ -241,6 +243,20 @@ createServer((req, res) => {
       send(res, 200, { ...(addLinks("POST /api/queue/set", { ok: true, queue }, ctx) as object), left_out: [] });
       return;
     }
+    if (req.method === "POST" && path === "/api/queue/stop") {
+      const b = QueueStopBody.parse(await body(req));
+      const it = queue.items.find((i) => i.key === b.key);
+      if (it?.state !== "running") { send(res, 400, { ok: false, error: `not a running item: ${b.key}` }); return; }
+      if (b.version !== null && b.version !== queue.version) { send(res, 409, addLinks("POST /api/queue/set", { ok: false, stale: true, queue }, ctx)); return; }
+      stops.push({ key: b.key, reason: b.reason });
+      // the real hub kills the worker at its next tick; here it stays running, marked, so the panel shows it
+      it.stop_asked = { reason: b.reason, at: now() };
+      it.note = `stopping, by you: ${b.reason}`;
+      queue.version += 1;
+      send(res, 200, addLinks("POST /api/queue/set", { ok: true, queue }, ctx));
+      return;
+    }
+    if (req.method === "GET" && path === "/api/__stops") { send(res, 200, stops); return; }
     if (req.method === "GET" && path === "/api/__calls") { send(res, 200, calls); return; }
     if (req.method === "GET" && path === "/api/__actions") { send(res, 200, actions); return; }
     if (req.method === "POST" && path?.startsWith("/api/ticket/") === true) {

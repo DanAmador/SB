@@ -1,0 +1,141 @@
+{
+  "body": {
+    "ok": true,
+    "queue": {
+      "agent": "main",
+      "agents": [
+        "main",
+        "spare"
+      ],
+      "bases": {},
+      "final_review": true,
+      "items": [
+        {
+          "agent": null,
+          "commit": null,
+          "ended": null,
+          "key": "repo/two#5",
+          "kind": "ticket",
+          "night": "night-20261113-010100",
+          "note": "",
+          "started": null,
+          "state": "queued",
+          "tries": 0,
+          "waits": {
+            "kind": "paused",
+            "text": "the queue is paused: nothing new starts",
+            "with": null
+          }
+        },
+        {
+          "agent": null,
+          "commit": null,
+          "ended": null,
+          "key": "repo/two#6",
+          "kind": "ticket",
+          "night": "night-20261113-010100",
+          "note": "",
+          "started": null,
+          "state": "queued",
+          "tries": 0,
+          "waits": {
+            "kind": "paused",
+            "text": "the queue is paused: nothing new starts",
+            "with": null
+          }
+        },
+        {
+          "agent": null,
+          "commit": null,
+          "ended": null,
+          "key": "repo/one#3",
+          "kind": "ticket",
+          "night": "night-20261113-010100",
+          "note": "",
+          "started": null,
+          "state": "queued",
+          "tries": 0,
+          "waits": {
+            "kind": "paused",
+            "text": "the queue is paused: nothing new starts",
+            "with": null
+          }
+        },
+        {
+          "agent": "spare",
+          "commit": null,
+          "ended": null,
+          "key": "repo/one#2",
+          "kind": "ticket",
+          "night": "night-20261113-010100",
+          "note": "stopping, by you: It edits the wrong checkout.",
+          "refused": 2,
+          "refused_lines": [
+            "refused: Bash: `git push` is refused",
+            "refused: Bash: `git stash` is refused"
+          ],
+          "repo": "/fixture/repo",
+          "runner": "spare",
+          "started": 1794528060.0,
+          "state": "running",
+          "stop_asked": {
+            "at": 1794528060.0,
+            "reason": "It edits the wrong checkout."
+          },
+          "tries": 0,
+          "waits": {
+            "kind": "paused",
+            "text": "the queue is paused: nothing new starts",
+            "with": null
+          }
+        },
+        {
+          "agent": "main",
+          "commit": null,
+          "created": 1794528060.0,
+          "ended": null,
+          "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "key": "job:aaaaaaaaaaaa:1",
+          "kind": "job",
+          "model": "opus",
+          "name": "audit",
+          "night": "night-20261113-010100",
+          "not_before": 1794609000.0,
+          "note": "",
+          "project": "/fixture/repo",
+          "prompt": "Audit the hub",
+          "repo": "/fixture/repo",
+          "started": null,
+          "state": "queued",
+          "title": "audit",
+          "tries": 0
+        }
+      ],
+      "maps": [
+        "repo/two",
+        "repo/one"
+      ],
+      "night": "night-20261113-010100",
+      "paused": true,
+      "repos": {
+        "/fixture/repo": {
+          "at_once": 2,
+          "running": 0,
+          "side_by_side": 3
+        }
+      },
+      "runs": {},
+      "seeded": true,
+      "stop_at": 1794549600.0,
+      "version": 27
+    }
+  },
+  "contentType": "application/json",
+  "request": {
+    "key": "repo/one#2",
+    "reason": "It edits the wrong checkout.",
+    "version": 26
+  },
+  "route": "POST /api/queue/stop",
+  "status": 200
+}

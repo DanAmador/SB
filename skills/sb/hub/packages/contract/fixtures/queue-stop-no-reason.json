@@ -1,0 +1,14 @@
+{
+  "body": {
+    "error": "say why it stops",
+    "ok": false
+  },
+  "contentType": "application/json",
+  "request": {
+    "key": "repo/one#2",
+    "reason": "",
+    "version": 26
+  },
+  "route": "POST /api/queue/stop",
+  "status": 400
+}

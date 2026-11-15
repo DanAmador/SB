@@ -7,9 +7,9 @@
         "failed": 0,
         "items": 5,
         "not_reached": 0,
-        "queued": 5,
+        "queued": 4,
         "running": 0,
-        "skipped": 0
+        "skipped": 1
       },
       "ended": null,
       "how": null,
@@ -69,18 +69,26 @@
         {
           "agent": "spare",
           "commit": null,
-          "ended": null,
+          "ended": 1794528060.0,
           "key": "repo/one#2",
           "kind": "ticket",
           "night": "night-fixture",
-          "note": "",
+          "note": "stopped by you: It edits the wrong checkout.. No file is left changed in the checkout /fixture/repo.",
+          "pid": null,
+          "pid_start": null,
           "refused": 2,
           "refused_lines": [
             "refused: Bash: `git push` is refused",
             "refused: Bash: `git stash` is refused"
           ],
-          "started": null,
-          "state": "queued",
+          "repo": "/fixture/repo",
+          "runner": "spare",
+          "started": 1794528060.0,
+          "state": "skipped",
+          "stop_asked": {
+            "at": 1794528060.0,
+            "reason": "It edits the wrong checkout."
+          },
           "tries": 0,
           "waits": {
             "kind": "paused",

@@ -861,6 +861,94 @@ class StopsTest(RunnerCase):
         self.assertEqual(self.open_tickets()[1]["status"], "claimed")
 
 
+class OwnerStopTest(RunnerCase):
+    """The page's Stop (POST /api/queue/stop): the worker's whole group ends within seconds, its work stays, the
+    ticket says stopped by you with the reason and is unclaimed, and the queue moves on."""
+
+    def gone(self, *pids, within=10):
+        end = time.time() + within
+        while any(map(alive, pids)) and time.time() < end:
+            time.sleep(0.05)
+        return not any(map(alive, pids))
+
+    def ticket_text(self, num):
+        return next(self.vault.glob("wayfinder/repo/one/issues/{:03d}*.md".format(num))).read_text(encoding="utf-8")
+
+    def test_stop_kills_the_worker_and_its_child_keeps_its_work_and_the_next_ticket_starts(self):
+        self.modes = {"repo/one#1": "hang"}
+        self.resume()
+        self.sup.tick()
+        leader, child = self.pids()
+        self.assertEqual(self.open_tickets()[1]["status"], "claimed")
+        repo = self.repos["repo/one"]
+        (repo / "one").mkdir()
+        (repo / "one" / "half.txt").write_text("half done\n")  # its work so far: left where it is
+        (repo / "README.md").write_text("x\nedited\n")
+        v = self.hub.state()["queue"]["version"]
+        self.assertTrue(self.hub.queue_stop("repo/one#1", "  it edits the wrong checkout ", v)["ok"])
+        self.assertEqual(self.items()["repo/one#1"]["note"], "stopping, by you: it edits the wrong checkout")
+        t0 = time.time()
+        self.sup.tick()
+        self.assertTrue(self.gone(leader, child), "the worker or its child still runs")
+        self.assertLess(time.time() - t0, 10)
+        item = self.items()["repo/one#1"]
+        self.assertEqual(item["state"], "skipped")
+        self.assertTrue(item["note"].startswith("stopped by you: it edits the wrong checkout."), item["note"])
+        self.assertEqual(item["stop_asked"]["reason"], "it edits the wrong checkout")
+        self.assertIsNone(item["pid"])
+        # its work is kept: nothing stashed, reset or deleted
+        self.assertEqual((repo / "one" / "half.txt").read_text(), "half done\n")
+        self.assertEqual((repo / "README.md").read_text(), "x\nedited\n")
+        self.assertEqual(git(repo, "stash", "list"), "")
+        # the ticket: unclaimed, with the reason and where the work is
+        self.assertEqual(self.open_tickets()[1]["status"], "open")
+        text = self.ticket_text(1)
+        self.assertIn("Stopped by you from the hub page: it edits the wrong checkout.", text)
+        self.assertIn("README.md", text)
+        self.assertIn("one/half.txt", text)
+        # the queue moved on, and the stopped ticket never ran again, on any model
+        self.until(lambda: self.state_of("repo/one#2") in ("running", "landed", "review", "done"))
+        for _ in range(3):
+            self.sup.tick()
+        self.assertEqual([x["key"] for x in self.launched].count("repo/one#1"), 1)
+        self.assertEqual(self.state_of("repo/one#1"), "skipped")
+        self.assertFalse(self.hub.state()["queue"]["paused"])  # not a failure: no streak, no pause
+
+    def test_a_stop_after_a_hub_restart_kills_the_worker_the_old_hub_started(self):
+        self.mode = "hang"
+        self.only(1)
+        self.sup.tick()
+        leader, child = self.pids()
+        old = [r["p"] for r in self.sup.procs.values()]
+        self.sup.procs.clear()  # the old hub died without killing it
+        self.addCleanup(lambda: [p.wait(timeout=10) for p in old])  # reaped once the new hub's Stop killed it
+        hub = Hub(self.root / "hub", now=self.clock, launcher=self.launcher)
+        sup = Supervisor(hub, port=4321)
+        sup.close_off = False
+        self.addCleanup(sup.stop)
+        sup.tick()
+        self.assertEqual(hub.state()["queue"]["items"][0]["state"], "running")  # adopted, waited for
+        self.assertTrue(alive(leader))
+        self.assertTrue(hub.queue_stop("repo/one#1", "stuck", hub.state()["queue"]["version"])["ok"])
+        sup.tick()
+        self.assertTrue(self.gone(leader, child), "the worker or its child still runs")
+        item = next(i for n in hub.nights()["nights"] for i in hub.night(n["id"])["night"]["items"]
+                    if i["key"] == "repo/one#1")
+        self.assertEqual(item["state"], "skipped")
+        self.assertIn("stopped by you: stuck", item["note"])
+        self.assertEqual(self.open_tickets()[1]["status"], "open")
+        self.assertIn("Stopped by you from the hub page: stuck.", self.ticket_text(1))
+        self.assertEqual([x["key"] for x in self.launched], ["repo/one#1"])
+
+    def test_only_a_running_item_can_be_stopped_and_only_with_a_reason(self):
+        self.tick_all()
+        v = self.hub.state()["queue"]["version"]
+        with self.assertRaisesRegex(ValueError, "not a running item"):
+            self.hub.queue_stop("repo/one#1", "why", v)
+        with self.assertRaisesRegex(ValueError, "say why"):
+            self.hub.queue_stop("repo/one#1", "  ", v)
+
+
 class ConcurrencyTest(RunnerCase):
     MAPS = (("repo/one", "repoA", ("A", "one/"), ("B", "two/")),
             ("repo/two", "repoB", ("C", "three/")))

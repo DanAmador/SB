@@ -187,6 +187,9 @@ const itemFields = {
   checked: z.string().nullable().optional(),
   /** Set each time the hub looks for work, on a queued item only. */
   waits: Waits.optional(),
+  /** The owner's Stop, with the reason and when: set while its worker is being ended, kept on the item it ended
+   * (skipped, "stopped by you"). Dropped when the owner queues it again. */
+  stop_asked: z.strictObject({ reason: z.string(), at: Seconds }).optional(),
   /** How many actions the worker's hook refused so far, and the last few; absent until the first refusal. */
   refused: z.number().int().optional(),
   refused_lines: z.array(z.string()).optional(),
@@ -594,6 +597,9 @@ export const QueueJobBody = z.strictObject({
   at: z.string().nullable().optional(),
 });
 export const QueueRemoveJobBody = z.strictObject({ key: z.string(), version: z.number().int().nullable() });
+/** The owner's Stop on a running item: its worker's whole process group is killed within seconds and the item ends
+ * skipped, "stopped by you" with the reason; its work stays where it is. */
+export const QueueStopBody = z.strictObject({ key: z.string(), reason: z.string().trim().min(1), version: z.number().int().nullable() });
 export const QueueItemAgentBody = z.strictObject({ key: z.string(), name: z.string().nullable().optional() });
 /** `<run key>@<ended>`: one ended run, once. */
 export const RunSeenBody = z.strictObject({ key: z.string().min(1) });

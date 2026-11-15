@@ -40,11 +40,39 @@ test("Run is the landing page: one row per worker run, the silent one amber, nev
   const sheet = page.getByRole("dialog");
   await expect(sheet.getByRole("link", { name: "Open in Obsidian" }).first()).toHaveAttribute("href", /^obsidian:/);
   await expect(sheet.getByRole("link", { name: "Map" })).toHaveAttribute("href", /^obsidian:/);
-  await sheet.getByRole("button", { name: "Stop" }).click();
-  await sheet.getByRole("button", { name: "Yes, stop it" }).click();
-  await expect(sheet.getByText("Asked to stop: it reads that after its next tool call.").first()).toBeVisible();
+  await expect(sheet.getByRole("button", { name: "Message" })).toBeVisible();
+  await expect(sheet.getByRole("button", { name: "Stop" })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(sheet).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+test("the panel's Stop asks why, confirms and calls the stop route; no message is sent", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(String(e)));
+  await page.goto("/next/");
+  const row = page.getByRole("list", { name: "Running now" }).getByRole("listitem").filter({ hasText: "writing the copy" });
+  await row.getByRole("button", { name: "Show details" }).click();
+  const sheet = page.getByRole("dialog");
+  await sheet.getByRole("button", { name: "Stop" }).click();
+  // no reason: it asks for one and posts nothing
+  await sheet.getByRole("button", { name: "Stop…" }).click();
+  await expect(sheet.getByText("Say why first.")).toBeVisible();
+  await sheet.getByLabel("Why it stops").fill("it edits the wrong checkout");
+  await sheet.getByRole("button", { name: "Stop…" }).click();
+  await expect(sheet.getByText("Stop this worker now: “it edits the wrong checkout”?", { exact: false })).toBeVisible();
+  // Cancel posts nothing
+  await sheet.getByRole("button", { name: "Cancel" }).first().click();
+  expect(await (await page.request.get("/api/__stops")).json()).toEqual([]);
+  await sheet.getByRole("button", { name: "Stop…" }).click();
+  await sheet.getByRole("button", { name: "Yes, stop it" }).click();
+  await expect(sheet.getByText("Stopping, by you: it edits the wrong checkout")).toBeVisible();
+  await expect(sheet.getByRole("button", { name: "Stop", exact: true })).toHaveCount(0);
+  await expect(sheet.getByRole("button", { name: "Message" })).toBeVisible();
+  expect(await (await page.request.get("/api/__stops")).json()).toEqual([{ key: "other/site#3", reason: "it edits the wrong checkout" }]);
+  // the old stop sentence is not sent as a message any more
+  const st = (await (await page.request.get("/api/state")).json()) as { messages: Record<string, { to: string }> };
+  expect(Object.values(st.messages).filter((m) => m.to === "other/site#3")).toEqual([]);
   expect(errors).toEqual([]);
 });
 

@@ -5,11 +5,11 @@
       "counts": {
         "done": 0,
         "failed": 0,
-        "items": 0,
-        "not_reached": 5,
+        "items": 1,
+        "not_reached": 4,
         "queued": 0,
         "running": 0,
-        "skipped": 0
+        "skipped": 1
       },
       "ended": 1794528060.0,
       "how": "stopped",
@@ -27,10 +27,6 @@
         {
           "key": "repo/one#3",
           "title": "C"
-        },
-        {
-          "key": "repo/one#2",
-          "title": "B"
         },
         {
           "key": "job:aaaaaaaaaaaa:1",

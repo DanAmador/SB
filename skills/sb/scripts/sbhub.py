@@ -616,7 +616,7 @@ class Hub:
         if item is None or item["state"] == "queued":
             return item
         for f in ("retry", "digested", "runner", "pid", "pid_start", "result", "base_sha", "first_base", "resume", "stops",
-                  "log_start", "checked", "verdict", "review", "redo"):
+                  "log_start", "checked", "verdict", "review", "redo", "stop_asked"):
             item.pop(f, None)
         item.update(state="queued", note="", ended=None, tries=0, started=None, commit=None)
         return item
@@ -875,6 +875,22 @@ class Hub:
             if item["state"] != "queued":
                 raise ValueError("only a queued job can be removed; this one is {}".format(item["state"]))
             q["items"].remove(item)
+        return self._queue_write(version, change)
+
+    def queue_stop(self, key, reason, version):
+        """The owner's Stop: a running item is marked `stop_asked` with the reason; the supervisor's next tick (at
+        once: the write kicks it) kills its worker's whole process group and ends it as stopped by you (_stop_asked).
+        Its work is never stashed, reset or deleted."""
+        words = " ".join(str(reason or "").split())
+        if not words:
+            raise ValueError("say why it stops")
+
+        def change(q, rows):
+            item = next((i for i in q["items"] if i["key"] == key), None)
+            if item is None or item["state"] != "running":
+                raise ValueError("not a running item: {}".format(key))
+            item["stop_asked"] = {"reason": words, "at": self.now()}
+            item["note"] = "stopping, by you: " + words
         return self._queue_write(version, change)
 
     def run_seen(self, key):
@@ -2728,6 +2744,9 @@ class Supervisor:
             running = [dict(i) for i in self.hub._data["queue"]["items"]
                        if i["state"] == "running"]
         for item in running:
+            if item.get("stop_asked"):  # the owner's Stop, before a restart's recovery could queue it again
+                self._stop_asked(item)
+                continue
             run = self.procs.get(item["key"])
             if run is None:
                 self._recover(item)
@@ -2753,6 +2772,62 @@ class Supervisor:
             # only finished work says what an item costs: a worker whose checks passed (it landed) counts
             if now_item.get("state") in ("done", "landed"):
                 self._learn(run, item.get("model") or "sonnet")
+
+    def _stop_asked(self, item):
+        """The owner's Stop (Hub.queue_stop): kill the worker's whole process group, its helpers included (one an
+        earlier hub started too, known by the pid and start time on the item), then end the item as stopped by you:
+        never tried again, never sent to Opus, not a usage stop and not a failure. A ticket's claim is released and
+        a comment names the reason and where the work is; that work is left exactly where it is."""
+        key, asked = item["key"], item["stop_asked"]
+        run = self.procs.pop(key, None)
+        if run is None and item.get("pid"):  # this hub did not start it (it restarted): the item knows the worker
+            pid, started = item["pid"], item.get("pid_start")
+            sure = bool(started) and _proc_start(pid) == started
+            run = {"p": _Adopted(pid, started if sure else None), "adopted": True, "agent": item.get("runner"),
+                   "log": item.get("log"), "start": item.get("log_start") or 0}
+        left = False
+        if run is not None:
+            if getattr(run["p"], "sure", True):  # a pid ps could not tie to the worker is never killed
+                _kill_group(run["p"], grace=3)
+                left = run["p"].poll() is None
+            else:
+                left = _pid_exists(run["p"].pid)
+            if run.get("log") and run.get("agent"):
+                try:
+                    self._consume(run, final=True)  # its usage readings still pace its account
+                except Exception:
+                    pass
+        where = self._work_left(item)
+        note = "stopped by you: " + asked["reason"]
+        if left:
+            note += "; its process {} could not be confirmed as the worker, so it was left alone".format(
+                run["p"].pid)
+        if item["kind"] == "ticket":
+            num = "{:03d}".format(int(key.rsplit("#", 1)[1]))
+            self.sbmap("comment", sbqueue.map_of(key), num, "--text",
+                       "Stopped by you from the hub page: {}. {}".format(asked["reason"].rstrip("."), where))
+            self._release(key)
+        self._end(key, "skipped", note=note + ". " + where)
+
+    def _work_left(self, item):
+        """Where a stopped worker's work is, in words: its branch and worktree, else the checkout's changed files."""
+        if item.get("tree"):
+            return "Its work stays on branch {} in the worktree {}.".format(item.get("branch"), item["tree"])
+        repo = item.get("repo")
+        if not repo:
+            return "It had no checkout yet."
+        names = []
+        for args in (("diff", "--name-only", "HEAD"), ("ls-files", "--others", "--exclude-standard")):
+            rc, out, _ = _git_run(repo, *args)
+            names += [n for n in out.splitlines() if n and n not in names] if rc == 0 else []
+        made = ""
+        if item.get("base_sha"):
+            rc, out, _ = _git_run(repo, "rev-list", "--count", "{}..HEAD".format(item["base_sha"]))
+            if rc == 0 and out.strip() not in ("", "0"):
+                made = " Commits since it started: {} (on the checkout's branch).".format(out.strip())
+        files = ("Files left changed in the checkout {}: {}.".format(repo, ", ".join(names)) if names else
+                 "No file is left changed in the checkout {}.".format(repo))
+        return files + made
 
     def _job_stopped(self, item, run):
         """True when a job's own output shows a logout or a usage limit: its agent waits and the job goes back to
@@ -3867,6 +3942,8 @@ def make_handler(hub):
                                         d.get("at") or None)
                 elif path == "/api/queue/remove_job":
                     out = hub.queue_remove_job(d["key"], d["version"])
+                elif path == "/api/queue/stop":
+                    out = hub.queue_stop(d["key"], d["reason"], d["version"])
                 elif path == "/api/night/start":
                     out = hub.night_start(d.get("name"), d.get("by"))
                 elif path == "/api/night/stop":

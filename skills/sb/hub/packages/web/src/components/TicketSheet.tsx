@@ -160,13 +160,31 @@ function QueueActions({ itemKey }: { itemKey: string }): React.JSX.Element | nul
   );
 }
 
-/** What the owner says to a worker: stop. The hub has no stop route; the worker reads it after its next tool call. */
-const STOP_WORDS = "Stop now, from the owner: start nothing new, commit nothing more, write your report saying where you stopped, and end.";
-
+/** The worker's Message and Stop. Stop asks why, confirms, and the hub kills the worker's whole process group within
+ * seconds: the ticket ends "stopped by you" with the reason, its work stays where it is, the queue moves on. */
 function RunningActions({ itemKey }: { itemKey: string }): React.JSX.Element {
-  const { state, writes, openMessage, down } = useBoard();
+  const { state, queueWrite, openMessage, down, busy } = useBoard();
+  const asked = state.queue.items.find((x) => x.key === itemKey)?.stop_asked;
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
   const [sure, setSure] = useState(false);
-  const pending = Object.values(state.messages).some((m) => m.to === itemKey && m.text === STOP_WORDS && m.delivered === null && m.lost === undefined);
+  const [working, setWorking] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const close = (): void => {
+    setOpen(false);
+    setSure(false);
+    setErr(null);
+  };
+  const stop = async (): Promise<void> => {
+    setWorking(true);
+    const out = await queueWrite("POST /api/queue/stop", { key: itemKey, reason: reason.trim(), version: state.queue.version }, "Stopping: it ends within seconds and its work stays where it is.");
+    setWorking(false);
+    setSure(false);
+    if (out.ok) {
+      setOpen(false);
+      setReason("");
+    } else setErr(out.words);
+  };
   return (
     <Block title="Its worker">
       <div className="flex flex-wrap items-center gap-2">
@@ -181,43 +199,16 @@ function RunningActions({ itemKey }: { itemKey: string }): React.JSX.Element {
           <IconMail aria-hidden />
           Message
         </Button>
-        {pending ? (
-          <span className="text-sm text-muted-foreground">Asked to stop: it reads that after its next tool call.</span>
-        ) : sure ? (
-          <span role="alert" className="flex flex-wrap items-center gap-2 text-sm">
-            Stop this worker?
-            <Button
-              size="sm"
-              variant="destructive"
-              autoFocus
-              disabled={down}
-              onClick={() => {
-                setSure(false);
-                void writes.send(itemKey, STOP_WORDS).then((out) => {
-                  say(out.ok ? { ok: true, words: "Asked to stop: it reads that after its next tool call." } : out);
-                });
-              }}
-            >
-              Yes, stop it
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => {
-                setSure(false);
-              }}
-            >
-              Cancel
-            </Button>
-          </span>
-        ) : (
+        {asked === undefined && (
           <Button
             size="sm"
-            variant="outline"
-            className="text-destructive"
+            variant={open ? "secondary" : "outline"}
+            className={cn(!open && "text-destructive")}
+            aria-expanded={open}
             disabled={down}
             onClick={() => {
-              setSure(true);
+              if (open) close();
+              else setOpen(true);
             }}
           >
             <IconPlayerStop aria-hidden />
@@ -225,6 +216,59 @@ function RunningActions({ itemKey }: { itemKey: string }): React.JSX.Element {
           </Button>
         )}
       </div>
+      {asked !== undefined && (
+        <p role="status" className="mt-2 text-sm break-words text-muted-foreground">
+          Stopping, by you: {asked.reason}
+        </p>
+      )}
+      {asked === undefined && open && (
+        <form
+          className="mt-2 flex flex-col gap-2 rounded-lg border bg-card p-3"
+          onSubmit={(ev) => {
+            ev.preventDefault();
+            if (!reason.trim()) {
+              setErr("Say why first.");
+              return;
+            }
+            setErr(null);
+            setSure(true);
+          }}
+        >
+          <Label>
+            Why it stops (it goes on the ticket)
+            <Input value={reason} maxLength={300} placeholder="e.g. it edits the wrong checkout" autoFocus onChange={(ev) => { setReason(ev.currentTarget.value); setSure(false); }} />
+          </Label>
+          {err !== null && (
+            <p role="alert" className="text-sm text-destructive">
+              {err}
+            </p>
+          )}
+          {sure ? (
+            <div role="alert" className="flex flex-col gap-2 rounded-md bg-warn-soft p-2.5 text-sm">
+              <span className="break-words">
+                Stop this worker now: “{reason.trim()}”? Its process ends within seconds; what it changed stays where it is, and the ticket is released with your reason.
+              </span>
+              <div className="flex gap-2">
+                <Button type="button" size="xs" variant="destructive" disabled={working || down || busy} autoFocus onClick={() => void stop()}>
+                  {working ? "Stopping…" : "Yes, stop it"}
+                </Button>
+                <Button type="button" size="xs" variant="ghost" disabled={working} onClick={() => { setSure(false); }}>
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex gap-2">
+              <Button type="submit" size="xs" variant="destructive" disabled={down}>
+                Stop…
+              </Button>
+              <Button type="button" size="xs" variant="ghost" onClick={close}>
+                Cancel
+              </Button>
+            </div>
+          )}
+        </form>
+      )}
     </Block>
   );
 }

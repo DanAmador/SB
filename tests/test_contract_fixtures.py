@@ -328,7 +328,20 @@ class ContractFixturesTest(unittest.TestCase):
         # the answers that take things away
         r("queue_remove_job", {"key": spare, "version": self.hub.state()["queue"]["version"]})
         self.assertTrue(job)
-        # the night: the first queue write started it; a second start is refused; a stop after ends it as stopped
+        # the owner's Stop on a running ticket (B, made running by hand: no worker): marked, then ended by the
+        # supervisor as stopped by you; a Stop with no reason is refused
+        with self.hub._lock:
+            b = next(i for i in self.hub._data["queue"]["items"] if i["key"] == "repo/one#2")
+            b.update(state="running", started=self.clock.t, repo=str(self.repo), runner="spare")
+        self.record("queue-stop-no-reason", "/api/queue/stop",
+                    {"key": "repo/one#2", "reason": "", "version": self.hub.state()["queue"]["version"]}, 400)
+        r("queue_stop", {"key": "repo/one#2", "reason": "It edits the wrong checkout.",
+                         "version": self.hub.state()["queue"]["version"]})
+        self.sup._reap()
+        b = next(i for i in self.hub.state()["queue"]["items"] if i["key"] == "repo/one#2")
+        self.assertEqual(b["state"], "skipped")
+        self.assertTrue(b["note"].startswith("stopped by you: It edits the wrong checkout."), b["note"])
+        # the night:the first queue write started it; a second start is refused; a stop after ends it as stopped
         nights = self.record("nights", "/api/nights")["nights"]
         self.assertEqual([n["state"] for n in nights], ["live", "ended"])
         live = nights[0]["id"]
