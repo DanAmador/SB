@@ -99,6 +99,9 @@ SENT_KEPT = 30  # finished messages kept for the page's log
 MESSAGE_MAX = 4000
 
 
+_KEEP = object()  # an argument the caller left out, as against None, which clears it
+
+
 class Hub:
     def __init__(self, home, now=time.time, run=None, launcher=None):
         self.home = Path(home)
@@ -1159,14 +1162,21 @@ class Hub:
             q["agent"] = q["agents"][0]
         return self._queue_write(version, change)
 
-    def queue_item_agent(self, key, name):
+    def queue_item_agent(self, key, name=_KEEP, model=_KEEP):
+        """The account (`name`, None for the pool) and/or the model ("sonnet", "opus"; None for the ticket's own
+        tier) a queued item runs on; an argument left out stays as it is."""
         def change(q, rows):
             item = next((i for i in q["items"] if i["key"] == key and i["state"] == "queued"), None)
             if item is None:
                 raise ValueError("not a queued item: {}".format(key))
-            if name is not None and name not in self._data["installed"]:
+            if name is not _KEEP and name is not None and name not in self._data["installed"]:
                 raise ValueError("unknown agent: {}".format(name))
-            item["agent"] = name
+            if model is not _KEEP and model not in (None, "sonnet", "opus"):
+                raise ValueError("unknown model: {}".format(model))
+            if name is not _KEEP:
+                item["agent"] = name
+            if model is not _KEEP and not item.get("tries"):
+                item["model"] = model
         return self._queue_write(None, change)
 
     def queue_options(self, stop_at, final_review, version):
@@ -3282,7 +3292,7 @@ class Supervisor:
         or (None, None, why): why is a note naming each agent's use and reset when usage alone stops it,
         empty when an agent is only busy. An item's own agent wins and never falls back to the pool."""
         names = [item["agent"]] if item.get("agent") else pool(q)
-        model = item.get("model") if item.get("tries") or item["kind"] == "job" else (t or {}).get("tier")
+        model = item.get("model") if item.get("tries") or item["kind"] == "job" else item.get("model") or (t or {}).get("tier")
         best, whys, busy = None, [], False
         for name in names:
             inst = self.hub._data["installed"].get(name)
@@ -3432,7 +3442,7 @@ class Supervisor:
                     continue
                 if any(sbqueue._blocker_key(t, b) not in landed for b in t["blocked_by_open"]):
                     continue  # a blocker is queued ahead of it: it waits for it (one that landed does not hold it)
-                model = (item.get("model") if item.get("tries") else
+                model = (item.get("model") if item.get("tries") or item.get("model") else
                          inst.get("model") if inst.get("kind") == "agy" else t.get("tier") or "sonnet")
                 if parallel(t["repo"]) > 1:  # its own worktree; a later try keeps the one it had
                     tree, branch = ((item["tree"], item["branch"]) if item.get("tree") and item.get("branch")
@@ -3995,7 +4005,7 @@ def make_handler(hub):
                 elif path.startswith("/api/ticket/") and path[len("/api/ticket/"):] in TICKET_ACTIONS:
                     out = hub.ticket_action(path[len("/api/ticket/"):], d["key"], d.get("text"), d.get("commit"))
                 elif path == "/api/queue/item_agent":
-                    out = hub.queue_item_agent(d["key"], d.get("name"))
+                    out = hub.queue_item_agent(d["key"], d["name"] if "name" in d else _KEEP, d["model"] if "model" in d else _KEEP)
                 elif path == "/api/agents/scan":
                     out = {"ok": True, "installed": hub.agents_scan()}
                 else:

@@ -166,6 +166,19 @@ class QueueTest(unittest.TestCase):
         self.h.queue_item_agent("repo/one#1", None)
         self.assertEqual(self.h.state()["queue"]["version"], v + 4)
 
+    def test_item_model_is_set_alone_and_refused_when_unknown(self):
+        with self.h._lock:
+            self.h._data["installed"]["main"] = {"kind": "claude", "dir": "/x", "model": None, "limited_until": None}
+        self.h.queue_item_agent("repo/one#1", "main")
+        self.h.queue_item_agent("repo/one#1", model="opus")
+        it = {i["key"]: i for i in self.h.state()["queue"]["items"]}["repo/one#1"]
+        self.assertEqual((it["agent"], it["model"]), ("main", "opus"))
+        with self.assertRaises(ValueError):
+            self.h.queue_item_agent("repo/one#1", model="gpt")
+        self.h.queue_item_agent("repo/one#1", model=None)
+        it = {i["key"]: i for i in self.h.state()["queue"]["items"]}["repo/one#1"]
+        self.assertEqual((it["agent"], it["model"]), ("main", None))
+
     def test_the_queue_survives_a_restart(self):
         v = self.h.state()["queue"]["version"]
         self.h.queue_set(["repo/one#1"], v)

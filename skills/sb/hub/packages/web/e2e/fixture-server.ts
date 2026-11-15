@@ -7,7 +7,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { QueueMapBody, QueueMoveBody, QueueMoveMapBody, QueueSetBody, QueueStopBody, NightRenameBody, NightStopBody, NightStartBody, NightsAnswer, NightDetail, TicketActionBody, RunDetail, RunSeenBody, MapRoute, RunsPage, SendBody, State, Tickets, Trail, addLinks, type LinkContext, type Message, type QueueItem, type TicketRow } from "@sb-hub/contract";
+import { QueueAgentsBody, QueueItemAgentBody, QueueParallelBody, QueueMapBody, QueueMoveBody, QueueMoveMapBody, QueueSetBody, QueueStopBody, NightRenameBody, NightStopBody, NightStartBody, NightsAnswer, NightDetail, TicketActionBody, RunDetail, RunSeenBody, MapRoute, RunsPage, SendBody, State, Tickets, Trail, addLinks, type LinkContext, type Message, type QueueItem, type TicketRow } from "@sb-hub/contract";
 
 /** Every file the fixtures name exists; the server's own vault lookup is covered by the server's tests. */
 const ctx: LinkContext = { exists: () => true, real: (p) => p, findTicket: (map, num) => `/vault/${map}/issues/${String(num)}.md`, runs: {} };
@@ -118,8 +118,9 @@ const queue = {
     },
     { ...item("other/site#3", "running"), runner: "main", started: start - 240, run: RUN, log: `${RUN}/s3.log` },
     { ...item("other/site#4", "failed"), title: "Check the shop's checkout", ended: start - 800, note: "check failed: pnpm test", run: RUN, log: `${RUN}/s4.log` },
-    item("demo/board#3", "queued"),
+    { ...item("demo/board#3", "queued"), waits: { kind: "files", with: "demo/board#5", text: "shares src/ with demo/board#5, which is running" } },
   ] as Raw<QueueItem>[],
+  repos: { "/demo": { at_once: 2, running: 2, side_by_side: 1 } } as Record<string, { at_once: number; running: number; side_by_side: number }>,
 };
 const first = JSON.stringify(queue.items);
 
@@ -161,7 +162,7 @@ const advance = (): void => {
   queue.version += 1;
 };
 
-const calls = { moveMap: 0, map: 0 };
+const calls = { moveMap: 0, map: 0, parallel: [] as { repo: string; n: number }[], agents: [] as string[][], itemAgent: [] as Record<string, unknown>[] };
 /** Every Stop run the page posted. */
 const stopCalls: string[] = [];
 /** Every Stop the page posted, for the test to read. */
@@ -220,7 +221,10 @@ function state(): State {
     },
     locks: {}, aliases: {}, charge: { "demo/board": "s-1" }, messages, providers: {},
     questions: { q1: { agent: "s-1", q: "Ship the new board tonight?", options: ["Yes", "Not yet"], default: "Yes", asked: now() - 10, deadline: now() + 600, answer: null, by: null } },
-    installed: { main: { kind: "claude", dir: null, model: null, limited_until: null } },
+    installed: {
+      main: { kind: "claude", dir: null, model: null, limited_until: null, usage: { five_hour: 0.42, five_hour_resets: now() + 7200, seven_day: 0.3, seven_day_resets: now() + 3 * 86400, at: now() } },
+      spare: { kind: "claude", dir: null, model: null, limited_until: null, usage: { five_hour: 0.9, five_hour_resets: now() + 3600, seven_day: 0.7, seven_day_resets: now() + 2 * 86400, at: now() } },
+    },
     seen: [...seen],
     now: now(),
     queue: (addLinks("GET /api/state", { queue }, ctx) as { queue: unknown }).queue,
@@ -340,6 +344,36 @@ createServer((req, res) => {
       calls.map += 1;
       queue.version += 1;
       send(res, 200, { ...(addLinks("POST /api/queue/set", { ok: true, queue }, ctx) as object), left_out: [] });
+      return;
+    }
+    if (req.method === "POST" && path === "/api/queue/parallel") {
+      const b = QueueParallelBody.parse(await body(req));
+      const r = queue.repos[b.repo];
+      if (r !== undefined) r.at_once = b.n;
+      calls.parallel.push({ repo: b.repo, n: b.n });
+      queue.version += 1;
+      send(res, 200, addLinks("POST /api/queue/set", { ok: true, queue }, ctx));
+      return;
+    }
+    if (req.method === "POST" && path === "/api/queue/agents") {
+      const b = QueueAgentsBody.parse(await body(req));
+      queue.agents = b.names;
+      queue.agent = b.names[0] ?? "main";
+      calls.agents.push(b.names);
+      queue.version += 1;
+      send(res, 200, addLinks("POST /api/queue/set", { ok: true, queue }, ctx));
+      return;
+    }
+    if (req.method === "POST" && path === "/api/queue/item_agent") {
+      const b = QueueItemAgentBody.parse(await body(req));
+      const it = queue.items.find((i) => i.key === b.key) as Record<string, unknown> | undefined;
+      if (it !== undefined) {
+        if (b.name !== undefined) it.agent = b.name;
+        if (b.model !== undefined) it.model = b.model;
+      }
+      calls.itemAgent.push({ ...b });
+      queue.version += 1;
+      send(res, 200, addLinks("POST /api/queue/set", { ok: true, queue }, ctx));
       return;
     }
     if (req.method === "POST" && path === "/api/queue/stop") {

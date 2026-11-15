@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { QueueItem, State, TicketRow } from "@sb-hub/contract";
 import { ticketIndex } from "./board.ts";
-import { countsLine, headLine, healthOf, liveItems, liveState, nightBlocks, nightLine, pairNight, QUEUE_HEAD, runItems, stateWords, stopAsk, stoppingWords } from "./night.ts";
+import { accountLines, countsLine, headLine, healthOf, liveItems, liveState, nightBlocks, nightLine, pairNight, poolWith, QUEUE_HEAD, repoLines, runItems, stateWords, stopAsk, stoppingWords, waitWords } from "./night.ts";
 import { helperCards, sessionCards } from "./sessions.ts";
 
 const NOW = 1_800_000_000;
@@ -141,5 +141,35 @@ describe("the live run", () => {
     expect(stateWords({ state: "ended", how: "stopped" })).toBe("Stopped by you");
     expect(stateWords({ state: "ended", how: "stop_time" })).toBe("Stop time reached");
     expect(stateWords({ state: "stopping", how: null })).toBe("Stopping");
+  });
+});
+
+describe("waitWords", () => {
+  const name = (k: string): string => ({ "p/a#2": "the sidebar ticket", "p/a": "Sidebar map" })[k] ?? k;
+  const w = (kind: string, text: string, withKey: string | null = null): never => ({ kind, with: withKey, text }) as never;
+  it("says each kind of wait in plain words", () => {
+    expect(waitWords(w("files", "shares e2e/ with p/a#2, which is running", "p/a#2"), name)).toBe("waits for the sidebar ticket: both change e2e/");
+    expect(waitWords(w("limit", "demo already runs its 3 at once"), name)).toBe("this repo runs 3 at once");
+    expect(waitWords(w("after", "comes after p/a#2, which has not landed", "p/a#2"), name)).toBe("waits for the sidebar ticket");
+    expect(waitWords(w("after", "comes after the map p/a", "p/a"), name)).toBe("waits for the map Sidebar map");
+    expect(waitWords(w("account", "no account has room until 21:30"), name)).toBe("no account has room until 21:30");
+    expect(waitWords(w("account", "main: 90% of 5 h, resets 21:30"), name)).toBe("no account has room: main: 90% of 5 h, resets 21:30");
+    expect(waitWords(w("paused", "the queue is paused: nothing new starts"), name)).toBe("the queue is paused");
+    expect(waitWords(w("time", "starts at 22:00"), name)).toBe("waits: starts at 22:00");
+  });
+});
+
+describe("repoLines, accountLines, poolWith", () => {
+  it("counts what could still run beside the running, never past the limit", () => {
+    const l = repoLines({ repos: { "/x/demo": { at_once: 3, running: 1, side_by_side: 5 }, "/x/api": { at_once: 2, running: 2, side_by_side: 1 } } });
+    expect(l.map((r) => r.words)).toEqual(["2 running of 2 at once · 0 more could run side by side", "1 running of 3 at once · 2 more could run side by side"]);
+  });
+  it("reads each account's two windows only while they last, and who is in the pool", () => {
+    const st = { now: NOW, queue: { agent: "main", agents: ["main"] }, installed: { main: { usage: { five_hour: 0.4, five_hour_resets: NOW + 60, seven_day: 0.2, seven_day_resets: NOW - 1, at: NOW } }, spare: {} } } as never;
+    expect(accountLines(st)).toEqual([{ name: "main", inPool: true, five: 40, fiveResets: NOW + 60, week: null, weekResets: null }, { name: "spare", inPool: false, five: null, fiveResets: null, week: null, weekResets: null }]);
+  });
+  it("will not empty the pool", () => {
+    expect(poolWith(["main"], "main", false)).toBeNull();
+    expect(poolWith(["main"], "spare", true)).toEqual(["main", "spare"]);
   });
 });

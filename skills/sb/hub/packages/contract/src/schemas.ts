@@ -601,7 +601,8 @@ export const QueueRemoveJobBody = z.strictObject({ key: z.string(), version: z.n
 /** The owner's Stop on a running item: its worker's whole process group is killed within seconds and the item ends
  * skipped, "stopped by you" with the reason; its work stays where it is. */
 export const QueueStopBody = z.strictObject({ key: z.string(), reason: z.string().trim().min(1), version: z.number().int().nullable() });
-export const QueueItemAgentBody = z.strictObject({ key: z.string(), name: z.string().nullable().optional() });
+/** `name`: the account (null: the pool); `model`: sonnet or opus (null: the ticket's own tier). Left out stays as it is. */
+export const QueueItemAgentBody = z.strictObject({ key: z.string(), name: z.string().nullable().optional(), model: z.enum(["sonnet", "opus"]).nullable().optional() });
 /** `<run key>@<ended>`: one ended run, once. */
 export const RunSeenBody = z.strictObject({ key: z.string().min(1) });
 export const AgentsDismissBody = z.strictObject({ agent: z.string() });
