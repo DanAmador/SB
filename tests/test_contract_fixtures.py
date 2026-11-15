@@ -356,6 +356,8 @@ class ContractFixturesTest(unittest.TestCase):
         self.record("night-stop-none", "/api/night/stop", {"mode": "now"}, 400)
         self.record("night-ended", "/api/night?id=" + live)
         self.record("night-start", "/api/night/start", {"name": "Second night", "by": "sess-1"})
+        renamed = self.record("night-rename", "/api/night/rename", {"name": "Late shift"})["night"]
+        self.assertEqual(renamed["name"], "Late shift")
         r("unsend", {"id": pending})
         r("unlock", {"key": "port:5173", "by": "sess-1"})
         r("run_seen", {"key": "repo/one#1@1000"})

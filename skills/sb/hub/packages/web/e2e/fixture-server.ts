@@ -7,7 +7,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { QueueMapBody, QueueMoveBody, QueueMoveMapBody, QueueSetBody, QueueStopBody, TicketActionBody, RunDetail, RunSeenBody, MapRoute, RunsPage, SendBody, State, Tickets, Trail, addLinks, type LinkContext, type Message, type QueueItem, type TicketRow } from "@sb-hub/contract";
+import { QueueMapBody, QueueMoveBody, QueueMoveMapBody, QueueSetBody, QueueStopBody, NightRenameBody, NightStopBody, NightStartBody, NightsAnswer, NightDetail, TicketActionBody, RunDetail, RunSeenBody, MapRoute, RunsPage, SendBody, State, Tickets, Trail, addLinks, type LinkContext, type Message, type QueueItem, type TicketRow } from "@sb-hub/contract";
 
 /** Every file the fixtures name exists; the server's own vault lookup is covered by the server's tests. */
 const ctx: LinkContext = { exists: () => true, real: (p) => p, findTicket: (map, num) => `/vault/${map}/issues/${String(num)}.md`, runs: {} };
@@ -95,15 +95,17 @@ const bareRoute = (): unknown => {
   }, ctx));
 };
 
+/** The id of the live run: every item the queue holds belongs to it, as the hub's own do. */
+let liveId = "n-live";
 const item = (key: string, state: QueueItem["state"]): Raw<QueueItem> => ({
-  key, kind: "ticket", agent: null, state, note: "", commit: null, tries: 0, started: state === "running" ? now() - 300 : null, ended: null,
+  key, kind: "ticket", agent: null, state, note: "", commit: null, tries: 0, started: state === "running" ? now() - 300 : null, ended: null, night: liveId,
 });
 const RUN = "/vault/runs/2026-11-13-board";
 const start = now();
 /** Every ticket action the page posted, for the test to read. */
 const actions: { action: string; key: string; text: string }[] = [];
 const queue = {
-  version: 1, seeded: true, paused: false, agent: "main", agents: ["main"],
+  version: 1, seeded: true, paused: false, agent: "main", agents: ["main"], night: "n-live" as string | null,
   runs: { "demo/board": `${RUN}/2026-11-13-board.md` },
   maps: ["demo/board", "other/site"],
   items: [
@@ -120,10 +122,38 @@ const queue = {
   ] as Raw<QueueItem>[],
 };
 const first = JSON.stringify(queue.items);
-/** The close-off job, between landing and its checks: only the run's graph tests ask for it. */
+
+// ---- runs: a live one (the queue above) and an ended one the owner stopped, with two tickets it never reached ----
+interface NightRec { id: string; name: string; started: number; by: string | null; state: "live" | "stopping" | "ended"; ended: number | null; how: "finished" | "stopped" | "stop_time" | null; not_reached: { key: string; title: string }[] }
+const oldItems = (): Raw<QueueItem>[] => [
+  { ...item("demo/board#2", "done"), night: "n-old", title: "Drag a ticket into the queue", ended: start - 86400 + 600, started: start - 86400, commit: "abcdef0123456789", run: RUN, log: `${RUN}/o2.log` },
+  { ...item("other/old#1", "failed"), night: "n-old", title: "Sweep the old attic", ended: start - 86400 + 900, started: start - 86400 + 100, note: "check failed: pnpm test", run: RUN, log: `${RUN}/o1.log` },
+] as Raw<QueueItem>[];
+const freshNights = (): NightRec[] => [
+  { id: "n-live", name: "Night of 2026-11-14, 22:45", started: start - 3600, by: "s-1", state: "live", ended: null, how: null, not_reached: [] },
+  { id: "n-old", name: "Night of 2026-11-13, 21:30", started: start - 86400 - 600, by: null, state: "ended", ended: start - 86400 + 1200, how: "stopped",
+    not_reached: [{ key: "demo/batch#1", title: "Batch A" }, { key: "demo/batch#2", title: "Batch B" }] },
+];
+let nights = freshNights();
+let oldRun = oldItems();
+const nightItems = (id: string): Raw<QueueItem>[] => (id === queue.night ? queue.items.filter((i) => i.night === id) : id === "n-old" ? oldRun : []);
+const nightView = (n: NightRec): Record<string, unknown> => {
+  const items = nightItems(n.id);
+  const c = (...st: string[]): number => items.filter((i) => st.includes(i.state)).length;
+  return { ...n, counts: { items: items.length, queued: c("queued"), running: c("running", "landed", "review", "recheck"), done: c("done"), failed: c("failed"), skipped: c("skipped"), not_reached: n.not_reached.length } };
+};
+const liveNight = (): NightRec | undefined => nights.find((n) => n.id === queue.night);
+/** Queuing with no run live starts one by itself. */
+const ensureNight = (): void => {
+  if (queue.night !== null) return;
+  liveId = `n-${String(nights.length + 1)}`;
+  nights = [{ id: liveId, name: "Night of 2026-11-15, 08:00", started: now(), by: null, state: "live", ended: null, how: null, not_reached: [] }, ...nights];
+  queue.night = liveId;
+};
+/** A job of the live run, between landing and its checks: only the run's graph tests ask for it. (A real close-off job belongs to no run and is left out of the page.) */
 const closeOff = {
 key: "job:close-off", kind: "job", agent: null, state: "landed", note: "", commit: null, tries: 0, started: start - 700, ended: null, model: null,
-project: "/demo", repo: "/demo", prompt: "close the night", hash: "abc", name: "close-off", title: "Close off the night", created: start - 3000, close_off: true,
+project: "/demo", repo: "/demo", prompt: "close the night", hash: "abc", name: "close-off", title: "Close off the night", created: start - 3000, night: "n-live",
 } as Raw<QueueItem>;
 /** For the live test: the queued ticket starts and a running one ends done; then put it back. */
 const advance = (): void => {
@@ -132,6 +162,8 @@ const advance = (): void => {
 };
 
 const calls = { moveMap: 0, map: 0 };
+/** Every Stop run the page posted. */
+const stopCalls: string[] = [];
 /** Every Stop the page posted, for the test to read. */
 const stops: { key: string; reason: string }[] = [];
 /** The queued maps in run order: the ones kept that still have something live, then new ones. */
@@ -262,6 +294,8 @@ createServer((req, res) => {
     if (req.method === "POST" && path === "/api/queue/set") {
       const b = QueueSetBody.parse(await body(req));
       if (b.version !== null && b.version !== queue.version) { send(res, 409, addLinks("POST /api/queue/set", { ok: false, stale: true, queue }, ctx)); return; }
+      if (liveNight()?.state === "stopping") { send(res, 400, { ok: false, error: "the run is stopping" }); return; }
+      ensureNight();
       const others = queue.items.filter((i) => i.state !== "queued");
       queue.items = [...others, ...b.keys.map((k) => queue.items.find((i) => i.key === k && i.state === "queued") ?? item(k, "queued"))];
       syncMaps();
@@ -290,6 +324,7 @@ createServer((req, res) => {
     }
     if (req.method === "POST" && path === "/api/queue/map") {
       const b = QueueMapBody.parse(await body(req));
+      ensureNight();
       if (b.map === "demo/bare") {
         const add = bareChecks.length === 0 ? [] : ["demo/bare#1", "demo/bare#2", "demo/bare#3"].filter((k) => !queue.items.some((i) => i.key === k && i.state === "queued"));
         queue.items = [...queue.items, ...add.map((k) => item(k, "queued"))];
@@ -320,11 +355,60 @@ createServer((req, res) => {
       send(res, 200, addLinks("POST /api/queue/set", { ok: true, queue }, ctx));
       return;
     }
+    if (req.method === "POST" && path === "/api/__nolive") {
+      // the live run ends: its items leave the line and no run is live
+      const live = liveNight();
+      if (live) { live.state = "ended"; live.how = "finished"; live.ended = now(); }
+      queue.items = [];
+      queue.night = null;
+      syncMaps();
+      queue.version += 1;
+      send(res, 200, { ok: true });
+      return;
+    }
+    if (req.method === "GET" && path === "/api/nights") { send(res, 200, NightsAnswer.parse({ nights: nights.map(nightView) })); return; }
+    if (req.method === "GET" && path === "/api/night") {
+      const n = nights.find((x) => x.id === new URL(req.url ?? "", "http://x").searchParams.get("id"));
+      if (n === undefined) { send(res, 404, { ok: false, error: "no such run" }); return; }
+      send(res, 200, NightDetail.parse(addLinks("GET /api/night", { night: { ...nightView(n), items: nightItems(n.id) } }, ctx)));
+      return;
+    }
+    if (req.method === "POST" && path === "/api/night/rename") {
+      const n = liveNight();
+      const b = NightRenameBody.parse(await body(req));
+      if (n === undefined || b.name.trim() === "") { send(res, 400, { ok: false, error: "no night is live" }); return; }
+      n.name = b.name.trim();
+      send(res, 200, { ok: true, night: nightView(n) });
+      return;
+    }
+    if (req.method === "POST" && path === "/api/night/stop") {
+      NightStopBody.parse(await body(req));
+      const n = liveNight();
+      if (n === undefined) { send(res, 400, { ok: false, error: "no night is live" }); return; }
+      stopCalls.push("after");
+      // what is queued leaves the line as not reached; what runs keeps running until it is judged
+      n.state = "stopping";
+      n.not_reached = queue.items.filter((i) => i.state === "queued").map((i) => ({ key: i.key, title: tickets().find((t) => `${t.map}#${String(t.num)}` === i.key)?.title ?? i.key }));
+      queue.items = queue.items.filter((i) => i.state !== "queued");
+      syncMaps();
+      queue.version += 1;
+      send(res, 200, { ok: true, night: nightView(n) });
+      return;
+    }
+    if (req.method === "POST" && path === "/api/night/start") {
+      NightStartBody.parse(await body(req));
+      ensureNight();
+      const n = liveNight();
+      if (n === undefined) { send(res, 400, { ok: false, error: "no night is live" }); return; }
+      send(res, 200, { ok: true, night: nightView(n) });
+      return;
+    }
+    if (req.method === "GET" && path === "/api/__night-stops") { send(res, 200, stopCalls); return; }
     if (req.method === "GET" && path === "/api/__stops") { send(res, 200, stops); return; }
     if (req.method === "GET" && path === "/api/__calls") { send(res, 200, calls); return; }
     if (req.method === "POST" && path === "/api/__job") { queue.items = [...queue.items.filter((i) => i.key !== closeOff.key), closeOff]; queue.version += 1; send(res, 200, { ok: true }); return; }
     if (req.method === "POST" && path === "/api/__advance") { advance(); send(res, 200, { ok: true }); return; }
-    if (req.method === "POST" && path === "/api/__restore") { queue.items = JSON.parse(first) as Raw<QueueItem>[]; queue.version += 1; send(res, 200, { ok: true }); return; }
+    if (req.method === "POST" && path === "/api/__restore") { liveId = "n-live"; queue.night = "n-live"; nights = freshNights(); oldRun = oldItems(); queue.items = JSON.parse(first) as Raw<QueueItem>[]; syncMaps(); queue.version += 1; send(res, 200, { ok: true }); return; }
     if (req.method === "GET" && path === "/api/__actions") { send(res, 200, actions); return; }
     if (req.method === "POST" && path?.startsWith("/api/ticket/") === true) {
       const b = TicketActionBody.parse(await body(req));

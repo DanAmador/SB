@@ -1,0 +1,30 @@
+{
+  "body": {
+    "night": {
+      "by": "sess-1",
+      "counts": {
+        "done": 0,
+        "failed": 0,
+        "items": 0,
+        "not_reached": 0,
+        "queued": 0,
+        "running": 0,
+        "skipped": 0
+      },
+      "ended": null,
+      "how": null,
+      "id": "night-fixture-2",
+      "name": "Late shift",
+      "not_reached": [],
+      "started": 1794528060.0,
+      "state": "live"
+    },
+    "ok": true
+  },
+  "contentType": "application/json",
+  "request": {
+    "name": "Late shift"
+  },
+  "route": "POST /api/night/rename",
+  "status": 200
+}

@@ -18,6 +18,7 @@ import { Breadcrumb, MenuButton, SidebarColumn, SidebarSheet } from "./Sidebar.t
 import { HistoryView } from "./HistoryView.tsx";
 import { MapView } from "./MapView.tsx";
 import { SessionSheet } from "./SessionPanel.tsx";
+import { RunHead } from "./RunHead.tsx";
 import { RunView } from "./RunView.tsx";
 import { NightGraph } from "./NightGraph.tsx";
 import { DetailSheet } from "./TicketSheet.tsx";
@@ -227,6 +228,7 @@ function Loaded({ state, tickets, down, lastOk }: { state: State; tickets: Board
             </div>
           )}
           <TabsContent value="run" className="flex flex-col gap-6 outline-none">
+            <RunHead />
             {scope.map !== "" ? <MapView map={scope.map} /> : <NightGraph />}
             <RunView />
           </TabsContent>

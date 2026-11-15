@@ -226,7 +226,7 @@ export function MapName({ links, name, title }: { links: Links | undefined; name
 
 /** The worker's report and log, which open in Obsidian: a link is there only when the note is. */
 export function FileLinks({ item }: { item: QueueItem }): React.JSX.Element | null {
-  const found: [string, string | null][] = [["Report", item.links.report], ["Log", item.links.log]];
+  const found: [string, string | null][] = [["Report", item.links.report], ["Review", item.links.review ?? null], ["Log", item.links.log]];
   const shown = found.filter((x): x is [string, string] => x[1] !== null);
   if (shown.length === 0) return null;
   return (

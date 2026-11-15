@@ -1,9 +1,9 @@
-import { RunsPage, type Run } from "@sb-hub/contract";
+import { RunsPage, type Night, type QueueItem, type Run } from "@sb-hub/contract";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { dayStart } from "./board.ts";
-import { choices, clampZoom, filterRuns, groupByDay, minutesOf, rangeOf, searchLog, sinceOf, stepIndex, type Filters } from "./history.ts";
+import { choices, clampZoom, filterItems, filterRuns, groupByDay, itemOutcome, minutesOf, nightWords, rangeOf, searchLog, sinceOf, sortNights, stepIndex, type Filters } from "./history.ts";
 import { readLink, writeLink } from "./link.ts";
 
 const NOW = new Date(2026, 10, 13, 15, 0).getTime() / 1000;
@@ -95,5 +95,32 @@ describe("grouping and numbers", () => {
     expect(link.view).toBe("history");
     expect(link.run).toBe("a/one#1");
     expect(readLink(writeLink(link))).toEqual(link);
+  });
+});
+
+describe("History by run", () => {
+  const counts = (c: Partial<Night["counts"]>): Night["counts"] => ({ items: 0, queued: 0, running: 0, done: 0, failed: 0, skipped: 0, not_reached: 0, ...c });
+  const night = (id: string, started: number, more: Partial<Night> = {}): Night => ({ id, name: id, started, by: null, state: "ended", ended: started + 100, how: "finished", not_reached: [], counts: counts({}), ...more });
+  it("lists runs newest first, whatever order the hub gave", () => {
+    const list = [night("a", 100), night("c", 300, { state: "live", ended: null, how: null }), night("b", 200)];
+    expect(sortNights(list).map((n) => n.id)).toEqual(["c", "b", "a"]);
+  });
+  it("says each run's counts: done, fell short, not reached, no word for a zero", () => {
+    expect(nightWords(counts({ done: 5, failed: 1, not_reached: 2 }))).toBe("5 done · 1 fell short · 2 not reached");
+    expect(nightWords(counts({ done: 3 }))).toBe("3 done");
+    expect(nightWords(counts({}))).toBe("nothing finished");
+  });
+  it("filters the tickets inside one run by outcome, search, pictures, account and model", () => {
+    const it = (key: string, state: QueueItem["state"], more: Record<string, unknown> = {}): QueueItem =>
+      ({ key, kind: "ticket", agent: null, state, note: "", commit: null, tries: 0, started: null, ended: null, ...more }) as unknown as QueueItem;
+    const items = [it("a/m#1", "done", { runner: "main", model: "opus", media: ["x.png"] }), it("a/m#2", "failed", { runner: "spare" }), it("a/m#3", "skipped")];
+    const f = { q: "", outcome: "" as const, pictures: false, account: "", model: "" };
+    const title = (i: QueueItem): string => `Title ${i.key}`;
+    expect(items.map(itemOutcome)).toEqual(["done", "fell short", "stopped"]);
+    expect(filterItems(items, { ...f, outcome: "failed" }, title).map((i) => i.key)).toEqual(["a/m#2"]);
+    expect(filterItems(items, { ...f, pictures: true }, title).map((i) => i.key)).toEqual(["a/m#1"]);
+    expect(filterItems(items, { ...f, account: "spare" }, title).map((i) => i.key)).toEqual(["a/m#2"]);
+    expect(filterItems(items, { ...f, model: "opus" }, title).map((i) => i.key)).toEqual(["a/m#1"]);
+    expect(filterItems(items, { ...f, q: "m#3" }, title).map((i) => i.key)).toEqual(["a/m#3"]);
   });
 });

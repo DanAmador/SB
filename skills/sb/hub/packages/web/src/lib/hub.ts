@@ -65,6 +65,13 @@ export const useRuns = (since: number, limit: number) =>
 export const useRun = (key: string) =>
   useQuery({ queryKey: ["run", key], queryFn: () => get("GET /api/run", { key }), enabled: key !== "", refetchInterval: TICKETS_MS, retry: 1 });
 
+/** The hub's runs, newest first with counts; polled with the state, since the head of the live one follows a stop. */
+export const useNights = () =>
+  useQuery({ queryKey: ["nights"], queryFn: () => get("GET /api/nights"), refetchInterval: STATE_MS, placeholderData: keepPreviousData, retry: 1 });
+/** One run with its items. */
+export const useNight = (id: string) =>
+  useQuery({ queryKey: ["night", id], queryFn: () => get("GET /api/night", { id }), enabled: id !== "", refetchInterval: TICKETS_MS, retry: 1 });
+
 /** The outcome of a write, in the words the page shows. */
 export type Outcome = { ok: true; words: string } | { ok: false; words: string };
 
@@ -81,12 +88,16 @@ type QueueRoute =
   | "POST /api/queue/stop"
   | "POST /api/queue/item_agent";
 
+type NightRoute = "POST /api/night/stop" | "POST /api/night/rename";
+
 function putQueue(qc: QueryClient, queue: Queue): void {
   qc.setQueryData<State>(["state"], (s) => (s ? { ...s, queue } : s));
 }
 
 export interface Writes {
   queue: <K extends QueueRoute>(route: K, body: RouteBody<K>, done: string | ((answer: RouteAnswer<K>) => string)) => Promise<Outcome>;
+  /** Rename the live run, or stop it after what runs. */
+  night: <K extends NightRoute>(route: K, body: RouteBody<K>, done: string) => Promise<Outcome>;
   ticket: (action: TicketAction, body: RouteBody<"POST /api/ticket/:action">, done: string) => Promise<Outcome>;
   answer: (qid: string, answer: string) => Promise<Outcome>;
   send: (to: string, text: string) => Promise<Outcome>;
@@ -120,6 +131,13 @@ export function useWrites(): Writes {
         return { ok: false, words: "the list changed while you were on it; try again" };
       }
       return { ok: false, words: out.error };
+    },
+    async night(route, body, done) {
+      const out = await post(route, body);
+      void qc.invalidateQueries({ queryKey: ["nights"] });
+      void qc.invalidateQueries({ queryKey: ["night"] });
+      refresh(true);
+      return out.ok ? { ok: true, words: done } : { ok: false, words: out.error };
     },
     async ticket(action, body, done) {
       const out = await post("POST /api/ticket/:action", body, ticketPath(action));

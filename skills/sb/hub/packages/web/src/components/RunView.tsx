@@ -10,7 +10,7 @@ import type { QueueItem } from "@sb-hub/contract";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ago, blockerTitles, dur, endsAt, firstLine, hm, itemTitle, mapTitle, plainReason, plural, projOf, runRows, showOf, type RunRow, type RunTone, itemInScope, ticketInScope } from "@/lib/board.ts";
-import { healthOf, MARK_WORDS, nightBlocks, nightLine, pairNight, type MapPair, type Mark, type NightBlock, type NightRow, type Pairing } from "@/lib/night.ts";
+import { healthOf, liveState, MARK_WORDS, nightBlocks, nightLine, pairNight, type MapPair, type Mark, type NightBlock, type NightRow, type Pairing } from "@/lib/night.ts";
 import { helperCards, sessionCards, type SessionCard } from "@/lib/sessions.ts";
 import { setLink, useLink } from "@/lib/link.ts";
 import { cn } from "@/lib/utils";
@@ -32,9 +32,20 @@ const DRAG_MAP = "application/x-sb-map";
 export function RunView(): React.JSX.Element {
   const { state, ix, scope, agents } = useBoard();
   const link = useLink();
-  const night = nightBlocks(state, ix, scope);
+  // the live run only: nothing from an ended one
+  const night = nightBlocks(liveState(state), ix, scope, true);
   const pairing = pairNight(state, night, sessionCards(state, ix, agents), helperCards(state, ix, agents));
   const stop = night.line.stopAt ?? endsAt(state, ix);
+  // no run is live: the head says so; here are only the maps to queue and the search
+  if (state.queue.night === null) {
+    return (
+      <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
+        <h2 className="sr-only">Run</h2>
+        <QueueAMap />
+        {!(scope.map !== "" && link.mv === "table") && <TicketTable />}
+      </div>
+    );
+  }
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
       <h2 className="sr-only">Run</h2>
@@ -62,10 +73,11 @@ export function RunView(): React.JSX.Element {
 // ---- running now ----
 
 function RunningNow(): React.JSX.Element {
-  const { state, ix, scope, qv } = useBoard();
-  const rows = runRows(state, ix).filter((r) => itemInScope(scope, r.item));
-  const between = state.queue.items.filter((i) => (i.state === "landed" || i.state === "review") && itemInScope(scope, i));
-  const next = qv.next.find((i) => itemInScope(scope, i));
+  const { state, ix, scope } = useBoard();
+  const live = liveState(state);
+  const rows = runRows(live, ix).filter((r) => itemInScope(scope, r.item));
+  const between = live.queue.items.filter((i) => (i.state === "landed" || i.state === "review") && itemInScope(scope, i));
+  const next = live.queue.items.find((i) => i.state === "queued" && itemInScope(scope, i));
   function whyWaits(i: QueueItem): string {
     if (state.queue.paused) return "the queue is paused";
     const t = ix.byKey.get(i.key);

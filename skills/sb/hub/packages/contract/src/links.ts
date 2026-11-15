@@ -46,6 +46,8 @@ export const Links = z.strictObject({
   board: Uri,
   report: Uri,
   log: Uri,
+  /** Its second pass's review note, once there is one. */
+  review: Uri.optional(),
 });
 export type Links = z.infer<typeof Links>;
 
@@ -78,6 +80,7 @@ interface ItemLike {
   readonly run?: string | undefined;
   readonly log?: string | undefined;
   readonly result?: string | undefined;
+  readonly review?: string | null | undefined;
 }
 
 const keyParts = (key: string): { map: string; num: number } | null => {
@@ -97,6 +100,7 @@ export function itemLinks(i: ItemLike, ctx: LinkContext): Links {
     board: linkTo(ctx.runs[i.map ?? k.map], ctx),
     report: linkTo(report, ctx),
     log: linkTo(i.log, ctx),
+    ...(i.review != null && { review: linkTo(i.review, ctx) }),
   };
 }
 

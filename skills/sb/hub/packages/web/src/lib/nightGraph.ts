@@ -53,7 +53,7 @@ function countOf(i: QueueItem): keyof Counts {
     case "recheck": return "checking";
   }
 }
-const tally = (items: readonly QueueItem[]): Counts => {
+export const tally = (items: readonly QueueItem[]): Counts => {
   const c = emptyCounts();
   for (const i of items) c[countOf(i)] += 1;
   return c;

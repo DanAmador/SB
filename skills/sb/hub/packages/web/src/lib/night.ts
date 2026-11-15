@@ -1,5 +1,6 @@
 /** The Run tab's grouping: the night map by map. Pure: no React, no DOM. */
-import type { QueueItem, State } from "@sb-hub/contract";
+import type { Night as NightRecord, QueueItem, State } from "@sb-hub/contract";
+import { countsLine as itemCounts, tally } from "./nightGraph.ts";
 import type { SessionCard } from "./sessions.ts";
 import { agentOf, dur, endedToday, itemInScope, itemMap, mapTitle, projOf, type Scope, type TicketIndex, itemProject, EVERYTHING } from "./board.ts";
 
@@ -67,12 +68,14 @@ export function countsLine(c: Readonly<Record<Mark, number>>): string {
 const GROUP_ORDER: Readonly<Record<Mark, number>> = { done: 0, short: 0, stopped: 0, running: 1, checking: 1, recheck: 2, next: 3 };
 
 /** Every map with something running, queued or ended today, in the hub's map order; then Jobs. */
-export function nightBlocks(state: State, ix: TicketIndex, scope: Scope = EVERYTHING): Night {
+export function nightBlocks(state: State, ix: TicketIndex, scope: Scope = EVERYTHING, wholeRun = false): Night {
   const q = state.queue;
   const queued = q.items.filter((i) => i.state === "queued");
   const place = new Map(queued.map((i, n) => [i.key, n + 1] as const));
   const live = q.items.filter((i) => ["queued", "running", "landed", "review", "recheck"].includes(i.state));
-  const all = [...live, ...endedToday(state)].filter((i) => itemInScope(scope, i));
+  // a live run keeps what it finished before midnight; the hub's old line keeps what ended today
+  const ended = wholeRun ? q.items.filter((i) => i.state === "done" || i.state === "failed" || i.state === "skipped") : endedToday(state);
+  const all = [...live, ...ended].filter((i) => itemInScope(scope, i));
   const maps = new Map<string, QueueItem[]>();
   for (const i of all) {
     const m = i.kind === "job" ? "" : itemMap(i);
@@ -191,3 +194,45 @@ export function pairNight(state: State, night: Night, cards: readonly SessionCar
   const others = chats.filter((c) => !used.has(c.id) && c.agent.state !== "done").map((chat) => ({ chat, helpers: helpers.get(chat.id) ?? [] }));
   return { maps, chats: others, liveChats: others.filter((o) => !o.chat.idle).length };
 }
+
+// ---- the live run: what the Run tab shows, and nothing of an ended one ----
+
+/**
+ * The items of the live run: those that carry its id. A close-off job belongs to no run, an ended run's items are
+ * off the line. A hub that knows no runs (queue.night absent) keeps every item.
+ */
+export function liveItems(queue: Pick<State["queue"], "items" | "night">): QueueItem[] {
+  if (queue.night === undefined) return queue.items;
+  const id = queue.night;
+  return id === null ? [] : queue.items.filter((i) => i.night === id);
+}
+
+/** The state the Run tab reads: the queue holds the live run's items only and keeps no cleared log. */
+export const liveState = (state: State): State => ({ ...state, queue: { ...state.queue, items: liveItems(state.queue), cleared: [] } });
+
+/** The live run's items inside the sidebar's pick (Everything: all; a project: its maps'; a map: its own). */
+export const runItems = (state: State, scope: Scope): QueueItem[] => liveItems(state.queue).filter((i) => itemInScope(scope, i));
+
+/** The head's one line: '6 done · 2 running · 9 next · 1 fell short'. */
+export const headLine = (items: readonly QueueItem[]): string => itemCounts(tally(items)) || "nothing queued yet";
+
+/** What Stop run asks, once. A ticket not yet started will not be reached; what runs or waits for its judging finishes. */
+export function stopAsk(items: readonly QueueItem[]): { running: number; notReached: number; text: string } {
+  const running = items.filter((i) => ["running", "landed", "review", "recheck"].includes(i.state)).length;
+  const notReached = items.filter((i) => i.state === "queued").length;
+  const t = (n: number): string => `${String(n)} ticket${n === 1 ? "" : "s"}`;
+  return { running, notReached, text: `Let the ${String(running)} running ticket${running === 1 ? "" : "s"} finish, then end the run. ${t(notReached)} will not be reached.` };
+}
+
+/** While a run stops: the titles of what still runs, 'Stopping: waiting for A, B to finish'. */
+export function stoppingWords(items: readonly QueueItem[], titleOf: (i: QueueItem) => string): string {
+  const on = items.filter((i) => ["running", "landed", "review", "recheck"].includes(i.state)).map(titleOf);
+  return on.length === 0 ? "Stopping: ending the run." : `Stopping: waiting for ${on.join(", ")} to finish.`;
+}
+
+/** The record of the live (or stopping) run in the hub's list of runs. */
+export const liveRecord = (nights: readonly NightRecord[], id: string | null | undefined): NightRecord | null => nights.find((n) => n.id === id && n.state !== "ended") ?? null;
+
+/** The words for how a run ended. */
+export const HOW_WORDS: Readonly<Record<string, string>> = { finished: "Finished", stopped: "Stopped by you", stop_time: "Stop time reached" };
+export const stateWords = (n: Pick<NightRecord, "state" | "how">): string => (n.state === "live" ? "Live" : n.state === "stopping" ? "Stopping" : (HOW_WORDS[n.how ?? "finished"] ?? "Finished"));

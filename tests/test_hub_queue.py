@@ -1044,6 +1044,9 @@ class NightTest(unittest.TestCase):
         code, out = call("/api/night/start", {"name": "Tonight"})
         self.assertEqual((code, out["night"]["state"]), (200, "live"))
         self.assertEqual(call("/api/night/start", {})[0], 400)
+        code, out = call("/api/night/rename", {"name": "  Late shift "})
+        self.assertEqual((code, out["night"]["name"]), (200, "Late shift"))
+        self.assertEqual(call("/api/night/rename", {"name": " "})[0], 400)
         self.set(1)
         code, out = call("/api/nights")
         self.assertEqual((code, [n["id"] for n in out["nights"]]), (200, [self.q()["night"]]))
@@ -1054,6 +1057,7 @@ class NightTest(unittest.TestCase):
         code, out = call("/api/night/stop", {"mode": "after"})
         self.assertEqual((code, out["night"]["how"]), (200, "stopped"))
         self.assertEqual(call("/api/night/stop", {"mode": "now"})[0], 400)
+        self.assertEqual(call("/api/night/rename", {"name": "x"})[0], 400)  # none is live now
 
 
 if __name__ == "__main__":

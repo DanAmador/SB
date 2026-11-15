@@ -76,7 +76,7 @@ class LanTest(HubCase):
         self.assertEqual(code, 200)
         self.assertIn("a", json.loads(body)["agents"])
         for path in ("api/queue/set", "api/queue/pause", "api/send", "api/answer", "api/ticket/done", "api/report",
-                     "api/night/start", "api/night/stop", "api/agents/dismiss", "api/agents/clear-quiet", "api/run/seen"):
+                     "api/night/start", "api/night/stop", "api/night/rename", "api/agents/dismiss", "api/agents/clear-quiet", "api/run/seen"):
             self.assertEqual(self.req(self.v(path), {"keys": [], "version": 0, "paused": False})[0], 403, path)
         self.assertIn("a", self.get("/api/state")["agents"])
 

@@ -8,9 +8,10 @@ import { Background, Controls, MarkerType, ReactFlow, type Edge, type Node, type
 import "@xyflow/react/dist/style.css";
 import { useEffect, useMemo, useState } from "react";
 import type * as React from "react";
-import type { MapTicket } from "@sb-hub/contract";
+import type { MapTicket, QueueItem } from "@sb-hub/contract";
 import { useMapRoutes } from "@/lib/hub.ts";
 import { setLink } from "@/lib/link.ts";
+import { liveItems } from "@/lib/night.ts";
 import { NODE_H, NODE_W, type MapNode } from "@/lib/map.ts";
 import { focusOf, infoOf, nightGraph, type NightBox, type NightFrame, type Slot } from "@/lib/nightGraph.ts";
 import { cn } from "@/lib/utils";
@@ -101,10 +102,12 @@ function List({ frames }: { frames: readonly NightFrame[] }): React.JSX.Element 
   );
 }
 
-export function NightGraph(): React.JSX.Element | null {
+/** The live run's graph, or the graph of the run it is given (History's). Either narrows to the sidebar's pick. */
+export function NightGraph({ items: given, title }: { items?: readonly QueueItem[]; title?: string }): React.JSX.Element | null {
   const { state, tickets, scope } = useBoard();
   const wide = useWide();
-  const items = state.queue.items;
+  const live = liveItems(state.queue);
+  const items = given ?? live;
   const maps = useMemo(() => [...new Set([...(state.queue.maps ?? []), ...items.filter((i) => i.kind === "ticket").map((i) => i.key.replace(/#\d+$/, ""))])], [state.queue.maps, items]);
   const routes = useMapRoutes(maps);
   const data = routes.map((r) => r.data);
@@ -149,7 +152,7 @@ export function NightGraph(): React.JSX.Element | null {
     <section aria-label="The run" className="flex flex-col gap-2">
       <h2 className="flex items-center gap-2 text-sm font-semibold">
         <IconTopologyStar3 className="size-4 text-muted-foreground" aria-hidden />
-        The run
+        {title ?? "The run"}
         <span className="text-xs font-normal text-muted-foreground" data-testid="run-counts">{g.line}</span>
       </h2>
       {wide ? (

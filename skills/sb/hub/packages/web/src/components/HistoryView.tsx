@@ -1,106 +1,197 @@
 /**
- * History, view 5: every run from the queue and the vault's run folders, newest first and grouped by day, with search, chips
- * for outcome, pictures, account and model, and a time range. A run opens beside the list (?run=<key>); on a phone it takes the page.
+ * History: one row per run (a night), newest first, each with its name, when, how it ended and its counts. A run
+ * opens (?night=<id>) to its graph, the tickets it did with outcome, report, review and log links, and the
+ * tickets its stop never reached, which can be queued again. The ticket filters work inside the open run.
  */
-import { IconPhoto, IconRobot } from "@tabler/icons-react";
-import { useState } from "react";
+import { IconArrowLeft, IconBan, IconCircleCheck, IconCircleDashed, IconLoader2, IconPhoto, IconRobot, IconX } from "@tabler/icons-react";
 import type * as React from "react";
-import type { Run, RunOutcome } from "@sb-hub/contract";
+import type { Night, QueueItem, RunOutcome } from "@sb-hub/contract";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
-import { hm, plural } from "@/lib/board.ts";
-import { choices, DEFAULT_RANGE, filterRuns, groupByDay, minutesOf, outcomeOf, OUTCOMES, RANGES, RANGE_WORDS, rangeOf, sinceOf } from "@/lib/history.ts";
-import { useRuns } from "@/lib/hub.ts";
+import { itemInScope, itemTitle, mapInScope, plural, projOf, withBlockers } from "@/lib/board.ts";
+import { filterItems, itemOutcome, nightWords, OUTCOMES, outcomeOf, sortNights, type ItemOutcome } from "@/lib/history.ts";
+import { useNight, useNights, useRuns } from "@/lib/hub.ts";
 import { setLink, useLink } from "@/lib/link.ts";
+import { stateWords } from "@/lib/night.ts";
 import { cn } from "@/lib/utils";
 import { Empty, ToneIcon } from "./bits.tsx";
 import { useBoard } from "./context.tsx";
+import { NightGraph } from "./NightGraph.tsx";
 import { OUTCOME, RunViewer } from "./RunViewer.tsx";
 
-const PAGE = 300;
+const stamp = (sec: number): string => {
+  const d = new Date(sec * 1000);
+  return `${d.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" })}, ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+};
 
 export function HistoryView(): React.JSX.Element {
-  const { state, scope } = useBoard();
   const link = useLink();
-  const [limit, setLimit] = useState(PAGE);
-  const range = rangeOf(link.range);
-  const q = useRuns(sinceOf(range, state.now), limit);
-  const all = q.data?.runs ?? [];
-  const outcome = outcomeOf(link.out);
-  const { accounts, models } = choices(all);
-  const shown = filterRuns(all, { q: link.q, outcome, pictures: link.pics === "1", account: link.acct, model: link.model }, scope);
-  const days = groupByDay(shown, state.now);
-  const open = shown.find((r) => r.key === link.run) ?? all.find((r) => r.key === link.run);
-  const total = q.data?.total ?? 0;
-  const narrowed = link.q !== "" || outcome !== "" || link.pics === "1" || link.acct !== "" || link.model !== "";
+  const nights = useNights();
+  const list = sortNights(nights.data?.nights ?? []);
+  const open = list.find((n) => n.id === link.night);
   return (
-    <div className="flex flex-col gap-3">
+    <div className="mx-auto flex w-full max-w-4xl flex-col gap-3">
       <h2 className="sr-only">History</h2>
-      <div className={cn(open !== undefined && "max-lg:hidden")}>
-        <Filters accounts={accounts} models={models} />
-      </div>
-      <div className={cn("grid gap-4", open !== undefined ? "lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)]" : "mx-auto w-full max-w-5xl")}>
-        <div className={cn("flex min-w-0 flex-col gap-3", open !== undefined && "max-lg:hidden")}>
+      {open !== undefined ? (
+        <NightDetail key={open.id} night={open} />
+      ) : (
+        <>
           <p className="text-xs text-muted-foreground" aria-live="polite">
-            {q.isPending ? "Reading the runs…" : q.isError ? "The runs could not be read." : `${plural(shown.length, "run")}${narrowed || shown.length !== all.length ? ` of ${String(all.length)}` : ""} · ${RANGE_WORDS[range].toLowerCase()}`}
+            {nights.isPending ? "Reading the runs…" : nights.isError ? "The runs could not be read." : plural(list.length, "run")}
           </p>
-          {q.data !== undefined && shown.length === 0 && <Empty>{narrowed ? "No run matches. Loosen a filter, or pick a longer time range." : "No run in this time range."}</Empty>}
-          {days.map((d) => (
-            <section key={d.label} aria-label={d.label} className="flex flex-col gap-1">
-              <h3 className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">{d.label}</h3>
-              <ul className="flex flex-col divide-y rounded-xl border bg-card">
-                {d.runs.map((r) => (
-                  <RunRow key={r.key} r={r} active={r.key === link.run} />
-                ))}
-              </ul>
-            </section>
-          ))}
-          {q.data !== undefined && total > all.length && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="self-start"
-              onClick={() => {
-                setLimit(limit + PAGE);
-              }}
-            >
-              {`Show ${String(Math.min(PAGE, total - all.length))} more of ${String(total - all.length)}`}
-            </Button>
+          {nights.data !== undefined && list.length === 0 && <Empty>No run yet. Queue a map and one starts.</Empty>}
+          {list.length > 0 && (
+            <ul aria-label="Runs" className="flex flex-col divide-y rounded-xl border bg-card">
+              {list.map((n) => (
+                <NightRow key={n.id} n={n} />
+              ))}
+            </ul>
           )}
-        </div>
-        {open !== undefined && <RunViewer key={open.key} run={open} />}
-      </div>
+        </>
+      )}
     </div>
   );
 }
 
-function RunRow({ r, active }: { r: Run; active: boolean }): React.JSX.Element {
-  const [Ic, word, tone] = OUTCOME[r.outcome];
-  const mins = minutesOf(r);
+function NightRow({ n }: { n: Night }): React.JSX.Element {
+  const live = n.state !== "ended";
   return (
-    <li className={cn("relative flex items-start gap-3 px-4 py-2.5 first:rounded-t-xl last:rounded-b-xl hover:bg-accent/40", active && "bg-accent/60")}>
-      <span className="mt-0.5"><ToneIcon icon={Ic} tone={tone} label={word} /></span>
-      <div className="min-w-0 flex-1">
+    <li data-night={n.id} className="relative flex flex-col gap-0.5 px-4 py-3 first:rounded-t-xl last:rounded-b-xl hover:bg-accent/40">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <button
           type="button"
-          aria-current={active ? "true" : undefined}
-          onClick={() => { setLink({ run: r.key, pic: "" }); }}
-          className="line-clamp-2 text-left text-sm font-medium after:absolute after:inset-0 after:content-[''] hover:underline focus-visible:underline focus-visible:outline-none"
+          onClick={() => { setLink({ night: n.id }); }}
+          className="min-w-0 text-left text-sm font-medium after:absolute after:inset-0 after:content-[''] hover:underline focus-visible:underline focus-visible:outline-none"
         >
-          {r.title}
+          {n.name}
         </button>
-        {r.reason !== "" && <p className={cn("truncate text-sm", r.outcome === "failed" ? "text-destructive" : "text-warn")} title={r.reason}>{r.reason}</p>}
-        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-          <span>{`${r.project} · ${r.map.includes("/") ? r.map.slice(r.map.indexOf("/") + 1) : r.map}`}</span>
-          {r.account !== null && <span className="inline-flex items-center gap-1"><IconRobot className="size-3.5" aria-hidden />{r.account}</span>}
-          {r.model !== null && <Badge>{r.model}</Badge>}
-          {mins !== null && <span>{`${String(mins)} min`}</span>}
-          {r.commit !== null && <code className="font-mono">{r.commit.slice(0, 7)}</code>}
-          {r.pictures.length > 0 && <span className="inline-flex items-center gap-1" title={plural(r.pictures.length, "picture")}><IconPhoto className="size-3.5" aria-hidden />{r.pictures.length}</span>}
-        </div>
+        <Badge tone={live ? "brand" : "neutral"}>{stateWords(n)}</Badge>
       </div>
-      <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{r.ended === null ? "" : hm(r.ended)}</span>
+      <p className="text-xs text-muted-foreground">{`${stamp(n.started)} · ${nightWords(n.counts)}`}</p>
+    </li>
+  );
+}
+
+const MARK: Readonly<Record<ItemOutcome, [typeof IconCircleCheck, "ok" | "bad" | "warn" | "brand" | "muted"]>> = {
+  done: [IconCircleCheck, "ok"],
+  "fell short": [IconX, "bad"],
+  stopped: [IconBan, "warn"],
+  running: [IconLoader2, "brand"],
+  next: [IconCircleDashed, "muted"],
+};
+
+function NightDetail({ night }: { night: Night }): React.JSX.Element {
+  const { scope, ix, tickets, queueWrite, state, down, busy } = useBoard();
+  const link = useLink();
+  const detail = useNight(night.id);
+  const runs = useRuns(0, 300);
+  const all = detail.data?.night.items ?? [];
+  const inScope = all.filter((i) => itemInScope(scope, i));
+  const titleOf = (i: QueueItem): string => itemTitle(i, ix.byKey.get(i.key) ?? (tickets ?? []).find((t) => `${t.map}#${String(t.num)}` === i.key));
+  const outcome = outcomeOf(link.out);
+  const shown = filterItems(inScope, { q: link.q, outcome, pictures: link.pics === "1", account: link.acct, model: link.model }, titleOf);
+  const accounts = [...new Set(inScope.map((i) => i.runner ?? i.agent).filter((x): x is string => x != null && x !== ""))].sort();
+  const models = [...new Set(inScope.map((i) => i.model).filter((x): x is string => x != null && x !== ""))].sort();
+  const unreached = night.not_reached.filter((r) => mapInScope(scope, r.key.replace(/#\d+$/, "")));
+  // the ones still open and not in the line: the others were done another way meanwhile
+  const again = unreached.filter((r) => ix.byKey.has(r.key) && !ix.live.has(r.key) && !ix.doneKeys.has(r.key)).map((r) => r.key);
+  const narrowed = link.q !== "" || outcome !== "" || link.pics === "1" || link.acct !== "" || link.model !== "";
+  const record = runs.data?.runs.find((r) => r.key === link.run);
+  const can = !down && !busy;
+  const queueAgain = (): void => {
+    const keys: string[] = [...state.queue.items.filter((i) => i.state === "queued" && i.kind === "ticket").map((i) => i.key)];
+    for (const k of again) for (const b of withBlockers(k, ix)) if (!keys.includes(b)) keys.push(b);
+    void queueWrite("POST /api/queue/set", { keys, version: state.queue.version }, `Queued ${plural(again.length, "ticket")} again.`).then((o) => {
+      if (o.ok) setLink({ view: "run", night: "" });
+    });
+  };
+  return (
+    <div className="flex min-w-0 flex-col gap-4">
+      <div className="flex flex-col gap-1 rounded-xl border bg-card px-4 py-3" data-testid="night-detail">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="ghost" size="icon-sm" aria-label="Back to the runs" title="Back to the runs" className="-ml-2" onClick={() => { setLink({ night: "", run: "" }); }}>
+            <IconArrowLeft aria-hidden />
+          </Button>
+          <h3 className="min-w-0 flex-1 text-base font-semibold">{night.name}</h3>
+          <Badge tone={night.state !== "ended" ? "brand" : "neutral"}>{stateWords(night)}</Badge>
+        </div>
+        <p className="text-xs text-muted-foreground">{`${stamp(night.started)}${night.ended !== null ? ` to ${stamp(night.ended)}` : ""} · ${nightWords(night.counts)}`}</p>
+        {night.state !== "ended" && (
+          <Button variant="ghost" size="sm" className="w-fit px-0 text-brand" onClick={() => { setLink({ view: "run", night: "" }); }}>
+            This run is live: open it on the Run tab
+          </Button>
+        )}
+      </div>
+      {detail.data !== undefined && <NightGraph items={all} title="The run's graph" />}
+      {unreached.length > 0 && (
+        <section aria-label="Not reached" data-testid="not-reached" className="flex flex-col gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-sm font-semibold">{`Not reached (${String(unreached.length)})`}</h3>
+            <Button size="sm" variant="outline" disabled={!can || again.length === 0} onClick={queueAgain}>
+              Queue these again
+            </Button>
+          </div>
+          <ul className="flex flex-col divide-y rounded-xl border bg-card">
+            {unreached.map((r) => (
+              <li key={r.key} data-key={r.key} data-mark="not reached" className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-sm">
+                <ToneIcon icon={IconCircleDashed} tone="muted" label="not reached" />
+                <button type="button" className="min-w-0 flex-1 basis-48 text-left hover:underline" onClick={() => { setLink({ t: r.key }); }}>
+                  {r.title}
+                </button>
+                <span className="text-xs text-muted-foreground">{again.includes(r.key) ? "not reached, still open" : "not reached, not open now"}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      <section aria-label="Tickets of the run" className="flex flex-col gap-2">
+        <Filters accounts={accounts} models={models} />
+        <p className="text-xs text-muted-foreground" aria-live="polite">
+          {detail.isPending ? "Reading the run…" : `${plural(shown.length, "ticket")}${narrowed || shown.length !== all.length ? ` of ${String(all.length)}` : ""}`}
+        </p>
+        {detail.data !== undefined && shown.length === 0 && <Empty>{narrowed ? "No ticket matches. Loosen a filter." : "No ticket ran in this run."}</Empty>}
+        {shown.length > 0 && (
+          <ul aria-label="Tickets of the run" className="flex flex-col divide-y rounded-xl border bg-card">
+            {shown.map((i) => (
+              <ItemRow key={i.key} i={i} title={titleOf(i)} hasRun={runs.data?.runs.some((r) => r.key === i.key) === true} />
+            ))}
+          </ul>
+        )}
+      </section>
+      {record !== undefined && <RunViewer key={record.key} run={record} />}
+    </div>
+  );
+}
+
+function ItemRow({ i, title, hasRun }: { i: QueueItem; title: string; hasRun: boolean }): React.JSX.Element {
+  const o = itemOutcome(i);
+  const [Ic, tone] = MARK[o];
+  const links: [string, string | null][] = [["Report", i.links.report], ["Review", i.links.review ?? null], ["Log", i.links.log]];
+  return (
+    <li data-key={i.key} data-mark={o} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-sm">
+      <ToneIcon icon={Ic} tone={tone} label={o} spin={o === "running"} />
+      <div className="min-w-0 flex-1 basis-48">
+        <button type="button" className="line-clamp-2 text-left font-medium hover:underline" onClick={() => { setLink({ t: i.key }); }}>
+          {title}
+        </button>
+        <p className="truncate text-xs text-muted-foreground">
+          {`${projOf(i.key.replace(/#\d+$/, ""))} · ${o}`}
+          {i.commit !== null && <code className="ml-1 font-mono">{i.commit.slice(0, 7)}</code>}
+        </p>
+      </div>
+      <div className="flex max-w-full flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+        {(i.runner ?? i.agent) != null && <span className="inline-flex items-center gap-1"><IconRobot className="size-3.5" aria-hidden />{i.runner ?? i.agent}</span>}
+        {(i.media ?? []).length > 0 && <span className="inline-flex items-center gap-1" title={plural((i.media ?? []).length, "picture")}><IconPhoto className="size-3.5" aria-hidden />{(i.media ?? []).length}</span>}
+        {links.filter((l): l is [string, string] => l[1] !== null).map(([w, href]) => (
+          <a key={w} href={href} className="text-brand underline-offset-2 hover:underline" title={`Open the ${w.toLowerCase()} in Obsidian`}>{w}</a>
+        ))}
+        {hasRun && (
+          <Button variant="ghost" size="xs" onClick={() => { setLink({ run: i.key, pic: "" }); }}>
+            Details
+          </Button>
+        )}
+      </div>
     </li>
   );
 }
@@ -121,26 +212,18 @@ function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; chi
 function Filters({ accounts, models }: { accounts: string[]; models: string[] }): React.JSX.Element {
   const link = useLink();
   const outcome = outcomeOf(link.out);
-  const range = link.range === "" ? DEFAULT_RANGE : rangeOf(link.range);
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
         <Input
           type="search"
           data-find
-          aria-label="Search runs"
-          placeholder="Search titles, reasons, commits  ( / )"
+          aria-label="Search tickets"
+          placeholder="Search tickets  ( / )"
           value={link.q}
           onChange={(e) => { setLink({ q: e.target.value }); }}
           className="w-full sm:w-80"
         />
-        <div role="group" aria-label="Time range" className="flex gap-1">
-          {RANGES.map((r) => (
-            <Chip key={r} on={range === r} onClick={() => { setLink({ range: r === DEFAULT_RANGE ? "" : r }); }}>
-              {RANGE_WORDS[r]}
-            </Chip>
-          ))}
-        </div>
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <div role="group" aria-label="Outcome" className="flex flex-wrap gap-1">

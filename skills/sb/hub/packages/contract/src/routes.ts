@@ -52,6 +52,7 @@ export const ROUTES = {
   "POST /api/queue/stop": post(s.QueueStopBody, { 200: s.QueueAnswer, 409: s.QueueStale }),
   "POST /api/night/start": post(s.NightStartBody, { 200: s.NightAnswer }),
   "POST /api/night/stop": post(s.NightStopBody, { 200: s.NightAnswer }),
+  "POST /api/night/rename": post(s.NightRenameBody, { 200: s.NightAnswer }),
   "POST /api/queue/item_agent": post(s.QueueItemAgentBody, { 200: s.QueueAnswer }),
   "POST /api/run/seen": post(s.RunSeenBody, { 200: s.Ok }),
   "POST /api/agents/dismiss": post(s.AgentsDismissBody, { 200: s.Ok }),

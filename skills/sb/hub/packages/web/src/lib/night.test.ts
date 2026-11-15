@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { QueueItem, State, TicketRow } from "@sb-hub/contract";
 import { ticketIndex } from "./board.ts";
-import { countsLine, healthOf, nightBlocks, nightLine, pairNight, QUEUE_HEAD } from "./night.ts";
+import { countsLine, headLine, healthOf, liveItems, liveState, nightBlocks, nightLine, pairNight, QUEUE_HEAD, runItems, stateWords, stopAsk, stoppingWords } from "./night.ts";
 import { helperCards, sessionCards } from "./sessions.ts";
 
 const NOW = 1_800_000_000;
@@ -95,5 +95,51 @@ describe("pairNight: who is on each ticket", () => {
   it("puts chats in charge of no map under Other chats with their helpers, and counts the live ones", () => {
     expect(pair.chats.map((c) => [c.chat.id, c.helpers.map((h) => h.id)])).toEqual([["c-2", ["h-2"]]]);
     expect(pair.liveChats).toBe(1);
+  });
+});
+
+describe("the live run", () => {
+  // two projects; two runs: n2 is live, n1 ended (its items are still in the file here to prove they are left out)
+  const run = (key: string, st: QueueItem["state"], night: string): QueueItem => item(key, st, { night });
+  const items = [
+    run("p/a#1", "done", "n2"), run("p/a#2", "running", "n2"), run("p/a#3", "queued", "n2"),
+    run("q/b#1", "failed", "n2"), run("q/b#2", "queued", "n2"), run("q/b#3", "queued", "n2"),
+    run("p/a#9", "done", "n1"), run("q/old#1", "failed", "n1"),
+    item("job:close-off", "landed", {}),
+  ];
+  const s = (night: string | null | undefined): State => ({ now: NOW, queue: { version: 1, items, maps: ["p/a", "q/b"], paused: false, agent: "main", stop_at: null, ...(night === undefined ? {} : { night }) }, installed: {} }) as unknown as State;
+
+  it("keeps the live run's items only: no ended run's, no close-off job", () => {
+    expect(liveItems(s("n2").queue).map((i) => i.key)).toEqual(["p/a#1", "p/a#2", "p/a#3", "q/b#1", "q/b#2", "q/b#3"]);
+    expect(liveItems(s(null).queue)).toEqual([]);
+    expect(liveItems(s(undefined).queue)).toHaveLength(9);
+    expect(liveState(s("n2")).queue.items).toHaveLength(6);
+  });
+  it("says the head's counts in one line", () => {
+    expect(headLine(liveItems(s("n2").queue))).toBe("1 done · 1 running · 3 next · 1 fell short");
+    expect(headLine([])).toBe("nothing queued yet");
+  });
+  it("scopes: Everything is the whole run, a project its maps, a map its own", () => {
+    const keys = (scope: { project: string; map: string }): string[] => runItems(s("n2"), scope).map((i) => i.key);
+    expect(keys({ project: "", map: "" })).toHaveLength(6);
+    expect(keys({ project: "p", map: "" })).toEqual(["p/a#1", "p/a#2", "p/a#3"]);
+    expect(keys({ project: "q", map: "" })).toEqual(["q/b#1", "q/b#2", "q/b#3"]);
+    expect(keys({ project: "q", map: "q/b" })).toEqual(["q/b#1", "q/b#2", "q/b#3"]);
+    expect(keys({ project: "p", map: "q/b" })).toEqual(["q/b#1", "q/b#2", "q/b#3"]);
+  });
+  it("a project's blocks are one per map of the live run, and an ended run's map is not among them", () => {
+    const night = nightBlocks(liveState(s("n2")), ticketIndex([], { queue: { items } } as never), { project: "q", map: "" }, true);
+    expect(night.blocks.map((b) => b.map)).toEqual(["q/b"]);
+    const all = nightBlocks(liveState(s("n2")), ticketIndex([], { queue: { items } } as never), { project: "", map: "" }, true);
+    expect(all.blocks.map((b) => b.map)).toEqual(["p/a", "q/b"]);
+  });
+  it("asks once what a stop does, and names what still runs while it stops", () => {
+    const live = liveItems(s("n2").queue);
+    expect(stopAsk(live).text).toBe("Let the 1 running ticket finish, then end the run. 3 tickets will not be reached.");
+    expect(stoppingWords(live, (i) => i.key)).toBe("Stopping: waiting for p/a#2 to finish.");
+    expect(stoppingWords([], (i) => i.key)).toBe("Stopping: ending the run.");
+    expect(stateWords({ state: "ended", how: "stopped" })).toBe("Stopped by you");
+    expect(stateWords({ state: "ended", how: "stop_time" })).toBe("Stop time reached");
+    expect(stateWords({ state: "stopping", how: null })).toBe("Stopping");
   });
 });

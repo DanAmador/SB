@@ -304,6 +304,7 @@ export const NightsAnswer = z.strictObject({ nights: z.array(Night) });
 export const NightDetail = z.strictObject({ night: Night.extend({ items: z.array(QueueItem) }) });
 export const NightAnswer = z.strictObject({ ok: z.literal(true), night: Night });
 export const NightStartBody = z.strictObject({ name: z.string().nullable().optional(), by: z.string().nullable().optional() });
+export const NightRenameBody = z.strictObject({ name: z.string() });
 export const NightStopBody = z.strictObject({ mode: z.literal("after") });
 
 // ---- providers: the hub's own panel is strict, a project's script may add anything ----

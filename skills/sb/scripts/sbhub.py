@@ -751,6 +751,20 @@ class Hub:
             self._save()
             return {"ok": True, "night": self._night_view(night)}
 
+    def night_rename(self, name):
+        """Give the live (or stopping) night another name."""
+        name = str(name or "").strip()
+        if not name:
+            raise ValueError("a night needs a name")
+        with self._lock:
+            night = self._night_live()
+            if night is None:
+                raise ValueError("no night is live")
+            night["name"] = name
+            self._data["queue"]["version"] += 1
+            self._save()
+            return {"ok": True, "night": self._night_view(night)}
+
     def night_stop(self, mode):
         """Stop after: nothing new starts, what runs finishes and is judged, then the night ends as stopped by
         you. What it never reached leaves the line, stays open and is listed on the night."""
@@ -3970,6 +3984,8 @@ def make_handler(hub):
                     out = hub.night_start(d.get("name"), d.get("by"))
                 elif path == "/api/night/stop":
                     out = hub.night_stop(d["mode"])
+                elif path == "/api/night/rename":
+                    out = hub.night_rename(d["name"])
                 elif path == "/api/run/seen":
                     out = hub.run_seen(d["key"])
                 elif path == "/api/agents/dismiss":

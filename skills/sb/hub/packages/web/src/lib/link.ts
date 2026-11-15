@@ -27,6 +27,8 @@ export interface Link {
   readonly pics: string;
   readonly acct: string;
   readonly model: string;
+  /** History: the open run's id (a night). */
+  readonly night: string;
   /** The open session's id: the Run tab opens its panel. */
   readonly sess: string;
   /** A map's landing: "table" for the ticket table, else the graph. */
@@ -43,7 +45,7 @@ export interface Link {
   readonly page: string;
 }
 
-const KEYS = ["view", "q", "project", "map", "s", "t", "run", "pic", "range", "out", "pics", "acct", "model", "sess", "mv", "ms", "act", "ts", "tt", "tp", "sort", "page"] as const;
+const KEYS = ["view", "q", "project", "map", "s", "t", "run", "night", "pic", "range", "out", "pics", "acct", "model", "sess", "mv", "ms", "act", "ts", "tt", "tp", "sort", "page"] as const;
 
 export function readLink(search: string): Link {
   const s = new URLSearchParams(search);
@@ -57,6 +59,7 @@ export function readLink(search: string): Link {
     s: SHOWS.find((x) => x === show) ?? "ready",
     t: s.get("t") ?? "",
     run: s.get("run") ?? "",
+    night: s.get("night") ?? "",
     pic: s.get("pic") ?? "",
     range: s.get("range") ?? "",
     out: s.get("out") ?? "",

@@ -1,5 +1,5 @@
 /** History's rules: which runs a filter keeps, how they group by day, and what the time range asks the hub for. */
-import type { Run, RunOutcome } from "@sb-hub/contract";
+import type { Night, QueueItem, Run, RunOutcome } from "@sb-hub/contract";
 import { dayStart, mapInScope, type Scope } from "./board.ts";
 
 export const RANGES = ["today", "7d", "30d", "all"] as const;
@@ -97,3 +97,41 @@ export const stepIndex = (i: number, by: 1 | -1, n: number): number => (n === 0 
 
 /** Clamp a zoom to 1x to 6x, so a picture never shrinks below its frame. */
 export const clampZoom = (z: number): number => Math.min(6, Math.max(1, Math.round(z * 100) / 100));
+
+// ---- runs: History lists one row per run, not loose days ----
+
+/** The runs newest first: by when each started. The hub's list is already in that order; this keeps it so. */
+export const sortNights = (nights: readonly Night[]): Night[] => [...nights].sort((a, b) => b.started - a.started);
+
+/** A run's counts for its row: '5 done · 1 fell short · 2 not reached', no word for a zero. */
+export function nightWords(c: Night["counts"]): string {
+  const parts: [number, string][] = [[c.done, "done"], [c.failed, "fell short"], [c.skipped, "stopped"], [c.not_reached, "not reached"]];
+  const said = parts.filter(([n]) => n > 0).map(([n, w]) => `${String(n)} ${w}`);
+  return said.length > 0 ? said.join(" · ") : "nothing finished";
+}
+
+/** An item's outcome in a run's list: how it ended, or that the stop never reached it. */
+export type ItemOutcome = "done" | "fell short" | "stopped" | "running" | "next";
+export const itemOutcome = (i: QueueItem): ItemOutcome => (i.state === "done" ? "done" : i.state === "failed" ? "fell short" : i.state === "skipped" ? "stopped" : i.state === "queued" ? "next" : "running");
+
+export interface ItemFilters {
+  readonly q: string;
+  readonly outcome: RunOutcome | "";
+  readonly pictures: boolean;
+  readonly account: string;
+  readonly model: string;
+}
+const RUN_OUTCOME: Readonly<Record<ItemOutcome, RunOutcome | "">> = { done: "done", "fell short": "failed", stopped: "skipped", running: "", next: "" };
+
+/** The items of one run a ticket filter keeps: the same search, outcome, pictures, account and model as before. */
+export function filterItems(items: readonly QueueItem[], f: ItemFilters, titleOf: (i: QueueItem) => string): QueueItem[] {
+  const words = f.q.toLowerCase().split(/\s+/).filter(Boolean);
+  return items.filter((i) => {
+    if (f.outcome !== "" && RUN_OUTCOME[itemOutcome(i)] !== f.outcome) return false;
+    if (f.pictures && (i.media ?? []).length === 0) return false;
+    if (f.account !== "" && (i.runner ?? i.agent) !== f.account) return false;
+    if (f.model !== "" && i.model !== f.model) return false;
+    const hay = `${titleOf(i)} ${i.note} ${i.commit ?? ""} ${i.key}`.toLowerCase();
+    return words.every((w) => hay.includes(w));
+  });
+}
