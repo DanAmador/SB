@@ -59,3 +59,46 @@ class Close(VaultCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CloseFinished(VaultCase):
+    """`sbmap close --finished`: every map whose tickets have all ended closes on its own."""
+
+    def setUp(self):
+        super().setUp()
+        self.map("semantra/done", title="All done")
+        self.ticket("semantra/done", 1, "Built")
+        self.ticket("semantra/done", 2, "Dropped", status="Project.Dropped")
+        self.map("semantra/busy", title="Still going")
+        self.ticket("semantra/busy", 3, "Built")
+        self.ticket("semantra/busy", 4, "Open", status="Project.Planned")
+        self.map("semantra/empty", title="Nothing yet")
+        self.sb("summary", "semantra/done", "--text", "Why: because it mattered.")
+
+    def test_closes_only_maps_whose_tickets_all_ended(self):
+        r = self.sb("close", "--finished")
+        self.assertIn("All done", r.stdout)
+        self.assertTrue(self.exists("wayfinder/semantra/archive/done/report.md"))
+        self.assertFalse(self.exists("wayfinder/semantra/archive/busy/report.md"))
+        self.assertFalse(self.exists("wayfinder/semantra/archive/empty/report.md"))
+        self.assertIn("status: Project.InProgress", self.read("wayfinder/semantra/busy/map.md"))
+
+    def test_the_report_and_plain_words_say_it_closed_on_its_own(self):
+        self.sb("close", "--finished")
+        report = self.read("wayfinder/semantra/archive/done/report.md")
+        self.assertIn("# All done: every ticket ended", report)
+        self.assertIn("Closed on its own on " + TODAY + ": 1 ticket resolved, 1 out of scope.", report)
+        self.assertNotIn("<One paragraph", report)
+        self.assertNotIn("## Your calls", report)
+        self.assertNotIn("## Decisions later work must respect", report)
+        words = self.read("wayfinder/semantra/archive/done/map.md")
+        self.assertIn("## In plain words\n\nClosed on its own on " + TODAY, words)
+        self.assertIn("Why: because it mattered.", words)
+
+    def test_a_dry_run_names_them_and_changes_nothing(self):
+        r = self.sb("close", "--finished", "--dry-run")
+        self.assertIn("All done", r.stdout)
+        self.assertNotIn("Still going", r.stdout)
+        self.assertFalse(self.exists("wayfinder/semantra/archive/done/report.md"))
+        self.assertIn("status: Project.InProgress", self.read("wayfinder/semantra/done/map.md"))
+

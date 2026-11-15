@@ -490,6 +490,14 @@ class ReviewTest(RunnerCase):
         self.assertIn("A: failed, judged partly by the Opus review", self.board())
         self.assertEqual(self.items()["repo/one#2"]["note"].count("not met"), 2)  # the verdict, and the item
 
+    def test_a_night_that_ends_closes_the_maps_it_finished(self):
+        self.sup.close_off = True  # the morning housekeeping, which closing finished maps is part of
+        self.only(1, 2)
+        self.until(lambda: (self.vault / "wayfinder/repo/archive/one/report.md").is_file())
+        report = (self.vault / "wayfinder/repo/archive/one/report.md").read_text(encoding="utf-8")
+        self.assertIn("Closed on its own on ", report)
+        self.assertIn("2 tickets resolved", report)
+
     def test_the_reviewer_runs_on_opus_for_a_sonnet_ticket_and_an_opus_ticket(self):
         self.sb("set", "repo/one", "002", "tier=opus", "--no-sync")
         self.resume()

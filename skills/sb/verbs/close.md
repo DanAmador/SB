@@ -1,5 +1,11 @@
 # /sb close <map>
 
+**Finished maps close on their own.** When a night ends, the hub runs `sbmap close --finished`:
+every map whose tickets have all ended (resolved or out of scope) is archived with a short report
+and In plain words saying so. Run it by hand any time (`--dry-run` lists them first). It skips the
+wiki learning below; a later learn pass over those reports does it. The steps here are for closing
+one map by hand, with its learning.
+
 The map's Destination is reached, or the owner is ending it. Leave two things: the map's knowledge
 compiled into the wiki, and a report the owner can review in one sitting and Semantra can place
 beside similar maps. Both follow wikibrain's *Writing a finding* ([the wiki](../reference/wiki.md)):

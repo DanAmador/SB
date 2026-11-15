@@ -2617,10 +2617,17 @@ class Supervisor:
 
     def _settle_night(self, ending=True):
         """A stopping night drops what is queued; with `ending`, a night whose items are all judged ends. The tick
-        ends it only after the board and the digest have read its items."""
+        ends it only after the board and the digest have read its items. A night that ends closes every map whose
+        tickets have all ended (`sbmap close --finished`), with the morning close-off's housekeeping."""
         with self.hub._lock:
+            live = self.hub._data["queue"].get("night")
             if self.hub._night_settle(ending):
                 self.hub._save()
+            ended = bool(live) and self.hub._data["queue"].get("night") is None
+        if ended and self.close_off:
+            rc, out, err = self.sbmap("close", "--finished")
+            print("sb hub queue: closed the finished maps: {}".format(out or "none") if rc == 0 else
+                  "sb hub queue: closing the finished maps failed: {}".format(err or out), file=sys.stderr, flush=True)
 
     def _night_note(self):
         """Keep the vault's hub-now.md current: on a start or an end, and every NOTE_EVERY s while something

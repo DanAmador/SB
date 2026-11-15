@@ -109,6 +109,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections import Counter
 import time
 import zlib
 from datetime import date
@@ -2325,8 +2326,41 @@ def wiki_module():
     sys.exit("sbmap: the wikibrain skill is missing: run install.sh (it is pinned in skills-lock.json)")
 
 
+def finished_maps():
+    """The open maps whose tickets have all ended (resolved or out of scope): at least one ticket, none open or
+    claimed. A map with no tickets yet is not finished."""
+    return [m for m in all_maps() if not m.archived and m.status != "resolved" and m.tickets
+            and all(t.status in ("resolved", "out-of-scope") for t in m.tickets.values())]
+
+
+def close_finished(args):
+    """`close --finished [--dry-run]`: close every finished map on its own, its report and In plain words saying so.
+    The wiki learning a hand close does is left for a later learn pass."""
+    today = date.today().isoformat()
+    for m in finished_maps():
+        if "--dry-run" in args:
+            print(f"{m.rel_name}  {m.title}")
+            continue
+        n = Counter(t.status for t in m.tickets.values())
+        parts = [f"{n['resolved']} ticket{'s' if n['resolved'] != 1 else ''} resolved"] + (
+            [f"{n['out-of-scope']} out of scope"] if n["out-of-scope"] else [])
+        outcome = (f"Closed on its own on {today}: {', '.join(parts)}. Nothing was left open. Its knowledge is not "
+                   "learned into the wiki yet; a learn pass over this report does that.")
+        old = plain_words(m)
+        rest = old[len(leading_quote(old)):].strip()
+        cmd_summary([m.rel_name, "--text", outcome + ("\n\n" + rest if rest else "")])
+        cmd_close([m.rel_name, "--outcome", outcome])
+
+
 def cmd_close(args):
-    sbwiki = wiki_module()
+    if args and args[0] == "--finished":
+        return close_finished(args[1:])
+    try:
+        sbwiki = wiki_module()
+    except SystemExit:
+        if not opt(args, "--outcome"):
+            raise
+        sbwiki = None  # a map closing on its own without the wiki skill: no findings, a learn pass adds them later
     m = load(args[0])
     report = m.folder / "report.md"
     if report.exists():
@@ -2337,11 +2371,16 @@ def cmd_close(args):
             print(f"  {t.id} {t.title}  [{t.status}{': ' + t.claimed_by if t.claimed_by else ''}]")
         sys.exit(f"sbmap: {len(waiting)} ticket(s) still open or claimed; resolve them or rule them out of scope")
     here = rel(m.folder) + "/"
-    findings = sorted((n for n in sbwiki.articles()
+    findings = [] if sbwiki is None else sorted((n for n in sbwiki.articles()
                        if any(sbwiki.entry_key(e).startswith(here) for e in n.refs("sources"))),
                       key=lambda n: n.title.lower())
     _, body, _ = split_fm(REPORT_TEMPLATE.read_text(encoding="utf-8"))
     body = body.replace("<the map's title>", m.title)
+    outcome = opt(args, "--outcome")
+    if outcome:  # closed on its own: the outcome is known, and there is nothing to call or respect
+        body = body.replace("<its outcome in a few words>", "every ticket ended")
+        body = re.sub(r"<One paragraph:.*?>", lambda _: outcome, body, flags=re.S)
+        body = drop_section(drop_section(body, "Your calls"), "Decisions later work must respect")
     if findings:
         placeholder = next(line for line in body.splitlines() if line.startswith("- [ ] <One sentence.>"))
         body = body.replace(placeholder, "\n".join(f"- [ ] <One sentence.> {n.link()}" for n in findings))
