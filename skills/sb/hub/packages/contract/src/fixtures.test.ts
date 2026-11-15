@@ -76,6 +76,15 @@ describe("fixtures written by the hub", () => {
     expect(panels.length).toBeGreaterThan(0);
     for (const p of panels) RepoProvider.parse(p);
   });
+
+  it("takes a queue item carrying what its tries cost, as sbhub's _add_spend writes it", () => {
+    const body = structuredClone(fixtures.find(([f]) => f === "state.json")?.[1].body) as { queue: { items: Record<string, unknown>[] } };
+    body.queue.items[0] = { ...body.queue.items[0], spend: { run_minutes: 12.5, check_minutes: 3.2, tries: 2, model: "opus",
+      account: "personal", tokens_in: 1200, tokens_out: 340, cache_read: 99000, cost_usd: 1.37 } };
+    expect(State.safeParse(addLinks("GET /api/state", body, bare())).success).toBe(true);
+    body.queue.items[0] = { ...body.queue.items[0], spend: { run_minutes: 1, check_minutes: 0, tries: 1, model: "sonnet", account: null } };
+    expect(State.safeParse(addLinks("GET /api/state", body, bare())).success).toBe(true);
+  });
 });
 
 describe("the schemas refuse what the hub never sends", () => {

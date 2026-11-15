@@ -193,6 +193,18 @@ const itemFields = {
   /** How many actions the worker's hook refused so far, and the last few; absent until the first refusal. */
   refused: z.number().int().optional(),
   refused_lines: z.array(z.string()).optional(),
+  /** What its tries cost so far (sbhub `_add_spend`); written onto the ticket's note when the item ends. */
+  spend: z.strictObject({
+    run_minutes: z.number(),
+    check_minutes: z.number(),
+    tries: z.number().int(),
+    model: z.string(),
+    account: z.string().nullable(),
+    tokens_in: z.number().optional(),
+    tokens_out: z.number().optional(),
+    cache_read: z.number().optional(),
+    cost_usd: z.number().optional(),
+  }).optional(),
   /** obsidian:// links to its notes, added by the TypeScript server (links.ts). */
   links: Links,
 };
