@@ -92,8 +92,10 @@ Read a ticket's properties, not its body, to know what happened to it; a board s
 
 1. **Read the vault first.** `sbmap info --repo <repo path>`, then `sbmap info <map>` for the map in
    play; `sbmap status <map>` for claims and the handoff, checkpoint and run boards it names;
-   `sbmap wiki index --project <repo>` and `sbmap wiki find` the effort's nouns. Say in one line
-   what they gave you, "nothing" included.
+   `sbmap wiki index --project <repo>` and `sbmap wiki find` the effort's nouns;
+   `semantra search "<the ask>"` for tickets and research that say it in other words
+   ([which search for which situation](reference/search.md)). Say in one line what they gave you,
+   "nothing" included.
 2. **Resolve the contract**: [contract.md](reference/contract.md) (commits, tests, models, lanes,
    the usage gate, blocked rules). `learn`, `ask` and `explain` skip it.
 3. Run the verb.

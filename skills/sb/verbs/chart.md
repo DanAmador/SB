@@ -12,6 +12,8 @@ later run alone. This replaces the wayfinder skill's *Chart the map*: load no ot
    `sbmap new <map> --title "<title>" --why "<problem → what changes, plain words>" --type <type> --question "<question>" --done-when "<done-when>" [--out "<what it leaves alone>"] [--said "<owner's words>"] [--blocked-by 624,625] [--paths a,b] [--tier opus] [--check owner]`
    - **Title**: one sentence on what is true once it is done, about 60 characters; the rest goes in `--why`.
    - `--why`, `--said` and `--out` follow [SKILL.md](../SKILL.md#every-ticket-and-map-says-why-in-the-owners-words).
+   - Refused because an open ticket reads the same: open it. The same problem goes on that ticket
+     (`sbmap comment`); a different one is filed again with `--not-a-duplicate` ([search.md](../reference/search.md)).
    - Each sized to one session (~1.5 h). Fewer, bigger-reason tickets beat many slices: a slice
      whose why is only "part of X" belongs in X's Question as a step.
    - `--paths`: the files or folders it will change, when the code already says. `sbmap lanes` runs

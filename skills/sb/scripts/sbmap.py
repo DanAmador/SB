@@ -47,7 +47,10 @@ Bases see the whole route. It answers what an agent should never compute or type
                             [--question "..."] [--done-when "..."] [--out "<what this ticket leaves alone>"]
                             [--blocked-by 622,623] [--paths src/a.py,docs/] [--comments "..."] [--no-sync]
                             [--said "<the owner's exact words, dated and quoted at the top>"]
-                                        full ticket creation with properties, wikilinks & auto-sync
+                            [--not-a-duplicate]
+                                        full ticket creation with properties, wikilinks & auto-sync; with
+                                        Semantra on PATH, refused while an open ticket of the repo reads the
+                                        same (add to it with comment, or pass --not-a-duplicate)
     sbmap.py summary  <map> --text "<why, in the owner's words; where it stands; what they decide next>"
                                         writes the map's ## In plain words (in place, or first);
                                         an owner quote (--said) already there stays
@@ -1230,6 +1233,47 @@ def file_title(title):
     return name if len(name) <= 100 else name[:100].rsplit(" ", 1)[0]
 
 
+LOOKALIKE = 0.5  # cosine: on the owner's vault a rewording of an open ticket scored 0.50-0.57, unrelated notes 0.44
+
+
+def semantra(*args, timeout=None):
+    """Run the Semantra CLI (search by meaning: $SEMANTRA, else `semantra` on PATH) over the vault and return its
+    JSON, or None when it is missing, fails or outlasts `timeout` seconds; it is stopped with SIGTERM so the
+    vectors it embedded are kept. A search after a night of notes can embed for minutes."""
+    cli = os.environ.get("SEMANTRA") or shutil.which("semantra")
+    if not cli:
+        return None
+    cmd = (["node"] if cli.endswith((".mjs", ".js")) else []) + [cli, *args, "--vault", str(VAULT), "--json"]
+    try:
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    except OSError:
+        return None
+    try:
+        out, _ = p.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        p.terminate()
+        p.communicate()
+        print(f"sbmap: duplicate check skipped: Semantra's index is catching up; `semantra index --vault "
+              f"\"{VAULT}\"` finishes it", file=sys.stderr)
+        return None
+    try:
+        return json.loads(out) if p.returncode == 0 else None
+    except ValueError:
+        return None
+
+
+def look_alikes(m, title, why):
+    """The open tickets of this repo's maps that read like a new one, as (cosine, Ticket), best first."""
+    found = semantra("search", f"{title}. {why}", "--limit", "15",
+                     timeout=float(os.environ.get("SB_SEMANTRA_TIMEOUT", 30)))
+    if not found:
+        return []
+    mine = {rel(f): f for f in repo_tickets(m.repo) if f.parent.name == "issues"}
+    hits = [(h["cosine"], Ticket(mine[h["path"]])) for h in found.get("hits", [])
+            if h.get("cosine", 0) >= LOOKALIKE and h.get("path") in mine]
+    return [(c, t) for c, t in hits if t.status in ("open", "claimed")]
+
+
 def cmd_new(args):
     m = load(args[0])
     title = opt(args, "--title") or sys.exit("sbmap: --title is required")
@@ -1244,6 +1288,11 @@ def cmd_new(args):
     question = opt(args, "--question", "")
     done_when = opt(args, "--done-when", "")
     comments = opt(args, "--comments", "") or opt(args, "--ruling", "")
+    same = [] if "--not-a-duplicate" in args else look_alikes(m, title, why)
+    if same:
+        lines = "\n".join(f"  {rel(t.path)}  ({c:.2f})  {t.title}" for c, t in same[:5])
+        sys.exit(f"sbmap: open tickets read like this one:\n{lines}\nThe same problem: add to that ticket with "
+                 f"`sbmap comment` instead. A different one: run this again with --not-a-duplicate.")
     n = next_number(m)
     path = m.folder / "issues" / f"{n:03d} {file_title(title)}.md"
     path.parent.mkdir(exist_ok=True)
@@ -2337,6 +2386,11 @@ def close_finished(args):
     """`close --finished [--dry-run]`: close every finished map on its own, its report and In plain words saying so.
     The wiki learning a hand close does is left for a later learn pass."""
     today = date.today().isoformat()
+    cli = os.environ.get("SEMANTRA") or shutil.which("semantra")
+    if cli and "--dry-run" not in args:
+        # the night's notes, embedded now in the background, so the morning's first search takes seconds
+        subprocess.Popen(["nice", *(["node"] if cli.endswith((".mjs", ".js")) else []), cli, "index", "--vault",
+                          str(VAULT)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
     for m in finished_maps():
         if "--dry-run" in args:
             print(f"{m.rel_name}  {m.title}")
