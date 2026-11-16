@@ -144,8 +144,10 @@ def main():
     argv = sys.argv[1:]
     brief = argv[argv.index("-p") + 1]
     print("argv: " + json.dumps(argv[argv.index("-p") + 2:]), flush=True)
-    print("env: " + json.dumps({k: os.environ.get(k) for k in
-                                ("CLAUDE_CONFIG_DIR", "SB_HUB_AGENT", "SB_HUB_PARENT", "SB_HUB_PORT", "SB_HUB_UNITY")}), flush=True)
+    env = {k: os.environ.get(k) for k in ("CLAUDE_CONFIG_DIR", "SB_HUB_AGENT", "SB_HUB_PARENT", "SB_HUB_PORT")}
+    if os.environ.get("SB_HUB_UNITY"):  # only a Unity project's worker or integrator has it
+        env["SB_HUB_UNITY"] = os.environ["SB_HUB_UNITY"]
+    print("env: " + json.dumps(env), flush=True)
     print("cwd: " + os.getcwd(), flush=True)
     if brief == "reply ok":  # the hub's usage probe
         print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "result": "ok"}))
