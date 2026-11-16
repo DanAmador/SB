@@ -2690,6 +2690,7 @@ def map_tickets(m):
     return {"map": m.rel_name, "title": m.title, "status": m.status, "words": short(" ".join(l for l in plain_words(m).splitlines() if not l.startswith(">")).strip(), 300),
             "checks": m.props.get("checks") or [], "uri": obsidian_uri(m.md_path), "tickets": rows}
 
+
 def repo_checks(repo):
     """The commands of <repo>/.sb/checks, one per line; blank lines and # comments skipped. [] when there is none."""
     try:
