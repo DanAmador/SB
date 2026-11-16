@@ -2,12 +2,13 @@
  * What the Run tab lets you set: how many tickets each repo runs at once, which accounts are in tonight's pool, the
  * account and model of a waiting ticket (one, or every ticked one), and the words for why a ticket waits.
  */
-import { IconCheck, IconChevronDown, IconMinus, IconPlus, IconRobot, IconX } from "@tabler/icons-react";
+import { IconCheck, IconChecklist, IconChevronDown, IconMinus, IconPlus, IconRobot, IconX } from "@tabler/icons-react";
 import { useState, useSyncExternalStore } from "react";
 import type * as React from "react";
 import type { QueueItem } from "@sb-hub/contract";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { say } from "@/lib/notice.ts";
 import { hm, itemTitle, mapTitle, plural, poolOf } from "@/lib/board.ts";
 import { accountLines, poolWith, repoLines, waitWords, type AccountLine } from "@/lib/night.ts";
 import { Store } from "@/lib/store.ts";
@@ -274,6 +275,42 @@ function AccountRow({ a, now, disabled, onSwitch }: { a: AccountLine; now: numbe
       >
         <span className={cn("block size-3.5 rounded-full bg-background shadow transition-transform", a.inPool ? "translate-x-4.5" : "translate-x-0.5")} />
       </button>
+    </div>
+  );
+}
+
+// ---- Review finished now ----
+
+/** The finished tickets no review has taken yet, with a button that starts every map's review at once. */
+export function ReviewNow(): React.JSX.Element {
+  const { state, tickets, writes, down, busy } = useBoard();
+  const [pending, setPending] = useState(false);
+  const [said, setSaid] = useState("");
+  const waiting = state.queue.items.filter((i) => i.kind === "ticket" && i.state === "landed").length;
+  const next = state.review_next_at ?? null;
+  const off = down || busy || pending || waiting === 0;
+  // busy is on for the read-only phone page and chat card
+  const nameOf = (map: string): string => {
+    const t = tickets?.find((x) => x.map === map);
+    return t === undefined ? map : mapTitle(t);
+  };
+  const press = async (): Promise<void> => {
+    setPending(true);
+    const out = await writes.reviewNow();
+    setPending(false);
+    say(out);
+    setSaid(!out.ok ? "" : out.started.length === 0 ? "No review started: each map with finished tickets already has one running." : `Review started on ${out.started.map(nameOf).join(", ")}.`);
+  };
+  return (
+    <div data-testid="review-now" className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+      <Button variant="outline" size="sm" disabled={off} onClick={() => { void press(); }}>
+        <IconChecklist aria-hidden />
+        {waiting === 0 ? "Review finished now" : `Review ${String(waiting)} finished now`}
+      </Button>
+      <span className="text-muted-foreground">
+        {waiting === 0 ? "No finished ticket waits for a review." : next !== null ? `The next timed look is at ${hm(next)}.` : "Finished tickets are reviewed when their map ends."}
+      </span>
+      {said !== "" && <span>{said}</span>}
     </div>
   );
 }

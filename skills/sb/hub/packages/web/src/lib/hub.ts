@@ -105,6 +105,8 @@ export interface Writes {
   unsend: (id: string) => Promise<Outcome>;
   dismiss: (agent: string) => Promise<Outcome>;
   clearQuiet: () => Promise<Outcome>;
+  /** Start every waiting review at once; the maps it started (keys) come with the outcome. */
+  reviewNow: () => Promise<Outcome & { started: readonly string[] }>;
   scan: () => Promise<Outcome>;
   /** Mark ended runs seen (`<key>@<ended>` each): they leave Waits for you at once and the hub keeps the mark. */
   seen: (keys: readonly string[]) => Promise<Outcome>;
@@ -178,6 +180,11 @@ export function useWrites(): Writes {
       refresh(false);
       for (const o of outs) if (!o.ok) return { ok: false, words: o.error };
       return { ok: true, words: "Marked seen." };
+    },
+    async reviewNow() {
+      const out = await post("POST /api/review/now", {});
+      refresh(true);
+      return out.ok ? { ok: true, words: "Reviews started.", started: out.data.started } : { ok: false, words: out.error, started: [] };
     },
     async scan() {
       const out = await post("POST /api/agents/scan", {});

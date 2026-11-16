@@ -15,7 +15,7 @@ import { helperCards, sessionCards, type SessionCard } from "@/lib/sessions.ts";
 import { setLink, useLink } from "@/lib/link.ts";
 import { cn } from "@/lib/utils";
 import { Empty, FileLinks, MapName, SectionTitle, TicketTitle, ToneIcon } from "./bits.tsx";
-import { Limits, RowMenu, TickBar, TickBox, WaitReason } from "./RunControls.tsx";
+import { Limits, ReviewNow, RowMenu, TickBar, TickBox, WaitReason } from "./RunControls.tsx";
 import { TicketTable } from "./TicketTable.tsx";
 import { useBoard } from "./context.tsx";
 
@@ -64,6 +64,7 @@ export function RunView(): React.JSX.Element {
       <section aria-label="The night, map by map" data-testid="blocks" className="flex flex-col gap-3">
         {night.blocks.length === 0 ? <Empty>Nothing is running, queued or ended today.</Empty> : night.blocks.map((b) => <Block key={b.map || "jobs"} b={b} queued={night.queuedMaps} pair={pairing.maps.get(b.map)} />)}
       </section>
+      <ReviewNow />
       <TickBar items={state.queue.items} />
       <OtherChats pairing={pairing} />
       <QueueAMap />
