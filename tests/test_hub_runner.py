@@ -462,16 +462,21 @@ class TicketLoopTest(RunnerCase):
         self.assertEqual(self.open_tickets()[1]["status"], "open")
         self.assertFalse(list(self.vault.glob("wayfinder/repo/one/issues/done/001*.md")))
 
-    def test_no_commit_on_sonnet_retries_once_on_opus_then_fails(self):
+    def test_no_commit_three_times_tries_twice_on_sonnet_then_opus_then_waits_for_you_with_every_reason(self):
         self.modes = {"repo/one#1": "nothing", "repo/one#2": "hang"}
         self.resume()
         self.until(lambda: self.state_of("repo/one#1") == "failed")
         runs = [x for x in self.launched if x["key"] == "repo/one#1"]
-        self.assertEqual([x["model"] for x in runs], ["sonnet", "opus"])
-        self.assertIn("no commit", runs[1]["brief"])
+        self.assertEqual([x["model"] for x in runs], ["sonnet", "sonnet", "opus"])  # tries 1-2 on its tier, 3 on opus
         self.assertNotIn("no commit", runs[0]["brief"])
-        self.assertIn('"--model", "opus"', Path(runs[1]["log"]).read_text(encoding="utf-8"))
-        self.assertEqual(self.items()["repo/one#1"]["tries"], 1)
+        self.assertIn("## This is try 2 of 5", runs[1]["brief"])
+        self.assertIn("- try 1 (sonnet): no commit", runs[1]["brief"])
+        self.assertIn("- try 2 (sonnet): no commit", runs[2]["brief"])
+        self.assertIn('"--model", "opus"', Path(runs[2]["log"]).read_text(encoding="utf-8"))
+        item = self.items()["repo/one#1"]
+        self.assertEqual((item["tries"], len(item["fails"])), (3, 3))
+        self.assertIn("the same failure 3 tries in a row with no new commit", item["note"])
+        self.assertIn("try 3 (opus): no commit", item["note"])
         self.assertEqual(self.open_tickets()[1]["status"], "open")
         self.assertIn("no commit", self.ticket_text(1))
 
@@ -994,24 +999,22 @@ class StopsTest(RunnerCase):
         self.assertEqual(self.hub.state()["installed"]["main"]["limited_until"], reset)
         self.assertEqual(self.open_tickets(), {})
 
-    def test_a_worker_past_its_time_limit_has_its_whole_group_killed_and_a_sonnet_ticket_retries_on_opus(self):
+    def test_a_worker_past_its_time_limit_has_its_whole_group_killed_and_is_tried_again_then_waits_for_you(self):
         self.sup.limit = 1
-        self.mode = "hang"
+        self.modes = {"repo/one#1": "hang", "repo/one#2": "nothing"}
         self.resume()
         self.sup.tick()
-        groups = [self.pids()]
-        Path(os.environ["FAKE_WORKER_PIDS"]).unlink()
-        self.clock.t += 2
-        self.sup.tick()  # killed, then retried on opus at once
+        groups = []
+        for _ in range(sbhub.SAME_MAX):
+            groups.append(self.pids())
+            Path(os.environ["FAKE_WORKER_PIDS"]).unlink()
+            self.clock.t += 2
+            self.sup.tick()  # killed, then tried again at once
         runs = [x for x in self.launched if x["key"] == "repo/one#1"]
-        self.assertEqual([x["model"] for x in runs], ["sonnet", "opus"])
+        self.assertEqual([x["model"] for x in runs], ["sonnet", "sonnet", "opus"])
         self.assertIn("ran past", runs[1]["brief"])
-        self.assertEqual((self.items()["repo/one#1"]["state"], self.items()["repo/one#1"]["tries"]), ("running", 1))
-        groups.append(self.pids())
-        self.clock.t += 2
-        self.sup.tick()
         item = self.items()["repo/one#1"]
-        self.assertEqual(item["state"], "failed")
+        self.assertEqual(item["state"], "failed")  # the same failure three times, no commit: the owner looks
         self.assertIn("ran past", item["note"])
         pids = [pid for g in groups for pid in g]
         end = time.time() + 5
@@ -1105,6 +1108,135 @@ class StopsTest(RunnerCase):
         self.sup.tick()
         self.assertEqual(self.state_of("repo/one#1"), "queued")
         self.assertEqual(self.open_tickets()[1]["status"], "claimed")
+
+
+class RetryTest(RunnerCase):
+    """A failed try goes back to the queue from its kept work, up to five tries (3-5 on Opus), first when its map waits
+    on it; the same failure three times with no new commit, or the fifth try, goes to the owner. Stops are no try."""
+    MAPS = (("repo/one", "repoA", ("A", "one/"), ("B", "two/"), ("C", "three/")),)
+
+    def failing_check(self, fails):
+        """A check that exits 1 `fails` times, then 0."""
+        script = self.root / "fails.sh"
+        script.write_text('n=$(cat "{c}" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "{c}"; '
+                          '[ $n -le {f} ] && exit 1; exit 0\n'.format(c=self.root / "fails", f=fails))
+        return "sh " + str(script)
+
+    def limit(self, name, until):
+        with self.hub._lock:
+            self.hub._data["installed"][name]["limited_until"] = until
+
+    def runs(self, key):
+        return [x for x in self.launched if x["key"] == key]
+
+    def test_a_check_failing_twice_lands_on_the_third_try_on_opus_from_the_second_tries_work(self):
+        self.sb("set", "repo/one", "001", "checks=" + self.failing_check(2), "--no-sync")
+        self.only(1)
+        self.until(lambda: self.state_of("repo/one#1") == "done")
+        runs = self.runs("repo/one#1")
+        self.assertEqual([x["model"] for x in runs], ["sonnet", "sonnet", "opus"])
+        item = self.items()["repo/one#1"]
+        first, second = (f["commit"] for f in item["fails"])
+        self.assertEqual([f["why"] for f in item["fails"]], ["check failed: " + self.failing_check(2)] * 2)
+        self.assertNotEqual(first, second)
+        self.assertEqual(item["base_sha"], second)  # the third try started on the second try's commit
+        self.assertEqual(git(self.repos["repo/one"], "rev-parse", item["commit"] + "^"), second)
+        self.assertEqual((self.repos["repo/one"] / "one" / "done.txt").read_text().count("work for"), 3)
+        self.assertIn("## This is try 3 of 5", runs[2]["brief"])
+        self.assertIn("- try 2 (sonnet): check failed", runs[2]["brief"])
+        self.assertIn("commit " + second[:9], runs[2]["brief"])
+        self.assertIn("go on from it", runs[2]["brief"])
+        self.assertNotIn(1, self.open_tickets())
+
+    def test_a_ticket_its_map_waits_on_is_tried_again_before_an_unrelated_ticket_of_its_repo(self):
+        self.sb("block", "repo/one", "002", "1", "--no-sync")
+        self.hub.queue_set(["repo/one#1", "repo/one#2", "repo/one#3"], self.hub.state()["queue"]["version"])
+        self.hub.queue_item_agent("repo/one#1", "spare")
+        self.modes = {"repo/one#1": "nothing"}
+        self.hub.queue_pause(False)
+        self.sup.tick()
+        self.assertEqual([x["key"] for x in self.launched], ["repo/one#1"])
+        self.limit("spare", START + 3600)  # its next try cannot start yet: main is free for the others
+        self.until(lambda: self.items()["repo/one#1"].get("tries") == 1)
+        for _ in range(3):
+            self.sup.tick()
+        self.assertEqual([x["key"] for x in self.launched], ["repo/one#1"])  # C waits though main is free
+        self.assertEqual(self.state_of("repo/one#3"), "queued")
+        self.assertIn("next try of repo/one#1", self.items()["repo/one#3"]["waits"]["text"])
+        self.limit("spare", None)
+        self.modes = {}
+        self.until(lambda: {self.state_of("repo/one#2"), self.state_of("repo/one#3")} <= {"landed", "review", "done"})
+        keys = [x["key"] for x in self.launched]
+        self.assertEqual(keys[:2], ["repo/one#1", "repo/one#1"])  # its next try first, then the rest of its repo
+        self.assertEqual(sorted(keys[2:]), ["repo/one#2", "repo/one#3"])
+
+    def test_the_same_failure_three_times_with_no_new_commit_waits_for_you_and_the_map_goes_on(self):
+        self.modes = {"repo/one#1": "nothing"}
+        self.only(1, 3)
+        self.until(lambda: self.state_of("repo/one#3") in ("landed", "review", "done"))
+        item = self.items()["repo/one#1"]
+        self.assertEqual(item["state"], "failed")
+        self.assertEqual(len(self.runs("repo/one#1")), sbhub.SAME_MAX)
+        self.assertEqual(len(item["fails"]), 3)
+        self.assertIn("the same failure 3 tries in a row with no new commit", item["note"])
+        for n in (1, 2, 3):
+            self.assertIn("try {} (".format(n), item["note"])
+        self.assertIn("work for repo/one/003", (self.repos["repo/one"] / "three" / "done.txt").read_text())
+        self.assertFalse(self.hub.state()["queue"]["paused"])
+
+    def test_the_fifth_failed_try_waits_for_you_even_with_new_commits(self):
+        self.sb("set", "repo/one", "001", "checks=" + self.failing_check(99), "--no-sync")
+        self.only(1)
+        self.until(lambda: self.state_of("repo/one#1") == "failed")
+        self.assertEqual([x["model"] for x in self.runs("repo/one#1")], ["sonnet", "sonnet", "opus", "opus", "opus"])
+        self.assertIn("5 tries, the most it gets", self.items()["repo/one#1"]["note"])
+
+    def test_a_usage_limit_stop_leaves_the_try_count_unchanged(self):
+        self.modes = {"repo/one#1": "nothing"}
+        self.only(1)
+        self.sup.tick()
+        self.modes = {"repo/one#1": "limit"}  # its second try hits the limit
+        self.until(lambda: self.hub.state()["installed"]["main"]["limited_until"])
+        item = self.items()["repo/one#1"]
+        self.assertEqual((item["state"], item["tries"], len(item["fails"]), item["stops"]), ("queued", 1, 1, 1))
+        self.assertEqual([x["model"] for x in self.runs("repo/one#1")], ["sonnet", "sonnet"])
+        self.limit("main", None)
+        self.modes = {}
+        self.until(lambda: self.state_of("repo/one#1") == "done")
+        runs = self.runs("repo/one#1")
+        self.assertEqual([x["model"] for x in runs], ["sonnet", "sonnet", "sonnet"])  # still try 2: not on opus
+        self.assertIn("## This is try 2 of 5", runs[2]["brief"])
+
+    def test_after_a_hub_restart_the_try_count_and_the_kept_work_survive(self):
+        self.sb("set", "repo/one", "001", "checks=" + self.failing_check(1), "--no-sync")
+        self.only(1)
+        self.sup.tick()
+        self.limit("main", START + 3600)  # the second try waits, so the hub restarts between the tries
+        self.until(lambda: self.items()["repo/one#1"].get("tries") == 1)
+        self.limit("main", None)
+        self.hub._save()
+        commit = self.items()["repo/one#1"]["fails"][0]["commit"]
+        self.sup.stop()
+        hub = Hub(self.root / "hub", now=self.clock, launcher=self.launcher)
+        with hub._lock:
+            hub._data["installed"]["main"]["limited_until"] = None
+        sup = Supervisor(hub)
+        sup.close_off = False
+        self.addCleanup(sup.stop)
+        item = next(i for i in hub.state()["queue"]["items"] if i["key"] == "repo/one#1")
+        self.assertEqual((item["state"], item["tries"], item["fails"][0]["commit"]), ("queued", 1, commit))
+        self.assertTrue(item["retry"].startswith("check failed"))
+        def one():  # the live line's item, or the ended night's record of it
+            return next((i for i in hub.state()["queue"]["items"] if i["key"] == "repo/one#1"), None) or next(
+                i for i in hub.night(hub.nights()["nights"][0]["id"])["night"]["items"] if i["key"] == "repo/one#1")
+        end = time.time() + 60
+        while time.time() < end and one()["state"] not in ("done", "failed"):
+            sup.tick()
+            time.sleep(0.03)
+        item = one()
+        self.assertEqual(item["state"], "done")
+        self.assertEqual(item["base_sha"], commit)  # the second try went on from the first try's commit
+        self.assertIn("## This is try 2 of 5", self.runs("repo/one#1")[1]["brief"])
 
 
 class OwnerStopTest(RunnerCase):

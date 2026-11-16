@@ -655,7 +655,7 @@ class Hub:
         if item is None or item["state"] == "queued":
             return item
         for f in ("retry", "digested", "runner", "pid", "pid_start", "result", "base_sha", "first_base", "resume", "stops",
-                  "log_start", "checked", "verdict", "review", "redo", "stop_asked"):
+                  "log_start", "checked", "verdict", "review", "redo", "stop_asked", "fails"):
             item.pop(f, None)
         item.update(state="queued", note="", ended=None, tries=0, started=None, commit=None)
         return item
@@ -1454,7 +1454,10 @@ def review_limit(n):
 
 REVIEW_MODEL = "opus"  # the second pass runs on Opus, whichever model did the work
 # A ticket's tries, each with its own counter on its queue item, none of which spends another's:
-#   tries     worker runs that ended (a sonnet first try whose checks failed runs once more on opus: `retry`)
+#   tries     failed tries so far (`fails` holds each one's model, reason and commit): a failed try is queued again
+#             at the front from its kept work, up to TRIES_MAX tries, from OPUS_FROM on Opus (`retry`); then, or after
+#             SAME_MAX alike failures with no new commit, it fails for the owner. A ticket its map waits on goes again
+#             before anything else of its repo starts.
 #   stops     runs cut off by a usage limit or a logout, queued again at the front (STOPS_MAX)
 #   rechecks  a check that exited 75, or a review that could not run, run again alone (RECHECKS_MAX)
 #   redo      the one more try the Opus review asks for: its first verdict was partly or not met. The field holds the
@@ -1508,6 +1511,9 @@ NEED_CAP = 0.60  # no item is judged to need more of a window than this: a big l
 IDLE_FLOOR = 0.10  # an account running nothing and under this much 5-hour use always takes an eligible item
 READING_OLD = 1800  # a reading older than this counts as none (one worker; the probe is due long before)
 STOPS_MAX = 3  # an item cut off by a limit or a logout this many times ends failed
+TRIES_MAX = 5  # a ticket whose try failed is queued again, from its kept work, up to this many tries in all
+OPUS_FROM = 3  # ...the first tries on its own tier, this one and later on Opus (an agy agent keeps its model)
+SAME_MAX = 3  # the same failure this many tries in a row with no new commit: it waits for the owner sooner
 AUTH_PATTERNS = ("authentication_failed", "failed to authenticate", "oauth session expired")
 RESUME = ("\n## An earlier try stopped\n\nAn earlier try on {agent} stopped {why}. Its changes may already be in "
           "the tree, committed or not: read `git log {base}..HEAD` and {diff} first, continue from there, do not "
@@ -1526,6 +1532,20 @@ def redo_brief(redo):
     findings = "\n".join(redo.get("findings") or []) or "(the review named no line not met: read it)"
     return REDO.format(work=work, verdict=redo.get("verdict") or "not met", review=redo.get("review") or "none kept",
                        findings=findings)
+
+
+def retry_brief(item, tree, branch, base):
+    """What a ticket's later try is told: which try it is, every earlier try's failure, the last one's whole reason,
+    and where the work so far is, to go on from."""
+    fails = item.get("fails") or []
+    where = ("on branch {} in this worktree".format(branch) if tree else "in this checkout")
+    lines = "\n".join("- try {} ({}): {}{}".format(n, f.get("model"), f.get("why"),
+                                                   ", commit " + f["commit"][:9] if f.get("commit") else "")
+                      for n, f in enumerate(fails, 1))
+    return ("\n## This is try {n} of {most}\n\nEarlier tries failed:\n{lines}\nThe last one's reason in full:\n{why}\n"
+            "Their work is kept {where}: read `git log {base}..HEAD` and `git status` first and go on from it; do not "
+            "start over and do not revert it. Fix what failed.\n").format(
+                n=len(fails) + 1, most=TRIES_MAX, lines=lines, why=item["retry"], where=where, base=base[:12])
 
 
 def _num(v):
@@ -2366,7 +2386,7 @@ class TicketRun:
         board = board if board is not None else self.board(t["map"])
         tree, branch = item.get("tree"), item.get("branch")
         bare = {"t": t, "agent": name, "inst": inst, "tree": tree, "branch": branch}
-        # a later try (cut off by a limit, or retried on opus) goes on in the worktree it had
+        # a later try (cut off by a limit, or after a failed one) goes on in the worktree it had
         reuse = bool(tree) and bool(item.get("resume") or item.get("tries")) and Path(tree).is_dir()
         where = tree if tree else t["repo"]
         # a try after one cut off by a limit or a logout keeps its base: the verdict sees all of the ticket's commits
@@ -2388,7 +2408,7 @@ class TicketRun:
         brief = sbqueue.brief(t, _plain_words(t), str(folder), where, branch or
                               _git(t["repo"], "rev-parse", "--abbrev-ref", "HEAD") or "the current branch")
         if item.get("retry"):
-            brief += "\nThe first try failed; the hub's check said:\n" + item["retry"] + "\n"
+            brief += retry_brief(item, tree, branch, item.get("first_base") or base)
         if item.get("redo"):
             brief += redo_brief(item["redo"])
         log = str(folder / "{}.log".format(int(t["num"])))
@@ -2450,11 +2470,31 @@ class TicketRun:
             stopped = self.stopped(item, run, checks)
             if stopped:
                 return stopped
-        if not recheck and not item.get("tries") and t.get("tier", "sonnet") == "sonnet" and run["inst"].get("kind") == "claude":
+        return self.again(item, run, reason, sha, checks)
+
+    def again(self, item, run, reason, sha, checks=()):
+        """A try that failed (its check, its landing, its time, no commit): `retry`, queued again at the front from
+        its kept work with every try's reason, up to TRIES_MAX tries, from OPUS_FROM on Opus; `failed` for the owner
+        after the last, or once the same failure came SAME_MAX tries in a row with no new commit. A stop at a limit
+        or a logout never gets here: it is no try."""
+        t = run["t"]
+        fails = list(item.get("fails") or []) + [{"model": item.get("model") or t.get("tier") or "sonnet",
+                                                   "why": firstline(reason)[:300], "commit": sha}]
+        last = [(_fail_class(f["why"]) or f["why"], f["commit"]) for f in fails[-SAME_MAX:]]
+        same = len(last) == SAME_MAX and len(set(last)) == 1
+        if len(fails) < TRIES_MAX and not same:
+            opus = len(fails) + 1 >= OPUS_FROM and (run.get("inst") or {}).get("kind") != "agy"  # agy keeps its model
+            model = "opus" if opus else fails[-1]["model"]
             self.release(item["key"])
-            return self.result(item, "retry", "retrying on opus: " + reason.splitlines()[0], run, sha, checks,
-                               retry={"model": "opus", "reason": reason})
-        return self.fail(item, run, reason, sha, checks)
+            return self.result(item, "retry", "try {} of {} failed, try {} {}: {}".format(
+                len(fails), TRIES_MAX, len(fails) + 1, "on " + model, firstline(reason)), run, sha, checks,
+                retry={"model": model, "reason": reason, "fails": fails})
+        why = ("the same failure {} tries in a row with no new commit".format(SAME_MAX) if same else
+               "{} tries, the most it gets".format(len(fails)))
+        every = "\n".join("try {} ({}): {}{}".format(n, f["model"], f["why"], ", commit " + f["commit"][:9]
+                                                    if f.get("commit") else "") for n, f in enumerate(fails, 1))
+        out = self.fail(item, run, "{}\nIt waits for you after {}. Every try:\n{}".format(reason, why, every), sha, checks)
+        return {**out, "fails": fails}
 
     def stopped(self, item, run, checks=()):
         """A `stopped` result when this try's own output shows a logout or a usage limit (a rejected window's
@@ -2709,7 +2749,7 @@ class TicketRun:
             return self.resolve(item, run, sha, checked, checks, review=path)
         # partly or not met: the first time, one more try with the findings (`redo`, once); after that try,
         # the ticket waits for the owner. Either way the findings go on the ticket and no commit is reverted.
-        first = not item.get("redo")
+        first = not item.get("redo") and (item.get("tries") or 0) + 1 < TRIES_MAX  # the redo is a try too
         findings = sbqueue.review_findings(text)
         not_met = [f for f in findings if re.search(r"\bnot met\b", f, re.I)]
         if first and path:  # the second try's review writes <num>-review.md afresh: the first one is kept beside it
@@ -3306,20 +3346,25 @@ class Supervisor:
             return
         if state == "redo":  # the review's one more try: first in the queue, on the model it had, from the newest
             # commit (its first try's included), told the findings; a stop's resume and an opus retry's reason go
-            self._update(key, front=True, drop=("resume", "retry"), state="queued", tries=(item.get("tries") or 0) + 1,
+            fails = list(item.get("fails") or []) + [{"model": item.get("model") or "sonnet",
+                                                       "why": firstline(res["note"])[:300], "commit": res["commit"]}]
+            self._update(key, front=True, drop=("resume", "retry"), state="queued", tries=len(fails), fails=fails,
                          redo=res["redo"], commit=res["commit"], verdict=res["verdict"], review=res["review"],
                          first_base=None, checked=None, rechecks=None, recheck_at=None, pid=None, pid_start=None,
                          started=None, ended=None, note=res["note"])
             return
-        if state == "retry":
-            self._update(key, front=True, state="queued", tries=1, model=res["retry"]["model"],
+        if state == "retry":  # its next try: first in the queue, from its kept work (its worktree, or the checkout)
+            fails = res["retry"]["fails"]
+            self._update(key, front=True, state="queued", tries=len(fails), fails=fails, model=res["retry"]["model"],
                          retry=res["retry"]["reason"], commit=res["commit"], pid=None, pid_start=None, started=None,
-                         note=res["note"])
+                         rechecks=None, recheck_at=None, note=res["note"])
             return
         # a worker that never started leaves the item's commit (an earlier try's) as it was
         fields = {"commit": res["commit"]} if judged or res["commit"] else {}
         if res.get("media"):
             fields["media"] = res["media"]
+        if res.get("fails"):
+            fields.update(fails=res["fails"], tries=len(res["fails"]))
         if res.get("verdict") or res.get("review"):
             fields.update(verdict=res.get("verdict"), review=res.get("review"), checked=None)
         self._end(key, state, note=res["note"], **fields)
@@ -3743,6 +3788,18 @@ class Supervisor:
             return best[1], best[2], best[3]
         return None, None, "waits: " + " · ".join(whys) if whys and not busy else ""
 
+    @staticmethod
+    def _retry_first(items, by):
+        """{repo: key} of the first queued ticket on a later try that a queued ticket of its map waits on: nothing
+        else of its repo starts before it goes again."""
+        waited = {sbqueue._blocker_key(by[i["key"]], b) for i in items if i["state"] == "queued" and i["key"] in by
+                  for b in by[i["key"]]["blocked_by_open"]}
+        out = {}
+        for i in items:
+            if i["kind"] == "ticket" and i["state"] == "queued" and i.get("tries") and i["key"] in waited:
+                out.setdefault((by.get(i["key"]) or {}).get("repo") or i.get("repo"), i["key"])
+        return out
+
     def _start(self):
         now = self.hub.now()
         with self.hub._lock:
@@ -3817,6 +3874,7 @@ class Supervisor:
             landed = {i["key"] for i in q["items"] if i["state"] == "landed"}  # not judged yet: no longer holds anything
             load, par = self._load(running), {}
             busy = {}  # repo -> the paths of each worktree ticket running in it; None for one in the checkout itself
+            first = self._retry_first(q["items"], by)
             for i in running:
                 busy.setdefault(i.get("repo"), []).append(list(i.get("paths") or []) if i.get("tree") else None)
 
@@ -3855,6 +3913,8 @@ class Supervisor:
                 repo = (t or {}).get("repo") or item.get("repo")
                 if repo in current and current[repo] != sbqueue.map_of(item["key"]):
                     continue  # an earlier map of its repo is not finished: it waits its map's turn
+                if first.get(repo, item["key"]) != item["key"]:
+                    continue  # a failed ticket its map waits on goes again before anything else of its repo
                 if t is not None and not room(t.get("repo"), t.get("paths")):
                     continue  # its repo is busy: it is not about to start, so it is not judged yet
                 name, inst, need = self._pick(q, item, t, load, now)
@@ -3927,6 +3987,8 @@ class Supervisor:
             changed = False
             keys = {x["key"] for x in items}
 
+            first = self._retry_first(items, by)
+
             def ahead(t):  # a blocker still in the queue that has not landed
                 return next((k for k in (sbqueue._blocker_key(t, b) for b in t["blocked_by_open"])
                              if k in keys and k not in landed), None)
@@ -3949,6 +4011,8 @@ class Supervisor:
                     w = ("after", ahead(t), "comes after {}, which has not landed".format(ahead(t)))
                 elif repo in current and current[repo] != sbqueue.map_of(i["key"]):
                     w = ("after", current[repo], "comes after the map {}".format(current[repo]))
+                elif i["kind"] == "ticket" and first.get(repo, i["key"]) != i["key"]:
+                    w = ("after", first[repo], "comes after the next try of {}, which its map waits on".format(first[repo]))
                 elif here and i["kind"] == "ticket":
                     for r in here:
                         shared = shared_path(r.get("paths"), (t or {}).get("paths")) if r.get("tree") else None
@@ -4934,7 +4998,7 @@ def cmd_agents(a):
     return 0
 
 
-RUN_ITEM_FIELDS = ("tries", "stops", "retry", "resume", "base_sha", "first_base", "tree", "branch", "redo")
+RUN_ITEM_FIELDS = ("tries", "stops", "retry", "resume", "base_sha", "first_base", "tree", "branch", "redo", "fails")
 
 
 def _hub_home():

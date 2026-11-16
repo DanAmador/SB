@@ -8,11 +8,18 @@
  "log": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one/1.log",
  "media": [],
  "model": "sonnet",
- "note": "retrying on opus: no commit after 000000000",
+ "note": "try 1 of 5 failed, try 2 on sonnet: no commit after 000000000",
  "redo": null,
  "report": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one/1.md",
  "retry": {
-  "model": "opus",
+  "fails": [
+   {
+    "commit": null,
+    "model": "sonnet",
+    "why": "no commit after 000000000"
+   }
+  ],
+  "model": "sonnet",
   "reason": "no commit after 000000000"
  },
  "review": null,

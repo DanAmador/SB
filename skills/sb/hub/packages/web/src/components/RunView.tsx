@@ -9,7 +9,7 @@ import type * as React from "react";
 import type { QueueItem } from "@sb-hub/contract";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ago, blockerTitles, dur, endsAt, firstLine, hm, itemTitle, mapTitle, plainReason, plural, projOf, runRows, showOf, type RunRow, type RunTone, itemInScope, ticketInScope } from "@/lib/board.ts";
+import { ago, blockerTitles, dur, endsAt, firstLine, hm, itemTitle, mapTitle, plainReason, plural, projOf, runRows, tryOf, showOf, type RunRow, type RunTone, itemInScope, ticketInScope } from "@/lib/board.ts";
 import { healthOf, liveState, MARK_WORDS, nightBlocks, nightLine, pairNight, type MapPair, type Mark, type NightBlock, type NightRow, type Pairing } from "@/lib/night.ts";
 import { helperCards, sessionCards, type SessionCard } from "@/lib/sessions.ts";
 import { setLink, useLink } from "@/lib/link.ts";
@@ -138,6 +138,7 @@ function RunLine({ r }: { r: RunRow }): React.JSX.Element {
             {r.account}
           </span>
           {r.item.model != null && <Badge>{r.item.model}</Badge>}
+          {tryOf(r.item) !== "" && <Badge>{tryOf(r.item)}</Badge>}
           <FileLinks item={r.item} />
         </div>
       </div>
@@ -316,6 +317,7 @@ function Row({ r, worker }: { r: NightRow; worker: SessionCard | undefined }): R
         )}
       </div>
       <div className="flex max-w-full shrink-0 items-center gap-2 text-xs text-muted-foreground">
+        {tryOf(i) !== "" && <span className="text-warn tabular-nums">{tryOf(i)}</span>}
         {worker !== undefined && <WorkerChip c={worker} item={i} title={title} />}
         {r.mark === "running" && (
           <>

@@ -137,6 +137,17 @@ export const Redo = z.strictObject({
 });
 export type Redo = z.infer<typeof Redo>;
 
+/** One failed try of a ticket (sbhub `again`): the model it ran on, the first line of why it failed, the commit the
+ * hub judged (null: none). */
+export const Fail = z.strictObject({
+  model: z.string(),
+  why: z.string(),
+  commit: z.string().nullable(),
+});
+export type Fail = z.infer<typeof Fail>;
+/** The most tries a ticket gets (sbhub.py TRIES_MAX): the page says "try 3 of 5". */
+export const TRIES_MAX = 5;
+
 export const CheckRun = z.strictObject({
   cmd: z.string(),
   /** null when it timed out. */
@@ -178,6 +189,9 @@ const itemFields = {
   first_base: z.string().nullable().optional(),
   result: z.string().optional(),
   retry: z.string().optional(),
+  /** Every failed try so far, oldest first: it is queued again from its kept work up to five tries (sbhub
+   * TRIES_MAX), and goes to Waits for you with these after the last. `tries` is their count. */
+  fails: z.array(Fail).optional(),
   resume: z.strictObject({ agent: z.string(), log: z.string(), why: z.string() }).optional(),
   stops: z.number().int().optional(),
   digested: z.boolean().optional(),

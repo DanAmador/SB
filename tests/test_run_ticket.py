@@ -48,7 +48,7 @@ class RunTicketCase(RunnerCase):
         (FIXTURES / (name + ".json")).write_text(json.dumps(stable(out), indent=1, sort_keys=True) + "\n", encoding="utf-8")
 
     def assertResult(self, res, state):
-        self.assertEqual(set(res), KEYS)
+        self.assertEqual(set(res) - {"fails"}, KEYS)  # fails: on a failure after its last try
         self.assertEqual(res["state"], state, res["note"])
         self.assertIn(res["state"], sbhub.RESULT_STATES)
         json.dumps(res)  # it is JSON as it stands
@@ -79,17 +79,24 @@ class RunTicketTest(RunTicketCase):
         self.assertEqual([(x["key"], x["model"]) for x in self.reviewed], [("repo/one#1", "opus")])
         self.fixture("done", res)
 
-    def test_no_commit_on_sonnet_answers_retry_on_opus_and_the_retry_fails_with_a_comment(self):
+    def test_no_commit_answers_retry_on_its_tier_then_on_opus_and_the_third_alike_fails_with_a_comment(self):
         res = self.run_ticket(mode="nothing")
         self.assertResult(res, "retry")
-        self.assertEqual(res["retry"]["model"], "opus")
+        self.assertEqual(res["retry"]["model"], "sonnet")  # tries 1-2 on its tier
         self.assertIn("no commit", res["retry"]["reason"])
+        self.assertEqual([f["model"] for f in res["retry"]["fails"]], ["sonnet"])
         self.assertEqual(self.open_tickets()[1]["status"], "open")  # released for the retry
         self.fixture("retry", res)
-        again = self.run_ticket(mode="nothing", model="opus", item={"tries": 1, "retry": res["retry"]["reason"]})
-        self.assertResult(again, "failed")
-        self.assertEqual((again["model"], again["tries"]), ("opus", 2))
-        self.assertIn("The first try failed", self.launched[-1]["brief"])
+        item = {"tries": 1, "retry": res["retry"]["reason"], "fails": res["retry"]["fails"]}
+        res = self.run_ticket(mode="nothing", model="sonnet", item=item)
+        self.assertResult(res, "retry")
+        self.assertEqual((res["retry"]["model"], res["tries"]), ("opus", 2))  # try 3 on opus
+        self.assertIn("## This is try 2 of 5", self.launched[-1]["brief"])
+        item = {"tries": 2, "retry": res["retry"]["reason"], "fails": res["retry"]["fails"]}
+        again = self.run_ticket(mode="nothing", model="opus", item=item)
+        self.assertResult(again, "failed")  # the same failure three times with no new commit
+        self.assertEqual((again["model"], again["tries"], len(again["fails"])), ("opus", 3, 3))
+        self.assertIn("the same failure 3 tries in a row", again["note"])
         self.assertIn("no commit", self.ticket_text(1))
         self.assertEqual(self.open_tickets()[1]["status"], "open")
         self.fixture("failed", again)
@@ -159,11 +166,12 @@ class RunTicketTest(RunTicketCase):
         self.assertIn("The worker made no commit", self.reviewed[0]["brief"])
         self.assertIn("## No change needed", self.reviewed[0]["brief"])
 
-    def test_a_failing_check_fails_with_the_checks_tail(self):
+    def test_a_failing_check_answers_retry_with_the_checks_tail(self):
         self.sb("set", "repo/one", "001", "tier=opus", "checks=echo broke && false", "--no-sync")
         res = self.run_ticket()
-        self.assertResult(res, "failed")
+        self.assertResult(res, "retry")  # tried again from its commit
         self.assertTrue(res["commit"])
+        self.assertEqual(res["retry"]["fails"][0]["commit"], res["commit"])
         self.assertEqual(res["checks"][0]["code"], 1)
         self.assertIn("broke", res["checks"][0]["tail"])
 
@@ -201,9 +209,10 @@ class RunTicketTest(RunTicketCase):
         self.assertEqual(self.launched, [])
 
     def test_a_worker_past_the_limit_is_killed(self):
-        res = self.run_ticket(mode="hang", model="opus", item={"tries": 1}, limit=1)
-        self.assertResult(res, "failed")
-        self.assertEqual(res["note"], "ran past 1 second")
+        fails = [{"model": "opus", "why": "check failed: try {}".format(n), "commit": None} for n in range(4)]
+        res = self.run_ticket(mode="hang", model="opus", item={"tries": 4, "fails": fails}, limit=1)
+        self.assertResult(res, "failed")  # its fifth try
+        self.assertTrue(res["note"].startswith("ran past 1 second\nIt waits for you after 5 tries"))
         self.assertEqual(res["checks"], [])
 
     def ticket_text(self, num, folder="repo/one"):

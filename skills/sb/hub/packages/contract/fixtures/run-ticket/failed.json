@@ -4,11 +4,28 @@
  "branch": null,
  "checks": [],
  "commit": null,
+ "fails": [
+  {
+   "commit": null,
+   "model": "sonnet",
+   "why": "no commit after 000000000"
+  },
+  {
+   "commit": null,
+   "model": "sonnet",
+   "why": "no commit after 000000000"
+  },
+  {
+   "commit": null,
+   "model": "opus",
+   "why": "no commit after 000000000"
+  }
+ ],
  "key": "repo/one#1",
  "log": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one/1.log",
  "media": [],
  "model": "opus",
- "note": "no commit after 000000000",
+ "note": "no commit after 000000000\nIt waits for you after the same failure 3 tries in a row with no new commit. Every try:\ntry 1 (sonnet): no commit after 000000000\ntry 2 (sonnet): no commit after 000000000\ntry 3 (opus): no commit after 000000000",
  "redo": null,
  "report": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one/1.md",
  "retry": null,
@@ -18,6 +35,6 @@
  "stop": null,
  "stops": 0,
  "tree": null,
- "tries": 2,
+ "tries": 3,
  "verdict": null
 }

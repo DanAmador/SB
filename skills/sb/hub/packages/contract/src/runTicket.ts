@@ -4,11 +4,11 @@
  * decides what runs next; Python runs it and answers with these.
  */
 import { z } from "zod";
-import { CheckRun, Redo, Seconds, Verdict } from "./schemas.ts";
+import { CheckRun, Fail, Redo, Seconds, Verdict } from "./schemas.ts";
 
 /**
  * done: resolved; failed: left open with a comment; skipped: never started (not ready, claimed, gone) or changed
- * while it ran; retry: run it again on `retry.model`; stopped: its agent hit a usage limit or a logout, run it
+ * while it ran; retry: run it again on `retry.model` from its kept work (up to five tries); stopped: its agent hit a usage limit or a logout, run it
  * again on any agent that fits; recheck: a check exited 75, or the review could not run (crashed, ran too long or
  * wrote no verdict): the commit and the claim stay and only that runs again; unclean: its checks passed but the
  * checkout holds unsaved changes to its files (`blocking`), so its work waits on its branch. A ticket whose checks passed is
@@ -36,7 +36,8 @@ export const RunTicketResult = z.strictObject({
   checks: z.array(CheckRun),
   /** Names of the pictures and clips in <run>/<num>-media. */
   media: z.array(z.string()),
-  retry: z.strictObject({ model: z.string(), reason: z.string() }).nullable(),
+  /** retry: the model of its next try, this try's whole reason, and every failed try so far (this one last). */
+  retry: z.strictObject({ model: z.string(), reason: z.string(), fails: z.array(Fail) }).nullable(),
   stop: RunTicketStop.nullable(),
   agent: z.string().nullable(),
   model: z.string().nullable(),
@@ -57,6 +58,8 @@ export const RunTicketResult = z.strictObject({
   review: z.string().nullable(),
   /** The review-driven try: asked for (state redo), or the one this run was (null when there was none). */
   redo: Redo.nullable(),
+  /** failed after its last try: every try's failure, oldest first. */
+  fails: z.array(Fail).optional(),
   /** unclean: the checkout's files with unsaved changes that its work waits for. */
   blocking: z.array(z.string()).optional(),
 });

@@ -15,6 +15,7 @@ import {
   runRows,
   filterOptions,
   plainReason,
+  tryOf,
   searchTickets,
   seenKey,
   showCounts,
@@ -393,5 +394,14 @@ describe("the sidebar's scope", () => {
     const one = scopeWaits(waits, { project: "sb", map: "sb/one" }, s);
     expect(one.count).toBe(2);
     expect(scopeWaits(waits, { project: "sk4te", map: "" }, s).questions.map(([id]) => id)).toEqual(["b"]);
+  });
+});
+
+describe("tryOf", () => {
+  it("names a later try of a queued or running ticket, never a first try or an ended one", () => {
+    expect(tryOf({ tries: 2, state: "queued" })).toBe("try 3 of 5");
+    expect(tryOf({ tries: 4, state: "running" })).toBe("try 5 of 5");
+    expect(tryOf({ tries: 0, state: "running" })).toBe("");
+    expect(tryOf({ tries: 5, state: "failed" })).toBe("");
   });
 });

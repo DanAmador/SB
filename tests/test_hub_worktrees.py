@@ -300,9 +300,10 @@ class AfterLandingTest(RunnerCase):
         self.assertEqual(git(self.repo, "rev-parse", reverts[0] + "^"), landed)
         self.assertEqual(git(self.repo, "diff", before, reverts[0]), "")  # main's files as before the landing
         self.assertIn("error CS1002", git(self.repo, "log", "-1", "--format=%B", reverts[0]) + self.launched[1]["brief"])
-        # queued again, its worker told why: the one retry, on opus
+        # queued again, its worker told why: its second try, on its own tier
         self.assertEqual(len(self.launched), 2)
-        self.assertEqual(self.launched[1]["model"], "opus")
+        self.assertEqual(self.launched[1]["model"], "sonnet")
+        self.assertIn("## This is try 2 of 5", self.launched[1]["brief"])
         self.assertIn("after landing, check failed: python3 .sb/checks-compile.py", self.launched[1]["brief"])
         self.assertIn("error CS1002", self.launched[1]["brief"])
         # the second try landed on a building main, carrying the first try's work again

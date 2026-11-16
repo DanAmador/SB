@@ -29,6 +29,7 @@ test("Run is the landing page: one row per worker run, the silent one amber, nev
   await expect(busy).toContainText("running the tests");
   await expect(busy).toContainText("12 min");
   await expect(busy).toContainText("opus");
+  await expect(busy).toContainText("try 3 of 5"); // its third try, after two failed ones
   await expect(busy.getByRole("link", { name: "Run the board against the real hub" })).toHaveAttribute("href", "obsidian://open?path=%2Fvault%2Fdemo%2Fboard%2Fissues%2F5.md");
   await expect(busy.getByRole("link", { name: "Log" })).toHaveAttribute("href", /^obsidian:\/\/open\?path=%2Fvault%2Fruns%2F2026-11-13-board%2F5\.log$/);
   // your chat session is not a run

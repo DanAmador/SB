@@ -109,7 +109,10 @@ const queue = {
   runs: { "demo/board": `${RUN}/2026-11-13-board.md` },
   maps: ["demo/board", "other/site"],
   items: [
-    { ...item("demo/board#5", "running"), runner: "main", model: "opus", started: start - 720, run: RUN, log: `${RUN}/5.log` },
+    {
+      ...item("demo/board#5", "running"), runner: "main", model: "opus", started: start - 720, run: RUN, log: `${RUN}/5.log`, tries: 2,
+      fails: [{ model: "sonnet", why: "check failed: pnpm test", commit: "0123456789abcdef" }, { model: "sonnet", why: "check failed: pnpm test", commit: "123456789abcdef0" }],
+    },
     { ...item("demo/board#8", "running"), runner: "main", started: start - 1500, run: RUN, log: `${RUN}/8.log` },
     { ...item("demo/board#6", "failed"), ended: start - 900, note: "no commit after 85bfcc87b", run: RUN, log: `${RUN}/6.log` },
     {
@@ -118,7 +121,7 @@ const queue = {
     },
     { ...item("other/site#3", "running"), runner: "main", started: start - 240, run: RUN, log: `${RUN}/s3.log` },
     { ...item("other/site#4", "failed"), title: "Check the shop's checkout", ended: start - 800, note: "check failed: pnpm test", run: RUN, log: `${RUN}/s4.log` },
-    { ...item("demo/board#3", "queued"), waits: { kind: "files", with: "demo/board#5", text: "shares src/ with demo/board#5, which is running" } },
+    { ...item("demo/board#3", "queued"), tries: 1, waits: { kind: "files", with: "demo/board#5", text: "shares src/ with demo/board#5, which is running" } },
   ] as Raw<QueueItem>[],
   repos: { "/demo": { at_once: 2, running: 2, side_by_side: 1 } } as Record<string, { at_once: number; running: number; side_by_side: number }>,
 };

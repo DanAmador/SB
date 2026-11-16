@@ -2,7 +2,7 @@
  * The board's grouping rules, pure: what goes in Questions, which sessions are yours, what is ready, queued,
  * running, done and failed. The views only draw what these return; board.test.ts pins every rule.
  */
-import type { AgentRow, Installed, Links, MapTicket, Message, Question, QueueItem, State, TicketRow } from "@sb-hub/contract";
+import { TRIES_MAX, type AgentRow, type Installed, type Links, type MapTicket, type Message, type Question, type QueueItem, type State, type TicketRow } from "@sb-hub/contract";
 
 /** A ticket's estimate when the queue's end is reckoned: 1.5 h. */
 export const ESTIMATE = 5400;
@@ -557,6 +557,11 @@ export function waitsFor(state: State, tickets: readonly TicketRow[] | null, ix:
 }
 
 /** Why a run failed or was skipped, in plain words; the raw note stays one click away. */
+/** "try 3 of 5" on a ticket queued again or running after a failed try; "" on its first try or once it ended. */
+export function tryOf(i: Pick<QueueItem, "tries" | "state">): string {
+  return i.tries > 0 && (i.state === "queued" || i.state === "running") ? `try ${String(i.tries + 1)} of ${String(TRIES_MAX)}` : "";
+}
+
 export function plainReason(i: Pick<QueueItem, "note" | "state">): string {
   const first = firstLine(i.note);
   if (!first) return i.state === "skipped" ? "skipped, no reason recorded" : "no reason recorded";
