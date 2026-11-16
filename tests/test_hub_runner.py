@@ -263,6 +263,28 @@ class UncleanCheckoutTest(RunnerCase):
         # the hub's own /api/state answer with the waiting item, for the contract's Vitest test to parse
         state_fixture(self.hub.state(), self.root, "unclean.json")
 
+    def test_an_unstaged_edit_to_a_tracked_file_the_branch_changes_waits_with_its_whole_name(self):
+        # git status says " M one/done.txt" for it: the leading space is part of the entry, not padding to strip
+        (self.repo / "one").mkdir(exist_ok=True)
+        (self.repo / "one" / "done.txt").write_text("base\n")
+        git(self.repo, "add", "one/done.txt")
+        git(self.repo, "commit", "-q", "-m", "base")
+        (self.repo / "one" / "done.txt").write_text("base\nthe owner's unsaved line\n")
+        self.assertEqual(subprocess.run(["git", "-C", str(self.repo), "status", "--porcelain"], capture_output=True,
+                                        text=True).stdout, " M one/done.txt\n")
+        self.only(1)
+        self.hub.queue_pause(False)
+        self.until(lambda: self.state_of("repo/one#1") not in (None, "queued", "running"))
+        item = self.items()["repo/one#1"]
+        self.assertEqual(item["state"], "unclean", item.get("note"))
+        self.assertEqual(item["blocking"], ["one/done.txt"])
+        self.assertIn("one/done.txt", item["note"])
+        self.assertEqual(self.sup.streak, (None, 0))
+        (self.repo / "one" / "done.txt").write_text("base\n")  # the edit undone: the file matches HEAD again
+        self.until(lambda: self.state_of("repo/one#1") == "done")
+        self.assertEqual(git(self.repo, "rev-parse", "HEAD"), item["commit"])
+        self.assertIn("work for repo/one/001", (self.repo / "one" / "done.txt").read_text())
+
     def test_once_the_files_are_cleared_the_next_pass_lands_it_rebased_onto_the_moved_checkout(self):
         item = self.wait_unclean()
         self.assertEqual(item["state"], "unclean")
@@ -295,6 +317,22 @@ class UncleanCheckoutTest(RunnerCase):
         self.assertIn("work for repo/one/002", (self.repo / "two" / "done.txt").read_text())
         self.assertEqual(self.state_of("repo/one#1"), "unclean")  # it still waits for its file
         self.assertFalse(self.hub.state()["queue"]["paused"])
+
+    def test_unsaved_names_each_kind_of_change_whole_from_git_status(self):
+        for name in ("a.txt", "b.txt", "c.txt", "d.txt"):
+            (self.repo / name).write_text(name + "\n")
+        git(self.repo, "add", ".")
+        git(self.repo, "commit", "-q", "-m", "files")
+        (self.repo / "a.txt").write_text("changed\n")  # " M", first in the list: its leading space must stay
+        (self.repo / "b.txt").write_text("staged\n")
+        git(self.repo, "add", "b.txt")  # "M "
+        git(self.repo, "mv", "c.txt", "e.txt")  # "R ", with its old name after it
+        (self.repo / "d.txt").unlink()  # " D"
+        (self.repo / "f.txt").write_text("new\n")  # "??"
+        self.assertEqual(sorted(sbhub.unsaved(self.repo)), ["a.txt", "b.txt", "c.txt", "d.txt", "e.txt", "f.txt"])
+        self.assertEqual(sbhub.unsaved(self.repo, ["a.txt"]), ["a.txt"])
+        (self.repo / "a.txt").write_text("a.txt\n")
+        self.assertEqual(sbhub.unsaved(self.repo, ["a.txt"]), [])
 
     def test_a_branch_that_no_longer_rebases_fails_for_the_owner_with_its_branch_kept(self):
         item = self.wait_unclean()

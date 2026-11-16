@@ -1816,14 +1816,15 @@ LAND_LOCK_POLL = 2
 MOVED = "moved"
 
 
-def _git_run(repo, *args, timeout=120):
-    """(returncode, stdout, stderr) of one git command in `repo`; (1, '', why) when git could not run."""
+def _git_run(repo, *args, timeout=120, strip=True):
+    """(returncode, stdout, stderr) of one git command in `repo`; (1, '', why) when git could not run. strip=False
+    keeps stdout as git wrote it, for output whose leading spaces mean something (`status --porcelain`)."""
     try:
         r = subprocess.run(["git", "-c", "core.fsmonitor=false", "-C", str(repo), *args], capture_output=True,
                            text=True, timeout=timeout)
     except (OSError, subprocess.SubprocessError) as e:
         return 1, "", str(e)
-    return r.returncode, r.stdout.strip(), r.stderr.strip()
+    return r.returncode, r.stdout.strip() if strip else r.stdout, r.stderr.strip()
 
 
 def project_root(path):
@@ -1943,7 +1944,8 @@ def rebase_tree(tree, onto):
 
 def unsaved(repo, paths=None):
     """The checkout's files with unsaved changes (modified, staged, deleted or untracked), of `paths` when given."""
-    rc, out, _ = _git_run(repo, "status", "--porcelain", "-z", "--untracked-files=all", "--", *(paths or []))
+    rc, out, _ = _git_run(repo, "status", "--porcelain", "-z", "--untracked-files=all", "--", *(paths or []),
+                           strip=False)
     if rc != 0:
         return None
     names, parts = [], out.split("\0")
