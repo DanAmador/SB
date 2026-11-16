@@ -9,7 +9,7 @@ export const TRAIL_MS = 2000;
 export const TICKETS_MS = 15000;
 
 export const useHubState = () =>
-  useQuery({ queryKey: ["state"], queryFn: () => get("GET /api/state"), refetchInterval: STATE_MS, retry: false });
+  useQuery({ queryKey: ["state"], queryFn: () => get("GET /api/state"), refetchInterval: STATE_MS, retry: 1, retryDelay: 400 });
 export const useTickets = () =>
   useQuery({ queryKey: ["tickets"], queryFn: () => get("GET /api/tickets"), refetchInterval: TICKETS_MS, retry: 1 });
 export const useTicketDetail = (key: string | null) =>

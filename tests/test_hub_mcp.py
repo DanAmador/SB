@@ -15,6 +15,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+HUB = Path(__file__).resolve().parents[1] / "skills" / "sb" / "hub"
 from helpers import SBMAP, HubCase, SCRIPT, wait_for
 
 try:
@@ -244,6 +245,41 @@ class HubMcpQueueTest(McpBase):
         self.assertIn("a", json.loads(ok.structured_content["body"])["agents"])
         for bad in ("/", "/api/../x", "http://evil/api/state"):
             self.assertTrue(self.run_client(lambda c: c.call_tool("sb_api", {"path": bad})).is_error, bad)
+
+@unittest.skipIf(Client is None, "mcp is not installed")
+class HubMcpStateTest(McpBase):
+    """The chat card's state read: the TypeScript hub's real /api/state, relayed by sb_api in parts, parsed by the contract."""
+    ts = True
+
+    def read_all(self, path):
+        first = self.run_client(lambda c: c.call_tool("sb_api", {"path": path})).structured_content
+        body, parts = first["body"], first["parts"]
+        for i in range(1, parts):
+            part = self.run_client(lambda c: c.call_tool("sb_api", {"path": path, "part": i}))
+            self.assertFalse(part.is_error)
+            body += part.structured_content["body"]
+        return first["status"], parts, body
+
+    def test_sb_api_state_in_parts_parses_by_the_contract(self):
+        self.hub("report", "--agent", "a", "--state", "idle")
+        self.hub("ask", "--agent", "a", "--q", "Pick one", "--options", "x,y")
+        self.mod.API_PART = 100  # the test state is small; cut it so it needs several parts
+        self.addCleanup(setattr, self.mod, "API_PART", 150_000)
+        status, parts, body = self.read_all("/api/state")
+        self.assertEqual(status, 200)
+        self.assertGreater(parts, 1, (len(body), self.mod.API_PART))
+        self.assertEqual(json.loads(body), self.get("/api/state") | {"now": json.loads(body)["now"]})
+        script = ("import { answerSchema } from %s;"
+                  "const r = answerSchema('GET /api/state', 200).safeParse(JSON.parse(process.argv[1]));"
+                  "if (!r.success) { console.error(JSON.stringify(r.error.issues)); process.exit(1); }" %
+                  json.dumps(str(HUB / "packages" / "contract" / "src" / "index.ts")))
+        out = subprocess.run(["node", "--input-type=module", "-e", script, body], capture_output=True, text=True)
+        self.assertEqual(out.returncode, 0, out.stderr)
+
+    def test_a_later_part_without_a_first_read_says_so(self):
+        r = self.run_client(lambda c: c.call_tool("sb_api", {"path": "/api/never", "part": 1}))
+        self.assertTrue(r.is_error)
+
 
 if __name__ == "__main__":
     unittest.main()

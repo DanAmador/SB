@@ -40,6 +40,9 @@ BOARD_URI = "ui://sbhub/board.html"
 DIST = HERE.parent / "hub" / "packages" / "web" / "dist"  # the new board's build: pnpm --dir skills/sb/hub build
 BRIDGE = HERE / "sbhub_widget_bridge.js"
 PORT = sbhub.default_port()
+# The hub's state is near 1 MB; a host refuses or cuts a tool result that size, so sb_api sends it in parts.
+API_PART = 150_000
+API_CACHE = {}
 ALERT = ("needs you", "blocked")
 EST = 5400  # a queue item's estimate, seconds: the hub page's 1.5 h
 
@@ -225,10 +228,16 @@ def build_server():
         return result("{} agents".format(len(s["agents"])), s)
 
     @apps.tool(resource_uri=BOARD_URI, visibility=["app"], title="sb api",
-               description="One read-only GET of the hub's /api/ for the board widget.")
-    def sb_api(path: str) -> CallToolResult:
+               description="One read-only GET of the hub's /api/ for the board widget, in parts of at most API_PART "
+                           "characters: part 0 reads the hub, the later parts slice that same answer.")
+    def sb_api(path: str, part: int = 0) -> CallToolResult:
         if not path.startswith("/api/") or ".." in path:
             return result("only GET /api/ paths", error=True)
+        if part > 0:
+            got = API_CACHE.get(path)
+            if got is None or part >= len(got[1]):
+                return result("part gone, read again from part 0", error=True)
+            return result("{} part {}".format(path, part), {"status": got[0], "body": got[1][part], "parts": len(got[1])})
         try:
             with urllib.request.urlopen("http://127.0.0.1:{}{}".format(PORT, path), timeout=10) as r:
                 status, body, kind = r.status, r.read(), r.headers.get("Content-Type", "")
@@ -238,8 +247,13 @@ def build_server():
         except (OSError, ValueError):
             return result("hub not reachable", {"down": True})
         if not kind.startswith("application/json"):
-            return result("not json", {"status": 415, "body": '{"ok": false, "error": "not json"}'})
-        return result("{} {}".format(status, path), {"status": status, "body": body.decode("utf-8")})
+            return result("not json", {"status": 415, "body": '{"ok": false, "error": "not json"}', "parts": 1})
+        text = body.decode("utf-8")
+        parts = [text[i:i + API_PART] for i in range(0, len(text), API_PART)] or [""]
+        API_CACHE[path] = (status, parts)
+        while len(API_CACHE) > 8:
+            API_CACHE.pop(next(iter(API_CACHE)))
+        return result("{} {}".format(status, path), {"status": status, "body": parts[0], "parts": len(parts)})
 
     @apps.tool(resource_uri=BOARD_URI, visibility=["app"], title="sb answer",
                description="Record the owner's choice for an open question.")

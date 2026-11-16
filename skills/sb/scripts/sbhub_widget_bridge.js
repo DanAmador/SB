@@ -37,13 +37,14 @@ window.__SB_WIDGET__ = true;
     else if (m.method === "ui/resource-teardown" || m.method === "ping") { if (m.id != null) send({ id: m.id, result: {} }); }
   });
 
-  const ready = request("ui/initialize", { appInfo: { name: "sb-board", version: "2.0.0" }, appCapabilities: { availableDisplayModes: ["inline"] }, protocolVersion: "2026-01-26" })
+  const init = () => request("ui/initialize", { appInfo: { name: "sb-board", version: "2.0.0" }, appCapabilities: { availableDisplayModes: ["inline"] }, protocolVersion: "2026-01-26" })
     .then((r) => {
       applyHost(r?.hostContext);
       canCall = !!r?.hostCapabilities?.serverTools;
       send({ method: "ui/notifications/initialized", params: {} });
     })
     .catch(() => { canCall = false; });
+  let ready = init();
 
   let last = 0;
   const size = () => {
@@ -55,6 +56,7 @@ window.__SB_WIDGET__ = true;
   const reply = (status, body) => new Response(body, { status, headers: { "Content-Type": "application/json" } });
   const call = async (name, args) => {
     await ready;
+    if (!canCall) { ready = init(); await ready; }  // a host that was slow once is asked again, not given up on for good
     if (!canCall) return null;
     return request("tools/call", { name, arguments: args });
   };
@@ -72,10 +74,18 @@ window.__SB_WIDGET__ = true;
         if (!r || r.isError) return reply(502, JSON.stringify({ ok: false, error: r?.content?.[0]?.text ?? "the host cannot call tools" }));
         return reply(200, '{"ok":true}');
       }
-      const r = await call("sb_api", { path });
-      const s = r?.structuredContent;
+      let r = await call("sb_api", { path, part: 0 });
+      let s = r?.structuredContent;
       if (!s || typeof s.status !== "number") return reply(503, '{"ok":false,"error":"the hub is not reachable"}');
-      return reply(s.status, s.body);
+      const status = s.status;
+      let body = s.body;
+      for (let i = 1; i < (s.parts ?? 1); i++) {  // a big answer (the state) comes in parts
+        r = await call("sb_api", { path, part: i });
+        s = r?.structuredContent;
+        if (!s || r.isError || typeof s.body !== "string") return reply(503, '{"ok":false,"error":"the hub is not reachable"}');
+        body += s.body;
+      }
+      return reply(status, body);
     } catch {
       return reply(503, '{"ok":false,"error":"the hub is not reachable"}');
     }
