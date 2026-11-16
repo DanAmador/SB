@@ -1326,7 +1326,9 @@ def hub_checks_section(passed, reason, sha, checks, report_text, stamp):
     lines = ["", "## Hub checks", "", "Checked by the sb hub at {}: {}{}.".format(
         stamp, "passed" if passed else firstline(reason) if passed is None else "failed: " + firstline(reason), ", commit " + sha[:9] if sha else "")]
     if not checks:
-        lines.append("No check ran (the verdict stopped before the checks).")
+        lines.append("No check ran ({}).".format("the ticket has no check commands: the Opus review of its Done when "
+                                                 "is its only check" if passed and reason.startswith("commit and checks")
+                                                 else "the verdict stopped before the checks"))
     for c in checks:
         lines += ["", "- `{}`: {}, {} s".format(c["cmd"], "timed out" if c["code"] is None else "exit {}".format(c["code"]),
                                               c["secs"]), "", "  ```", *("  " + l for l in c["tail"].splitlines()), "  ```"]
@@ -2401,9 +2403,10 @@ class TicketRun:
             return self.result(item, "done", "resolved: {}, findings in the report".format(
                 "no change needed" if reason.startswith("no change needed") else "research"), run, None, checks,
                 **judged)
-        answer = ("Checked by the sb hub in code: commit {} carries `Ticket: {}/{:03d}` and every check exited 0 "
-                  "({n} of {n}): {}. {}{} {}").format(
-            sha, t["map"], int(t["num"]), listed, reason[:1].upper(), reason[1:] + ".", tail, n=len(t["checks"]))
+        ran = ("every check exited 0 ({n} of {n}): {}".format(listed, n=len(t["checks"])) if t["checks"] else
+               "it has no check commands, so the Opus review of its Done when was its only check")
+        answer = "Checked by the sb hub in code: commit {} carries `Ticket: {}/{:03d}` and {}. {}{} {}".format(
+            sha, t["map"], int(t["num"]), ran, reason[:1].upper(), reason[1:] + ".", tail)
         rc, out, err = self.sbmap("resolve", t["map"], nnn, "--gist", t["title"], "--answer", answer,
                                   "--commit", sha, "--repo-root", t["repo"], *judged_by)
         if rc != 0 and "remote" in err:  # sbmap stamps a commit only in a repo with an origin: name it in the gist

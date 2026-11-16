@@ -44,6 +44,13 @@ class QueueTest(unittest.TestCase):
     def tearDown(self):
         self._tmp.cleanup()
 
+    def test_a_ticket_with_no_check_commands_anywhere_is_ready_and_the_owners_ticket_still_waits(self):
+        rows = [tk(1, checks=[], checks_from=""), tk(2, checks=[], check="owner"), tk(3, checks=[], has_done_when=False)]
+        h = Hub(self.home / "nocheck", run=lambda: json.dumps(rows))
+        got = {t["num"]: (t["state"], t["reason"]) for t in h.tickets()}
+        self.assertEqual(got, {1: ("ready", "ready"), 2: ("waits for you", "you check this one: a worker cannot"),
+                               3: ("not ready", "no done-when")})
+
     def keys(self, h=None):
         return [i["key"] for i in (h or self.h).state()["queue"]["items"]]
 

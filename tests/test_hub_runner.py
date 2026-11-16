@@ -834,6 +834,43 @@ class ReviewRetryTest(RunnerCase):
         self.assertNotIn(1, self.open_tickets())
 
 
+class NoCommandsTest(RunnerCase):
+    """A ticket with a Done when and no check commands on any layer (ticket, map, repo .sb/checks) runs: the command
+    step has nothing to run, and the Opus review (the fake reviewer's file, in review-brief.md's shape and read by
+    sbqueue.review_verdict) is its only judge."""
+
+    def setUp(self):
+        super().setUp()
+        self.sb("mapset", "repo/one", "checks=")
+        rows = self.open_tickets()
+        self.assertEqual([(rows[n]["checks"], rows[n]["checks_from"]) for n in (1, 2)], [([], "")] * 2)
+
+    def test_it_is_ready_and_a_finished_review_resolves_it(self):
+        self.assertEqual({t["num"]: t["state"] for t in self.hub.tickets() if t["map"] == "repo/one"},
+                         {1: "ready", 2: "ready"})
+        self.only(1)
+        self.until(lambda: self.state_of("repo/one#1") == "done")
+        item = self.items()["repo/one#1"]
+        self.assertEqual(item["verdict"], "finished")
+        self.assertIn(sbqueue.NO_CHECKS_BRIEF, self.launched[0]["brief"])  # the worker is told the review judges it
+        self.assertIn("no check commands: the Opus review", self.reviewed[0]["brief"])  # the hub's checks section
+        done = next(self.vault.glob("wayfinder/repo/one/issues/done/001*.md")).read_text(encoding="utf-8")
+        self.assertIn("it has no check commands, so the Opus review of its Done when was its only check", done)
+        self.assertIn("review: met\n", done)
+
+    def test_partly_and_not_met_fail_the_try_with_the_reviewers_not_met_line(self):
+        self.verdicts = {"repo/one#1": "partly", "repo/one#2": "not met"}
+        self.resume()
+        self.until(lambda: self.state_of("repo/one#1") == "failed" and self.state_of("repo/one#2") == "failed")
+        line = "It works.: not met: the fake reviewer found no test for it"
+        for num, verdict in ((1, "partly"), (2, "not met")):
+            item = self.items()["repo/one#{}".format(num)]
+            self.assertEqual(len([x for x in self.launched if x["key"] == item["key"]]), 2)  # the try failed: one more
+            self.assertEqual(item["redo"]["findings"], ["- " + line])
+            self.assertEqual(item["note"], "judged {} by the Opus review after its second try: {}".format(verdict, line))
+            self.assertEqual(self.open_tickets()[num]["status"], "open")
+
+
 class StopsTest(RunnerCase):
     def test_a_usage_limit_waits_for_the_reset_and_releases_the_claim(self):
         self.mode = "limit"

@@ -37,8 +37,7 @@ def classify(t, queued, tickets=()):
         return "waits for you", "you check this one: a worker cannot"
     if not t["has_done_when"]:
         return "not ready", "no done-when"
-    if not t["checks"]:
-        return "not ready", "no check commands"
+    # no check commands on any layer: it still runs, and the Opus review of its Done when is its only check
     for b in t["blocked_by_open"]:
         if _blocker_key(t, b) not in queued:
             return "blocked", f"after {_title(t, b, tickets)}"
@@ -199,6 +198,10 @@ def move(order_keys, k, to_index, tickets):
 
 
 BRIEF_TEMPLATE = Path(__file__).resolve().parent.parent / "templates" / "session-brief.md"
+# the worker brief's checks line when no layer gives a command (the template says "These commands must all exit 0")
+NO_CHECKS_BRIEF = ("- none: this ticket has no check commands. After you finish, an Opus reviewer reads your change "
+                   "and judges each Done when item met or not met, and only that decides if it is done: check every "
+                   "item yourself before you commit (run it, look at the result) and say how under ## Self-checks.")
 
 
 def brief(t, map_plain_words, run_folder, repo, branch):
@@ -210,7 +213,8 @@ def brief(t, map_plain_words, run_folder, repo, branch):
         "background": map_plain_words, "repo": repo, "branch": branch, "sbmap": sbmap, "map": t["map"],
         "num": str(num), "num3": f"{num:03d}", "title": t["title"], "why": t["why"], "question": t["question"],
         "out": t["out"] or "anything outside the ticket", "paths": ", ".join(t["paths"]),
-        "done_when": t["done_when"], "checks": "\n".join(f"- {c}" for c in t["checks"]), "run_folder": str(run_folder),
+        "done_when": t["done_when"], "checks": "\n".join(f"- {c}" for c in t["checks"]) or NO_CHECKS_BRIEF,
+        "run_folder": str(run_folder),
     }
     return _fill(BRIEF_TEMPLATE, values)
 

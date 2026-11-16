@@ -68,7 +68,7 @@ class ClassifyTest(unittest.TestCase):
             (T(1, type="grilling", has_done_when=False), set(), "waits for you"),
             (T(1, type="architecture"), set(), "waits for you"),
             (T(1, has_done_when=False, checks=[]), set(), "not ready"),
-            (T(1, checks=[]), set(), "not ready"),
+            (T(1, checks=[]), set(), "ready"),
             (T(1, blocked_by_open=[2]), set(), "blocked"),
             (T(1, blocked_by_open=[2]), {"r/m#2"}, "ready"),
             (T(1, blocked_by_open=["map x"]), {"r/m#2"}, "blocked"),
@@ -79,7 +79,7 @@ class ClassifyTest(unittest.TestCase):
     def test_reasons(self):
         self.assertIn("sess-9", classify(T(1, status="claimed", claimed_by="sess-9"), set())[1])
         self.assertEqual(classify(T(1, has_done_when=False), set())[1], "no done-when")
-        self.assertEqual(classify(T(1, checks=[]), set())[1], "no check commands")
+        self.assertEqual(classify(T(1, checks=[]), set())[1], "ready")  # the review judges its Done when
         self.assertEqual(classify(T(1, blocked_by_open=[3, 2]), set(), [T(3), T(2)])[1], "after T3")
         self.assertEqual(classify(T(1, blocked_by_open=[3]), set())[1], "after ticket 3")
 

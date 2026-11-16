@@ -17,7 +17,7 @@ the vault. Only the running hub writes the queue (`$SB_HUB_HOME/state.json`); CL
 - **Ready** only when the ticket's type is `task`, `research` or `prototype`, it has a `Done when`,
   it has checks (its own or its map's), and every blocker is resolved or queued ahead of it. Else it
   shows on the page with its reason: `blocked`, `waits for you` (grilling, architecture),
-  `not ready` (no done-when, no check commands), `claimed`.
+  `not ready` (no done-when; a ticket with no check commands still runs and the review judges it), `claimed`.
 - **Checks**: shell commands, run in the ticket's repo after the worker exits, that all exit 0:
   `sbmap mapset <map> checks="cmd one; cmd two"` on the map, or `sbmap set <map> <NNN> checks="…"`
   on one ticket. The repo's fast loop only: they run once per ticket. Three layers, first found wins:
