@@ -6,17 +6,19 @@ Needs the mcp package; skipped without it. Run it with:
 import asyncio
 import json
 import os
+import queue
 import subprocess
 import sys
 import tempfile
 import threading
 import time
 import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
 
 HUB = Path(__file__).resolve().parents[1] / "skills" / "sb" / "hub"
-from helpers import SBMAP, HubCase, SCRIPT, wait_for
+from helpers import SBMAP, HubCase, SCRIPT, serve_command, wait_for
 
 try:
     from mcp.client import advertise
@@ -279,6 +281,79 @@ class HubMcpStateTest(McpBase):
     def test_a_later_part_without_a_first_read_says_so(self):
         r = self.run_client(lambda c: c.call_tool("sb_api", {"path": "/api/never", "part": 1}))
         self.assertTrue(r.is_error)
+
+
+@unittest.skipIf(Client is None, "mcp is not installed")
+class HubCardTest(McpBase):
+    """The chat card against the Python hub as it really answers (no `links` on a queue item): the bridge, sb_api in parts
+    and the board's typed client together, and the card coming back by itself after the hub restarts."""
+    ts = False
+
+    def shim(self):
+        test = self
+
+        class H(BaseHTTPRequestHandler):
+            def do_POST(self):
+                call = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                r = test.run_client(lambda c: c.call_tool(call["name"], call["arguments"]))
+                out = json.dumps({"structuredContent": r.structured_content, "isError": r.is_error}).encode()
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(out)))
+                self.end_headers()
+                self.wfile.write(out)
+
+            def log_message(self, *a):
+                pass
+
+        srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        self.addCleanup(srv.server_close)
+        self.addCleanup(srv.shutdown)
+        return srv.server_address[1]
+
+    def lines(self, probe):
+        q = queue.Queue()
+        threading.Thread(target=lambda: [q.put(l.strip()) for l in probe.stdout], daemon=True).start()
+        return q
+
+    def next_line(self, q, until, secs):
+        end, seen = time.time() + secs, []
+        while time.time() < end:
+            try:
+                line = q.get(timeout=0.5)
+            except queue.Empty:
+                continue
+            seen.append(line)
+            if line.startswith(until):
+                return line, secs - (end - time.time())
+        self.fail("no %r line within %s s: %s" % (until, secs, seen[-5:]))
+
+    def test_the_card_shows_the_python_hubs_state_and_comes_back_after_a_restart(self):
+        project = Path(self._tmp.name) / "proj"
+        subprocess.run(["git", "init", "-q", str(project)], check=True)
+        self.assertTrue(self.hub("queue", "job", "--project", str(project), "--prompt", "x").stdout.strip())
+        items = self.get("/api/state")["queue"]["items"]
+        self.assertTrue(items and all("links" not in i for i in items), items)  # what the Python hub really serves
+        self.mod.API_PART = 300  # cut the answer so it is relayed in several parts, as the real one is
+        self.addCleanup(setattr, self.mod, "API_PART", 150_000)
+        shim = self.shim()
+        probe = subprocess.Popen(["node", "--experimental-transform-types", "--no-warnings", str(Path(__file__).with_name("hub_card_probe.mjs")),
+                                  str(HUB / "packages" / "web" / "src" / "lib" / "api.ts"),
+                                  str(Path(self.mod.__file__).with_name("sbhub_widget_bridge.js")),
+                                  "http://127.0.0.1:%d/" % shim, "1000"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        self.addCleanup(probe.kill)
+        q = self.lines(probe)
+        first, _ = self.next_line(q, "ok", 30)  # the host's first start offered no tools; the bridge asked again
+        self.assertEqual(first, "ok 2")
+        self.server.kill()
+        self.server.wait()
+        self.server.stdout.close()
+        self.next_line(q, "fail", 10)  # the card sees the hub gone
+        self.server = subprocess.Popen(serve_command(self.port, False), stdout=subprocess.PIPE, text=True, env=self.env)
+        self.procs.append(self.server)
+        self.assertEqual(self.server.stdout.readline().strip(), "sb hub on http://127.0.0.1:%d" % self.port)
+        _, took = self.next_line(q, "ok", 10)
+        self.assertLess(took, 10)
 
 
 if __name__ == "__main__":

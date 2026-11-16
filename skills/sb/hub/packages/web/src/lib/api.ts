@@ -2,7 +2,7 @@
  * The typed client: every call names a contract route, sends the body that route takes and parses the answer with
  * the route's own schema, so a field the hub renames fails here, loudly, instead of drawing nothing.
  */
-import { ROUTES, answerSchema, type RouteAnswer, type RouteBody, type RouteName } from "@sb-hub/contract";
+import { ROUTES, addLinks, answerSchema, type RouteAnswer, type RouteBody, type RouteName } from "@sb-hub/contract";
 
 /** The phone page lives under /v/<token>/ and the API under /v/<token>/api/; at /next/ the API is at /api/. */
 const phone = /^\/v\/[^/]+(?=\/)/.exec(typeof location === "undefined" ? "" : location.pathname);
@@ -30,10 +30,18 @@ type JsonGet = { [K in GetRoute]: (typeof ROUTES)[K]["kind"] extends "json" ? K 
 
 const pathOf = (route: RouteName): string => route.slice(route.indexOf(" ") + 1);
 
-function parse(route: RouteName, status: number, body: unknown): unknown {
+/**
+ * A hub that is the bare Python one (no TypeScript server in front) answers without `links`. The chat card reads whatever
+ * hub the host reaches, so there an answer that fails the contract is read again with every link null, instead of the
+ * board saying the hub is not answering. The website and the phone page keep the strict read.
+ */
+const noLinks = (route: RouteName, body: unknown): unknown => addLinks(route, body, { exists: () => false, real: (p) => p, findTicket: () => null, runs: {} });
+
+export function parse(route: RouteName, status: number, body: unknown): unknown {
   const schema = answerSchema(route, status);
   if (schema === undefined) throw new HubError(`the hub said ${String(status)}`, status);
-  const out = schema.safeParse(body);
+  let out = schema.safeParse(body);
+  if (!out.success && IN_WIDGET) out = schema.safeParse(noLinks(route, body));
   if (!out.success) throw new HubError(`the hub's answer to ${route} does not match the contract`, status);
   return out.data;
 }
