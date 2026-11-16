@@ -386,7 +386,8 @@ class AfterLandingTest(RunnerCase):
 
 # stands in for sk4te's compile for the blame tests: one word of FAKE_COMPILE per run. `pass` passes (a stale
 # Editor that saw nothing), `75` could not run, `broken` fails naming FAKE_COMPILE_BROKEN while that file is in the
-# checkout, `sticky` names it and fails whatever is there. FAKE_COMPILE_LOCK makes it leave .git/index.lock behind as it ends (Unity or a chat's git in the
+# checkout and base/fix.txt (a fix run's mend) is not, `sticky` names it and fails whatever is there, `pair` fails in base/Shared.cs while both tickets' work
+# is in and base/fix.txt is not (each builds alone; together they clash in a file neither touched). FAKE_COMPILE_LOCK makes it leave .git/index.lock behind as it ends (Unity or a chat's git in the
 # checkout at that moment): removed after that many seconds, or kept with `keep`
 BLAME_COMPILE = """import json, os, subprocess, sys, time
 log = os.environ["FAKE_COMPILE_LOG"]
@@ -405,7 +406,12 @@ if mode == "75":
     print("the Editor did not answer")
     sys.exit(75)
 broken = os.environ.get("FAKE_COMPILE_BROKEN", "")
-if mode == "sticky" or mode == "broken" and broken and os.path.exists(broken):
+if mode == "pair" and os.path.exists("one/done.txt") and os.path.exists("two/done.txt") \\
+        and not os.path.exists("base/fix.txt"):
+    print("compile errors:")
+    print("base/Shared.cs(7,3): error CS0102: The type 'Shared' already contains a definition for 'Count'")
+    sys.exit(1)
+if mode == "sticky" or mode == "broken" and broken and os.path.exists(broken) and not os.path.exists("base/fix.txt"):
     print("compile errors:")
     print(broken + "(49,92): error CS0117: 'Lash' does not contain a definition for 'HitHeldSeconds'")
     sys.exit(1)
@@ -429,7 +435,7 @@ class BlameTest(RunnerCase):
         git(self.repo, "commit", "-q", "-m", "checks")
         self.log = self.root / "compile.jsonl"
         os.environ.update(FAKE_COMPILE_LOG=str(self.log), FAKE_COMPILE_BROKEN="one/done.txt")
-        for k in ("FAKE_COMPILE", "FAKE_COMPILE_LOCK"):
+        for k in ("FAKE_COMPILE", "FAKE_COMPILE_LOCK", "FAKE_FIX"):
             self.addCleanup(os.environ.pop, k, None)
         patcher = mock.patch.multiple(sbhub, LAND_LOCK_POLL=0.05, LAND_LOCK_WAIT=30)
         patcher.start()
@@ -562,7 +568,7 @@ class BlameTest(RunnerCase):
         self.hub.queue_set(["repo/one#2"], self.hub.state()["queue"]["version"])
         self.until(lambda: (self.items()["repo/one#2"].get("waits") or {}).get("kind") == "build")
         self.assertEqual(self.state_of("repo/one#2"), "queued")
-        self.assertEqual(len(self.launched), 1)
+        self.assertEqual([l["key"] for l in self.launched if not l["key"].startswith("job:")], ["repo/one#1"])
         # mended by hand: the check runs again on the new commit, passes, and A lands without its worker
         self.mend_main()
         self.until(lambda: self.state_of("repo/one#1") in ("landed", "done") and self.state_of("repo/one#2") != "queued")
@@ -595,6 +601,74 @@ class BlameTest(RunnerCase):
         self.until(lambda: self.state_of("repo/one#1") in ("landed", "done"))
         self.assertTrue((self.repo / "one" / "done.txt").exists())
         self.assertFalse(self.items()["repo/one#1"].get("fails"))
+
+    def fix_jobs(self):
+        return [i for i in self.items().values() if i.get("fix_build")]
+
+    def held_main(self):
+        """The main folder does not build for someone's own half-done edit: ticket 1 lands, fails outside its files,
+        is backed out and held, and the break gets its fix run."""
+        os.environ["FAKE_COMPILE"] = "broken"
+        self.break_main()
+        self.only(1)
+        return self.until(lambda: self.fix_jobs() and self.items()["repo/one#1"].get("held") and self.fix_jobs())
+
+    def test_a_break_no_ticket_owns_starts_one_fix_run_that_mends_it_and_the_held_ticket_lands(self):
+        os.environ["FAKE_FIX"] = "commit"
+        [job] = self.held_main()
+        self.assertEqual(job["fix_build"], str(self.repo))
+        self.assertEqual(job["model"], "opus")
+        self.until(lambda: self.state_of("repo/one#1") in ("landed", "done"))
+        [brief] = [l["brief"] for l in self.launched if l["key"] == job["key"]]
+        self.assertTrue(brief.startswith("# Mend game's build"))
+        self.assertIn("base/broken.txt(49,92): error CS0117", brief)
+        self.assertIn("python3 .sb/checks-compile.py", brief)
+        self.assertIn("unity:" + self.repo.name, brief)
+        self.assertTrue((self.repo / "base" / "fix.txt").exists())  # mended in the main folder
+        self.assertTrue((self.repo / "one" / "done.txt").exists())  # and the held ticket landed on it, its worker run once
+        self.assertEqual(sum(1 for l in self.launched if "repo/one/001" in l["brief"]), 1)
+        self.assertFalse(self.items()["repo/one#1"].get("fails"))
+        self.assertNotIn("held", self.build())
+        self.assertEqual(self.hub.state()["questions"], {})
+        board = Path(job["run"]) / (Path(job["run"]).name + ".md")  # the run board sbmap made for it
+        self.assertRegex(board.read_text(), r"fix run for game's build ended: Mended: the shared file builds again\. "
+                                            r"Cost: \$\d+\.\d\d")
+
+    def test_a_fix_run_that_cannot_mend_it_asks_the_owner_once_and_the_tickets_keep_waiting(self):
+        os.environ["FAKE_FIX"] = "nothing"
+        [job] = self.held_main()
+        q = self.until(lambda: self.hub.state()["questions"])
+        [(qid, asked)] = q.items()
+        self.assertIn("game's build is broken in broken.txt and the fix run could not mend it", asked["q"])
+        self.assertEqual(self.build()["fix"]["asked"], qid)
+        for _ in range(5):
+            self.sup.tick()
+        a = self.items()["repo/one#1"]
+        self.assertEqual((a["state"], a.get("held")), ("recheck", str(self.repo)))  # still waiting, nothing retried
+        self.assertFalse(a.get("fails"))
+        self.assertEqual(len(self.hub.state()["questions"]), 1)  # asked once
+        self.assertEqual(len(self.fix_jobs()), 1)
+
+    def test_a_second_break_while_the_fix_run_works_starts_no_second_one(self):
+        os.environ["FAKE_FIX"] = "slow"
+        [job] = self.held_main()
+        self.until(lambda: self.state_of(job["key"]) == "running")
+        h = self.build()["held"]
+        self.sup.runner.build_mark(str(self.repo), held={**h, "head": "0" * 40, "files": ["base/Other.cs"]})
+        for _ in range(5):
+            self.sup.tick()
+        self.assertEqual(len(self.fix_jobs()), 1)
+
+    def test_two_tickets_that_clash_only_together_make_the_second_one_mend_it_on_its_own_try(self):
+        os.environ["FAKE_COMPILE"] = "pair"  # each builds alone; together they clash in a file neither touched
+        self.sb("block", "repo/one", "2", "1")
+        self.only(1, 2)
+        b = self.until(lambda: (self.items().get("repo/one#2") or {}).get("fails") and self.items()["repo/one#2"])
+        self.assertIn("The main folder builds without your work", b["retry"])
+        self.assertIn("base/Shared.cs", b["retry"])
+        self.assertIsNone(b.get("held"))
+        self.assertEqual(self.fix_jobs(), [])
+        self.assertNotIn("held", self.build())
 
     def compiles(self):
         return [json.loads(l) for l in self.log.read_text().splitlines()] if self.log.exists() else []

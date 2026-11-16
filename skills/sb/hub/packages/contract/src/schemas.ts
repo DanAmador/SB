@@ -203,6 +203,8 @@ const itemFields = {
   blocking: z.array(z.string()).optional(),
   /** recheck: the repo whose build is broken outside its files; it lands once that builds again (no try spent). */
   held: z.string().nullable().optional(),
+  /** job: the repo whose broken build this fix run mends (templates/fix-build.md). */
+  fix_build: z.string().optional(),
   /** When it last landed (checks passed): the review timer counts from it, across hub restarts. */
   landed_at: Seconds.optional(),
   media: z.array(z.string()).optional(),
@@ -302,6 +304,9 @@ export const Build = z.strictObject({
   held: z
     .strictObject({ cmd: z.string(), after: z.boolean(), files: z.array(z.string()), head: z.string(), at: Seconds })
     .optional(),
+  /** The one fix run of this break: its job's key (null when it could not be queued), whether it ended, and the id of
+   * the question put to the owner when it could not mend it. */
+  fix: z.strictObject({ key: z.string().nullable(), ended: z.boolean(), asked: z.string().optional() }).optional(),
 });
 export type Build = z.infer<typeof Build>;
 

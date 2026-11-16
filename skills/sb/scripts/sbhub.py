@@ -1353,6 +1353,10 @@ MEDIA_MAX, MEDIA_BYTES = 6, 8 << 20
 CHECK_TAIL = 40  # output lines kept per check
 CLOSE_OFF_AT = (9, 0)  # the morning close-off job's local time
 CLOSE_OFF = Path(__file__).resolve().parents[1] / "templates" / "close-off.md"
+# a build held for a break no ticket owns gets one fix run: a job in the repo's main folder, briefed from this
+FIX_BUILD = Path(__file__).resolve().parents[1] / "templates" / "fix-build.md"
+FIX_MODEL = "opus"
+FIX_ASK_WAIT = 12 * 3600
 
 
 def next_clock(hhmm, now):
@@ -2748,7 +2752,8 @@ class TicketRun:
                                                     first_base=run.get("first_base"))
             elsewhere = broken_elsewhere(reason, _git(tree, "diff", "--name-only", head, sha).split()) \
                 if passed is False and sha else []
-            if elsewhere:  # the newest commit it was rebased on does not build either: not this ticket's try
+            if elsewhere and self.check_main(t["repo"], {"cmd": _failed_cmd(reason), "after": False}, head) is False:
+                # the newest commit it was rebased on does not build either: not this ticket's try
                 self.build_mark(t["repo"], errors=compile_errors(reason)[1], by=sbqueue.key(t), held={
                     "cmd": _failed_cmd(reason), "after": False, "files": elsewhere, "head": head,
                     "at": self.hub.now()})
@@ -2830,7 +2835,13 @@ class TicketRun:
                     failed, Path(repo).name, landing["sha"][:9], err, unity_lock(repo))
                 threading.Thread(target=notify, daemon=True, args=("sb hub: needs you", "{}: the build is broken "
                                  "and {} could not be backed out".format(Path(repo).name, landing["key"]))).start()
-            elif elsewhere:  # backed out, its work kept on its branch: it lands again once the build is green
+            elif elsewhere:  # backed out, its work kept on its branch: is the main folder broken without it too?
+                alone = sbqueue._run_checks(cmds, repo, _recording(checks), "")
+                if alone is None:  # it builds without this landing: the clash is this ticket's to mend, its try
+                    self.build_mark(repo, green=_git(repo, "rev-parse", "HEAD"))
+                    return False, ("after landing, {}\nThe main folder builds without your work, so the clash is "
+                                   "between your change and {}: mend it on your branch (you may change those "
+                                   "files).").format(why, ", ".join(elsewhere[:5]))
                 self.build_mark(repo, held={"cmd": _failed_cmd(failed), "after": True, "files": elsewhere,
                                             "head": _git(repo, "rev-parse", "HEAD"), "at": self.hub.now()})
                 return None, "after landing, {} ({}): {}".format(HELD, ", ".join(elsewhere[:3]), why)
@@ -2914,9 +2925,9 @@ class TicketRun:
                 sbqueue._drop_clean_copy(repo, d, subprocess.run)
         if failed and failed.startswith(sbqueue.NOT_RUN):
             return None
-        if failed:
+        if failed and self.build_of(repo).get("held"):
             self.build_mark(repo, errors=compile_errors(failed)[1], by=self.build_of(repo).get("errors_by"),
-                            held={**held, "head": head, "at": self.hub.now()})
+                            held={**self.build_of(repo)["held"], "head": head, "at": self.hub.now()})
         return not failed
 
     def last_errors(self, repo):
@@ -3836,25 +3847,105 @@ class Supervisor:
                              note="the recheck did not run: {}: {}".format(type(e).__name__, e))
 
     def _held_builds(self):
-        """A repo whose build is broken outside any ticket's files holds its tickets: the check that failed runs
-        again on the checkout's newest commit when that moved or every HELD_EVERY; once it passes the build is green
-        and every ticket it held lands again at once (a recheck, its worker not run), with no try spent."""
+        """A repo whose build is broken outside any ticket's files holds its tickets. It gets one fix run (a job in
+        its main folder, templates/fix-build.md) per break. The check that failed runs again on the checkout's newest
+        commit when that moved, when the fix run ended, or every HELD_EVERY; once it passes the build is green and
+        every ticket it held lands again at once (a recheck, its worker not run), with no try spent. A fix run that
+        ended without mending it asks the owner once."""
         now = self.hub.now()
         with self.hub._lock:
-            builds = {r: dict(b["held"]) for r, b in (self.hub._data["queue"].get("builds") or {}).items()
+            builds = {r: json.loads(json.dumps(b)) for r, b in (self.hub._data["queue"].get("builds") or {}).items()
                       if b.get("held")}
-        for repo, h in builds.items():
+        for repo, b in builds.items():
+            if "fix" not in b:
+                self._start_fix(repo, b)
+                continue  # its check runs again once the fix run ended (or the checkout moved)
+            h, fix = b["held"], b["fix"]
             head = _git(repo, "rev-parse", "HEAD")
             if not head or head == h.get("head") and now < (h.get("at") or 0) + HELD_EVERY:
                 continue
-            if self.runner.check_main(repo, h, head):
+            if not fix.get("ended") and head == h.get("head"):
+                continue  # the fix run is still at it: its own commit is what the next check judges
+            ok = self.runner.check_main(repo, h, head)
+            if ok:
                 self.runner.build_mark(repo, green=head)
+            elif ok is False and fix.get("ended") and not fix.get("asked"):
+                self._ask_fix(repo, b)
         with self.hub._lock:
             builds = self.hub._data["queue"].get("builds") or {}
             free = [i["key"] for i in self.hub._data["queue"]["items"]
                     if i.get("held") and not (builds.get(i["held"]) or {}).get("held")]
         for key in free:
             self._update(key, held=None, recheck_at=now, note="the build is green again: it lands now")
+
+    def _start_fix(self, repo, b):
+        """Queue the one fix run of this break, first in the queue, briefed with the check and its errors."""
+        h = b["held"]
+        name = Path(repo).name
+        try:
+            template = FIX_BUILD.read_text(encoding="utf-8")
+        except OSError as e:
+            print("sb hub queue: fix-build template: {}".format(e), file=sys.stderr, flush=True)
+            return
+        prompt = template
+        for k, v in (("{repo_name}", name), ("{repo}", repo), ("{cmd}", h["cmd"]), ("{head}", h["head"][:12]),
+                     ("{since}", b.get("errors_by") or "a landing"), ("{files}", ", ".join(h.get("files") or [])),
+                     ("{errors}", "\n".join(b.get("errors") or []) or "(none recorded)"), ("{lock}", unity_lock(repo))):
+            prompt = prompt.replace(k, v)
+        try:
+            key = self.hub._queue_job(repo, repo, prompt, None, FIX_MODEL, "fix-build-" + name)["key"]
+        except ValueError as e:  # the same break was handed to a fix run less than a day ago
+            key = None
+            print("sb hub queue: fix run for {}: {}".format(name, e), file=sys.stderr, flush=True)
+        with self.hub._lock:
+            got = (self.hub._data["queue"].get("builds") or {}).get(repo)
+            if got is not None and got.get("held"):
+                got["fix"] = {"key": key, "ended": key is None}
+                self.hub._data["queue"]["version"] += 1
+                self.hub._save()
+        if key:
+            self._update(key, front=True, fix_build=repo, title="mend {}'s build".format(name))
+
+    def _fix_ended(self, item, run, result, ok):
+        """A fix run ended: its cost goes on its run board, and the check runs again at the next pass."""
+        repo = item["fix_build"]
+        spend = log_spend(run.get("log"), run.get("start") or 0) or {}
+        minutes = max(0, self.hub.now() - (item.get("started") or self.hub.now())) / 60
+        board = Path(run["log"]).parent / (Path(run["log"]).parent.name + ".md")
+        try:
+            said = firstline(Path(result).read_text(encoding="utf-8")) if result else ""
+            with open(board, "a", encoding="utf-8") as f:
+                f.write("\n- {} fix run for {}'s build {}: {}. Cost: ${:.2f}, {:.0f} min ({}).\n".format(
+                    _hm(self.hub.now()), Path(repo).name, "ended" if ok else "failed",
+                    said.rstrip(".") or "no word from it",
+                    spend.get("cost_usd") or 0, minutes, item.get("model") or FIX_MODEL))
+        except OSError as e:
+            print("sb hub queue: fix run board: {}".format(e), file=sys.stderr, flush=True)
+        with self.hub._lock:
+            b = (self.hub._data["queue"].get("builds") or {}).get(repo)
+            if b and b.get("fix", {}).get("key") == item["key"]:
+                b["fix"]["ended"] = True
+                if b.get("held"):
+                    b["held"]["at"] = 0  # judged again at the next pass, whatever the checkout's commit
+                self.hub._data["queue"]["version"] += 1
+                self.hub._save()
+
+    def _ask_fix(self, repo, b):
+        """The fix run could not mend it: the owner is asked once, and the tickets keep waiting."""
+        name, h = Path(repo).name, b["held"]
+        q = ("{}'s build is broken in {} and the fix run could not mend it. Its tickets wait, with no try spent, "
+             "until the check passes on the main folder: `{}`. The fix run's report is on its run board.").format(
+            name, ", ".join(Path(f).name for f in h.get("files") or []) or "files the hub could not name", h["cmd"])
+        got = self.hub.ask(b["fix"].get("key") or "sb-hub", q, ["I'll mend it by hand", "Leave it until morning"],
+                           "Leave it until morning", FIX_ASK_WAIT)
+        with self.hub._lock:
+            cur = (self.hub._data["queue"].get("builds") or {}).get(repo)
+            if cur and cur.get("fix"):
+                cur["fix"]["asked"] = got["id"]
+                self.hub._data["queue"]["version"] += 1
+                self.hub._save()
+        threading.Thread(target=notify, daemon=True, args=("sb hub: needs you", "{}: the build is broken and the "
+                         "fix run could not mend it".format(name))).start()
 
     def _unclean(self):
         """Each item waiting for a clean checkout whose blocking files are now saved or cleared (one git status on
@@ -4065,6 +4156,8 @@ class Supervisor:
             self._end(key, "done", result=str(result), note="done; result in " + str(result.parent))
         else:
             self._end(key, "failed", result=str(result), note="the worker exited {}".format(code))
+        if item.get("fix_build"):
+            self._fix_ended(item, run, result, code == 0 and not over)
 
     def _close_off(self):
         """Once a day, while the queue holds anything besides close-off jobs, queue the morning close-off for
@@ -4662,8 +4755,16 @@ def run_providers(project, timeout=120, trusted=True):
         return out
     for f in files:
         try:
-            r = subprocess.run([str(f)], capture_output=True, text=True, errors="replace", timeout=timeout,
-                               cwd=project)
+            # its own process group, so a timeout kills what it started too (a test suite), not only the script
+            p = subprocess.Popen([str(f)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, errors="replace",
+                                 cwd=project, start_new_session=True)
+            try:
+                stdout, stderr = p.communicate(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                _kill_group(p, grace=1)
+                p.communicate()
+                raise
+            r = subprocess.CompletedProcess(p.args, p.returncode, stdout, stderr)
             if r.returncode != 0:
                 out.append(_provider_error(f.name, "exit {}: {}".format(r.returncode, r.stderr.strip() or r.stdout.strip())))
                 continue

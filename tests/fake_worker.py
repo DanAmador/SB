@@ -19,6 +19,10 @@ its arguments (the log keeps them), and does what FAKE_WORKER_MODE says:
            run only if the hook allows it, commit nothing, exit 1
   hang     start a child that sleeps, write both pids to FAKE_WORKER_PIDS, sleep past any limit
 
+A brief that opens `# Mend ` (templates/fix-build.md) makes it the fake build fixer, whatever the mode; FAKE_FIX says
+what it does: `commit` writes base/fix.txt and commits it, `slow` sleeps 3 seconds and commits nothing, anything else
+commits nothing. Each exits 0 with a one-line result.
+
 A brief that names a review file (`Write your review to: <path>`, templates/review-brief.md) makes it the fake
 reviewer instead, whatever the mode (it names one review file per landed ticket, `<num>-review.md`). FAKE_REVIEW
 says what it does with each, a mode for all or a JSON object {"<num>": mode} (default finished):
@@ -116,6 +120,19 @@ def main():
         return reviewer([r.strip() for r in review])
     if os.environ.get("FAKE_WORKER_USAGE"):
         event(float(os.environ["FAKE_WORKER_USAGE"].split(">")[0]))
+    if brief.startswith("# Mend "):
+        fix = os.environ.get("FAKE_FIX", "")
+        if fix == "slow":
+            time.sleep(3)
+        if fix == "commit":
+            os.makedirs("base", exist_ok=True)
+            with open("base/fix.txt", "w", encoding="utf-8") as f:
+                f.write("mended\n")
+            subprocess.run(["git", "add", "base/fix.txt"], check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "fix(build): the shared file builds with both"], check=True)
+        said = "Mended: the shared file builds again." if fix == "commit" else "Could not mend it: it needs a ruling."
+        result({"type": "result", "subtype": "success", "is_error": False, "result": said})
+        return 0
     mode = os.environ.get("FAKE_WORKER_MODE", "commit")
     found = re.search(r"^\s*Ticket: (\S+)\s*$", brief, re.M)
     ticket = found.group(1) if found else None
