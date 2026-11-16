@@ -256,6 +256,8 @@ export const Queue = z.strictObject({
   version: z.number().int(),
   seeded: z.boolean(),
   paused: z.boolean(),
+  /** Why the hub paused the queue by itself ("paused: three tickets in a row failed with …"); absent otherwise. */
+  note: z.string().nullable().optional(),
   agent: z.string().nullable(),
   items: z.array(QueueItem),
   /** The queued maps in run order: in a repo the hub starts tickets only from the first one with work or something
