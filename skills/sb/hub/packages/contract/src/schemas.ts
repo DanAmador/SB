@@ -490,6 +490,9 @@ export const TicketRow = z.strictObject({
   map_title: z.string(),
   map_order: z.number().int(),
   claimed_by: z.string().nullable(),
+  /** The bundle (2 to 4 tickets one worker runs together) this ticket is in and its 1-based place; null when none. */
+  bundle: z.string().nullable().optional(),
+  position: z.number().int().nullable().optional(),
   queued: z.boolean(),
   state: TicketState,
   reason: z.string(),
@@ -519,6 +522,9 @@ export const MapTicket = z.strictObject({
   why: z.string(),
   priority: z.string().nullable(),
   tier: z.string(),
+  /** The bundle (2 to 4 tickets one worker runs together) this ticket is in and its 1-based place; null when none. */
+  bundle: z.string().nullable().optional(),
+  position: z.number().int().nullable().optional(),
   /** 1-based place among the queued tickets, or null when it is not queued. */
   place: z.number().int().nullable(),
   /** The outcome of its last queue run, or null when it never ran. */

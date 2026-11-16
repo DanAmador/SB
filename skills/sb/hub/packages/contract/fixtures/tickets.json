@@ -3,6 +3,7 @@
     {
       "blocked_by": [],
       "blocked_by_open": [],
+      "bundle": null,
       "check": "tests",
       "checks": [
         "true"
@@ -21,6 +22,7 @@
       "paths": [
         "two/"
       ],
+      "position": null,
       "priority": "C",
       "question": "",
       "queued": true,
@@ -37,6 +39,7 @@
     {
       "blocked_by": [],
       "blocked_by_open": [],
+      "bundle": null,
       "check": "tests",
       "checks": [
         "true"
@@ -55,6 +58,7 @@
       "paths": [
         "three/"
       ],
+      "position": null,
       "priority": "C",
       "question": "",
       "queued": true,
@@ -71,6 +75,7 @@
     {
       "blocked_by": [],
       "blocked_by_open": [],
+      "bundle": null,
       "check": "tests",
       "checks": [
         "true"
@@ -89,6 +94,7 @@
       "paths": [
         "four/"
       ],
+      "position": null,
       "priority": "C",
       "question": "",
       "queued": false,
@@ -105,6 +111,7 @@
     {
       "blocked_by": [],
       "blocked_by_open": [],
+      "bundle": null,
       "check": "tests",
       "checks": [
         "true"
@@ -123,6 +130,7 @@
       "paths": [
         "five/"
       ],
+      "position": null,
       "priority": "C",
       "question": "",
       "queued": true,
@@ -139,6 +147,7 @@
     {
       "blocked_by": [],
       "blocked_by_open": [],
+      "bundle": null,
       "check": "tests",
       "checks": [
         "true"
@@ -157,6 +166,7 @@
       "paths": [
         "five/"
       ],
+      "position": null,
       "priority": "C",
       "question": "",
       "queued": true,
@@ -173,6 +183,7 @@
     {
       "blocked_by": [],
       "blocked_by_open": [],
+      "bundle": null,
       "check": "tests",
       "checks": [
         "true"
@@ -198,6 +209,7 @@
       ],
       "out": "",
       "paths": [],
+      "position": null,
       "priority": "C",
       "question": "",
       "queued": false,

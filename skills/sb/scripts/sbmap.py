@@ -15,6 +15,9 @@ Bases see the whole route. It answers what an agent should never compute or type
     sbmap.py maps [--repo <path>]       every map in the vault (or one repo's), with counts
     sbmap.py status   <map>             counts, claimed tickets, the frontier, the map's handoff.md and
                                         checkpoint.md and the run boards that name it
+    sbmap.py bundle   <map> <NNN,NNN,..> --name <n> | --clear <n> | --suggest [--json]
+                                        bundle: 2 to 4 open tickets one worker runs together, in blocker
+                                        order; --suggest proposes them from shared paths and blocker chains
     sbmap.py frontier <map>             open tickets whose every blocker is resolved, in map order
     sbmap.py show     <map> <NNN>       succinct digest: status, type, blockers, question, done when
     sbmap.py lanes    <map> [--max 2] [--json]
@@ -159,7 +162,7 @@ SHAPES = {  # mermaid node shape per ticket type
 }
 TICKET_KEYS = ["wayfinder", "operonId", "number", "title", "why", "project", "aliases", "status", "type",
                "priority", "tier", "check", "ruling", "created", "filed_during", "completed", "review", "review_note",
-               "map", "blocked_by", "claimed_by",
+               "map", "blocked_by", "claimed_by", "bundle", "bundle_position",
                "paths", "repo", "commit", "ref", "pr", "github", "tags"]
 MAP_KEYS = ["wayfinder", "project", "status", "aliases", "repo", "github", "tags"]
 # Operon's priorities are letters, S highest, C its default; sbmap takes either the letter or a word
@@ -333,6 +336,8 @@ class Ticket:
         raw = fields.get("blocked_by") or []
         self.blocked_by = raw if isinstance(raw, list) else [b.strip() for b in raw.split(",") if b.strip()]
         self.claimed_by = fields.get("claimed_by") or ""
+        self.bundle = str(fields.get("bundle") or "") or None
+        self.position = int(fields["bundle_position"]) if self.bundle and str(fields.get("bundle_position", "")).isdigit() else None
         raw = fields.get("paths") or []
         self.paths = raw if isinstance(raw, list) else split_list(raw)
         # `## Answer` is the convention; tickets moved from GitHub carry `## Resolved in ...`
@@ -705,7 +710,8 @@ def cmd_info(args):
                 waiting.append(t.id)  # blocked: the number only, `show` has the rest
             elif t.status in ("open", "claimed"):
                 mark = f"[{t.claimed_by or 'claimed'}]" if t.status == "claimed" else "▸"
-                print(f"{mark} {t.id} {t.title} — {short(t.props.get('why', ''), 90)}")
+                tag = f" [bundle {t.bundle} #{t.position}]" if t.bundle else ""
+                print(f"{mark} {t.id} {t.title}{tag} — {short(t.props.get('why', ''), 90)}")
         if waiting:
             print("blocked: " + " ".join(waiting))
         return
@@ -2686,7 +2692,8 @@ def map_tickets(m):
         rows.append({
             "num": t.num, "title": t.title, "type": t.type, "status": t.status, "why": t.props.get("why", ""),
             "priority": t.props.get("priority") or None, "tier": str(t.props.get("tier") or "sonnet"),
-            "blocked_by": [blocker_ref(m, ref) for ref in t.blocked_by], "file": str(t.path)})
+            "blocked_by": [blocker_ref(m, ref) for ref in t.blocked_by], "file": str(t.path),
+            "bundle": t.bundle, "position": t.position})
     return {"map": m.rel_name, "title": m.title, "status": m.status, "words": short(" ".join(l for l in plain_words(m).splitlines() if not l.startswith(">")).strip(), 300),
             "checks": m.props.get("checks") or [], "uri": obsidian_uri(m.md_path), "tickets": rows}
 
@@ -2739,11 +2746,103 @@ def cmd_tickets(args):
                 "options": options_of(t.body), "ruling": str(t.props.get("ruling") or "") or None,
                 "checks": checks, "checks_from": checks_from if checks else "",
                 "repo": str(m.props.get("repo", "")), "file": str(t.path),
-                "map_title": m.title, "map_order": i, "claimed_by": t.claimed_by or None})
+                "map_title": m.title, "map_order": i, "claimed_by": t.claimed_by or None,
+                "bundle": t.bundle, "position": t.position})
     print(json.dumps(rows, indent=1))
 
+MAX_BUNDLE = 4
 
-COMMANDS = {"info": cmd_info, "maps": cmd_maps, "status": cmd_status, "frontier": cmd_frontier, "lanes": cmd_lanes, "show": cmd_show,
+def blocker_nums(m, t):
+    return [x.num for ref in t.blocked_by for _, _, x in [m.blocker(ref)] if x and x.num in m.tickets]
+
+def suggest_bundles(m):
+    """Open, unbundled tickets joined by a shared path (as `lanes` reads it) or a blocked-by link, grouped
+    into connected sets, each put in blocker order and cut into runs of at most 4; singles are dropped."""
+    pool = [t for t in m.order() if t.status == "open" and not t.bundle]
+    nums = {t.num for t in pool}
+    parent = {t.num: t.num for t in pool}
+    def find(n):
+        while parent[n] != n:
+            n = parent[n] = parent[parent[n]]
+        return n
+    for i, a in enumerate(pool):
+        for b in pool[i + 1:]:
+            if overlap(a.paths, b.paths):
+                parent[find(a.num)] = find(b.num)
+        for n in blocker_nums(m, a):
+            if n in nums:
+                parent[find(a.num)] = find(n)
+    groups = {}
+    for t in pool:
+        groups.setdefault(find(t.num), []).append(t)
+    out = []
+    for g in groups.values():
+        left, ordered = list(g), []
+        while left:  # map order, but a ticket only after its blockers
+            t = next((t for t in left if not any(n in {u.num for u in left} and n != t.num for n in blocker_nums(m, t))), left[0])
+            ordered.append(t)
+            left.remove(t)
+        for i in range(0, len(ordered), MAX_BUNDLE):
+            chunk = ordered[i:i + MAX_BUNDLE]
+            if len(chunk) > 1:
+                out.append(chunk)
+    return out
+
+def cmd_bundle(args):
+    m = load(args[0])
+    if "--clear" in args:
+        name, n = opt(args, "--clear"), 0
+        for t in m.order():
+            if t.bundle == name:
+                props = {k: v for k, v in t.props.items() if k not in ("bundle", "bundle_position")}
+                t.save(props)
+                n += 1
+        if not n:
+            sys.exit(f"sbmap: no bundle {name} on {m.rel_name}")
+        print(f"cleared bundle {name}: {n} tickets")
+        return
+    if "--suggest" in args:
+        found = [{"tickets": [t.num for t in g], "paths": sorted({p for t in g for p in t.paths}),
+                  "tier": max((str(t.props.get("tier") or "sonnet") for t in g), key=TIERS.index)} for g in suggest_bundles(m)]
+        if "--json" in args:
+            print(json.dumps(found))
+            return
+        for g in found:
+            nums = ",".join(map(str, g["tickets"]))
+            print(f"sbmap bundle {m.rel_name} {nums} --name {g['tickets'][0]:03d}  # {g['tier']}: {', '.join(g['paths']) or 'blocker chain'}")
+        return
+    name = opt(args, "--name") or sys.exit("sbmap: bundle needs --name (or --clear <name>, or --suggest)")
+    if not re.fullmatch(r"[\w.-]+", name):
+        sys.exit("sbmap: bundle name is letters, digits, . _ - only")
+    try:
+        nums = [int(x) for x in split_list(args[1])]
+    except (IndexError, ValueError):
+        sys.exit("sbmap: bundle takes tickets as NNN,NNN,...")
+    if not 2 <= len(nums) <= MAX_BUNDLE or len(set(nums)) != len(nums):
+        sys.exit(f"sbmap: a bundle is 2 to {MAX_BUNDLE} different tickets, not {len(nums)}")
+    for n in nums:
+        if n not in m.tickets:
+            sys.exit(f"sbmap: ticket {n} is not in {m.rel_name}; a bundle holds one map's tickets")
+        t = m.tickets[n]
+        if t.status != "open":
+            sys.exit(f"sbmap: ticket {t.id} is {t.status}; only open tickets bundle")
+        if t.bundle and t.bundle != name:
+            sys.exit(f"sbmap: ticket {t.id} is already in bundle {t.bundle}; --clear it first")
+    for i, n in enumerate(nums):
+        late = [b for b in blocker_nums(m, m.tickets[n]) if b in nums[i + 1:]]
+        if late:
+            sys.exit(f"sbmap: ticket {n:03d} is blocked by {late[0]:03d}, which comes after it; put {late[0]:03d} first")
+    for t in m.order():  # re-naming a bundle replaces it
+        if t.bundle == name and t.num not in nums:
+            t.save({k: v for k, v in t.props.items() if k not in ("bundle", "bundle_position")})
+    for i, n in enumerate(nums, 1):
+        t = m.tickets[n]
+        t.save({**t.props, "bundle": name, "bundle_position": i})
+    tier = max((str(m.tickets[n].props.get("tier") or "sonnet") for n in nums), key=TIERS.index)
+    print(f"bundle {name}: {', '.join(f'{n:03d}' for n in nums)} (runs on {tier})")
+
+
+COMMANDS = {"info": cmd_info, "maps": cmd_maps, "status": cmd_status, "frontier": cmd_frontier, "lanes": cmd_lanes, "bundle": cmd_bundle, "show": cmd_show,
             "next": cmd_next, "mapset": cmd_mapset, "tickets": cmd_tickets, "link": cmd_link, "uri": cmd_uri, "check": cmd_check, "verify": cmd_verify,
             "init": cmd_init, "summary": cmd_summary, "new": cmd_new, "set": cmd_set, "claim": cmd_claim,
             "comment": cmd_comment, "rule": cmd_rule, "spend": cmd_spend, "ruling": cmd_comment, "block": cmd_block, "move": cmd_move,

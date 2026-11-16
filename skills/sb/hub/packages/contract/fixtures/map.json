@@ -8,6 +8,7 @@
     "tickets": [
       {
         "blocked_by": [],
+        "bundle": null,
         "file": "/fixture/Vault/wayfinder/repo/one/issues/done/001 A.md",
         "last_run": {
           "ended": 1794528000.0,
@@ -16,6 +17,7 @@
         },
         "num": 1,
         "place": null,
+        "position": null,
         "priority": "C",
         "state": "done",
         "status": "resolved",
@@ -26,10 +28,12 @@
       },
       {
         "blocked_by": [],
+        "bundle": null,
         "file": "/fixture/Vault/wayfinder/repo/one/issues/002 B.md",
         "last_run": null,
         "num": 2,
         "place": 4,
+        "position": null,
         "priority": "C",
         "state": "ready",
         "status": "open",
@@ -40,10 +44,12 @@
       },
       {
         "blocked_by": [],
+        "bundle": null,
         "file": "/fixture/Vault/wayfinder/repo/one/issues/003 C.md",
         "last_run": null,
         "num": 3,
         "place": 3,
+        "position": null,
         "priority": "C",
         "state": "ready",
         "status": "open",
@@ -54,10 +60,12 @@
       },
       {
         "blocked_by": [],
+        "bundle": null,
         "file": "/fixture/Vault/wayfinder/repo/one/issues/004 D.md",
         "last_run": null,
         "num": 4,
         "place": null,
+        "position": null,
         "priority": "C",
         "state": "ready",
         "status": "open",
