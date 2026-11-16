@@ -155,6 +155,8 @@ class ContractFixturesTest(unittest.TestCase):
             fix["bytes"] = len(raw)
         text = self.stable(json.dumps(fix, indent=2, sort_keys=True) + "\n")
         text = re.sub(r'"secs": [\d.]+', '"secs": 0.0', text)
+        # a worker's start time from ps: left live, every run of the tests would edit a tracked fixture
+        text = re.sub(r'"pid_start": "[^"]*"', '"pid_start": "Mon Nov 16 10:05:45 2026"', text)
         FIXTURES.mkdir(parents=True, exist_ok=True)
         f = FIXTURES / (name + ".json")
         if not f.exists() or f.read_text(encoding="utf-8") != text:
