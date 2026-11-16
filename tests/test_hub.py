@@ -231,6 +231,13 @@ class HubTest(unittest.TestCase):
         self.t += 2
         self.assertEqual(set(h.state()["locks"]), {"listed"})
 
+    def test_the_hubs_own_landing_lock_does_not_expire(self):
+        h = self.h  # a Unity compile after landing can run past ten minutes; a restarted hub undoes it instead
+        h.lock("unity:sk4te", "sb-hub landing sk4te/m#1", landing={"key": "sk4te/m#1", "repo": "/r", "before": "a",
+                                                                  "sha": "b"})
+        self.t += 3600
+        self.assertEqual(set(h.state()["locks"]), {"unity:sk4te"})
+
     def test_a_lock_held_through_an_alias_does_not_expire(self):
         h = self.h
         h.report({"agent": "s1", "alias": "night-run", "state": "working"})

@@ -1,0 +1,96 @@
+{
+ "agents": {},
+ "aliases": {},
+ "charge": {},
+ "installed": {
+  "main": {
+   "dir": "/tmp/sb/.claude-main",
+   "kind": "claude",
+   "limited_until": null,
+   "model": null,
+   "probed": 1794528000.0
+  },
+  "spare": {
+   "dir": "/tmp/sb/.claude-spare",
+   "kind": "claude",
+   "limited_until": null,
+   "model": null
+  }
+ },
+ "locks": {
+  "unity:game": {
+   "at": 1794528000.0,
+   "by": "sb-hub landing repo/one#1",
+   "landing": {
+    "before": "0000000000000000000000000000000000000000",
+    "branch": "sb/repo-one-001",
+    "key": "repo/one#1",
+    "repo": "/tmp/sb/game",
+    "sha": "0000000000000000000000000000000000000000",
+    "tree": "/tmp/sb/hub/worktrees/repoA-000000/repo-one-001"
+   }
+  }
+ },
+ "messages": {},
+ "now": 1794528000.0,
+ "providers": {},
+ "questions": {},
+ "queue": {
+  "agent": "main",
+  "bases": {
+   "/tmp/sb/game": {
+    "project": "repo",
+    "sha": "0000000000000000000000000000000000000000"
+   }
+  },
+  "items": [
+   {
+    "agent": null,
+    "base_sha": "0000000000000000000000000000000000000000",
+    "branch": "sb/repo-one-001",
+    "commit": null,
+    "ended": null,
+    "first_base": "0000000000000000000000000000000000000000",
+    "key": "repo/one#1",
+    "kind": "ticket",
+    "log": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one/1.log",
+    "log_start": 0,
+    "map": "repo/one",
+    "model": "sonnet",
+    "night": "night-20261113-010000",
+    "note": "running on main (sonnet)",
+    "paths": [
+     "one/"
+    ],
+    "pid": 0,
+    "pid_start": "Mon Nov 16 10:05:45 2026",
+    "repo": "/tmp/sb/game",
+    "run": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one",
+    "runner": "main",
+    "started": 1794528000.0,
+    "state": "running",
+    "title": "A",
+    "tree": "/tmp/sb/hub/worktrees/repoA-000000/repo-one-001",
+    "tries": 0
+   }
+  ],
+  "maps": [
+   "repo/one"
+  ],
+  "night": "night-20261113-010000",
+  "paused": false,
+  "repos": {
+   "/tmp/sb/game": {
+    "at_once": 2,
+    "running": 1,
+    "side_by_side": 0
+   }
+  },
+  "runs": {
+   "repo/one": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one/2026-11-13-one.md"
+  },
+  "seeded": true,
+  "version": 4
+ },
+ "seen": []
+}

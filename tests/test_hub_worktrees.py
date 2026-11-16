@@ -2,13 +2,17 @@
 overlap, each in its own git worktree on its own branch; a passed ticket is rebased onto the checkout's branch,
 checked there, and fast-forwarded into the checkout. Same harness as test_hub_runner: Supervisor.tick() by hand,
 a temp vault, temp repos and tests/fake_worker.py for `claude -p`."""
+import json
 import os
 import re
+import threading
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from test_hub_runner import TEMPLATES, RunnerCase, git
+from test_hub_runner import TEMPLATES, RunnerCase, git, state_fixture
+import sbhub
 from sbhub import Hub, Supervisor
 
 
@@ -220,6 +224,160 @@ class WorktreeTest(RunnerCase):
         self.assertEqual(self.launched[-1]["key"], "repo/one#1")
         self.assertIn("An earlier try", self.launched[-1]["brief"])
         self.assertTrue((tree / "one" / "half.txt").exists())  # the same worktree, not a fresh one
+
+
+# sk4te's real .sb/checks (2026-11-16), its compile line marked to run in the checkout after landing
+SK4TE_CHECKS = """# sk4te's fast loop: sb runs these, one per line, for any ticket with no checks of its own or its map's.
+after-landing: python3 .sb/checks-compile.py
+"""
+
+# stands in for sk4te's .sb/checks-compile.py (which asks the one open Unity): it notes where it ran, whether the
+# ticket's work was there and who held the locks, then passes or fails as FAKE_COMPILE says (one word per run)
+FAKE_COMPILE = """import json, os, subprocess, sys, time
+log = os.environ["FAKE_COMPILE_LOG"]
+runs = open(log).read().count("\\n") if os.path.exists(log) else 0
+locks = json.load(open(os.environ["FAKE_COMPILE_STATE"])).get("locks", {})
+head = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+with open(log, "a") as f:
+    f.write(json.dumps({"cwd": os.getcwd(), "work": os.path.exists("one/done.txt"), "head": head,
+                        "locks": locks, "at": time.time()}) + "\\n")
+modes = os.environ.get("FAKE_COMPILE", "pass").split(",")
+if modes[min(runs, len(modes) - 1)] == "fail":
+    print("Assets/One.cs(3,1): error CS1002: ; expected")
+    sys.exit(1)
+"""
+
+
+class Crash(BaseException):
+    """The hub process dying mid-landing (not an Exception, so nothing in the hub catches it)."""
+
+
+class AfterLandingTest(RunnerCase):
+    """A repo whose .sb/checks marks a line `after-landing: ` (sk4te's Unity compile): the hub lands the ticket under
+    the repo's Unity lock, runs that line in the checkout with the work in, and backs the landing out with one
+    revert commit when it fails."""
+    MAPS = (("repo/one", "game", ("A", "one/"), ("B", "two/")),)
+
+    def setUp(self):
+        super().setUp()
+        self.repo = self.repos["repo/one"]
+        git(self.repo, "config", "sb.parallel", "2")
+        self.sb("mapset", "repo/one", "checks=")  # no map checks: the repo's .sb/checks decides, as in sk4te
+        (self.repo / ".sb").mkdir()
+        (self.repo / ".sb" / "checks").write_text(SK4TE_CHECKS)
+        (self.repo / ".sb" / "checks-compile.py").write_text(FAKE_COMPILE)
+        git(self.repo, "add", ".sb")
+        git(self.repo, "commit", "-q", "-m", "checks")
+        self.log = self.root / "compile.jsonl"
+        os.environ.update(FAKE_COMPILE_LOG=str(self.log), FAKE_COMPILE_STATE=str(self.root / "hub" / "state.json"))
+        patcher = mock.patch.multiple(sbhub, LAND_LOCK_POLL=0.05, LAND_LOCK_WAIT=30)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.lock = "unity:" + self.repo.name
+
+    def compiles(self):
+        return [json.loads(l) for l in self.log.read_text().splitlines()] if self.log.exists() else []
+
+    def test_the_checks_come_from_the_repo_file_with_the_mark(self):
+        row = next(t for t in self.hub.tickets(fresh=True) if t["num"] == 1)
+        self.assertEqual(row["checks"], ["after-landing: python3 .sb/checks-compile.py"])  # through the real sbmap
+
+    def test_a_failing_compile_after_landing_is_reverted_by_one_commit_and_the_ticket_tries_again(self):
+        os.environ["FAKE_COMPILE"] = "fail,pass"
+        before = git(self.repo, "rev-parse", "HEAD")
+        self.only(1)
+        self.until(lambda: self.state_of("repo/one#1") == "done")
+        first, second = self.compiles()
+        # the first compile ran in the checkout with the ticket's work in, under the hub's lock
+        self.assertEqual(os.path.realpath(first["cwd"]), os.path.realpath(self.repo))
+        self.assertTrue(first["work"])
+        self.assertEqual(first["locks"][self.lock]["by"], "sb-hub landing repo/one#1")
+        landed = first["head"]
+        self.assertNotEqual(landed, before)
+        git(self.repo, "merge-base", "--is-ancestor", landed, "HEAD")  # its commit is in main ...
+        reverts = git(self.repo, "log", "--format=%H", "--grep=Undoes-landing:", "HEAD").split()
+        self.assertEqual(len(reverts), 1)  # ... then backed out by one revert commit on top of it
+        self.assertEqual(git(self.repo, "rev-parse", reverts[0] + "^"), landed)
+        self.assertEqual(git(self.repo, "diff", before, reverts[0]), "")  # main's files as before the landing
+        self.assertIn("error CS1002", git(self.repo, "log", "-1", "--format=%B", reverts[0]) + self.launched[1]["brief"])
+        # queued again, its worker told why: the one retry, on opus
+        self.assertEqual(len(self.launched), 2)
+        self.assertEqual(self.launched[1]["model"], "opus")
+        self.assertIn("after landing, check failed: python3 .sb/checks-compile.py", self.launched[1]["brief"])
+        self.assertIn("error CS1002", self.launched[1]["brief"])
+        # the second try landed on a building main, carrying the first try's work again
+        self.assertTrue(second["work"])
+        self.assertEqual((self.repo / "one" / "done.txt").read_text().count("work for"), 2)
+        self.assertEqual(self.hub.state()["locks"], {})
+
+    def test_a_passing_compile_after_landing_leaves_it_landed_and_the_lock_released(self):
+        before = git(self.repo, "rev-parse", "HEAD")
+        self.only(1)
+        self.until(lambda: self.state_of("repo/one#1") == "done")
+        [ran] = self.compiles()
+        self.assertEqual(os.path.realpath(ran["cwd"]), os.path.realpath(self.repo))
+        self.assertTrue(ran["work"])
+        self.assertIn(self.lock, ran["locks"])
+        self.assertEqual(ran["head"], git(self.repo, "rev-parse", "HEAD"))
+        self.assertNotEqual(ran["head"], before)
+        self.assertEqual(git(self.repo, "log", "--format=%H", "--grep=Undoes-landing:", "HEAD"), "")
+        self.assertEqual(self.hub.state()["locks"], {})
+        self.assertNotIn(1, self.open_tickets())
+
+    def test_a_landing_waits_while_a_chat_session_holds_the_unity_lock(self):
+        self.hub.report({"agent": "chat", "state": "working", "project": str(self.repo)})
+        self.assertTrue(self.hub.lock(self.lock, "chat")["ok"])
+        before = git(self.repo, "rev-parse", "HEAD")
+        freed = []
+
+        def unlock():
+            freed.append(time.time())
+            self.assertEqual(git(self.repo, "rev-parse", "HEAD"), before)  # nothing landed while it was held
+            self.hub.unlock(self.lock, "chat")
+        timer = threading.Timer(1.5, unlock)
+        self.only(1)
+        self.until(lambda: self.launched and self.state_of("repo/one#1") == "running")
+        timer.start()
+        self.addCleanup(timer.cancel)
+        self.until(lambda: self.state_of("repo/one#1") == "done")
+        [ran] = self.compiles()
+        self.assertTrue(freed)
+        self.assertGreater(ran["at"], freed[0])  # it landed only after sb_unlock
+        self.assertTrue(ran["work"])
+        self.assertEqual(self.hub.state()["locks"], {})
+
+    def test_a_hub_restart_while_a_landing_holds_the_lock_backs_it_out_and_lands_it_again(self):
+        before = git(self.repo, "rev-parse", "HEAD")
+
+        def die(*a, **k):
+            raise Crash()
+        self.only(1)
+        with mock.patch.object(self.sup.runner, "after_landing", die):
+            with self.assertRaises(Crash):
+                self.until(lambda: False)
+        # the hub died fast-forwarded and locked: the ticket's work is in main, unchecked
+        landed = git(self.repo, "rev-parse", "HEAD")
+        self.assertNotEqual(landed, before)
+        self.assertIn("landing", json.loads((self.root / "hub" / "state.json").read_text())["locks"][self.lock])
+        state_fixture(self.hub.state(), self.root, "landing.json")  # the page must still read a hub mid-landing
+        self.sup.procs.clear()  # this hub is gone: the next one finds only what it saved
+        hub = Hub(self.root / "hub", now=self.clock, launcher=self.launcher)
+        sup = Supervisor(hub)
+        sup.close_off = False
+        self.addCleanup(sup.stop)
+        workers = len(self.launched)
+        end = time.time() + 60
+        self.hub, self.sup = hub, sup  # the harness's items() and until() read and tick the new hub
+        self.until(lambda: self.state_of("repo/one#1") == "done")
+        self.assertEqual(len(self.launched), workers)  # landed again without running its worker
+        self.assertEqual(hub.state()["locks"], {})
+        [ran] = self.compiles()
+        self.assertTrue(ran["work"])  # compiled with its work in, this time to the end
+        [revert] = git(self.repo, "log", "--format=%H", "--grep=Undoes-landing:", "HEAD").split()
+        self.assertEqual(git(self.repo, "rev-parse", revert + "^"), landed)
+        self.assertEqual(git(self.repo, "diff", before, revert), "")
+        self.assertEqual(ran["head"], git(self.repo, "rev-parse", "HEAD"))
+        self.assertEqual((self.repo / "one" / "done.txt").read_text().count("work for"), 1)
 
 
 class ProjectRootTest(unittest.TestCase):

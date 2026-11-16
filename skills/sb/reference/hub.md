@@ -28,6 +28,19 @@ the vault. Only the running hub writes the queue (`$SB_HUB_HOME/state.json`); CL
   changed, one per line. In a repo with a `.codegraph/` index, one `.sb/checks` line runs only the tests
   CodeGraph finds, else the fast suite:
   `t=$(printf "%s\n" "$SB_CHANGED" | codegraph affected --stdin -q 2>/dev/null); if [ -n "$t" ]; then <runner> $t; else <fast suite>; fi`
+  **After landing:** a check line starting `after-landing: ` (sk4te: `after-landing: python3
+  .sb/checks-compile.py`) runs in the checkout itself, once the ticket's work landed there: a game's
+  compile asks the one open Unity, which has the checkout open, never the ticket's worktree. Every
+  other line runs before landing, in the worktree, as before. For such a ticket the hub takes the lock
+  `unity:<repo folder name>` (chat sessions take the same one with `sb_lock` before they use that
+  Unity; the hub waits up to 10 minutes while one holds it, then rechecks later), fast-forwards, runs
+  the after-landing lines, and lets go. If one fails, the landing is backed out by **one revert commit**
+  (the checkout's files as before it; history is never rewritten), the work is replayed on the
+  ticket's branch, and the ticket goes back to its worker with the failure in its brief (the one Opus
+  retry), so the next ticket lands on a building main. One that exits 75 (Unity did not answer) is
+  backed out too and lands again at its recheck. A hub that stops mid-landing keeps the landing in
+  the lock; the next hub backs it out, lets go of the lock and lands the ticket again without its
+  worker. A ticket that ran in the checkout itself (no worktree) runs the line there like any other.
 - **Tier**: `sbmap set <map> <NNN> tier=opus` on a complex ticket; Sonnet when absent. A failed
   Sonnet ticket retries once on Opus.
 - **Order**, fixed: after its blockers; then priority S→F; then the ticket that unblocks the most

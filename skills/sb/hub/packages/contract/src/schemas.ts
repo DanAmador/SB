@@ -45,7 +45,16 @@ export const AgentRow = z.strictObject({
 });
 export type AgentRow = z.infer<typeof AgentRow>;
 
-export const Lock = z.strictObject({ by: z.string(), at: Seconds });
+/** The hub's own landing that holds a repo's Unity lock (sbhub TicketRun._land): a restarted hub undoes it. */
+export const Landing = z.strictObject({
+  key: z.string(),
+  repo: z.string(),
+  before: z.string(),
+  sha: z.string(),
+  tree: z.string(),
+  branch: z.string(),
+});
+export const Lock = z.strictObject({ by: z.string(), at: Seconds, landing: Landing.optional() });
 export type Lock = z.infer<typeof Lock>;
 
 export const Question = z.strictObject({

@@ -207,6 +207,8 @@ class Hub:
             if t["ended"] is not None and now - t["ended"] > TRAIL_LIMIT:
                 del self._trails[k]
         for k, held in list(self._data["locks"].items()):
+            if held.get("landing"):
+                continue  # the hub's own landing: it lets go when the landing ends, a restarted hub undoes it
             if self._resolve(held["by"]) not in self._data["agents"] and now - held["at"] > ORPHAN_LOCK_LIMIT:
                 del self._data["locks"][k]
                 changed = True
@@ -364,12 +366,14 @@ class Hub:
             return item["title"]
         return next((t.get("title") for t in self._tcache[1] or [] if sbqueue.key(t) == key), None)
 
-    def lock(self, key, by):
+    def lock(self, key, by, landing=None):
+        """`landing`: the hub's own landing that takes it (see TicketRun._land), kept with the lock so a restarted hub
+        can undo a landing it left half done."""
         with self._lock:
             held = self._data["locks"].get(key)
             if held and held["by"] != by:
                 return {"ok": False, "held_by": held["by"]}
-            self._data["locks"][key] = {"by": by, "at": self.now()}
+            self._data["locks"][key] = {"by": by, "at": self.now(), **({"landing": landing} if landing else {})}
             self._save()
             return {"ok": True}
 
@@ -1785,6 +1789,8 @@ def _git(repo, *args):
 QUEUE_TRIES = 4  # `queue add` / `queue rm` write this often while the queue keeps changing under them
 PARALLEL_MAX = 8  # tickets at once in one repo, whatever its git config says
 LAND_TRIES = 3  # rebase, check and fast-forward again this often when the checkout gained commits meanwhile
+LAND_LOCK_WAIT = 600  # a landing with after-landing checks waits this long for the repo's Unity lock, then rechecks later
+LAND_LOCK_POLL = 2
 MOVED = "moved"
 
 
@@ -1943,6 +1949,59 @@ def land(repo, sha):
     changed = _git(repo, "diff", "--name-only", "-z", head, sha).split("\0")
     blocking = sorted(set(unsaved(repo) or ()) & {n for n in changed if n})
     return blocking or "git merge --ff-only into the checkout failed: " + (err or out or "no reason given")
+
+
+def _landing_by(landing):
+    return "sb-hub landing " + landing["key"]
+
+
+def unity_lock(repo):
+    """The lock a repo's one Unity editor goes by: chat sessions take it with sb_lock, the hub while it lands."""
+    return "unity:" + Path(str(repo)).name
+
+
+def revert_landing(repo, before, sha, why):
+    """Undo one landing, the commits before..sha, by one new commit on the checkout's branch: the files as they were
+    before it, whatever came after it kept. History is never rewritten. (None, the revert's sha), or (why not, None).
+    Nothing to undo when sha is not on the branch or a revert of it is already there."""
+    head = _git(repo, "rev-parse", "HEAD")
+    if not head or _git_run(repo, "merge-base", "--is-ancestor", sha, head)[0] != 0:
+        return None, None
+    mark = "Undoes-landing: {}..{}".format(before, sha)
+    if _git(repo, "log", "--format=%H", "--fixed-strings", "--grep=" + mark, "{}..{}".format(sha, head)):
+        return None, None
+    rc, out, err = _git_run(repo, "merge-tree", "--write-tree", "--merge-base", sha, head, before)
+    if rc != 0:
+        return "git merge-tree could not undo it: " + firstline(err or out), None
+    msg = "revert: back out {}\n\n{}\n\n{}\n".format(_git(repo, "log", "-1", "--format=%s", sha), why, mark)
+    rc, new, err = _git_run(repo, "commit-tree", out.split()[0], "-p", head, "-m", msg)
+    if rc != 0:
+        return "git commit-tree failed: " + firstline(err), None
+    rc, out, err = _git_run(repo, "merge", "--ff-only", "--quiet", new.strip(), timeout=300)
+    if rc != 0:
+        return "git merge --ff-only of the revert failed: " + firstline(err or out), None
+    return None, new.strip()
+
+
+def replay_tree(tree, before, onto):
+    """After a revert: the worktree's commits since `before` (the ones the revert undid, and any after them) replayed on
+    top of `onto`, the revert, so the next try and landing carry the work again. None, or why not."""
+    if not tree or not Path(tree).is_dir() or _git_run(tree, "merge-base", "--is-ancestor", onto, "HEAD")[0] == 0:
+        return None  # no worktree, or already replayed
+    rc, out, err = _git_run(tree, "rebase", "--autostash", "--reapply-cherry-picks", "--onto", onto, before, timeout=300)
+    if rc == 0:
+        return None
+    _git_run(tree, "rebase", "--abort")
+    return "git rebase of its worktree onto the revert failed: " + firstline(err or out)
+
+
+def undo_landing(landing, why):
+    """A landing's revert in the checkout, then its work replayed in its worktree: None, or why not."""
+    err, new = revert_landing(landing["repo"], landing["before"], landing["sha"], why)
+    if err:
+        return err
+    head = new or _git(landing["repo"], "rev-parse", "HEAD")
+    return replay_tree(landing.get("tree"), landing["before"], head) if head else None
 
 
 def _tail(path, start=0, size=LOG_TAIL):
@@ -2424,8 +2483,13 @@ class TicketRun:
 
     def _land(self, t, run, tree):
         """(passed, reason, sha, checks) of a worktree ticket: its commits rebased onto the checkout's newest commit,
-        judged there, then fast-forwarded into the checkout; the worktree and branch go once it landed."""
+        judged there, then fast-forwarded into the checkout; the worktree and branch go once it landed.
+        Check lines marked `after-landing: ` (sbqueue.AFTER_LANDING) run in the checkout itself after the
+        fast-forward, under the repo's Unity lock (waiting while a chat session holds it); one that fails backs the
+        landing out with one revert commit and the work is replayed on its branch for the next try."""
         report = Path(run["log"]).parent / "{}.md".format(int(t["num"])) if run.get("log") else None
+        after = sbqueue.after_landing(t["checks"])
+        first = {**t, "checks": sbqueue.before_landing(t["checks"])}
         checks, sha = [], None
         for _ in range(LAND_TRIES):
             checks = []
@@ -2433,13 +2497,25 @@ class TicketRun:
             why = rebase_tree(tree, head) if head else "the checkout has no commit"
             if why:
                 return False, "could not land: " + why, None, checks
-            passed, reason, sha = sbqueue.verdict(t, tree, head, run=_recording(checks), report=report,
+            passed, reason, sha = sbqueue.verdict(first, tree, head, run=_recording(checks), report=report,
                                                     first_base=run.get("first_base"))
             if not passed:
                 return passed, reason, sha, checks
+            locked = after and sha and {"key": sbqueue.key(t), "repo": str(t["repo"]), "before": head, "sha": sha,
+                                        "tree": str(tree), "branch": run.get("branch") or ""}
+            if locked:
+                held = self.take_unity(locked)
+                if held:
+                    return None, "could not land yet: {}".format(held), sha, checks
             why = land(t["repo"], sha) if sha else None
             if why is None and sha:
                 run["landed_on"] = head
+            if locked and why is None:
+                failed = self.after_landing(locked, after, checks)
+                if failed:
+                    return failed + (sha, checks)
+            elif locked:
+                self.hub.unlock(unity_lock(t["repo"]), _landing_by(locked))
             if why == MOVED:
                 continue  # someone committed on the checkout meanwhile: on top of that, and checked again
             if isinstance(why, list):  # unsaved edits to its files in the checkout: it waits on its branch for them
@@ -2450,6 +2526,40 @@ class TicketRun:
             drop_tree(t["repo"], tree, run.get("branch") or "")
             return passed, reason, sha, checks
         return False, "could not land: the checkout kept gaining commits ({} tries)".format(LAND_TRIES), sha, checks
+
+    def take_unity(self, landing):
+        """Take the repo's Unity lock for this landing, waiting up to LAND_LOCK_WAIT while someone else holds it:
+        None once held, else who holds it."""
+        key, by = unity_lock(landing["repo"]), _landing_by(landing)
+        end = time.time() + LAND_LOCK_WAIT
+        while True:
+            got = self.hub.lock(key, by, landing=landing)
+            if got.get("ok"):
+                return None
+            if time.time() >= end or self.stopping():
+                return "{} is held by {}".format(key, got.get("held_by"))
+            time.sleep(LAND_LOCK_POLL)
+
+    def after_landing(self, landing, cmds, checks):
+        """Run the after-landing checks in the checkout, which holds the ticket's work now; then let go of the Unity
+        lock. None when they pass, else (passed, reason): False when one failed (the landing is reverted, the ticket
+        tried again or failed as any failed check), None when one could not run (reverted too: it lands again at
+        its recheck)."""
+        repo = landing["repo"]
+        try:
+            changed = _git(repo, "diff", "--name-only", landing["before"], landing["sha"])
+            failed = sbqueue._run_checks(cmds, repo, _recording(checks), changed)
+            if not failed:
+                return None
+            why = "{}\nIt landed on {} as {}; the hub backed it out.".format(
+                failed, Path(repo).name, landing["sha"][:9])
+            err = undo_landing(landing, failed.splitlines()[0])
+            if err:  # the checkout keeps the broken work: the owner must see it
+                why = "{}\nIt landed on {} as {} and could NOT be backed out: {}".format(
+                    failed, Path(repo).name, landing["sha"][:9], err)
+            return (None if failed.startswith(sbqueue.NOT_RUN) and not err else False), "after landing, " + why
+        finally:
+            self.hub.unlock(unity_lock(repo), _landing_by(landing))
 
     def report_checks(self, t, run, passed, reason, sha, checks):
         """Append the hub's verdict and every check to the worker's report in the run folder (a run file, not a
@@ -2661,6 +2771,7 @@ class Supervisor:
         self.reviews = {}  # map -> its second pass's {p, agent, inst, log, start, files, keys, limit, at}, while it runs
         self.streak = (None, 0)  # the failure class of the last failed items in a row, and how many
         self.stopped = False
+        self.unlanded = False  # the landings an earlier hub left half done are undone at the first tick
         self.note_path = None  # wayfinder/runs/hub-now.md: `serve` sets it; tests leave the vault alone
         self.note_seen = (None, 0, "")  # (the queue's shape at the last write, when, the text written)
 
@@ -2709,6 +2820,8 @@ class Supervisor:
         return r.returncode, r.stdout.strip(), r.stderr.strip()
 
     def tick(self):
+        if not self.unlanded:
+            self._unland()
         self.hub.tickets()  # keeps the page's ticket cache fresh and seeds the queue (both cached)
         self._watch()
         self._reap()
@@ -3225,6 +3338,28 @@ class Supervisor:
                 q["version"] += 1
                 self.hub._save()
             self.streak = (None, 0)
+
+    def _unland(self):
+        """A hub that stopped while a landing held a repo's Unity lock (its work fast-forwarded into the checkout,
+        its after-landing checks not yet passed) left it half landed: the landing is backed out by a revert, its
+        work replayed on its branch, the lock let go, and the ticket lands again at once as a recheck (its worker
+        does not run again). Landings run inside the tick, so at the first tick none of this hub's is under way."""
+        self.unlanded = True
+        with self.hub._lock:
+            held = [(k, dict(v)) for k, v in self.hub._data["locks"].items() if v.get("landing")]
+        for k, v in held:
+            landing = v["landing"]
+            err = undo_landing(landing, "the hub stopped before its after-landing checks passed")
+            if err:  # the lock stays, so nothing else lands on top until the owner looks
+                print("sb hub: could not undo the landing of {}: {}".format(landing["key"], err), file=sys.stderr,
+                      flush=True)
+                continue
+            self.hub.unlock(k, v["by"])
+            with self.hub._lock:
+                item = next((dict(i) for i in self.hub._data["queue"]["items"] if i["key"] == landing["key"]), None)
+            if item and item["state"] in ("running", "recheck"):
+                self._update(item["key"], state="recheck", recheck_at=self.hub.now(), pid=None, pid_start=None,
+                             note="the hub stopped while it landed: backed out, it lands again")
 
     def _recover(self, item):
         """A `running` item this hub did not start (it restarted). When its worker still runs, it is waited for

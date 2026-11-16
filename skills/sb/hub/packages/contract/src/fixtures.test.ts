@@ -91,6 +91,13 @@ describe("fixtures written by the hub", () => {
     const item = State.parse(addLinks("GET /api/state", body, bare())).queue.items.find((i) => i.state === "unclean");
     expect(item?.blocking).toEqual(["one/done.txt"]);
   });
+
+  it("takes a hub mid-landing, holding a repo's Unity lock (tests/test_hub_worktrees.py AfterLandingTest)", () => {
+    const body: unknown = JSON.parse(readFileSync(join(dir, "state", "landing.json"), "utf8"));
+    const lock = State.parse(addLinks("GET /api/state", body, bare())).locks["unity:game"];
+    expect(lock?.by).toBe("sb-hub landing repo/one#1");
+    expect(lock?.landing?.key).toBe("repo/one#1");
+  });
 });
 
 describe("the schemas refuse what the hub never sends", () => {

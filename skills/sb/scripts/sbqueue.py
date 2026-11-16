@@ -13,6 +13,19 @@ SBMAP = Path(__file__).resolve().parent / "sbmap.py"
 CHECK_TIMEOUT = 20 * 60
 EX_TEMPFAIL = 75  # a check exits it when the tool it needs did not answer: it could not run, it did not fail
 NOT_RUN = "check could not run"
+# a check line starting with this runs in the checkout itself once the ticket's work landed there, under the repo's
+# Unity lock (sbhub TicketRun._land): sk4te's compile asks the one open Unity, which has the checkout open
+AFTER_LANDING = "after-landing: "
+
+
+def after_landing(checks):
+    """The commands of the check lines marked after-landing, without the mark."""
+    return [c[len(AFTER_LANDING):].strip() for c in checks if c.startswith(AFTER_LANDING)]
+
+
+def before_landing(checks):
+    """The check lines that run before landing (every line not marked after-landing)."""
+    return [c for c in checks if not c.startswith(AFTER_LANDING)]
 
 
 def key(t):
@@ -417,6 +430,8 @@ def _run_checks(checks, cwd, run, changed=""):
     (`codegraph affected --stdin`, see reference/hub.md)."""
     env = {**os.environ, "SB_CHANGED": changed}
     for cmd in checks:
+        if cmd.startswith(AFTER_LANDING):  # a ticket worked in the checkout itself: it already is where it lands
+            cmd = cmd[len(AFTER_LANDING):].strip()
         try:
             r = run(cmd, shell=True, cwd=str(cwd), capture_output=True, text=True, timeout=CHECK_TIMEOUT, env=env)
         except subprocess.TimeoutExpired:

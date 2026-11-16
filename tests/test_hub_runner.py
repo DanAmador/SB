@@ -65,6 +65,20 @@ def alive(pid):
     return bool(stat) and not stat.startswith("Z")
 
 
+def state_fixture(state, root, name):
+    """Write a real /api/state answer, its temp paths, shas, times and pids made stable, as a contract fixture the
+    hub's Vitest tests parse (packages/contract/fixtures/state/<name>)."""
+    text = json.dumps(state, indent=1, sort_keys=True).replace(str(root), "/tmp/sb")
+    text = re.sub(r"\b[0-9a-f]{40}\b", "0" * 40, text)
+    text = re.sub(r"\b[0-9a-f]{9}\b", "0" * 9, text)
+    text = re.sub(r"\d{4}-\d{2}-\d{2}-", "2026-11-13-", text)
+    text = re.sub(r'"(secs|pid|check_minutes|run_minutes)": [\d.e-]+', r'"\1": 0', text)
+    text = re.sub(r"worktrees/[^/\"]+-[0-9a-f]{6}/", "worktrees/repoA-000000/", text)
+    fixture = Path(SCRIPT).resolve().parents[1] / "hub" / "packages" / "contract" / "fixtures" / "state" / name
+    fixture.parent.mkdir(exist_ok=True)
+    fixture.write_text(text + "\n", encoding="utf-8")
+
+
 class RunnerCase(unittest.TestCase):
     MAPS = (("repo/one", "repoA", ("A", "one/"), ("B", "two/")),)
 
@@ -244,15 +258,7 @@ class UncleanCheckoutTest(RunnerCase):
         self.assertEqual(self.state_of("repo/one#1"), "unclean")
         self.assertEqual(self.items()["repo/one#1"]["commit"], item["commit"])
         # the hub's own /api/state answer with the waiting item, for the contract's Vitest test to parse
-        text = json.dumps(self.hub.state(), indent=1, sort_keys=True).replace(str(self.root), "/tmp/sb")
-        text = re.sub(r"\b[0-9a-f]{40}\b", "0" * 40, text)
-        text = re.sub(r"\b[0-9a-f]{9}\b", "0" * 9, text)
-        text = re.sub(r"\d{4}-\d{2}-\d{2}-", "2026-11-13-", text)
-        text = re.sub(r'"(secs|pid|check_minutes|run_minutes)": [\d.e-]+', r'"\1": 0', text)
-        text = re.sub(r"worktrees/[^/\"]+-[0-9a-f]{6}/", "worktrees/repoA-000000/", text)
-        fixture = Path(SCRIPT).resolve().parents[1] / "hub" / "packages" / "contract" / "fixtures" / "state" / "unclean.json"
-        fixture.parent.mkdir(exist_ok=True)
-        fixture.write_text(text + "\n", encoding="utf-8")
+        state_fixture(self.hub.state(), self.root, "unclean.json")
 
     def test_once_the_files_are_cleared_the_next_pass_lands_it_rebased_onto_the_moved_checkout(self):
         item = self.wait_unclean()
