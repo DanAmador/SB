@@ -5,7 +5,7 @@ import type { SessionCard } from "./sessions.ts";
 import { agentOf, dur, endedToday, itemInScope, itemMap, mapTitle, projOf, type Scope, type TicketIndex, itemProject, EVERYTHING } from "./board.ts";
 
 /** What a row's mark says. */
-export type Mark = "done" | "running" | "checking" | "next" | "short" | "stopped" | "recheck";
+export type Mark = "done" | "running" | "checking" | "next" | "short" | "stopped" | "recheck" | "unclean";
 
 export const MARK_WORDS: Readonly<Record<Mark, string>> = {
   done: "done",
@@ -15,6 +15,7 @@ export const MARK_WORDS: Readonly<Record<Mark, string>> = {
   short: "fell short",
   stopped: "stopped",
   recheck: "check could not run",
+  unclean: "waits for a clean checkout",
 };
 
 export interface NightRow {
@@ -45,8 +46,8 @@ export interface Night {
   readonly queuedMaps: readonly string[];
 }
 
-const ORDER: readonly Mark[] = ["done", "running", "checking", "recheck", "next", "short", "stopped"];
-const WORDS: Readonly<Record<Mark, string>> = { done: "done", running: "running", checking: "checking", recheck: "check could not run", next: "next", short: "fell short", stopped: "stopped" };
+const ORDER: readonly Mark[] = ["done", "running", "checking", "recheck", "unclean", "next", "short", "stopped"];
+const WORDS: Readonly<Record<Mark, string>> = { done: "done", running: "running", checking: "checking", recheck: "check could not run", unclean: "waits for a clean checkout", next: "next", short: "fell short", stopped: "stopped" };
 
 export function markOf(i: QueueItem): Mark {
   switch (i.state) {
@@ -55,6 +56,7 @@ export function markOf(i: QueueItem): Mark {
     case "landed":
     case "review": return "checking";
     case "recheck": return "recheck";
+    case "unclean": return "unclean";
     case "done": return "done";
     case "skipped": return "stopped";
     default: return "short";
@@ -65,14 +67,14 @@ export function countsLine(c: Readonly<Record<Mark, number>>): string {
   return ORDER.filter((m) => c[m] > 0).map((m) => `${String(c[m])} ${WORDS[m]}`).join(" · ");
 }
 
-const GROUP_ORDER: Readonly<Record<Mark, number>> = { done: 0, short: 0, stopped: 0, running: 1, checking: 1, recheck: 2, next: 3 };
+const GROUP_ORDER: Readonly<Record<Mark, number>> = { done: 0, short: 0, stopped: 0, running: 1, checking: 1, recheck: 2, unclean: 2, next: 3 };
 
 /** Every map with something running, queued or ended today, in the hub's map order; then Jobs. */
 export function nightBlocks(state: State, ix: TicketIndex, scope: Scope = EVERYTHING, wholeRun = false): Night {
   const q = state.queue;
   const queued = q.items.filter((i) => i.state === "queued");
   const place = new Map(queued.map((i, n) => [i.key, n + 1] as const));
-  const live = q.items.filter((i) => ["queued", "running", "landed", "review", "recheck"].includes(i.state));
+  const live = q.items.filter((i) => ["queued", "running", "landed", "review", "recheck", "unclean"].includes(i.state));
   // a live run keeps what it finished before midnight; the hub's old line keeps what ended today
   const ended = wholeRun ? q.items.filter((i) => i.state === "done" || i.state === "failed" || i.state === "skipped") : endedToday(state);
   const all = [...live, ...ended].filter((i) => itemInScope(scope, i));
@@ -218,7 +220,7 @@ export const headLine = (items: readonly QueueItem[]): string => itemCounts(tall
 
 /** What Stop run asks, once. A ticket not yet started will not be reached; what runs or waits for its judging finishes. */
 export function stopAsk(items: readonly QueueItem[]): { running: number; notReached: number; text: string } {
-  const running = items.filter((i) => ["running", "landed", "review", "recheck"].includes(i.state)).length;
+  const running = items.filter((i) => ["running", "landed", "review", "recheck", "unclean"].includes(i.state)).length;
   const notReached = items.filter((i) => i.state === "queued").length;
   const t = (n: number): string => `${String(n)} ticket${n === 1 ? "" : "s"}`;
   return { running, notReached, text: `Let the ${String(running)} running ticket${running === 1 ? "" : "s"} finish, then end the run. ${t(notReached)} will not be reached.` };
@@ -226,7 +228,7 @@ export function stopAsk(items: readonly QueueItem[]): { running: number; notReac
 
 /** While a run stops: the titles of what still runs, 'Stopping: waiting for A, B to finish'. */
 export function stoppingWords(items: readonly QueueItem[], titleOf: (i: QueueItem) => string): string {
-  const on = items.filter((i) => ["running", "landed", "review", "recheck"].includes(i.state)).map(titleOf);
+  const on = items.filter((i) => ["running", "landed", "review", "recheck", "unclean"].includes(i.state)).map(titleOf);
   return on.length === 0 ? "Stopping: ending the run." : `Stopping: waiting for ${on.join(", ")} to finish.`;
 }
 

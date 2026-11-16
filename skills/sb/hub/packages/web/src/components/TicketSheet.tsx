@@ -107,7 +107,7 @@ function TicketPanel({ itemKey }: { itemKey: string }): React.JSX.Element {
         {i && (
           <Block title="In the queue">
             <p className="text-sm">{status}</p>
-            {i.state === "recheck" && <p className="text-sm text-warn">{firstLine(i.note)}</p>}
+            {(i.state === "recheck" || i.state === "unclean") && <p className="text-sm text-warn">{firstLine(i.note)}</p>}
             {(i.state === "failed" || i.state === "skipped") && <p className="text-sm text-destructive">{firstLine(i.note) || "no reason recorded"}</p>}
             <Checks checks={i.checks ?? []} />
             <Pictures item={i} full />
@@ -128,7 +128,7 @@ function QueueActions({ itemKey }: { itemKey: string }): React.JSX.Element | nul
   const i = state.queue.items.find((x) => x.key === itemKey);
   const off = down || busy;
   if (i?.state === "running") return <RunningActions itemKey={itemKey} />;
-  if (i?.kind === "job" || i?.state === "recheck" || t === undefined) return null; // waiting checks: queuing would rerun the worker
+  if (i?.kind === "job" || i?.state === "recheck" || i?.state === "unclean" || t === undefined) return null; // waiting checks: queuing would rerun the worker
   const queued = i?.state === "queued";
   const at = qv.queuedKeys.indexOf(itemKey);
   if (!queued && (qv.live.has(itemKey) || !addable(t, ix))) return null;

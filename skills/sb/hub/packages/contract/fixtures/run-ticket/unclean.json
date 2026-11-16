@@ -1,0 +1,33 @@
+{
+ "agent": "main",
+ "base": "0000000000000000000000000000000000000000",
+ "blocking": [
+  "one/done.txt"
+ ],
+ "branch": "sb/one-1",
+ "checks": [
+  {
+   "cmd": "true",
+   "code": 0,
+   "secs": 0.5,
+   "tail": ""
+  }
+ ],
+ "commit": "0000000000000000000000000000000000000000",
+ "key": "repo/one#1",
+ "log": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one/1.log",
+ "media": [],
+ "model": "sonnet",
+ "note": "landed on its branch sb/one-1, waiting for a clean checkout: unsaved changes to one/done.txt",
+ "redo": null,
+ "report": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one/1.md",
+ "retry": null,
+ "review": null,
+ "run": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one",
+ "state": "unclean",
+ "stop": null,
+ "stops": 0,
+ "tree": "/tmp/sb/trees/one-1",
+ "tries": 1,
+ "verdict": null
+}

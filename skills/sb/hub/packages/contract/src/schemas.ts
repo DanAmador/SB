@@ -104,8 +104,10 @@ export type Installed = z.infer<typeof Installed>;
  * landed: its commit and checks passed and its work landed, but it is not judged yet: it holds no files and no place
  * among the tickets running at once, and the ticket stays open. review: its map's one Opus second pass is judging it
  * against its Done when (a queue saved by an older hub may hold items here with no pass running: they are judged).
+ * unclean: its checks passed but its work could not land because the checkout holds unsaved changes to its files
+ * (`blocking`): it waits on its branch and lands once they are saved or cleared, rebased when the checkout moved.
  */
-export const ItemState = z.enum(["queued", "running", "landed", "review", "recheck", "done", "failed", "skipped"]);
+export const ItemState = z.enum(["queued", "running", "landed", "review", "recheck", "unclean", "done", "failed", "skipped"]);
 export type ItemState = z.infer<typeof ItemState>;
 
 /** The Opus second pass's judgement of a ticket against its Done when: only finished resolves it. */
@@ -174,6 +176,8 @@ const itemFields = {
    * Recheck button). rechecks is null once a review starts afresh. */
   rechecks: z.number().int().nullable().optional(),
   recheck_at: Seconds.nullable().optional(),
+  /** unclean: the checkout's files with unsaved changes that its work waits for. */
+  blocking: z.array(z.string()).optional(),
   media: z.array(z.string()).optional(),
   checks: z.array(CheckRun).optional(),
   /** The second pass's verdict once it gave one (null while none). */
@@ -291,7 +295,7 @@ export type NightHow = z.infer<typeof NightHow>;
 export const NightCounts = z.strictObject({
   items: z.number().int(),
   queued: z.number().int(),
-  /** At work or not judged yet (running, landed, review, recheck). */
+  /** At work or not judged yet (running, landed, review, recheck, unclean). */
   running: z.number().int(),
   done: z.number().int(),
   failed: z.number().int(),

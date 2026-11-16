@@ -595,7 +595,7 @@ class Hub:
 
     def _live_keys(self):
         return {i["key"] for i in self._data["queue"]["items"]
-                if i["kind"] == "ticket" and i["state"] in ("queued", "running", "landed", "review")}
+                if i["kind"] == "ticket" and i["state"] in ("queued", "running", "landed", "review", "unclean")}
 
     @staticmethod
     def _item(key):
@@ -1913,16 +1913,36 @@ def rebase_tree(tree, onto):
     return "git rebase onto {} failed: {}".format(onto[:9], firstline(err or out))
 
 
+def unsaved(repo, paths=None):
+    """The checkout's files with unsaved changes (modified, staged, deleted or untracked), of `paths` when given."""
+    rc, out, _ = _git_run(repo, "status", "--porcelain", "-z", "--untracked-files=all", "--", *(paths or []))
+    if rc != 0:
+        return None
+    names, parts = [], out.split("\0")
+    while parts:
+        entry = parts.pop(0)
+        if len(entry) > 3:
+            names.append(entry[3:])
+            if entry[0] in "RC" and parts:  # a rename's old name follows it
+                names.append(parts.pop(0))
+    return names
+
 def land(repo, sha):
     """Fast-forward the checkout's branch to `sha`: None when done, MOVED when the checkout gained commits since
-    the rebase (rebase again), else why not (the checkout is left as it was)."""
+    the rebase (rebase again), a list of files when the merge refused because the checkout holds unsaved changes to
+    files the branch changes (the work waits for them, see Supervisor._unclean), else why not (the checkout is left
+    as it was)."""
     if not _git(repo, "symbolic-ref", "-q", "HEAD"):
         return "the checkout is not on a branch"
     head = _git(repo, "rev-parse", "HEAD")
     if not head or _git_run(repo, "merge-base", "--is-ancestor", head, sha)[0] != 0:
         return MOVED
     rc, out, err = _git_run(repo, "merge", "--ff-only", "--quiet", sha, timeout=300)
-    return None if rc == 0 else "git merge --ff-only into the checkout failed: " + (err or out or "no reason given")
+    if rc == 0:
+        return None
+    changed = _git(repo, "diff", "--name-only", "-z", head, sha).split("\0")
+    blocking = sorted(set(unsaved(repo) or ()) & {n for n in changed if n})
+    return blocking or "git merge --ff-only into the checkout failed: " + (err or out or "no reason given")
 
 
 def _tail(path, start=0, size=LOG_TAIL):
@@ -2042,7 +2062,7 @@ def media_in(run_folder, num):
 # through TicketRun, so there is one way to run a ticket. Its answer is one result (the contract's
 # RunTicketResult): what happened, and what the queue does next (retry on another model, or wait for a limit) ----
 
-RESULT_STATES = ("done", "failed", "skipped", "retry", "stopped", "recheck", "redo")
+RESULT_STATES = ("done", "failed", "skipped", "retry", "stopped", "recheck", "redo", "unclean")
 STOP_WHY = {"auth": "when its login expired", "limit": "at its usage limit"}
 
 
@@ -2353,6 +2373,10 @@ class TicketRun:
         else:
             passed, reason, sha, checks = self.land(t, run, tree)
             self.report_checks(t, run, passed, reason, sha, checks)
+        if run.get("blocking"):
+            return {**self.result(item, "unclean", "landed on its branch {}, waiting for a clean checkout: unsaved "
+                                  "changes to {}".format(branch, ", ".join(run["blocking"])), run, sha, checks),
+                    "blocking": run["blocking"]}
         if passed is None:
             return self.result(item, "recheck", reason.splitlines()[0], run, sha, checks)
         if tree and not passed:
@@ -2418,6 +2442,9 @@ class TicketRun:
                 run["landed_on"] = head
             if why == MOVED:
                 continue  # someone committed on the checkout meanwhile: on top of that, and checked again
+            if isinstance(why, list):  # unsaved edits to its files in the checkout: it waits on its branch for them
+                run["blocking"] = why
+                return None, "could not land yet: the checkout has unsaved changes to " + ", ".join(why), sha, checks
             if why:
                 return False, "could not land: " + why, sha, checks
             drop_tree(t["repo"], tree, run.get("branch") or "")
@@ -2691,6 +2718,7 @@ class Supervisor:
         self._settle_night(False)  # a night that stops starts nothing new
         if not self.stopped:
             self._rechecks()
+            self._unclean()
             self._reviews()  # and one a recheck asked for starts at once
             self._probe()
             self._start()
@@ -3033,8 +3061,8 @@ class Supervisor:
                     self._apply(item, self.runner.fail(item, run, why, None))
             with self.hub._lock:
                 now_item = next((i for i in self.hub._data["queue"]["items"] if i["key"] == item["key"]), {})
-            # only finished work says what an item costs: a worker whose checks passed (it landed) counts
-            if now_item.get("state") in ("done", "landed"):
+            # only finished work says what an item costs: a worker whose checks passed (it landed, or waits to) counts
+            if now_item.get("state") in ("done", "landed", "unclean"):
                 self._learn(run, item.get("model") or "sonnet")
 
     def _stop_asked(self, item):
@@ -3141,6 +3169,14 @@ class Supervisor:
             self._update(key, state="landed", ended=None, commit=res["commit"], checked=res["checked"], pid=None,
                          pid_start=None, rechecks=None, recheck_at=None, verdict=None, review=None, note=res["note"])
             return
+        if state == "unclean":  # its work waits on its branch until the checkout's copies of its files are saved
+            first = item.get("state") != "unclean"
+            self._update(key, state="unclean", ended=None, commit=res["commit"], blocking=res["blocking"], pid=None,
+                         pid_start=None, started=None, rechecks=None, recheck_at=None, checked=None, note=res["note"])
+            if first:  # one alert, not one per loop pass
+                threading.Thread(target=notify, daemon=True, args=("sb hub: needs you", "{}: waiting for a clean "
+                                 "checkout: save or clear {}".format(key, ", ".join(res["blocking"])))).start()
+            return
         if state == "recheck":
             again = item.get("state") == "recheck" or item.get("state") == "review" and item.get("rechecks") is not None
             n = (item.get("rechecks") or 0) + 1 if again else 0
@@ -3245,6 +3281,21 @@ class Supervisor:
             except Exception as e:  # tried again at the next due time, never failed for it
                 self._update(item["key"], recheck_at=self.hub.now() + RECHECK_EVERY,
                              note="the recheck did not run: {}: {}".format(type(e).__name__, e))
+
+    def _unclean(self):
+        """Each item waiting for a clean checkout whose blocking files are now saved or cleared (one git status on
+        them): its kept commit is rebased onto the checkout's newest commit, checked and landed, as a recheck is.
+        A rebase that conflicts fails it with its branch kept; files still unsaved keep it waiting."""
+        with self.hub._lock:
+            waiting = [dict(i) for i in self.hub._data["queue"]["items"]
+                       if i["kind"] == "ticket" and i["state"] == "unclean"]
+        for item in waiting:
+            if not item.get("repo") or unsaved(item["repo"], item.get("blocking") or []) != []:
+                continue
+            try:
+                self._recheck(item)
+            except Exception as e:  # tried again at the next pass, never failed for it
+                self._update(item["key"], note="the landing did not run: {}: {}".format(type(e).__name__, e))
 
     def _recheck(self, item):
         key = item["key"]

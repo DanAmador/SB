@@ -208,6 +208,100 @@ class RunnerCase(unittest.TestCase):
         return "\n".join(b.read_text(encoding="utf-8") for b in boards)
 
 
+class UncleanCheckoutTest(RunnerCase):
+    """A worktree ticket whose work cannot land because the owner's checkout holds unsaved changes to its files:
+    it waits on its branch (not failed, its map going on), and lands on its own once they are saved or cleared."""
+    MAPS = (("repo/one", "repoA", ("A", "one/"), ("B", "two/")),)
+
+    def setUp(self):
+        super().setUp()
+        self.repo = self.repos["repo/one"]
+        git(self.repo, "config", "sb.parallel", "2")
+
+    def wait_unclean(self):
+        """Ticket A runs while the checkout holds an unsaved one/done.txt, the file its commit adds."""
+        (self.repo / "one").mkdir(exist_ok=True)
+        (self.repo / "one" / "done.txt").write_text("the owner's unsaved line\n")
+        self.only(1)
+        self.hub.queue_pause(False)
+        self.until(lambda: self.state_of("repo/one#1") not in (None, "queued", "running"))
+        return self.items()["repo/one#1"]
+
+    def test_work_that_overlaps_unsaved_files_waits_for_a_clean_checkout_with_the_files_named(self):
+        item = self.wait_unclean()
+        self.assertEqual(item["state"], "unclean")
+        self.assertEqual(item["blocking"], ["one/done.txt"])
+        self.assertIn("waiting for a clean checkout", item["note"])
+        self.assertIn("one/done.txt", item["note"])
+        self.assertIn(item["branch"], item["note"])
+        self.assertIn(item["branch"], git(self.repo, "branch", "--list", "sb/*"))  # its branch and worktree stay
+        self.assertTrue(Path(item["tree"]).is_dir())
+        self.assertEqual((self.repo / "one" / "done.txt").read_text(), "the owner's unsaved line\n")
+        self.assertEqual(self.open_tickets()[1]["status"], "claimed")  # not failed: the hub still holds it
+        self.assertEqual(self.sup.streak, (None, 0))
+        for _ in range(3):  # still unsaved: each pass looks and it keeps waiting
+            self.sup.tick()
+        self.assertEqual(self.state_of("repo/one#1"), "unclean")
+        self.assertEqual(self.items()["repo/one#1"]["commit"], item["commit"])
+        # the hub's own /api/state answer with the waiting item, for the contract's Vitest test to parse
+        text = json.dumps(self.hub.state(), indent=1, sort_keys=True).replace(str(self.root), "/tmp/sb")
+        text = re.sub(r"\b[0-9a-f]{40}\b", "0" * 40, text)
+        text = re.sub(r"\b[0-9a-f]{9}\b", "0" * 9, text)
+        text = re.sub(r"\d{4}-\d{2}-\d{2}-", "2026-11-13-", text)
+        text = re.sub(r'"(secs|pid|check_minutes|run_minutes)": [\d.e-]+', r'"\1": 0', text)
+        text = re.sub(r"worktrees/[^/\"]+-[0-9a-f]{6}/", "worktrees/repoA-000000/", text)
+        fixture = Path(SCRIPT).resolve().parents[1] / "hub" / "packages" / "contract" / "fixtures" / "state" / "unclean.json"
+        fixture.parent.mkdir(exist_ok=True)
+        fixture.write_text(text + "\n", encoding="utf-8")
+
+    def test_once_the_files_are_cleared_the_next_pass_lands_it_rebased_onto_the_moved_checkout(self):
+        item = self.wait_unclean()
+        self.assertEqual(item["state"], "unclean")
+        (self.repo / "one" / "done.txt").unlink()  # cleared, and the owner committed something else meanwhile
+        (self.repo / "owner.txt").write_text("owner\n")
+        git(self.repo, "add", "owner.txt")
+        git(self.repo, "commit", "-q", "-m", "owner")
+        owner = git(self.repo, "rev-parse", "HEAD")
+        self.until(lambda: self.state_of("repo/one#1") == "done")
+        sha = self.items()["repo/one#1"]["commit"]
+        self.assertNotEqual(sha, item["commit"])  # rebased onto the owner's commit
+        self.assertEqual(git(self.repo, "rev-parse", sha + "^"), owner)
+        self.assertEqual(git(self.repo, "rev-parse", "HEAD"), sha)
+        self.assertIn("work for repo/one/001", (self.repo / "one" / "done.txt").read_text())
+        self.assertEqual(git(self.repo, "branch", "--list", "sb/*"), "")
+        self.assertNotIn(1, self.open_tickets())
+
+    def test_a_saved_edit_lands_it_without_a_rebase_when_the_checkout_did_not_move(self):
+        item = self.wait_unclean()
+        (self.repo / "one" / "done.txt").unlink()
+        self.until(lambda: self.state_of("repo/one#1") == "done")
+        self.assertEqual(self.items()["repo/one#1"]["commit"], item["commit"])
+        self.assertEqual(git(self.repo, "rev-parse", "HEAD"), item["commit"])
+
+    def test_a_later_ticket_of_its_map_that_touches_other_files_still_runs_and_lands(self):
+        item = self.wait_unclean()
+        self.assertEqual(item["state"], "unclean")
+        self.hub.queue_set(["repo/one#1", "repo/one#2"], self.hub.state()["queue"]["version"])
+        self.until(lambda: self.state_of("repo/one#2") == "done")
+        self.assertIn("work for repo/one/002", (self.repo / "two" / "done.txt").read_text())
+        self.assertEqual(self.state_of("repo/one#1"), "unclean")  # it still waits for its file
+        self.assertFalse(self.hub.state()["queue"]["paused"])
+
+    def test_a_branch_that_no_longer_rebases_fails_for_the_owner_with_its_branch_kept(self):
+        item = self.wait_unclean()
+        git(self.repo, "add", "one/done.txt")  # the owner commits their own one/done.txt: the two clash
+        git(self.repo, "commit", "-q", "-m", "owner")
+        self.until(lambda: self.state_of("repo/one#1") == "failed")
+        got = self.items()["repo/one#1"]
+        self.assertIn("could not land: its commits conflict", got["note"])
+        self.assertIn("one/done.txt", got["note"])
+        self.assertIn(item["branch"], got["note"])
+        self.assertIn(item["branch"], git(self.repo, "branch", "--list", "sb/*"))
+        self.assertEqual(git(Path(item["tree"]), "status", "--porcelain"), "")  # no rebase left half done
+        self.assertEqual((self.repo / "one" / "done.txt").read_text(), "the owner's unsaved line\n")
+        self.assertEqual(self.open_tickets()[1]["status"], "open")
+
+
 class LimitTextTest(unittest.TestCase):
     def test_a_limit_with_no_reset_time_waits_an_hour(self):
         self.assertEqual(sbhub.limited_until("Usage limit reached. Try later.", START), START + 3600)

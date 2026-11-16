@@ -106,6 +106,20 @@ class RunTicketTest(RunTicketCase):
         self.assertIn("check could not run", Path(res["report"]).read_text(encoding="utf-8"))
         self.fixture("recheck", res)
 
+    def test_work_blocked_by_unsaved_files_in_the_checkout_answers_unclean_and_keeps_its_branch(self):
+        repo = self.repos["repo/one"]
+        (repo / "one").mkdir(exist_ok=True)
+        (repo / "one" / "done.txt").write_text("unsaved\n")
+        tree = str(self.root / "trees" / "one-1")
+        res = self.run_ticket(item={"tree": tree, "branch": "sb/one-1"})  # its own worktree, landed by fast-forward
+        self.assertEqual(set(res), KEYS | {"blocking"})
+        self.assertEqual(res["state"], "unclean", res["note"])
+        self.assertEqual(res["blocking"], ["one/done.txt"])
+        self.assertIn("sb/one-1", git(repo, "branch", "--list", "sb/*"))
+        self.assertEqual((repo / "one" / "done.txt").read_text(), "unsaved\n")
+        self.assertEqual(self.open_tickets()[1]["status"], "claimed")
+        self.fixture("unclean", res)
+
     def test_a_partly_verdict_answers_redo_with_the_findings_and_the_second_partly_fails(self):
         self.verdicts["repo/one#1"] = "partly"
         res = self.run_ticket()

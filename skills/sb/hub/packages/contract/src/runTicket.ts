@@ -10,12 +10,13 @@ import { CheckRun, Redo, Seconds, Verdict } from "./schemas.ts";
  * done: resolved; failed: left open with a comment; skipped: never started (not ready, claimed, gone) or changed
  * while it ran; retry: run it again on `retry.model`; stopped: its agent hit a usage limit or a logout, run it
  * again on any agent that fits; recheck: a check exited 75, or the review could not run (crashed, ran too long or
- * wrote no verdict): the commit and the claim stay and only that runs again. A ticket whose checks passed is
+ * wrote no verdict): the commit and the claim stay and only that runs again; unclean: its checks passed but the
+ * checkout holds unsaved changes to its files (`blocking`), so its work waits on its branch. A ticket whose checks passed is
  * judged by the Opus review: finished resolves it (done); partly or not met on its first try answer redo (run it
  * once more, passing `redo` back in its item: the findings and the first commit go in its brief); on that second
  * try they leave it open (failed, `verdict` says which) for the owner.
  */
-export const RunTicketState = z.enum(["done", "failed", "skipped", "retry", "stopped", "recheck", "redo"]);
+export const RunTicketState = z.enum(["done", "failed", "skipped", "retry", "stopped", "recheck", "redo", "unclean"]);
 export type RunTicketState = z.infer<typeof RunTicketState>;
 
 export const RunTicketStop = z.strictObject({
@@ -56,6 +57,8 @@ export const RunTicketResult = z.strictObject({
   review: z.string().nullable(),
   /** The review-driven try: asked for (state redo), or the one this run was (null when there was none). */
   redo: Redo.nullable(),
+  /** unclean: the checkout's files with unsaved changes that its work waits for. */
+  blocking: z.array(z.string()).optional(),
 });
 export type RunTicketResult = z.infer<typeof RunTicketResult>;
 

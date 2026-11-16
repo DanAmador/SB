@@ -85,6 +85,12 @@ describe("fixtures written by the hub", () => {
     body.queue.items[0] = { ...body.queue.items[0], spend: { run_minutes: 1, check_minutes: 0, tries: 1, model: "sonnet", account: null } };
     expect(State.safeParse(addLinks("GET /api/state", body, bare())).success).toBe(true);
   });
+
+  it("takes a ticket whose landing waits for a clean checkout (tests/test_hub_runner.py UncleanCheckoutTest)", () => {
+    const body: unknown = JSON.parse(readFileSync(join(dir, "state", "unclean.json"), "utf8"));
+    const item = State.parse(addLinks("GET /api/state", body, bare())).queue.items.find((i) => i.state === "unclean");
+    expect(item?.blocking).toEqual(["one/done.txt"]);
+  });
 });
 
 describe("the schemas refuse what the hub never sends", () => {

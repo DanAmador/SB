@@ -1,0 +1,93 @@
+{
+ "agents": {},
+ "aliases": {},
+ "charge": {},
+ "installed": {
+  "main": {
+   "dir": "/tmp/sb/.claude-main",
+   "kind": "claude",
+   "limited_until": null,
+   "model": null,
+   "probed": 1794528000.0
+  },
+  "spare": {
+   "dir": "/tmp/sb/.claude-spare",
+   "kind": "claude",
+   "limited_until": null,
+   "model": null
+  }
+ },
+ "locks": {},
+ "messages": {},
+ "now": 1794528000.0,
+ "providers": {},
+ "questions": {},
+ "queue": {
+  "agent": "main",
+  "bases": {},
+  "items": [
+   {
+    "agent": null,
+    "base_sha": "0000000000000000000000000000000000000000",
+    "blocking": [
+     "one/done.txt"
+    ],
+    "branch": "sb/repo-one-001",
+    "checked": null,
+    "checks": [
+     {
+      "cmd": "true",
+      "code": 0,
+      "secs": 0,
+      "tail": ""
+     }
+    ],
+    "commit": "0000000000000000000000000000000000000000",
+    "ended": null,
+    "first_base": "0000000000000000000000000000000000000000",
+    "key": "repo/one#1",
+    "kind": "ticket",
+    "log": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one/1.log",
+    "log_start": 0,
+    "map": "repo/one",
+    "model": "sonnet",
+    "night": "night-20261113-010000",
+    "note": "landed on its branch sb/repo-one-001, waiting for a clean checkout: unsaved changes to one/done.txt",
+    "paths": [
+     "one/"
+    ],
+    "pid": null,
+    "pid_start": null,
+    "recheck_at": null,
+    "rechecks": null,
+    "repo": "/tmp/sb/repoA",
+    "run": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one",
+    "runner": "main",
+    "spend": {
+     "account": "main",
+     "check_minutes": 0,
+     "model": "sonnet",
+     "run_minutes": 0,
+     "tries": 1
+    },
+    "started": null,
+    "state": "unclean",
+    "title": "A",
+    "tree": "/tmp/sb/hub/worktrees/repoA-000000/repo-one-001",
+    "tries": 0
+   }
+  ],
+  "maps": [
+   "repo/one"
+  ],
+  "night": "night-20261113-010000",
+  "paused": false,
+  "repos": {},
+  "runs": {
+   "repo/one": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one/2026-11-13-one.md"
+  },
+  "seeded": true,
+  "version": 9
+ },
+ "seen": []
+}

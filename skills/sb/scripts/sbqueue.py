@@ -131,7 +131,7 @@ def order(tickets, queued, maps=()):
     return out
 
 
-HOLDING = ("running", "landed", "review", "recheck")  # a ticket at work or not judged yet: its map stays current
+HOLDING = ("running", "landed", "review", "recheck", "unclean")  # at work or not judged yet: its map stays current
 
 
 def map_queueable(tickets, name, live):

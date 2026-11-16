@@ -174,6 +174,7 @@ const MARKS: Readonly<Record<Mark, [typeof IconCircleCheck, "ok" | "bad" | "warn
   short: [IconX, "bad"],
   stopped: [IconBan, "warn"],
   recheck: [IconBan, "warn"],
+  unclean: [IconHourglass, "warn"],
 };
 
 function Block({ b, queued, pair }: { b: NightBlock; queued: readonly string[]; pair: MapPair | undefined }): React.JSX.Element {
@@ -306,7 +307,7 @@ function Row({ r, worker }: { r: NightRow; worker: SessionCard | undefined }): R
         <TicketTitle itemKey={i.key} links={i.links} className="line-clamp-2">
           {title}
         </TicketTitle>
-        {(r.mark === "short" || r.mark === "stopped" || r.mark === "recheck") && <p className={cn("truncate text-xs", r.mark === "short" ? "text-destructive" : "text-warn")}>{plainReason(i)}</p>}
+        {(r.mark === "short" || r.mark === "stopped" || r.mark === "recheck" || r.mark === "unclean") && <p className={cn("truncate text-xs", r.mark === "short" ? "text-destructive" : "text-warn")}>{plainReason(i)}</p>}
         {r.mark === "next" && <WaitReason item={i} />}
         {r.mark === "running" && worker === undefined && (
           <p className="truncate text-xs text-muted-foreground" title={firstLine(i.note)}>
@@ -343,7 +344,7 @@ function Row({ r, worker }: { r: NightRow; worker: SessionCard | undefined }): R
             </Button>
           </>
         )}
-        {(r.mark === "done" || r.mark === "short" || r.mark === "stopped" || r.mark === "recheck") && (
+        {(r.mark === "done" || r.mark === "short" || r.mark === "stopped" || r.mark === "recheck" || r.mark === "unclean") && (
           <>
             <span>{MARK_WORDS[r.mark]}</span>
             <FileLinks item={i} />

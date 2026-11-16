@@ -50,7 +50,8 @@ function countOf(i: QueueItem): keyof Counts {
     case "skipped": return "stopped";
     case "landed":
     case "review":
-    case "recheck": return "checking";
+    case "recheck":
+    case "unclean": return "checking";
   }
 }
 export const tally = (items: readonly QueueItem[]): Counts => {
@@ -66,6 +67,7 @@ const STATE_WORDS: Readonly<Record<QueueItem["state"], string>> = {
   landed: "Waits for its second pass",
   review: "In its second pass",
   recheck: "Checks waiting to run",
+  unclean: "Waits for a clean checkout",
   done: "Done",
   failed: "Fell short",
   skipped: "Stopped",
