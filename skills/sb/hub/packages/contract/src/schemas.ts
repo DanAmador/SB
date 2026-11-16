@@ -248,6 +248,10 @@ export const TicketItem = z.strictObject({
   branch: z.string().nullable().optional(),
   /** Its paths while it runs in a worktree: another ticket whose paths meet these waits. */
   paths: z.array(z.string()).nullable().optional(),
+  /** Its last Claude try's session id and the config dir it ran under: a stop, a restart or the review's one more
+   * try resumes it (`claude --resume`); dropped when that resume fails or the try ran on agy. */
+  session: z.string().optional(),
+  session_dir: z.string().optional(),
 });
 export type TicketItem = z.infer<typeof TicketItem>;
 

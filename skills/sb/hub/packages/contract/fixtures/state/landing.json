@@ -67,6 +67,8 @@
     "repo": "/tmp/sb/game",
     "run": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one",
     "runner": "main",
+    "session": "00000000-0000-0000-0000-000000000000",
+    "session_dir": "/tmp/sb/.claude-main",
     "started": 1794528000.0,
     "state": "running",
     "title": "A",

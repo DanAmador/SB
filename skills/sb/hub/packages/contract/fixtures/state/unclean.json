@@ -63,6 +63,8 @@
     "repo": "/tmp/sb/repoA",
     "run": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one",
     "runner": "main",
+    "session": "00000000-0000-0000-0000-000000000000",
+    "session_dir": "/tmp/sb/.claude-main",
     "spend": {
      "account": "main",
      "check_minutes": 0,

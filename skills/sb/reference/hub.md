@@ -67,6 +67,13 @@ the vault. Only the running hub writes the queue (`$SB_HUB_HOME/state.json`); CL
   tells running workers to commit what passes and stop. A ticket cut off by a limit or a logout
   resumes on another account with room, from where it stopped. An expired login takes that account
   out of the pool and asks the owner to sign in.
+- **Sessions**: each Claude worker runs as its own session (`--session-id`); its queue item keeps
+  `session` and `session_dir` (the account's config dir). A stop at a limit or a logout, a hub restart
+  and the review's one more try go on with that session (`claude -p --resume <id> "<what happened>"`,
+  same worktree, same model); on another account its file is copied into that account's `projects/`
+  first. A failed try's retry (the Opus one too) starts a new session, told every earlier try's commit
+  and the last report. No session kept, its file missing or older than a day, or a resume that ends
+  with an error before any turn: the try starts afresh with the whole brief and the old log's path.
 - **Review**: a ticket whose checks pass lands (`landed`, with `landed_at`) and waits for its map's Opus
   review, one per map at a time, which judges every landed ticket no review holds. It starts when the map's run
   ends, or, while the map still runs, once its oldest landed ticket waited 25 minutes (`SB_REVIEW_EVERY_MIN`),

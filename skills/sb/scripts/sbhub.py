@@ -1546,6 +1546,10 @@ AUTH_PATTERNS = ("authentication_failed", "failed to authenticate", "oauth sessi
 RESUME = ("\n## An earlier try stopped\n\nAn earlier try on {agent} stopped {why}. Its changes may already be in "
           "the tree, committed or not: read `git log {base}..HEAD` and {diff} first, continue from there, do not "
           "redo finished work. Its log: {log}.\n")
+# what a resumed session is told (it keeps its first brief): what happened, then where to go on from
+CONTINUE = ("{what}\nYour work so far is in this tree, committed or not: read `git log {base}..HEAD` and `git status`, "
+            "go on from there and do not redo finished work. Finish as your brief said: verify, commit with this "
+            "trailer, and write your report to {report}.\n\n  Ticket: {ticket}\n")
 REDO = ("\n## This is the ticket's second try\n\n{work} The Opus review judged that try {verdict} against the Done "
         "when (its review: {review}). Fix what it found not met:\n{findings}\nThe next review judges both tries' "
         "commits together; there is no third try.\n")
@@ -1562,18 +1566,19 @@ def redo_brief(redo):
                        findings=findings)
 
 
-def retry_brief(item, tree, branch, base):
-    """What a ticket's later try is told: which try it is, every earlier try's failure, the last one's whole reason,
-    and where the work so far is, to go on from."""
+def retry_brief(item, tree, branch, base, report=None):
+    """What a ticket's later try (a new session) is told: which try it is, every earlier try's failure and commit,
+    the last one's whole reason and report, and where the work so far is, to go on from."""
     fails = item.get("fails") or []
     where = ("on branch {} in this worktree".format(branch) if tree else "in this checkout")
     lines = "\n".join("- try {} ({}): {}{}".format(n, f.get("model"), f.get("why"),
                                                    ", commit " + f["commit"][:9] if f.get("commit") else "")
                       for n, f in enumerate(fails, 1))
     return ("\n## This is try {n} of {most}\n\nEarlier tries failed:\n{lines}\nThe last one's reason in full:\n{why}\n"
-            "Their work is kept {where}: read `git log {base}..HEAD` and `git status` first and go on from it; do not "
-            "start over and do not revert it. Fix what failed.\n").format(
-                n=len(fails) + 1, most=TRIES_MAX, lines=lines, why=item["retry"], where=where, base=base[:12])
+            "{report}Their work is kept {where}: read `git log {base}..HEAD` and `git status` first and go on from it; "
+            "do not start over and do not revert it. Fix what failed.\n").format(
+                n=len(fails) + 1, most=TRIES_MAX, lines=lines, why=item["retry"], where=where, base=base[:12],
+                report="The last try's report: {}\n".format(report) if report else "")
 
 
 def _num(v):
@@ -1702,23 +1707,71 @@ GIT_RULE = ("\n\nGit rule: never run git stash, stash pop/apply, checkout or res
             "throwaway worktree (git worktree add --detach /tmp/clean-tree HEAD), run there, then remove it.\n")
 
 
-def launch(agent, brief, repo, model, env, log):
+def launch(agent, brief, repo, model, env, log, resume=None):
     """Start one headless worker and return its Popen: the only place that knows the agents' commands.
-    Own process group, cwd the ticket's repo, stdout and stderr to `log`; `env` adds the hub's ids."""
+    Own process group, cwd the ticket's repo, stdout and stderr to `log`; `env` adds the hub's ids. A Claude worker
+    runs as a new session (`--session-id`) or, with `resume`, goes on with that one; the Popen's `session` is its id
+    (None for agy)."""
     full = {**os.environ, **env}
     brief += GIT_RULE
+    session = None
     if agent.get("kind") == "agy":
         cmd = [_exe("agy", full), "-p", brief] + (["--model", model] if model else []) + ["--output-format", "json"]
     else:
         if agent.get("dir"):
             full["CLAUDE_CONFIG_DIR"] = agent["dir"]
-        cmd = [_exe("claude", full), "-p", brief, "--permission-mode", "auto", "--model", model,
-               "--settings", json.dumps(GUARD_SETTINGS),
+        session = resume or str(uuid.uuid4())
+        cmd = [_exe("claude", full), "-p", brief, "--resume" if resume else "--session-id", session,
+               "--permission-mode", "auto", "--model", model, "--settings", json.dumps(GUARD_SETTINGS),
                "--output-format", "stream-json", "--verbose"]  # stream-json carries the account's usage
     Path(log).parent.mkdir(parents=True, exist_ok=True)
     with open(log, "ab") as out:
-        return subprocess.Popen(cmd, cwd=repo, env=full, stdin=subprocess.DEVNULL, stdout=out,
-                                stderr=subprocess.STDOUT, start_new_session=True)
+        p = subprocess.Popen(cmd, cwd=repo, env=full, stdin=subprocess.DEVNULL, stdout=out,
+                             stderr=subprocess.STDOUT, start_new_session=True)
+    p.session = session
+    return p
+
+
+SESSION_DAY = 86400  # a session older than this is not resumed: the try starts afresh, told the old log
+
+
+def config_dir(agent):
+    """The Claude config dir an agent's workers run under (where their sessions are kept)."""
+    return agent.get("dir") or os.environ.get("CLAUDE_CONFIG_DIR") or str(Path.home() / ".claude")
+
+
+def session_file(config, cwd, sid):
+    """Where Claude Code keeps a session: <config>/projects/<cwd, each character not a letter or digit a dash>/<id>.jsonl.
+    ponytail: Claude shortens a very long cwd's folder name with a hash; such a session is not found, so it starts
+    afresh."""
+    return Path(config) / "projects" / re.sub(r"[^A-Za-z0-9]", "-", os.path.realpath(cwd)) / (sid + ".jsonl")
+
+
+def resumable(item, agent, cwd, now=time.time):
+    """The session id a stopped or reviewed ticket goes on with on `agent` in `cwd`, or None for a fresh start: no
+    session kept, an agy agent, its file missing or older than SESSION_DAY, or it could not be copied into this
+    agent's account (a session lives in one account's folder)."""
+    sid, was = item.get("session"), item.get("session_dir")
+    if not sid or not was or agent.get("kind") == "agy":
+        return None
+    src = session_file(was, cwd, sid)
+    try:
+        if now() - src.stat().st_mtime > SESSION_DAY:
+            return None
+        dst = session_file(config_dir(agent), cwd, sid)
+        if dst != src:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+    except OSError:
+        return None
+    return sid
+
+
+def resume_failed(run):
+    """A resumed worker that ended with an error before its session took a turn: the session could not go on."""
+    rc = getattr(run.get("p"), "returncode", None)
+    return bool(run.get("resumed")) and rc not in (None, 0) and \
+        '"type":"assistant"' not in _tail(run["log"], run.get("start") or 0).replace(" ", "")
 
 
 def _kill_group(p, grace=3.0):
@@ -2435,14 +2488,27 @@ class TicketRun:
         if rc != 0:
             return None, self.result(item, "skipped", "could not claim it: " + (err or out), bare)
         folder = Path(board).parent
-        brief = sbqueue.brief(t, _plain_words(t), str(folder), where, branch or
-                              _git(t["repo"], "rev-parse", "--abbrev-ref", "HEAD") or "the current branch")
-        if item.get("retry"):
-            brief += retry_brief(item, tree, branch, item.get("first_base") or base)
-        if item.get("redo"):
-            brief += redo_brief(item["redo"])
         log = str(folder / "{}.log".format(int(t["num"])))
-        if item.get("resume"):
+        # a stop, a restart or the review's one more try goes on with the try's own session (an opus retry is a new
+        # one); with none to go on with, it starts afresh as below
+        going_on = item.get("resume") or item.get("redo") and not item.get("retry")
+        sid = resumable(item, inst, where) if going_on else None
+        if sid:
+            r = item.get("resume")
+            what = ("This session stopped {}{}; the hub resumed it.".format(r["why"], " on " + r["agent"] if r.get(
+                "agent") else "") if r else "Your work landed and the Opus review read it." + redo_brief(item["redo"]))
+            brief = CONTINUE.format(what=what, base=base[:12], report=folder / "{}.md".format(int(t["num"])),
+                                    ticket="{}/{}".format(t["map"], nnn))
+        else:
+            brief = sbqueue.brief(t, _plain_words(t), str(folder), where, branch or
+                                  _git(t["repo"], "rev-parse", "--abbrev-ref", "HEAD") or "the current branch")
+        if item.get("retry") and not sid:
+            prev = Path(item["run"]) / "{}.md".format(int(t["num"])) if item.get("run") else None
+            brief += retry_brief(item, tree, branch, item.get("first_base") or base,
+                                 str(prev) if prev and prev.is_file() else None)
+        if item.get("redo") and not sid:
+            brief += redo_brief(item["redo"])
+        if item.get("resume") and not sid:
             r, paths = item["resume"], " ".join(t.get("paths") or [])
             brief += RESUME.format(agent=r["agent"], why=r["why"], base=base, log=r.get("log") or log,
                                    diff="`git diff -- {}`".format(paths) if paths else "`git diff`")
@@ -2452,14 +2518,18 @@ class TicketRun:
             start = os.path.getsize(log)  # launch appends: this try's output begins here
         except OSError:
             start = 0
-        run = {**bare, "base": base, "first_base": item.get("first_base") or base, "log": log, "start": start, "folder": str(folder)}
+        run = {**bare, "base": base, "first_base": item.get("first_base") or base, "log": log, "start": start,
+               "folder": str(folder), "resumed": bool(sid)}
         try:
             if self.stopping():
                 raise OSError("the hub is stopping")
-            run["p"] = self.hub.launcher(inst, brief, where, item["model"], env, log)
+            # the resume goes only to a resumed launch: a test's launcher may take the six plain arguments
+            run["p"] = self.hub.launcher(inst, brief, where, item["model"], env, log, **({"resume": sid} if sid else {}))
         except (OSError, ValueError, subprocess.SubprocessError) as e:
             self.release(key)
             return None, self.result(item, "failed", "could not start the worker: {}".format(e), run)
+        run["session"] = getattr(run["p"], "session", None)
+        run["session_dir"] = config_dir(inst) if run["session"] else None
         return run, None
 
     # ---- judging ----
@@ -2501,6 +2571,11 @@ class TicketRun:
             stopped = self.stopped(item, run, checks)
             if stopped:
                 return stopped
+            if resume_failed(run):  # no try and no stop: queued again at the front, to start afresh
+                self.release(item["key"])
+                note = "its session could not be resumed on {}; it starts afresh".format(run["agent"])
+                return {**self.result(item, "stopped", note, run, sha, checks), "stops": int(item.get("stops") or 0),
+                        "fresh": True}
         return self.again(item, run, reason, sha, checks)
 
     def again(self, item, run, reason, sha, checks=()):
@@ -3348,10 +3423,11 @@ class Supervisor:
         key, state = item["key"], res["state"]
         if res.get("stop"):
             self._agent_stopped(res["stop"])
-        if state == "stopped":
-            self._update(key, front=True, state="queued", pid=None, pid_start=None, started=None, stops=res["stops"],
-                         resume={"agent": res["stop"]["agent"], "log": res["log"], "why": STOP_WHY[res["stop"]["kind"]]},
-                         note=res["note"])
+        if state == "stopped":  # a stop keeps its session to go on with; a resume that failed (`fresh`) drops it
+            stop = res.get("stop")
+            more = {"resume": {"agent": stop["agent"], "log": res["log"], "why": STOP_WHY[stop["kind"]]}} if stop else {}
+            self._update(key, front=True, drop=("session", "session_dir") if res.get("fresh") else (), state="queued",
+                         pid=None, pid_start=None, started=None, stops=res["stops"], note=res["note"], **more)
             return
         if state == "landed":  # the checks passed and the work landed: its map's second pass judges it (_reviews)
             self._update(key, state="landed", ended=None, landed_at=self.hub.now(), commit=res["commit"],
@@ -4143,8 +4219,11 @@ class Supervisor:
             self.hub._save()
         self._track(key, run)
         p = run["p"]
-        self._update(key, base_sha=base, first_base=run.get("first_base") or base, log=run["log"], log_start=run["start"], run=run["folder"], pid=p.pid,
-                     pid_start=_proc_start(p.pid), note="running on {} ({})".format(name, item["model"]))
+        sess = {"session": run["session"], "session_dir": run["session_dir"]} if run.get("session") else {}
+        self._update(key, drop=() if sess else ("session", "session_dir"), base_sha=base,
+                     first_base=run.get("first_base") or base, log=run["log"], log_start=run["start"], run=run["folder"],
+                     pid=p.pid, pid_start=_proc_start(p.pid), note="running on {} ({})".format(name, item["model"]),
+                     **sess)
 
     def _launch_job(self, item, name, inst):
         key = item["key"]

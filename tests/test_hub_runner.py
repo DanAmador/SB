@@ -77,6 +77,7 @@ def state_fixture(state, root, name):
     # that touches it then meets what looks like someone's unsaved edit
     text = re.sub(r'"pid_start": "[^"]+"', '"pid_start": "Mon Nov 16 10:05:45 2026"', text)
     text = re.sub(r"worktrees/[^/\"]+-[0-9a-f]{6}/", "worktrees/repoA-000000/", text)
+    text = re.sub(r'"session": "[0-9a-f-]{36}"', '"session": "00000000-0000-0000-0000-000000000000"', text)
     fixture = Path(SCRIPT).resolve().parents[1] / "hub" / "packages" / "contract" / "fixtures" / "state" / name
     fixture.parent.mkdir(exist_ok=True)
     fixture.write_text(text + "\n", encoding="utf-8")
@@ -133,6 +134,7 @@ class RunnerCase(unittest.TestCase):
         self.repos = {folder: self.root / repo for folder, repo, *_ in self.MAPS}
         self.clock = Clock(START)
         self.mode, self.modes, self.launched, self.reviewed = "commit", {}, [], []
+        self.sessions = False  # True: each new Claude session leaves its file where Claude keeps it
         # item key -> what its fake second pass does (FAKE_REVIEW), default finished; a list: one per review, in turn
         # (its last is kept for any later one)
         self.verdicts = {}
@@ -151,7 +153,7 @@ class RunnerCase(unittest.TestCase):
             self.assertEqual(r.returncode, 0, "sbmap {}\n{}{}".format(" ".join(a), r.stdout, r.stderr))
         return r
 
-    def launcher(self, agent, brief, repo, model, env, log):
+    def launcher(self, agent, brief, repo, model, env, log, **kw):
         """Workers go to `launched`, second passes (a brief naming review files) to `reviewed`, with the keys of the
         tickets it was handed."""
         key = env["SB_HUB_AGENT"]
@@ -168,7 +170,12 @@ class RunnerCase(unittest.TestCase):
                 if v is not None:
                     got[k.rsplit("#", 1)[1]] = (v.pop(0) if len(v) > 1 else v[0]) if isinstance(v, list) else v
             fake["FAKE_REVIEW"] = json.dumps(got)
-        return sbhub.launch(agent, brief, repo, model, {**env, **fake}, log)
+        p = sbhub.launch(agent, brief, repo, model, {**env, **fake}, log, **kw)
+        if self.sessions and p.session and not kw:  # as Claude does: a new session's file, under its config dir
+            f = sbhub.session_file(agent["dir"], repo, p.session)
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text('{"type":"user"}\n', encoding="utf-8")
+        return p
 
     # ---- reading the result ----
 
@@ -219,6 +226,16 @@ class RunnerCase(unittest.TestCase):
 
     def state_of(self, key):
         return self.items().get(key, {}).get("state")
+
+    def printed(self, log, n, what="argv"):
+        """The first `n` tries' `argv` (lists) or `cwd` as the fake worker printed them, waiting for the n-th."""
+        end = time.time() + 10
+        while True:
+            text = Path(log).read_text(encoding="utf-8")
+            lines = [x[len(what) + 2:] for x in text.splitlines() if x.startswith(what + ": ")]
+            if len(lines) >= n or time.time() > end:
+                return [json.loads(x) for x in lines] if what == "argv" else lines
+            time.sleep(0.02)
 
     def board(self, folder="repo/one"):
         boards = sorted(self.vault.glob("wayfinder/repo/runs/*/*.md"))
@@ -397,7 +414,8 @@ class TicketLoopTest(RunnerCase):
         self.assertIn(sha2, next(self.vault.glob("wayfinder/repo/one/issues/done/002*.md")).read_text(encoding="utf-8"))
         # the real launch: claude's flags, the agent's config dir, the item's id, the run folder's log
         log = Path(self.launched[0]["log"]).read_text(encoding="utf-8")
-        self.assertIn('argv: ["--permission-mode", "auto", "--model", "sonnet", "--settings", ', log)  # the git guard hook
+        self.assertRegex(log, r'argv: \["--session-id", "[0-9a-f-]{36}", "--permission-mode", "auto", "--model", "sonnet", '
+                              r'"--settings", ')  # its own session; the git guard hook
         self.assertIn('"--output-format", "stream-json", "--verbose"]', log)
         self.assertIn('"CLAUDE_CONFIG_DIR": "{}"'.format(self.root / ".claude-main"), log)
         self.assertIn('"SB_HUB_AGENT": "repo/one#1", "SB_HUB_PARENT": "queue", "SB_HUB_PORT": "4321"', log)
@@ -1004,6 +1022,16 @@ class ReviewRetryTest(RunnerCase):
         self.assertIn("- It works.: not met: the fake reviewer found no test for it", brief)  # the not-met line
         self.assertNotIn("- The commit names the ticket: met", brief)  # a met line is not a finding
 
+    def test_the_one_more_try_resumes_the_first_tries_session_told_the_findings(self):
+        self.sessions, self.verdicts = True, {"repo/one#1": ["not met", "finished"]}
+        self.only_one()
+        self.until(lambda: len(self.runs()) == 2)
+        first, again = self.runs()
+        argvs = self.printed(first["log"], 2)
+        self.assertEqual(argvs[1][argvs[1].index("--resume") + 1], argvs[0][argvs[0].index("--session-id") + 1])
+        self.assertTrue(again["brief"].startswith("Your work landed and the Opus review read it."), again["brief"])
+        self.assert_second_brief(again["brief"], self.shas(1)[0], "not met")
+
     def test_not_met_then_finished_runs_the_worker_twice_briefed_with_the_findings_and_the_first_commit(self):
         self.verdicts = {"repo/one#1": ["not met", "finished"]}
         self.only_one()
@@ -1146,6 +1174,67 @@ class StopsTest(RunnerCase):
         self.assertEqual(self.hub.state()["installed"]["main"]["limited_until"], reset)
         self.assertEqual(self.open_tickets(), {})
 
+    def stop_with_a_session(self):
+        """Ticket 1 alone starts on main, a session whose file is kept as Claude keeps it, and stops at main's usage
+        limit. Returns the session's id."""
+        self.sessions, self.modes = True, {"repo/one#1": "limit"}
+        self.only(1)
+        self.until(lambda: self.launched)
+        return self.items()["repo/one#1"]["session"]
+
+    def test_a_launched_worker_runs_as_a_new_session_its_item_keeps(self):
+        self.only(1)
+        self.until(lambda: self.state_of("repo/one#1") == "done")
+        item, argv = self.items()["repo/one#1"], self.printed(self.launched[0]["log"], 1)[0]
+        self.assertEqual(argv[argv.index("--session-id") + 1], item["session"])
+        self.assertNotIn("--resume", argv)
+        self.assertEqual(item["session_dir"], str(self.root / ".claude-main"))
+
+    def test_a_usage_limit_resumes_its_session_on_a_free_account_in_the_same_tree(self):
+        with self.hub._lock:
+            self.hub._data["queue"]["agents"] = ["main", "spare"]
+        sid = self.stop_with_a_session()
+        self.until(lambda: len(self.launched) == 2)  # main is limited: spare takes it at once
+        first, again = self.launched
+        argv, cwd = self.printed(again["log"], 2)[1], self.printed(again["log"], 2, "cwd")
+        self.assertEqual(again["agent"]["dir"], str(self.root / ".claude-spare"))
+        self.assertEqual(argv[argv.index("--resume") + 1], sid)
+        self.assertNotIn("--session-id", argv)
+        self.assertEqual((again["model"], cwd[1]), (first["model"], cwd[0]))  # its model, in the same tree
+        self.assertTrue(sbhub.session_file(self.root / ".claude-spare", cwd[0], sid).is_file())  # copied to spare
+        self.assertTrue(again["brief"].startswith("This session stopped at its usage limit on main"), again["brief"])
+        self.assertIn("  Ticket: repo/one/001\n", again["brief"])
+        self.assertNotIn("Files you own", again["brief"])  # a short prompt, not the whole brief again
+
+    def test_a_resume_that_fails_at_once_starts_afresh_told_the_old_log(self):
+        sid = self.stop_with_a_session()
+        self.until(lambda: self.items()["repo/one#1"].get("resume"))
+        self.clock.t = datetime(2026, 11, 13, 4, 40).timestamp() + 1
+        self.modes = {"repo/one#1": "nothing"}  # the resumed session ends with an error before any turn
+        self.until(lambda: len(self.launched) == 2)
+        self.modes = {}
+        self.until(lambda: self.state_of("repo/one#1") == "done")
+        item, argvs = self.items()["repo/one#1"], self.printed(self.launched[0]["log"], 3)
+        self.assertEqual(argvs[1][argvs[1].index("--resume") + 1], sid)
+        self.assertNotIn("--resume", argvs[2])
+        self.assertNotEqual(argvs[2][argvs[2].index("--session-id") + 1], sid)
+        fresh = self.launched[2]["brief"]
+        self.assertIn("Files you own", fresh)
+        self.assertIn("An earlier try on main stopped at its usage limit", fresh)
+        self.assertIn(self.launched[0]["log"], fresh)
+        self.assertEqual((item["stops"], item["tries"]), (1, 0))  # the failed resume is no stop and no failed try
+
+    def test_a_session_too_old_missing_or_on_agy_is_not_resumed(self):
+        d = self.root / ".claude-main"
+        f = sbhub.session_file(d, self.root, "s1")
+        f.parent.mkdir(parents=True)
+        f.write_text("{}\n", encoding="utf-8")
+        item, claude = {"session": "s1", "session_dir": str(d)}, {"kind": "claude", "dir": str(d)}
+        self.assertEqual(sbhub.resumable(item, claude, self.root), "s1")
+        self.assertIsNone(sbhub.resumable(item, claude, self.root, now=lambda: time.time() + sbhub.SESSION_DAY + 60))
+        self.assertIsNone(sbhub.resumable({**item, "session": "s2"}, claude, self.root))
+        self.assertIsNone(sbhub.resumable(item, {"kind": "agy", "dir": None}, self.root))
+
     def test_a_worker_past_its_time_limit_has_its_whole_group_killed_and_is_tried_again_then_waits_for_you(self):
         self.sup.limit = 1
         self.modes = {"repo/one#1": "hang", "repo/one#2": "nothing"}
@@ -1278,6 +1367,7 @@ class RetryTest(RunnerCase):
 
     def test_a_check_failing_twice_lands_on_the_third_try_on_opus_from_the_second_tries_work(self):
         self.sb("set", "repo/one", "001", "checks=" + self.failing_check(2), "--no-sync")
+        self.sessions = True  # a failed try's session is kept, yet a retry starts a new one
         self.only(1)
         self.until(lambda: self.state_of("repo/one#1") == "done")
         runs = self.runs("repo/one#1")
@@ -1293,6 +1383,8 @@ class RetryTest(RunnerCase):
         self.assertIn("- try 2 (sonnet): check failed", runs[2]["brief"])
         self.assertIn("commit " + second[:9], runs[2]["brief"])
         self.assertIn("go on from it", runs[2]["brief"])
+        self.assertIn("Files you own", runs[2]["brief"])  # the whole brief: a new session
+        self.assertIn("The last try's report: /r/1.md", sbhub.retry_brief({"retry": "x"}, None, None, "abc", "/r/1.md"))
         self.assertNotIn(1, self.open_tickets())
 
     def test_a_ticket_its_map_waits_on_is_tried_again_before_an_unrelated_ticket_of_its_repo(self):
