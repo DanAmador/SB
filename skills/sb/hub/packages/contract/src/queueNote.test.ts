@@ -26,7 +26,6 @@ describe("a queue the hub paused by itself", () => {
     expect(Queue.parse(paused).note).toBe(paused.note);
   });
   it("parses with no note", () => {
-    const { note: _, ...plain } = paused;
-    expect(Queue.parse(plain).note).toBeUndefined();
+    expect(Queue.parse({ ...paused, note: undefined }).note).toBeUndefined();
   });
 });
