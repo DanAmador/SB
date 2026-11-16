@@ -4,4 +4,4 @@ pnpm --dir skills/sb/hub typecheck
 pnpm --dir skills/sb/hub lint
 pnpm --dir skills/sb/hub test
 pnpm --dir skills/sb/hub build
-python3 -m unittest discover tests
+python3 tests/run_parallel.py

@@ -274,9 +274,15 @@ Labels and values are shown to the owner as written: plain words, no internal co
 
 ### Example
 
-`.sb/providers/tests` in this repo is an example: it runs the unittest suite and prints a `status`,
-a `progress`, a `counts` and a `log` widget. It reruns only when `HEAD` or `git status` changed
-since its last run, and otherwise reprints the cached result. Copy it as a starting point; make it
-executable (`chmod +x`).
+A script that prints one `status` widget:
+
+```python
+#!/usr/bin/env python3
+import json
+print(json.dumps({"title": "Build", "widgets": [{"kind": "status", "label": "Last build", "value": "green", "level": "ok"}]}))
+```
+
+Keep it fast: the hub runs it on every refresh and stops it, with whatever it started, after 120 seconds.
+Never run a long job such as a test suite from it. Make it executable (`chmod +x`).
 
 The hub serves the latest results in `GET /api/state` as `"providers": {project: [result, ...]}`.

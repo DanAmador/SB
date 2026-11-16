@@ -74,6 +74,10 @@ def hub(path, data=None, timeout=2):
     return code, out
 
 
+HUB_DOWN = ("The sb hub is not running. Do not start it yourself: tell the owner, who runs it as a service "
+            "(skills/sb/scripts/sbhub_service.sh).")
+
+
 def start_hub():
     """Start `sbhub.py serve` detached; True once it answers (within ~4 s)."""
     if os.environ.get("SB_HUB_AUTOSTART") == "0":
@@ -213,7 +217,7 @@ def build_server():
     def sb_board(ctx: Context) -> CallToolResult:
         s = board_state()
         if s is None:
-            return result("The sb hub is not running and could not be started.", error=True)
+            return result(HUB_DOWN, error=True)
         text = summary(s)
         if client_supports_apps(ctx):
             text += "\n(The owner sees this live in the widget above; no need to repeat it.)"
@@ -307,8 +311,7 @@ def build_server():
     def sb_queue(add: list[str] = [], remove: list[str] = [], agent: str = "") -> CallToolResult:  # noqa: B006 (never mutated)
         code, s = hub("/api/state")
         if code != 200:
-            return result("The sb hub is not running and could not be started; start it with "
-                          "`python3 skills/sb/scripts/sbhub.py serve`, then try again.", error=True)
+            return result(HUB_DOWN, error=True)
         q = s["queue"]
         if add or remove:
             for attempt in (0, 1):

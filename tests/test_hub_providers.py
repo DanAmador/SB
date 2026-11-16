@@ -64,6 +64,20 @@ class ProviderCase(unittest.TestCase):
         self.assertEqual([p["title"] for p in out], ["Repo and maps", "a-garbage", "b-crash", "c-hang", "Ok"])
         self.assertTrue(all(p["widgets"][0]["level"] == "bad" for p in out[1:4]))
 
+    def test_a_timed_out_script_takes_its_children_with_it(self):
+        # the repo's own tests provider runs the suite as a child: a timeout that killed only the script left
+        # the suite running with no parent, and the hub started another one on every refresh
+        pid_file = Path(self._tmp.name, "child.pid")
+        script(self.repo, "spawner", "import subprocess, time\n"
+               "c = subprocess.Popen(['sleep', '60'])\n"
+               "open({!r}, 'w').write(str(c.pid))\ntime.sleep(60)".format(str(pid_file)))
+        out = run_providers(self.repo, timeout=1)
+        self.assertIn("timed out", out[1]["widgets"][0]["value"])
+        child = int(pid_file.read_text())
+        # a killed child that its dead parent never reaped stays a zombie until init takes it: gone or a zombie
+        state = subprocess.run(["ps", "-o", "stat=", "-p", str(child)], capture_output=True, text=True).stdout.strip()
+        self.assertTrue(state in ("", "Z") or state.startswith("Z"), "child still running: " + state)
+
     def test_a_non_executable_file_is_ignored(self):
         Path(self.repo, ".sb", "providers").mkdir(parents=True)
         Path(self.repo, ".sb", "providers", "README.md").write_text("notes")
@@ -120,10 +134,8 @@ class ProviderCase(unittest.TestCase):
             self.assertFalse(hub.changed.is_set())
             self.assertEqual(hub.queued, set())
 
-    def test_the_providers_name_their_icons(self):
+    def test_the_generic_provider_names_its_icon(self):
         self.assertEqual(generic_provider(self.repo)["icon"], "git")
-        mine = Path(__file__).resolve().parents[1] / ".sb" / "providers" / "tests"
-        self.assertIn('"icon": "tests"', mine.read_text())
 
     def test_more_reports_during_the_first_run_queue_no_more_runs(self):
         hub = Hub(self._tmp.name)
@@ -159,48 +171,6 @@ class ProviderCase(unittest.TestCase):
         self.assertTrue(t.is_alive())
         self.assertEqual(hub.providers[self.repo][0]["widgets"][0]["level"], "bad")
         self.assertIn("boom", hub.providers[self.repo][0]["widgets"][0]["value"])
-
-
-class ExampleProviderTest(unittest.TestCase):
-    """This repo's .sb/providers/tests reruns the suite only when the repo changed."""
-    SCRIPT = Path(__file__).resolve().parents[1] / ".sb" / "providers" / "tests"
-
-    def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self._tmp.cleanup)
-        self.repo = Path(make_repo(self._tmp.name))
-        self.count = Path(self._tmp.name, "runs")
-        (self.repo / "tests").mkdir()
-        (self.repo / "tests" / "test_one.py").write_text(
-            "import unittest\nopen({!r}, 'a').write('x')\n\n\nclass T(unittest.TestCase):\n"
-            "    def test_it(self):\n        pass\n".format(str(self.count)))
-        cache = Path(self._tmp.name, "tmp")
-        cache.mkdir()
-        self.env = {**os.environ, "TMPDIR": str(cache)}
-        self.env.pop("SB_PROVIDER_TESTS_RUNNING", None)
-
-    def run_it(self, **env):
-        r = subprocess.run([str(self.SCRIPT)], cwd=self.repo, capture_output=True, text=True,
-                           env={**self.env, **env}, timeout=60)
-        self.assertEqual(r.returncode, 0, r.stderr)
-        return json.loads(r.stdout)
-
-    def runs(self):
-        return len(self.count.read_text()) if self.count.exists() else 0
-
-    def test_it_reruns_only_when_head_or_the_tree_changed(self):
-        first = self.run_it()
-        self.assertEqual((first["widgets"][2]["items"], self.runs()), ({"pass": 1, "fail": 0}, 1))
-        self.assertEqual(self.run_it(), first)
-        self.assertEqual(self.runs(), 1)
-        (self.repo / "new.txt").write_text("x")
-        self.run_it()
-        self.assertEqual(self.runs(), 2)
-        self.assertEqual(sorted(f.name for f in self.repo.iterdir()), [".git", "new.txt", "tests"])
-
-    def test_it_never_runs_the_suite_from_inside_its_own_run(self):
-        out = self.run_it(SB_PROVIDER_TESTS_RUNNING="1")
-        self.assertEqual((out["title"], self.runs()), ("Test suite", 0))
 
 
 class RefreshTest(HubCase):

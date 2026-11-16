@@ -59,7 +59,7 @@ skills/sb/
                       `sbmap wiki …` runs the wikibrain skill's tools (below)
 mods/obsidian-links/  Claude Code mod: a click on a vault link in chat opens the note in Obsidian
 .claude-plugin/       marketplace.json: makes this repo a folder marketplace for the mod
-tests/                the CLI run against a throwaway vault: `python3 -m unittest discover tests`
+tests/                the CLI run against a throwaway vault: `python3 tests/run_parallel.py` (each class in its own process, all at once)
 skills-lock.json      skills sb leans on, by GitHub repo: wikibrain (the wiki's format and tools,
                       github.com/DanAmador/wikiBrain, pinned to a commit), karpathy-llm-wiki, design-doc-mermaid,
                       ponytail, i-have-adhd; install.sh fetches them, the repo never vendors them

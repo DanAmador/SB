@@ -3,10 +3,12 @@ import json
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills" / "sb" / "scripts"))
-from sbhub import Hub, SEEN_KEPT  # noqa: E402
+import sbhub  # noqa: E402
+from sbhub import Hub  # noqa: E402
 
 
 class SeenTest(unittest.TestCase):
@@ -26,7 +28,9 @@ class SeenTest(unittest.TestCase):
         self.assertEqual(saved["seen"], ["repo/one#1@900"])
         self.assertEqual(Hub(self.home, now=lambda: 1000.0).state()["seen"], ["repo/one#1@900"])
 
+    @mock.patch.object(sbhub, "SEEN_KEPT", 5)  # the real cap is 2000: each mark saves state.json, so a small cap
     def test_marking_twice_keeps_one_and_the_oldest_marks_drop(self):
+        SEEN_KEPT = sbhub.SEEN_KEPT
         self.hub.run_seen("a#1@1")
         self.hub.run_seen("a#1@1")
         self.assertEqual(self.hub.state()["seen"], ["a#1@1"])
