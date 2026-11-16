@@ -1,4 +1,6 @@
 """sbqueue's rules: classify, order, move, brief, verdict."""
+import json
+import os
 import shutil
 import subprocess
 import sys
@@ -7,7 +9,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills" / "sb" / "scripts"))
-from sbqueue import (brief, classify, current_maps, key, map_list, map_queueable, move, order, stuck_on,  # noqa: E402
+from sbqueue import (brief, chains, classify, current_maps, key, map_list, map_queueable, move, order, stuck_on,  # noqa: E402
                      verdict)
 
 
@@ -111,6 +113,42 @@ class OrderTest(unittest.TestCase):
     def test_more_unblocked_goes_first(self):
         ts = [T(1), T(2), T(3, blocked_by_open=[2]), T(4, blocked_by_open=[2])]
         self.assertEqual(order(ts, [key(t) for t in ts])[0], "r/m#2")
+
+    def test_a_low_priority_ticket_freeing_a_chain_of_three_runs_before_a_high_priority_one_freeing_nothing(self):
+        ts = [T(1, priority="S"), T(2, priority="D"), T(3, blocked_by_open=[2]), T(4, blocked_by_open=[3]),
+              T(5, blocked_by_open=[4])]
+        got = order(ts, [key(t) for t in ts])
+        self.assertEqual(got[0], "r/m#2")
+        self.assertLess(got.index("r/m#2"), got.index("r/m#1"))
+
+    def test_two_direct_dependants_run_after_a_chain_of_three(self):
+        ts = [T(1), T(2, priority="S"), T(3, blocked_by_open=[1]), T(4, blocked_by_open=[1]),
+              T(5), T(6, blocked_by_open=[5]), T(7, blocked_by_open=[6]), T(8, blocked_by_open=[7])]
+        got = order(ts, [key(t) for t in ts])
+        self.assertEqual(chains(ts, [key(t) for t in ts])["r/m#1"], 2)
+        self.assertLess(got.index("r/m#5"), got.index("r/m#1"))
+
+    def test_chain_counts_each_dependant_once_through_every_path(self):
+        ts = [T(1), T(2, blocked_by_open=[1]), T(3, blocked_by_open=[1]), T(4, blocked_by_open=[2, 3])]
+        self.assertEqual(chains(ts, [key(t) for t in ts])["r/m#1"], 3)
+
+    def test_a_copy_of_a_real_maps_issues_runs_every_ticket_after_its_blockers(self):
+        src = Path.home() / "Documents" / "Second Brain" / "wayfinder" / "sb-workflow" / "night-spend"
+        if not src.is_dir():
+            self.skipTest("night-spend is not in the vault")
+        with tempfile.TemporaryDirectory() as vault:
+            shutil.copytree(src, Path(vault) / "wayfinder" / "sb-workflow" / "night-spend")
+            out = subprocess.run([sys.executable, str(Path(__file__).resolve().parents[1] / "skills" / "sb" / "scripts"
+                                                      / "sbmap.py"), "tickets", "--json", "sb-workflow/night-spend"],
+                                 env={**os.environ, "SB_VAULT": vault}, capture_output=True, text=True, check=True)
+        ts = json.loads(out.stdout)
+        keys = [key(t) for t in ts]
+        got = order(ts, keys)
+        self.assertEqual(set(got), set(keys))
+        at = {k: i for i, k in enumerate(got)}
+        for t in ts:
+            for b in t["blocked_by_open"]:
+                self.assertLess(at[f"{t['map']}#{b}"], at[key(t)])
 
     def test_map_order_breaks_ties(self):
         ts = [T(1, map_order=5), T(2, map_order=1)]

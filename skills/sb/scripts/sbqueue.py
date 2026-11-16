@@ -70,9 +70,8 @@ def map_list(maps, keys):
     return out
 
 
-def order(tickets, queued, maps=()):
-    """Queued keys in run order: map by map in `maps` order (a map it does not name comes after, where its first
-    key is), and inside a map blockers first, then priority, then most unblocked, then map order and number."""
+def _live_deps(tickets, queued):
+    """(live, deps): the queued tickets that can run, and for each the keys it waits on."""
     by = {key(t): t for t in tickets}
     live = {k: by[k] for k in queued if k in by}
     # drop what waits on something neither resolved nor queued, and what waits on a dropped ticket
@@ -83,14 +82,37 @@ def order(tickets, queued, maps=()):
             if any(_blocker_key(t, b) not in live for b in t["blocked_by_open"]):
                 del live[k]
                 changed = True
-    deps = {k: {_blocker_key(t, b) for b in t["blocked_by_open"]} for k, t in live.items()}
-    unblocks = {k: sum(k in d for d in deps.values()) for k in live}
+    return live, {k: {_blocker_key(t, b) for b in t["blocked_by_open"]} for k, t in live.items()}
+
+
+def chains(tickets, queued):
+    """For each runnable queued key, how many queued tickets wait on it directly or through others, each once."""
+    live, deps = _live_deps(tickets, queued)
+    out = {}
+    for k in live:
+        seen, todo = set(), [k]
+        while todo:
+            x = todo.pop()
+            for o, d in deps.items():
+                if x in d and o not in seen:
+                    seen.add(o)
+                    todo.append(o)
+        out[k] = len(seen)
+    return out
+
+
+def order(tickets, queued, maps=()):
+    """Queued keys in run order: map by map in `maps` order (a map it does not name comes after, where its first
+    key is), and inside a map blockers first, then the longest chain of tickets freed (directly or through
+    others), then priority, then map order and number."""
+    live, deps = _live_deps(tickets, queued)
+    unblocks = chains(tickets, queued)
     pos = {k: i for i, k in enumerate(queued)}
     place = {m: i for i, m in enumerate(map_list(maps, queued))}
 
     def rank(k):
         t = live[k]
-        return (place[map_of(k)], _rank(t), -unblocks[k], int(t.get("map_order") or 0), int(t["num"]), pos[k])
+        return (place[map_of(k)], -unblocks[k], _rank(t), int(t.get("map_order") or 0), int(t["num"]), pos[k])
 
     waiting = {k: set(d) for k, d in deps.items()}
     heap = [(rank(k), k) for k, d in waiting.items() if not d]

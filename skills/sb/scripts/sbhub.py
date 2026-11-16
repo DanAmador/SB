@@ -628,7 +628,9 @@ class Hub:
                 end = max((n + 1 for n, x in enumerate(seq) if sbqueue.map_of(x) == m), default=len(seq))
                 seq = sbqueue.move(seq, k, end, rows)
         q["maps"] = sbqueue.map_list(maps, seq)
-        q["items"] = keep + [self._afresh(have.get(k)) or self._item(k) for k in seq]
+        freed = sbqueue.chains(rows, seq + sorted(running))
+        fresh = lambda k: {**self._item(k), "note": "frees %d" % freed[k] if freed.get(k) else ""}
+        q["items"] = keep + [self._afresh(have.get(k)) or fresh(k) for k in seq]
 
     @staticmethod
     def _sync_maps(q):
