@@ -329,20 +329,21 @@ def verdict(t, repo, base_sha, run=subprocess.run, report=None, first_base=None)
     earlier try's commit sits behind base_sha: when nothing new carries the trailer, `first_base` (the item's first
     base) is searched too, and a trailered commit there stands as the ticket's commit."""
     num = int(t["num"])
-    wanted = {f"Ticket: {t['map']}/{num}", f"Ticket: {t['map']}/{num:03d}"}
+    # a ticket moved to another map keeps its commit: the trailer may name the map it was on (same project, same number)
+    wanted = re.compile(rf"Ticket: {re.escape(t['map'].split('/')[0])}/[^/\s]+/0*{num}")
     r = run(["git", "-C", str(repo), "log", f"{base_sha}..HEAD", "--format=%H%x00%B%x01"],
             capture_output=True, text=True)
     if r.returncode != 0:
         return False, f"cannot read the commits after {base_sha[:12]}: {(r.stderr or '').strip()[:200]}", None
     log = r.stdout
     entries = [e.strip("\n").split("\x00", 1) for e in log.split("\x01") if e.strip()]
-    sha = next((s.strip() for s, body in entries if wanted & {l.strip() for l in body.splitlines()}), None)
+    sha = next((s.strip() for s, body in entries if any(wanted.fullmatch(l.strip()) for l in body.splitlines())), None)
     if not sha and first_base and first_base != base_sha:
         r2 = run(["git", "-C", str(repo), "log", f"{first_base}..HEAD", "--format=%H%x00%B%x01"],
                  capture_output=True, text=True)
         if r2.returncode == 0:
             es = [e.strip("\n").split("\x00", 1) for e in r2.stdout.split("\x01") if e.strip()]
-            sha = next((s.strip() for s, body in es if wanted & {l.strip() for l in body.splitlines()}), None)
+            sha = next((s.strip() for s, body in es if any(wanted.fullmatch(l.strip()) for l in body.splitlines())), None)
     if not sha and t.get("type") == "research" and report and Path(report).is_file() and Path(report).stat().st_size:
         return True, "research: no commit needed, the findings are in the worker's report", None
     if not sha and report and Path(report).is_file() and NO_CHANGE.search(Path(report).read_text(encoding="utf-8",

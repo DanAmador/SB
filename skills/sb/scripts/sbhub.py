@@ -110,6 +110,7 @@ class Hub:
         self._run = run  # () -> the open tickets (list or JSON); sbmap when None
         self.launcher = launcher or launch  # starts one worker; tests hand in their own
         self._tcache = (0.0, None)
+        self._renamed = {}  # old queue key -> its key after sbmap move
         self._mcache = {}  # map -> (when, sbmap's answer or None when it had none), for /api/map
         self._tfailed = None  # when sbmap last failed
         self.now = now
@@ -511,8 +512,36 @@ class Hub:
         with self._lock:
             if got is not None:
                 self._tcache = (self.now(), got)
+                self._rekey(got)
             self._tfailed = None if got is not None else self.now()
         return got
+
+    def _rekey(self, rows):
+        """A ticket moved to another map (sbmap move) keeps its queue item: same project and number, the item's
+        key and map become the new map's. Items a worker or review holds wait; the caller holds the lock."""
+        q = self._data["queue"]
+        have = {sbqueue.key(t) for t in rows}
+        new = {(t["map"].split("/")[0], int(t["num"])): t for t in rows}  # a map is <project>/<effort>
+        moved = False
+        for i in q["items"]:
+            if i.get("kind") != "ticket" or i["key"] in have or i["state"] in ("running", "review") or "#" not in i["key"]:
+                continue
+            t = new.get((i["key"].split("/")[0], int(i["key"].rsplit("#", 1)[1])))
+            if t and sbqueue.key(t) not in {x["key"] for x in q["items"]}:
+                self._renamed[i["key"]] = sbqueue.key(t)
+                i["key"], moved = sbqueue.key(t), True
+                if "map" in i:
+                    i["map"] = t["map"]
+        if moved:
+            q["version"] += 1
+            self._save()
+
+    def _moved(self, key):
+        """`key` as the queue names it now: the tickets are read afresh (the cache may predate an sbmap move),
+        which re-keys an item whose ticket moved to another map."""
+        if "#" in key:
+            self._fresh_tickets()
+        return self._renamed.get(key, key)
 
     def tickets(self, run=None, fresh=False):
         """Open tickets with `state`/`reason` (sbqueue.classify) and `queued`. Reading them never ticks one:
@@ -1053,6 +1082,7 @@ class Hub:
         runs it. A failed sbmap raises ValueError with sbmap's message; a done one refreshes the ticket list."""
         if action not in TICKET_ACTIONS:
             raise ValueError("unknown action: {}".format(action))
+        key = self._moved(key)
         if action == "recheck":
             return self.recheck_now(key)
         with self._lock:
@@ -1118,6 +1148,7 @@ class Hub:
         """The Recheck button: the ticket's checks run again at the next tick, and the count starts over. Also Land
         again: a failed run whose commit waits in its kept worktree goes back to its checks on the kept commit, so
         it is rebased, checked, landed and reviewed without its worker running again."""
+        key = self._moved(key)
         with self._lock:
             item = next((dict(i) for i in self._data["queue"]["items"]
                          if i["key"] == key and (i["state"] == "recheck" or landing_failed(i))), None)

@@ -128,6 +128,51 @@ class WorktreeTest(RunnerCase):
         git(self.repo, "merge-base", "--is-ancestor", self.items()["repo/one#1"]["commit"], "HEAD")
         self.assertNotIn(item["tree"], self.trees())
 
+    def move_to_two(self, num):
+        """The real `sbmap move` of a ticket to a second map of the same repo."""
+        if not (self.vault / "wayfinder/repo/two").exists():
+            self.sb("init", "repo/two", "--title", "Two", "--why", "Why.", "--destination", "Somewhere.",
+                    "--repo", str(self.repo))
+            self.sb("mapset", "repo/two", "checks=true")
+        self.sb("move", "repo/one", "{:03d}".format(num), "--to", "repo/two")
+
+    def test_a_failed_run_whose_ticket_moved_to_another_map_lands_again_under_the_new_key(self):
+        self.modes = {"repo/one#2": "slow"}
+        os.environ["FAKE_WORKER_SLEEP"] = "6"
+        self.hub.queue_set(["repo/one#1", "repo/one#2"], self.hub.state()["queue"]["version"])
+        self.hub.queue_item_agent("repo/one#2", "spare")
+        lock = self.repo / ".git" / "index.lock"
+        lock.write_text("")
+        self.hub.queue_pause(False)
+        self.until(lambda: self.state_of("repo/one#1") == "failed")
+        tree = self.items()["repo/one#1"]["tree"]
+        lock.unlink()
+        self.move_to_two(1)
+        self.hub.ticket_action("recheck", "repo/one#1")  # the page still holds the old key
+        keys = [i["key"] for i in self.hub.state()["queue"]["items"]]
+        self.assertIn("repo/two#1", keys)
+        self.assertNotIn("repo/one#1", keys)
+        self.until(lambda: self.state_of("repo/two#1") in ("done", "skipped", "failed"), timeout=60)
+        self.assertEqual(self.state_of("repo/two#1"), "done", self.items()["repo/two#1"]["note"])
+        git(self.repo, "merge-base", "--is-ancestor", self.items()["repo/two#1"]["commit"], "HEAD")
+        self.assertNotIn(tree, self.trees())
+
+    def test_a_queued_ticket_that_moved_runs_under_the_new_map_and_a_restarted_hub_still_finds_it(self):
+        self.mode = "hang"
+        self.tick_all()
+        self.move_to_two(1)
+        self.hub.tickets(fresh=True)
+        keys = [i["key"] for i in self.hub.state()["queue"]["items"]]
+        self.assertIn("repo/two#1", keys)
+        self.assertNotIn("repo/one#1", keys)
+        hub = Hub(self.root / "hub", now=self.clock, launcher=self.launcher)  # a restart reads the saved queue
+        self.assertIn("repo/two#1", [i["key"] for i in hub.state()["queue"]["items"]])
+        self.hub.queue_set(["repo/two#1"], self.hub.state()["queue"]["version"])
+        self.hub.queue_pause(False)
+        self.sup.tick()
+        self.assertEqual(self.launched[0]["key"], "repo/two#1")
+        self.assertEqual(self.state_of("repo/two#1"), "running")
+
     def test_a_worktree_worker_that_outlived_its_hub_is_judged_and_landed_by_the_next_one(self):
         self.modes = {"repo/one#1": "slow"}
         os.environ["FAKE_WORKER_SLEEP"] = "1.5"
