@@ -24,6 +24,10 @@ the vault. Only the running hub writes the queue (`$SB_HUB_HOME/state.json`); CL
   the ticket's own, the map's, then the repo's `.sb/checks` (one command per line, `#` lines and
   blanks skipped; the owner agrees it in the design session and it is committed). A Done when item
   no command can check is judged by the reviewer.
+  **Test only what the change reaches:** every check gets `SB_CHANGED`, the files the ticket's commit
+  changed, one per line. In a repo with a `.codegraph/` index, one `.sb/checks` line runs only the tests
+  CodeGraph finds, else the fast suite:
+  `t=$(printf "%s\n" "$SB_CHANGED" | codegraph affected --stdin -q 2>/dev/null); if [ -n "$t" ]; then <runner> $t; else <fast suite>; fi`
 - **Tier**: `sbmap set <map> <NNN> tier=opus` on a complex ticket; Sonnet when absent. A failed
   Sonnet ticket retries once on Opus.
 - **Order**, fixed: after its blockers; then priority S→F; then the ticket that unblocks the most

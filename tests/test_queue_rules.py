@@ -1,4 +1,5 @@
 """sbqueue's rules: classify, order, move, brief, verdict."""
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -225,6 +226,35 @@ class VerdictTest(unittest.TestCase):
         self.assertTrue(ok, why)
         self.assertIn("other/b.py", why)
         self.assertNotIn("src/a.py", why)
+
+    def test_checks_get_the_commits_changed_files_in_SB_CHANGED(self):
+        self.commit(["src/a.py", "src/b.py"])
+        ok, why, _ = verdict(self.t(checks=['test "$SB_CHANGED" = "$(printf \'src/a.py\\nsrc/b.py\')"']), self.repo, self.base)
+        self.assertTrue(ok, why)
+
+    @unittest.skipUnless(shutil.which("codegraph"), "codegraph is not installed")
+    def test_a_check_runs_only_the_tests_codegraph_finds_and_falls_back_with_no_index(self):
+        # the recipe in reference/hub.md, on a real indexed repo: a change to src/a.py reaches tests/test_a.py only
+        pick = ('t=$(printf "%s\\n" "$SB_CHANGED" | codegraph affected --stdin -q 2>/dev/null); '
+                'if [ -n "$t" ]; then echo "$t" > picked; else echo fast > picked; fi')
+        (self.repo / "src").mkdir()
+        (self.repo / "tests").mkdir()
+        (self.repo / "src" / "b.py").write_text("def b():\n    return 2\n")
+        (self.repo / "tests" / "test_a.py").write_text("from src.a import a\n\ndef test_a():\n    assert a() == 1\n")
+        (self.repo / "tests" / "test_b.py").write_text("from src.b import b\n\ndef test_b():\n    assert b() == 2\n")
+        (self.repo / "src" / "a.py").write_text("def a():\n    return 1\n")
+        git(self.repo, "add", ".")
+        git(self.repo, "commit", "-qm", "code")
+        base = git(self.repo, "rev-parse", "HEAD")
+        (self.repo / "src" / "a.py").write_text("def a():\n    return 3 - 2\n")
+        git(self.repo, "commit", "-qam", "work\n\nTicket: r/m/005")
+        ok, why, _ = verdict(self.t(checks=[pick]), self.repo, base)
+        self.assertTrue(ok, why)
+        self.assertEqual((self.repo / "picked").read_text().strip(), "fast")  # no index yet: the fast suite
+        subprocess.run(["codegraph", "init", str(self.repo)], capture_output=True, check=True)
+        ok, why, _ = verdict(self.t(checks=[pick]), self.repo, base)
+        self.assertTrue(ok, why)
+        self.assertEqual((self.repo / "picked").read_text().strip(), "tests/test_a.py")
 
     def test_an_untrailered_commit_outside_paths_before_a_good_one_is_not_named(self):
         # the list comes from the ticket's commit alone (ticket 052), not from base..HEAD

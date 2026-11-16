@@ -3,6 +3,7 @@
 Tickets are the dicts `sbmap tickets --json` prints. Nothing here reads the vault or the hub's state.
 """
 import heapq
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -357,7 +358,9 @@ def verdict(t, repo, base_sha, run=subprocess.run, report=None, first_base=None)
         if stray:
             outside = "; it also changed files outside the ticket's list: " + ", ".join(stray[:10]) + (
                 f" and {len(stray) - 10} more" if len(stray) > 10 else "")
-    failed = _run_checks(t["checks"], repo, run)
+    changed = run(["git", "-C", str(repo), "diff-tree", "--root", "--no-commit-id", "--name-only", "-r", sha],
+                  capture_output=True, text=True).stdout.strip()
+    failed = _run_checks(t["checks"], repo, run, changed)
     if not failed:
         return True, "commit and checks all good" + outside, sha
     if failed.startswith(NOT_RUN):
@@ -373,7 +376,7 @@ def verdict(t, repo, base_sha, run=subprocess.run, report=None, first_base=None)
     if clean is None:
         return False, failed, sha
     try:
-        again = _run_checks(t["checks"], clean, run)
+        again = _run_checks(t["checks"], clean, run, changed)
     finally:
         _drop_clean_copy(repo, clean, run)
     if again:
@@ -383,11 +386,14 @@ def verdict(t, repo, base_sha, run=subprocess.run, report=None, first_base=None)
                   f"other uncommitted work in the shared folder breaks them there ({shown})" + outside), sha
 
 
-def _run_checks(checks, cwd, run):
-    """None when every check exits 0, else the first failure in words (starting NOT_RUN when it exited 75)."""
+def _run_checks(checks, cwd, run, changed=""):
+    """None when every check exits 0, else the first failure in words (starting NOT_RUN when it exited 75).
+    SB_CHANGED holds the files the ticket's commit changed, one per line, so a check can test only what they reach
+    (`codegraph affected --stdin`, see reference/hub.md)."""
+    env = {**os.environ, "SB_CHANGED": changed}
     for cmd in checks:
         try:
-            r = run(cmd, shell=True, cwd=str(cwd), capture_output=True, text=True, timeout=CHECK_TIMEOUT)
+            r = run(cmd, shell=True, cwd=str(cwd), capture_output=True, text=True, timeout=CHECK_TIMEOUT, env=env)
         except subprocess.TimeoutExpired:
             return f"check timed out after 20 minutes: {cmd}"
         if r.returncode != 0:
