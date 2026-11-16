@@ -55,6 +55,10 @@ the vault. Only the running hub writes the queue (`$SB_HUB_HOME/state.json`); CL
   as a comment; the commit is left in place; the repo's next ticket still runs.
 - **Workers**: one per repo at a time; a worker past 90 minutes is killed and fails. A new queue
   starts **paused**: nothing runs until the owner (or `tonight`) resumes it.
+- **Worker start**: a worker gets the hub's tools (the `mods/hub-report` plugin), the repo's own `.claude`
+  settings, skills and `.mcp.json`, and these variables only: PATH, HOME, USER, LOGNAME, SHELL, LANG, `LC_*`,
+  TERM, TMPDIR, CLAUDE_CONFIG_DIR, `SB_HUB_*`. Not the owner's connectors, skills, hooks or keys. A repo adds a
+  variable by naming it, one per line, in `.sb/env`.
 - **Pool and pacing**: the night's agents are a pool (`sbhub queue agents assembio personal`); a
   ticket's own `agent` override pins it. Each Claude worker streams its account's usage (5-hour and
   weekly window, reset times); with nothing running the hub reads it with a one-line Haiku call. An

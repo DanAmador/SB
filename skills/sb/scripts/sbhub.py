@@ -1707,12 +1707,27 @@ GIT_RULE = ("\n\nGit rule: never run git stash, stash pop/apply, checkout or res
             "throwaway worktree (git worktree add --detach /tmp/clean-tree HEAD), run there, then remove it.\n")
 
 
+PLUGIN = Path(__file__).resolve().parents[3] / "mods" / "hub-report"  # the hub's tools and message hooks
+ENV_KEEP = ("PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "TERM", "TMPDIR", "CLAUDE_CONFIG_DIR")
+
+
+def worker_env(repo, env):
+    """A worker's environment: the named variables of the hub's own, the repo's `.sb/env` names (one per line), then
+    `env` (the hub's ids). Nothing else of the hub's environment reaches a worker."""
+    try:
+        extra = [l.strip() for l in (Path(repo) / ".sb" / "env").read_text(encoding="utf-8").splitlines()]
+    except OSError:
+        extra = []
+    keep = set(ENV_KEEP) | {l for l in extra if l and not l.startswith("#")}
+    return {**{k: v for k, v in os.environ.items() if k in keep or k.startswith(("LC_", "SB_HUB_"))}, **env}
+
+
 def launch(agent, brief, repo, model, env, log, resume=None):
     """Start one headless worker and return its Popen: the only place that knows the agents' commands.
     Own process group, cwd the ticket's repo, stdout and stderr to `log`; `env` adds the hub's ids. A Claude worker
     runs as a new session (`--session-id`) or, with `resume`, goes on with that one; the Popen's `session` is its id
     (None for agy)."""
-    full = {**os.environ, **env}
+    full = worker_env(repo, env)
     brief += GIT_RULE
     session = None
     if agent.get("kind") == "agy":
@@ -1723,7 +1738,11 @@ def launch(agent, brief, repo, model, env, log, resume=None):
         session = resume or str(uuid.uuid4())
         cmd = [_exe("claude", full), "-p", brief, "--resume" if resume else "--session-id", session,
                "--permission-mode", "auto", "--model", model, "--settings", json.dumps(GUARD_SETTINGS),
-               "--output-format", "stream-json", "--verbose"]  # stream-json carries the account's usage
+               "--output-format", "stream-json", "--verbose",  # stream-json carries the account's usage
+               "--setting-sources", "project,local", "--strict-mcp-config", "--plugin-dir", str(PLUGIN),
+               "--mcp-config", str(PLUGIN / ".mcp.json")]  # --strict-mcp-config skips the plugin's own server: pass it
+        if (Path(repo) / ".mcp.json").is_file():  # the repo's own MCP servers (Unity for a game) stay
+            cmd += ["--mcp-config", str(Path(repo) / ".mcp.json")]
     Path(log).parent.mkdir(parents=True, exist_ok=True)
     with open(log, "ab") as out:
         p = subprocess.Popen(cmd, cwd=repo, env=full, stdin=subprocess.DEVNULL, stdout=out,

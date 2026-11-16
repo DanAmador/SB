@@ -170,7 +170,7 @@ class RunnerCase(unittest.TestCase):
                 if v is not None:
                     got[k.rsplit("#", 1)[1]] = (v.pop(0) if len(v) > 1 else v[0]) if isinstance(v, list) else v
             fake["FAKE_REVIEW"] = json.dumps(got)
-        p = sbhub.launch(agent, brief, repo, model, {**env, **fake}, log, **kw)
+        p = sbhub.launch(agent, brief, repo, model, {**env, **fake, **{k: v for k, v in os.environ.items() if k.startswith("FAKE_")}}, log, **kw)
         if self.sessions and p.session and not kw:  # as Claude does: a new session's file, under its config dir
             f = sbhub.session_file(agent["dir"], repo, p.session)
             f.parent.mkdir(parents=True, exist_ok=True)
@@ -416,7 +416,7 @@ class TicketLoopTest(RunnerCase):
         log = Path(self.launched[0]["log"]).read_text(encoding="utf-8")
         self.assertRegex(log, r'argv: \["--session-id", "[0-9a-f-]{36}", "--permission-mode", "auto", "--model", "sonnet", '
                               r'"--settings", ')  # its own session; the git guard hook
-        self.assertIn('"--output-format", "stream-json", "--verbose"]', log)
+        self.assertIn('"--output-format", "stream-json", "--verbose", "--setting-sources", "project,local", "--strict-mcp-config"', log)
         self.assertIn('"CLAUDE_CONFIG_DIR": "{}"'.format(self.root / ".claude-main"), log)
         self.assertIn('"SB_HUB_AGENT": "repo/one#1", "SB_HUB_PARENT": "queue", "SB_HUB_PORT": "4321"', log)
         self.assertIn("cwd: " + str(self.repos["repo/one"]), log)
@@ -1600,7 +1600,8 @@ class JobsTest(RunnerCase):
         if key.startswith("job:") and mode == "commit":  # a prompt has no ticket to commit for
             mode = "job"
         self.launched.append({"key": key, "model": model, "brief": brief, "agent": agent, "log": log, "repo": repo})
-        return sbhub.launch(agent, brief, repo, model, {**env, "FAKE_WORKER_MODE": mode}, log)
+        return sbhub.launch(agent, brief, repo, model, {**env, **{k: v for k, v in os.environ.items() if k.startswith("FAKE_")},
+                                      "FAKE_WORKER_MODE": mode}, log)
 
     def setUp(self):
         super().setUp()
@@ -1786,6 +1787,27 @@ class JobsTest(RunnerCase):
 
 
 class LaunchAndHookTest(RunnerCase):
+    def test_launch_gives_a_claude_worker_only_the_hubs_tools_and_the_named_environment(self):
+        repo = self.root / "envrepo"
+        (repo / ".sb").mkdir(parents=True)
+        (repo / ".sb" / "env").write_text("UNITY_PATH\n# c\n\n", encoding="utf-8")
+        (repo / ".mcp.json").write_text("{}", encoding="utf-8")
+        with mock.patch.dict(os.environ, {"UNITY_PATH": "u", "OPENAI_API_KEY": "k", "LC_ALL": "C", "SB_HUB_PORT": "1"}), \
+                mock.patch.object(sbhub.subprocess, "Popen") as popen, mock.patch.object(sbhub, "_exe", return_value="claude"):
+            sbhub.launch({"kind": "claude", "dir": "/cfg"}, "b", str(repo), "sonnet", {"SB_HUB_AGENT": "a"}, str(self.root / "l"))
+            sbhub.launch({"kind": "agy"}, "b", str(self.root), "m", {}, str(self.root / "l"))
+        argv, env = popen.call_args_list[0].args[0], popen.call_args_list[0].kwargs["env"]
+        self.assertIn("--strict-mcp-config", argv)
+        self.assertEqual(argv[argv.index("--setting-sources") + 1], "project,local")
+        self.assertEqual(Path(argv[argv.index("--plugin-dir") + 1]), Path(sbhub.__file__).resolve().parents[3] / "mods" / "hub-report")
+        self.assertEqual([a for a, b in zip(argv, argv[1:]) if a == "--mcp-config" and b], ["--mcp-config"] * 2)
+        self.assertTrue(argv[-1].endswith("envrepo/.mcp.json"))
+        self.assertEqual(env["CLAUDE_CONFIG_DIR"], "/cfg")
+        self.assertEqual((env["UNITY_PATH"], env["LC_ALL"], env["SB_HUB_AGENT"], env["SB_HUB_PORT"]), ("u", "C", "a", "1"))
+        self.assertNotIn("OPENAI_API_KEY", env)
+        self.assertNotIn("OPENAI_API_KEY", popen.call_args_list[1].kwargs["env"])
+        self.assertNotIn("UNITY_PATH", popen.call_args_list[1].kwargs["env"])
+
     def test_launch_starts_agy_in_its_own_group_with_its_model(self):
         log = self.root / "agy.log"
         p = sbhub.launch({"kind": "agy", "dir": None, "model": "gemini-x"}, "Ticket: m/001\n", str(self.repos["repo/one"]),
@@ -1800,6 +1822,8 @@ class LaunchAndHookTest(RunnerCase):
         cfg.mkdir()
         (cfg / ".credentials.json").write_text("{}")
         port = free_port()
+        (self.repos["repo/one"] / ".sb").mkdir()  # a repo names the variables its tools need
+        (self.repos["repo/one"] / ".sb" / "env").write_text("FAKE_WORKER_MODE\nFAKE_WORKER_PIDS\n", encoding="utf-8")
         env = {**os.environ, "SB_HUB_HOME": str(self.root / "served"), "FAKE_WORKER_MODE": "hang"}
         env.pop("SB_HUB_QUEUE", None)
         p = subprocess.Popen([sys.executable, SCRIPT, "serve", "--port", str(port)], stdout=subprocess.PIPE,

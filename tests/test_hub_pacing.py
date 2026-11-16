@@ -65,7 +65,8 @@ class PacingCase(RunnerCase):
             git(repo, "add", "one/partial.txt")
             git(repo, "commit", "-q", "-m", "wip")
         return sbhub.launch(agent, brief, repo, model,
-                            {**env, "FAKE_WORKER_MODE": mode, **self.agent_env.get(name, {})}, log)
+                            {**env, **{k: v for k, v in os.environ.items() if k.startswith("FAKE_")},
+                             "FAKE_WORKER_MODE": mode, **self.agent_env.get(name, {})}, log)
 
     def inst(self, name):
         return self.hub.state()["installed"][name]
