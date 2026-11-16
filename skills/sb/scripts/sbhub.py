@@ -1182,6 +1182,8 @@ class Hub:
     def queue_pause(self, paused):
         def change(q, rows):
             q["paused"] = bool(paused)
+            if not q["paused"]:
+                q.pop("note", None)  # the reason it was paused no longer holds
         return self._queue_write(None, change)
 
     def queue_parallel(self, repo, n, version):

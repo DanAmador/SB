@@ -549,6 +549,24 @@ class ScanTest(unittest.TestCase):
 
 
 class QueueHttpTest(HubCase):
+    def test_resuming_clears_the_note_of_a_pause_by_three_failures_also_after_a_restart(self):
+        self.server.kill()
+        self.server.wait()
+        self.server.stdout.close()
+        sup = sbhub.Supervisor(Hub(self._tmp.name))  # the real pause: three failures in a row, saved to state.json
+        for _ in range(3):
+            sup._count_failure("no commit: the worker made none")
+        self.server = self.popen("serve")
+        self.assertTrue(self.server.stdout.readline().startswith("sb hub on"))
+        q = self.get("/api/state")["queue"]
+        self.assertTrue(q["paused"])
+        self.assertTrue(q["note"].startswith("paused: three tickets in a row"), q.get("note"))
+        self.assertEqual(self.post("/api/queue/pause", {"paused": False})[0], 200)
+        q = self.get("/api/state")["queue"]
+        self.assertFalse(q["paused"])
+        self.assertFalse(q.get("note"))
+        self.assertFalse(Hub(self._tmp.name).state()["queue"].get("note"))  # as after a hub restart
+
     def setUp(self):
         self._tmp2 = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp2.cleanup)
