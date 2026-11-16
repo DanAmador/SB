@@ -73,6 +73,9 @@ def state_fixture(state, root, name):
     text = re.sub(r"\b[0-9a-f]{9}\b", "0" * 9, text)
     text = re.sub(r"\d{4}-\d{2}-\d{2}-", "2026-11-13-", text)
     text = re.sub(r'"(secs|pid|check_minutes|run_minutes)": [\d.e-]+', r'"\1": 0', text)
+    # a worker's start time from ps: left live, every run of the tests edits this tracked fixture and a landing
+    # that touches it then meets what looks like someone's unsaved edit
+    text = re.sub(r'"pid_start": "[^"]+"', '"pid_start": "Mon Nov 16 10:05:45 2026"', text)
     text = re.sub(r"worktrees/[^/\"]+-[0-9a-f]{6}/", "worktrees/repoA-000000/", text)
     fixture = Path(SCRIPT).resolve().parents[1] / "hub" / "packages" / "contract" / "fixtures" / "state" / name
     fixture.parent.mkdir(exist_ok=True)
