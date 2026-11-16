@@ -1,5 +1,8 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { State, type AgentRow, type Question, type QueueItem, type TicketRow } from "@sb-hub/contract";
+import { parse } from "./api.ts";
+import { State, addLinks, type AgentRow, type Question, type QueueItem, type TicketRow } from "@sb-hub/contract";
 import {
   SILENT,
   WEEK,
@@ -403,5 +406,18 @@ describe("tryOf", () => {
     expect(tryOf({ tries: 4, state: "running" })).toBe("try 5 of 5");
     expect(tryOf({ tries: 0, state: "running" })).toBe("");
     expect(tryOf({ tries: 5, state: "failed" })).toBe("");
+  });
+});
+
+describe("a hub a field ahead of the page", () => {
+  it("still draws the board: a key the contract does not know is dropped, a missing one still fails", () => {
+    const file = JSON.parse(readFileSync(join(import.meta.dirname, "../../../contract/fixtures/state.json"), "utf8")) as { body: { queue: object } & Record<string, unknown> };
+    // the fixture is the Python hub's answer; the server adds each item's links before the page sees it
+    const linked = addLinks("GET /api/state", file.body, { exists: () => false, real: (p) => p, findTicket: () => null, runs: {} }) as { queue: object };
+    const ahead: Record<string, unknown> = { ...linked, queue: { ...linked.queue, mystery: 1 } };
+    const s = parse("GET /api/state", 200, ahead) as State;
+    expect(s.queue).not.toHaveProperty("mystery");
+    expect(splitAgents(s).sessions).toBeDefined();
+    expect(() => parse("GET /api/state", 200, { ...ahead, now: undefined })).toThrow(/does not match the contract/);
   });
 });

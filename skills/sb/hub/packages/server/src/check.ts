@@ -1,5 +1,5 @@
 /** Whether an answer from the Python hub is one the contract allows. */
-import { ApiError, answerSchema, ROUTES, routeOf, type RouteName } from "@sb-hub/contract";
+import { ApiError, answerSchema, lenient, ROUTES, routeOf, type RouteName } from "@sb-hub/contract";
 
 type Schema = NonNullable<ReturnType<typeof answerSchema>>;
 
@@ -9,13 +9,14 @@ export interface Answer {
   readonly body: Buffer;
 }
 
-export type Verdict = { readonly ok: true } | { readonly ok: false; readonly route: string; readonly problem: string };
+/** `value` is set when the answer had keys the contract does not know: the answer without them, and their names. */
+export type Verdict = { readonly ok: true; readonly value?: unknown; readonly unknown?: readonly string[] } | { readonly ok: false; readonly route: string; readonly problem: string };
 
 const mime = (contentType: string): string => (contentType.split(";", 1)[0] ?? "").trim().toLowerCase();
 
 function parsed(schema: Schema, value: unknown, route: string): Verdict {
-  const r = schema.safeParse(value);
-  if (r.success) return { ok: true };
+  const r = lenient(schema, value);
+  if (r.ok) return r.unknown.length === 0 ? { ok: true } : { ok: true, value: r.value, unknown: r.unknown };
   const where = r.error.issues.slice(0, 3).map((i) => `${i.path.join(".") || "(answer)"}: ${i.message}`);
   return { ok: false, route, problem: where.join("; ") };
 }

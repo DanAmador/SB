@@ -65,6 +65,22 @@ describe("forwarding to the Python hub", () => {
     expect(logged[0]).toContain("GET /api/state answered 200: now:");
   });
 
+  it("drops a key the contract does not know and names it once per route, not on every poll", async () => {
+    const { call, logged } = setup(() => json(200, { ...STATE, queue: { ...STATE.queue, mystery: 1 } }));
+    for (let n = 0; n < 2; n++) {
+      const r = await call("/api/state");
+      expect(r.status).toBe(200);
+      expect(((await r.json()) as { queue: object }).queue).not.toHaveProperty("mystery");
+    }
+    expect(logged).toHaveLength(1);
+    expect(logged[0]).toContain("GET /api/state queue.mystery");
+  });
+
+  it("still answers 502 when a required key is missing", async () => {
+    const { call } = setup(() => json(200, { ...STATE, now: undefined }));
+    expect((await call("/api/state")).status).toBe(502);
+  });
+
   it("checks the answer by its status: a lock held is a 409", async () => {
     const { call } = setup(() => json(409, { ok: false, held_by: "b" }));
     const r = await call("/api/lock", { method: "POST", body: '{"key":"k","by":"a"}', headers: { "content-type": "application/json" } });

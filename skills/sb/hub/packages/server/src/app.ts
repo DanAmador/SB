@@ -87,6 +87,8 @@ export function createApp(o: AppOptions): Hono {
     }
   }
 
+  const unknownSeen = new Set<string>();
+
   /** The Python hub's answer to `path` (path and query), passed on only when the contract allows it. */
   async function forward(c: Context, path: string, body?: Buffer, check = true): Promise<Response> {
     const headers: Record<string, string> = {};
@@ -105,6 +107,17 @@ export function createApp(o: AppOptions): Hono {
       if (!v.ok) {
         o.log(`contract mismatch: ${v.route} answered ${String(reply.status)}: ${v.problem}`);
         return error(502, `the hub's answer to ${v.route} did not match the contract`);
+      }
+      if (v.unknown !== undefined) {
+        // a key the contract does not know is dropped, and named once per route, not on every poll
+        for (const k of v.unknown) {
+          const seen = `${c.req.method} ${path.split("?", 1)[0] ?? ""} ${k}`;
+          if (!unknownSeen.has(seen)) {
+            unknownSeen.add(seen);
+            o.log(`unknown key dropped: ${seen}`);
+          }
+        }
+        reply = { ...reply, body: Buffer.from(JSON.stringify(v.value)) };
       }
     }
     return answer(reply.status, reply.body, reply.contentType, reply.headers);

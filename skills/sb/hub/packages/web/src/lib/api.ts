@@ -2,7 +2,7 @@
  * The typed client: every call names a contract route, sends the body that route takes and parses the answer with
  * the route's own schema, so a field the hub renames fails here, loudly, instead of drawing nothing.
  */
-import { ROUTES, addLinks, answerSchema, type RouteAnswer, type RouteBody, type RouteName } from "@sb-hub/contract";
+import { ROUTES, addLinks, answerSchema, lenient, type RouteAnswer, type RouteBody, type RouteName } from "@sb-hub/contract";
 
 /** The phone page lives under /v/<token>/ and the API under /v/<token>/api/; at /next/ the API is at /api/. */
 const phone = /^\/v\/[^/]+(?=\/)/.exec(typeof location === "undefined" ? "" : location.pathname);
@@ -40,10 +40,11 @@ const noLinks = (route: RouteName, body: unknown): unknown => addLinks(route, bo
 export function parse(route: RouteName, status: number, body: unknown): unknown {
   const schema = answerSchema(route, status);
   if (schema === undefined) throw new HubError(`the hub said ${String(status)}`, status);
-  let out = schema.safeParse(body);
-  if (!out.success && IN_WIDGET) out = schema.safeParse(noLinks(route, body));
-  if (!out.success) throw new HubError(`the hub's answer to ${route} does not match the contract`, status);
-  return out.data;
+  // keys the contract does not know are dropped, so a hub a field ahead of the page still draws
+  let out = lenient(schema, body);
+  if (!out.ok && IN_WIDGET) out = lenient(schema, noLinks(route, body));
+  if (!out.ok) throw new HubError(`the hub's answer to ${route} does not match the contract`, status);
+  return schema.parse(out.value);
 }
 
 async function errorOf(r: Response): Promise<HubError> {
