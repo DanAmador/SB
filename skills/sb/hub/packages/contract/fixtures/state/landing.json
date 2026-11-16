@@ -63,7 +63,7 @@
      "one/"
     ],
     "pid": 0,
-    "pid_start": "Mon Nov 16 10:05:45 2026",
+    "pid_start": "Mon Nov 16 11:16:28 2026",
     "repo": "/tmp/sb/game",
     "run": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one",
     "runner": "main",
@@ -92,5 +92,6 @@
   "seeded": true,
   "version": 4
  },
+ "review_next_at": null,
  "seen": []
 }

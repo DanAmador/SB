@@ -201,6 +201,8 @@ const itemFields = {
   recheck_at: Seconds.nullable().optional(),
   /** unclean: the checkout's files with unsaved changes that its work waits for. */
   blocking: z.array(z.string()).optional(),
+  /** When it last landed (checks passed): the review timer counts from it, across hub restarts. */
+  landed_at: Seconds.optional(),
   media: z.array(z.string()).optional(),
   checks: z.array(CheckRun).optional(),
   /** The second pass's verdict once it gave one (null while none). */
@@ -453,6 +455,9 @@ export const State = z.strictObject({
   providers: z.record(z.string(), z.array(ProviderPanel)),
   /** Who holds ~/.sb-hub/queue.lock: `mine` is false on a hub that serves read-only beside another that runs the queue. */
   queue_lock: z.strictObject({ mine: z.boolean(), holder: z.string() }).optional(),
+  /** When the review timer next looks: the oldest landed ticket's landing plus SB_REVIEW_EVERY_MIN (25) minutes,
+   * over maps with no review running; null when no landed ticket waits (absent from a hub older than this). */
+  review_next_at: Seconds.nullable().optional(),
 });
 export type State = z.infer<typeof State>;
 
@@ -696,4 +701,6 @@ export const QueueMapAnswer = QueueAnswer.extend({
   left_out: z.array(z.strictObject({ key: z.string(), reason: z.string() })),
 });
 export const ClearQuietAnswer = z.strictObject({ ok: z.literal(true), cleared: z.number().int() });
+/** POST /api/review/now: the maps whose review it started (none while each already runs one). */
+export const ReviewNowAnswer = z.strictObject({ ok: z.literal(true), started: z.array(z.string()) });
 export const ScanAnswer = z.strictObject({ ok: z.literal(true), installed: z.record(z.string(), Installed) });

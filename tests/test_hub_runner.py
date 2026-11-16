@@ -869,6 +869,112 @@ class MapReviewTest(RunnerCase):
         self.assertNotIn(1, self.open_tickets())
 
 
+class TimedReviewTest(RunnerCase):
+    """A busy map's landed tickets get their review once the oldest waited review_every() (25 minutes), counted from
+    `landed_at` in the queue file; the map-end review takes only the leftovers; POST /api/review/now starts the same
+    review at once for every map with landed tickets, busy or not."""
+    MAPS = (("repo/one", "repoA", ("A", "one/"), ("B", "two/"), ("C", "three/")),
+            ("repo/two", "repoB", ("D", "four/"), ("E", "five/")))
+
+    def landed_ago(self, minutes, *keys):
+        """Back-date these tickets' landing, as if they landed `minutes` ago."""
+        with self.hub._lock:
+            for i in self.hub._data["queue"]["items"]:
+                if i["key"] in keys:
+                    self.assertEqual(i["state"], "landed")
+                    i["landed_at"] = self.clock.t - minutes * 60
+            self.hub._save()
+
+    def restart(self):
+        """The hub stops (its workers and reviews killed) and a new one loads the queue file the old one wrote."""
+        self.sup.stop()
+        self.hub = Hub(self.root / "hub", now=self.clock, launcher=self.launcher)
+        self.sup = Supervisor(self.hub, port=4321)
+        self.sup.close_off = False
+        self.addCleanup(self.sup.stop)
+
+    def two_landed_and_one_running(self):
+        self.only(1, 2, 3)
+        self.until(lambda: [self.state_of("repo/one#{}".format(n)) for n in (1, 2, 3)] == ["landed", "landed", "running"])
+        self.assertEqual(self.reviewed, [])
+
+    def test_two_tickets_landed_26_minutes_ago_get_one_review_while_the_third_runs_and_it_alone_at_the_maps_end(self):
+        self.modes = {"repo/one#3": "slow"}
+        os.environ["FAKE_WORKER_SLEEP"] = "4"
+        self.addCleanup(os.environ.pop, "FAKE_WORKER_SLEEP", None)
+        self.two_landed_and_one_running()
+        self.landed_ago(26, "repo/one#1", "repo/one#2")
+        self.until(lambda: self.reviewed)
+        self.assertEqual(self.state_of("repo/one#3"), "running")  # the map is still busy
+        self.assertEqual([x["keys"] for x in self.reviewed], [["repo/one#1", "repo/one#2"]])
+        self.until(lambda: self.state_of("repo/one#3") == "done")
+        self.assertEqual([x["keys"] for x in self.reviewed], [["repo/one#1", "repo/one#2"], ["repo/one#3"]])
+        self.assertEqual([self.state_of("repo/one#{}".format(n)) for n in (1, 2)], ["done", "done"])
+
+    def test_a_ticket_landed_10_minutes_ago_waits_and_the_clock_counts_from_its_landing_across_a_restart(self):
+        self.modes = {"repo/one#3": "hang"}
+        self.two_landed_and_one_running()
+        self.landed_ago(10, "repo/one#1", "repo/one#2")
+        landed = self.items()["repo/one#1"]["landed_at"]
+        for _ in range(5):
+            self.sup.tick()
+        self.assertEqual((self.reviewed, self.sup.reviews), ([], {}))  # 10 minutes: not yet
+        self.assertEqual(self.hub.state()["review_next_at"], landed + 25 * 60)
+        self.restart()  # the landing time is in the queue file: a restart does not reset the clock
+        on_disk = json.loads((self.root / "hub" / "state.json").read_text(encoding="utf-8"))["queue"]["items"]
+        self.assertEqual(next(i["landed_at"] for i in on_disk if i["key"] == "repo/one#1"), landed)
+        self.until(lambda: self.state_of("repo/one#3") == "running")  # the worker the restart killed runs again
+        for _ in range(5):
+            self.sup.tick()
+        self.assertEqual(self.reviewed, [])
+        self.clock.t += 16 * 60  # 26 minutes since the landing, 16 since the restart
+        self.until(lambda: self.reviewed)
+        self.assertEqual([x["keys"] for x in self.reviewed], [["repo/one#1", "repo/one#2"]])
+        self.assertEqual(self.hub.state()["review_next_at"], None)  # nothing landed waits outside the review
+
+    def test_a_review_running_when_the_hub_restarts_is_started_once_by_the_new_hub(self):
+        self.modes = {"repo/one#3": "hang"}
+        self.verdicts = {"repo/one#1": "slow"}
+        os.environ["FAKE_REVIEW_SLEEP"] = "30"
+        self.addCleanup(os.environ.pop, "FAKE_REVIEW_SLEEP", None)
+        self.two_landed_and_one_running()
+        self.landed_ago(26, "repo/one#1", "repo/one#2")
+        self.until(lambda: "repo/one" in self.sup.reviews)
+        self.restart()  # the review was killed; its tickets stay `review` in the queue file
+        self.assertEqual([self.state_of("repo/one#{}".format(n)) for n in (1, 2)], ["review", "review"])
+        self.reviewed.clear()
+        for _ in range(10):
+            self.sup.tick()
+            time.sleep(0.03)
+        self.assertEqual([x["keys"] for x in self.reviewed], [["repo/one#1", "repo/one#2"]])  # once, not twice
+        self.assertEqual(self.sup.review_now(), [])  # the owner's Review now takes nothing it holds
+
+    def test_review_now_over_http_starts_both_busy_maps_from_the_queue_file_and_nothing_while_they_run(self):
+        self.modes = {"repo/one#2": "hang", "repo/two#5": "hang"}
+        self.verdicts = {"repo/one#1": "slow", "repo/two#4": "slow"}
+        os.environ["FAKE_REVIEW_SLEEP"] = "30"
+        self.addCleanup(os.environ.pop, "FAKE_REVIEW_SLEEP", None)
+        self.hub.queue_set(["repo/one#1", "repo/one#2", "repo/two#4", "repo/two#5"], self.hub.state()["queue"]["version"])
+        for key in ("repo/two#4", "repo/two#5"):  # one ticket per agent: the second map runs on the spare one
+            self.hub.queue_item_agent(key, "spare")
+        self.hub.queue_pause(False)
+        want = {"repo/one#1": "landed", "repo/one#2": "running", "repo/two#4": "landed", "repo/two#5": "running"}
+        self.until(lambda: {k: self.state_of(k) for k in want} == want)
+        self.assertEqual(self.reviewed, [])  # both maps are busy and nothing waited 25 minutes
+        self.restart()  # the new hub reads the queue file the running one wrote
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", free_port()), sbhub.make_handler(self.hub))
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        port = server.server_address[1]
+        self.assertEqual(sbhub.call(port, "/api/review/now", {}, timeout=70), (200, {"ok": True, "started": ["repo/one", "repo/two"]}))
+        self.assertEqual(sorted(x["keys"] for x in self.reviewed), [["repo/one#1"], ["repo/two#4"]])
+        self.assertEqual(sbhub.call(port, "/api/review/now", {}, timeout=70), (200, {"ok": True, "started": []}))  # they still run
+        self.assertEqual(len(self.reviewed), 2)
+        r = subprocess.run([sys.executable, str(SCRIPT), "review-now", "--port", str(port)], capture_output=True, text=True)
+        self.assertEqual((r.returncode, r.stdout), (0, "review started: none\n"))
+
+
 class ReviewRetryTest(RunnerCase):
     """A ticket the review judges partly or not met gets one more try (the item's `redo`), briefed with the review's
     findings and its first commit; if that falls short too, it stays open and waits for the owner."""

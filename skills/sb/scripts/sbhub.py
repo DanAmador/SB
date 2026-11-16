@@ -107,6 +107,7 @@ class Hub:
     def __init__(self, home, now=time.time, run=None, launcher=None):
         self.home = Path(home)
         self.queue_lock = None  # {mine, holder}: set by serve; None outside it
+        self.supervisor = None  # the Supervisor running the queue, once one is made (POST /api/review/now)
         self._run = run  # () -> the open tickets (list or JSON); sbmap when None
         self.launcher = launcher or launch  # starts one worker; tests hand in their own
         self._tcache = (0.0, None)
@@ -473,7 +474,8 @@ class Hub:
                     v["map"] = sbqueue.map_of(k)
                     if charge.get(v["map"]) in out["agents"]:
                         v["in_charge"] = charge[v["map"]]
-            out = {**out, "now": self.now(), "providers": dict(self.providers)}
+            out = {**out, "now": self.now(), "providers": dict(self.providers),
+                   "review_next_at": review_next_at(out["queue"]["items"])}
             if self.queue_lock is not None:
                 out["queue_lock"] = dict(self.queue_lock)
             return out
@@ -968,6 +970,12 @@ class Hub:
             self._save()
             return {"ok": True}
 
+    def review_now(self):
+        """POST /api/review/now: the queue's supervisor starts every review the timer would, at once; a hub that runs
+        no queue (read-only beside another) starts none."""
+        sup = self.supervisor
+        return {"ok": True, "started": sup.review_now() if sup else []}
+
     def agents_clear_quiet(self):
         """Take off the board every row idle or waiting on "your turn" for over QUIET_FOR, and every finished
         worker; display state only, like agents_dismiss."""
@@ -1443,6 +1451,26 @@ TICKETS_FAILED_FOR = 5  # after a failed sbmap, no new try for this long
 WORKER_LIMIT = 90 * 60  # a worker still running after this long has its process group killed
 TICK_EVERY = 5
 RECHECK_EVERY = 10 * 60  # a ticket whose check could not run (exit 75): its checks run again this often
+REVIEW_EVERY_MIN = 25  # a landed ticket waits at most this long for its review while its map still runs
+
+
+def review_every():
+    """Seconds a landed ticket waits before the timer reviews it on a busy map (env SB_REVIEW_EVERY_MIN overrides)."""
+    try:
+        return float(os.environ.get("SB_REVIEW_EVERY_MIN") or REVIEW_EVERY_MIN) * 60
+    except ValueError:
+        return REVIEW_EVERY_MIN * 60
+
+
+def review_next_at(items):
+    """When the timer next looks at a busy map: the oldest landed ticket's landing plus review_every(), over maps
+    with no review running (their items in state `review`); None when nothing waits."""
+    held = {sbqueue.map_of(i["key"]) for i in items if i["kind"] == "ticket" and i["state"] == "review"}
+    at = [i.get("landed_at") or 0 for i in items
+          if i["kind"] == "ticket" and i["state"] == "landed" and sbqueue.map_of(i["key"]) not in held]
+    return min(at) + review_every() if at else None
+
+
 RECHECKS_MAX = 6  # ...this many times, then it waits for the Recheck button
 REVIEW_BASE, REVIEW_EACH = 10 * 60, 5 * 60  # a map's second pass may run 10 minutes plus 5 per ticket, then it is killed
 
@@ -2465,8 +2493,9 @@ class TicketRun:
         if tree and not passed:
             reason += "\nIts work stays on branch {} in {}.".format(branch, tree)
         if passed:  # a worker that did the work lands, whatever it printed afterwards; its map's second pass judges it
-            return {**self.result(item, "landed", "landed, not judged yet: the Opus review judges it when its map's "
-                                  "run ends", run, sha, checks), "checked": reason}
+            wait = "landed, not judged yet: the Opus review judges it when its map's run ends, or once it waited {} " \
+                   "minutes".format(int(review_every() // 60))
+            return {**self.result(item, "landed", wait, run, sha, checks), "checked": reason}
         # a failed run whose own output (not an earlier try's) names a usage limit or a logout is tried again
         if not over and not recheck:
             stopped = self.stopped(item, run, checks)
@@ -2813,6 +2842,8 @@ class Supervisor:
         # u0/u1 (its first and newest usage reading), alone (no other worker on its agent overlapped it), braked}
         self.procs = {}
         self.reviews = {}  # map -> its second pass's {p, agent, inst, log, start, files, keys, limit, at}, while it runs
+        self.review_lock = threading.Lock()  # the tick's reviews and POST /api/review/now never start one map twice
+        hub.supervisor = self  # POST /api/review/now reaches the reviews through it
         self.streak = (None, 0)  # the failure class of the last failed items in a row, and how many
         self.stopped = False
         self.unlanded = False  # the landings an earlier hub left half done are undone at the first tick
@@ -3323,7 +3354,8 @@ class Supervisor:
                          note=res["note"])
             return
         if state == "landed":  # the checks passed and the work landed: its map's second pass judges it (_reviews)
-            self._update(key, state="landed", ended=None, commit=res["commit"], checked=res["checked"], pid=None,
+            self._update(key, state="landed", ended=None, landed_at=self.hub.now(), commit=res["commit"],
+                         checked=res["checked"], pid=None,
                          pid_start=None, rechecks=None, recheck_at=None, verdict=None, review=None, note=res["note"])
             return
         if state == "unclean":  # its work waits on its branch until the checkout's copies of its files are saved
@@ -3506,8 +3538,9 @@ class Supervisor:
             self.runner.rebuild_after(row["repo"], run.get("landed_on") or run.get("base"), res["commit"])
 
     def _reviews(self):
-        """A map's second pass: one per map, started when the map's run has ended and judging every ticket of it that
-        landed (`_start_reviews`); once it ended or ran past its limit, each ticket is judged: resolved, left open with
+        """A map's second pass: one per map at a time, started when the map's run has ended, when its oldest landed
+        ticket waited review_every(), or on the owner's Review now, judging the landed tickets no review holds
+        (`_start_reviews`); once it ended or ran past its limit, each ticket is judged: resolved, left open with
         the findings, or `recheck` when its review could not run (`_review_end`). A review is a process like a worker:
         the tick never waits for it, and it holds no repo and no agent slot, so other tickets start meanwhile."""
         for m, rv in list(self.reviews.items()):
@@ -3539,10 +3572,25 @@ class Supervisor:
         return {"state": "recheck", "commit": item.get("commit"), "checked": item.get("checked") or "",
                 "review": None, "note": "review could not run: " + why}
 
-    def _start_reviews(self):
-        """For each map whose run has ended (no item of it queued, running or in checks; a paused queue's queued items
-        do not count), start ONE second pass over its landed tickets: those in state `landed`, and any in state
-        `review` that no running second pass holds (a hub that restarted, or one that saved the old state)."""
+    def review_now(self):
+        """POST /api/review/now and `sbhub review-now`: start, at once, the review the timer would start for every map
+        with landed tickets no review holds, busy or not. The maps started, sorted."""
+        if self.stopped:
+            return []
+        return self._start_reviews(now=True)
+
+    def _start_reviews(self, now=False):
+        """Start ONE second pass per map over its landed tickets: those in state `landed`, and any in state `review`
+        that no running second pass holds (a hub that restarted, or one that saved the old state). A map gets it when
+        its run has ended (no item of it queued, running or in checks; a paused queue's queued items do not count),
+        or, still busy, once its oldest such ticket landed review_every() ago (`landed_at`, kept in the queue file, so
+        a restart does not reset the clock), or at once with `now` (the owner's Review now). One review at a time per
+        map: a map with one running waits for it, and a running review's tickets are never taken again. The map-end
+        review is the same call, so it takes only the leftovers. Returns the maps started."""
+        with self.review_lock:
+            return self._start_reviews_locked(now)
+
+    def _start_reviews_locked(self, now):
         with self.hub._lock:
             q = self.hub._data["queue"]
             covered = {k for rv in self.reviews.values() for k in rv["keys"]}
@@ -3555,12 +3603,15 @@ class Supervisor:
                     groups.setdefault(m, []).append(dict(i))
                 elif st == "running" or st == "queued" and not q["paused"] or st == "recheck" and i.get("checked") is None:
                     busy.add(m)
-            groups = {m: g for m, g in groups.items() if m not in busy and m not in self.reviews}
+            due = self.hub.now() - review_every()
+            groups = {m: g for m, g in groups.items() if m not in self.reviews and (
+                now or m not in busy or min(i.get("landed_at") or 0 for i in g) <= due)}
+        started = []
         if not groups:
-            return
+            return started
         rows = self.hub._fresh_tickets()
         if rows is None:
-            return  # the tickets could not be read: tried again at the next look
+            return started  # the tickets could not be read: tried again at the next look
         by = {sbqueue.key(t): t for t in rows}
         for m, group in groups.items():
             if any(by.get(i["key"]) and self.runner.rebuild.busy(by[i["key"]]["repo"]) for i in group):
@@ -3588,9 +3639,11 @@ class Supervisor:
                 continue
             rv["at"] = self.hub.now()
             self.reviews[m] = rv
+            started.append(m)
             for item, _, _ in entries:
                 self._update(item["key"], state="review", review=rv["files"][item["key"]],
                              note="the Opus review runs on {}".format(rv["agent"]))
+        return sorted(started)
 
     def _restart_once(self, repo, error):
         """True the first time `error` (a template naming a field the hub cannot fill) is seen for `repo`, and noted
@@ -4504,6 +4557,8 @@ def make_handler(hub):
                     out = hub.agents_dismiss(d["agent"])
                 elif path == "/api/agents/clear-quiet":
                     out = hub.agents_clear_quiet()
+                elif path == "/api/review/now":
+                    out = hub.review_now()
                 elif path.startswith("/api/ticket/") and path[len("/api/ticket/"):] in TICKET_ACTIONS:
                     out = hub.ticket_action(path[len("/api/ticket/"):], d["key"], d.get("text"), d.get("commit"))
                 elif path == "/api/queue/item_agent":
@@ -5180,6 +5235,15 @@ def _run_status(home, pid):
     return 0
 
 
+def cmd_review_now(a):
+    code, out = call(a.port, "/api/review/now", {}, timeout=70)
+    if code == 0:
+        print("sbhub: not running", file=sys.stderr)
+        return 2
+    print("review started: " + (", ".join(out.get("started") or []) or "none"))
+    return 0
+
+
 def cmd_state(a):
     print(json.dumps(call(a.port, "/api/state")[1]))
     return 0
@@ -5216,6 +5280,7 @@ def main(argv=None):
     add("night", ("action", {"nargs": "?", "default": "show"}), ("--name", {}), ("--by", {}),
         ("--mode", {"default": "after"}))
     add("agents", ("--scan", {"action": "store_true"}))
+    add("review-now")
     add("trust", ("project", {}))
     add("untrust", ("project", {}))
     add("hook", ("--event", {}))
@@ -5244,6 +5309,8 @@ def main(argv=None):
         return cmd_night(a)
     if a.cmd == "agents":
         return cmd_agents(a)
+    if a.cmd == "review-now":
+        return cmd_review_now(a)
     if a.cmd == "run-ticket":
         return cmd_run_ticket(a)
     return cmd_state(a)

@@ -364,6 +364,7 @@ class ContractFixturesTest(unittest.TestCase):
         r("run_seen", {"key": "repo/one#1@1000"})
         r("agents_dismiss", {"agent": "sess-3"})
         r("agents_clear-quiet", {})
+        self.assertEqual(r("review_now", {}), {"ok": True, "started": []})  # the queue was stopped: none starts
         self.record("missing-field", "/api/lock", {"key": "x"}, 400)
         self.record("bad-value", "/api/ask", {"agent": "a", "q": "?", "options": ["one"], "default": "one", "wait": 1}, 400)
         for action, text in (("comment", "Checked from the fixture."), ("tier", "opus"), ("checks", "true")):

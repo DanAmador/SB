@@ -58,6 +58,7 @@ export const ROUTES = {
   "POST /api/agents/dismiss": post(s.AgentsDismissBody, { 200: s.Ok }),
   "POST /api/agents/clear-quiet": post(s.EmptyBody, { 200: s.ClearQuietAnswer }),
   "POST /api/agents/scan": post(s.EmptyBody, { 200: s.ScanAnswer }),
+  "POST /api/review/now": post(s.EmptyBody, { 200: s.ReviewNowAnswer }),
   "POST /api/ticket/:action": post(s.TicketActionBody, { 200: s.Ok }),
 } as const satisfies Record<string, RouteSpec>;
 

@@ -67,6 +67,14 @@ the vault. Only the running hub writes the queue (`$SB_HUB_HOME/state.json`); CL
   tells running workers to commit what passes and stop. A ticket cut off by a limit or a logout
   resumes on another account with room, from where it stopped. An expired login takes that account
   out of the pool and asks the owner to sign in.
+- **Review**: a ticket whose checks pass lands (`landed`, with `landed_at`) and waits for its map's Opus
+  review, one per map at a time, which judges every landed ticket no review holds. It starts when the map's run
+  ends, or, while the map still runs, once its oldest landed ticket waited 25 minutes (`SB_REVIEW_EVERY_MIN`),
+  counted from `landed_at` in the queue file, so a restart does not reset it; the map-end review then takes only the
+  leftovers. `POST /api/review/now {}` (`sbhub review-now`) starts the review the timer would for every map with
+  landed tickets, busy or not, and answers `{ok, started: [maps]}`; a map whose review runs starts nothing new.
+  `/api/state`'s `review_next_at` is when the timer next looks (null: nothing waits). No review starts while the
+  hub rebuilds its own code. A review running when the hub stops is started afresh, once, by the next hub.
 - **Jobs**: a one-off prompt for any agent, in a wayfinder project or any git checkout by path
   (`sbhub queue job …`, or the page's New job form). No claim, no verdict: exit 0 is done.
 
@@ -79,6 +87,7 @@ Commands (`scripts/sbhub.py`):
 | `queue pause\|resume` | hold or release the queue |
 | `queue agents <name>...` | the night's pool, in preference order |
 | `queue job --project P --agent A [--model M] [--name N] (--prompt T \| --prompt-file F)` | a one-off job |
+| `review-now` | start the review of every map with landed, unreviewed tickets, now |
 | `agents [--scan]` | installed agents; `--scan` finds `~/.claude*` configs and `agy` |
 
 In chat: `sb_queue(add=["<map>#<num>"], remove=[…])` returns the queue as a few lines;
