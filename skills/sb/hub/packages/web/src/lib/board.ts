@@ -2,7 +2,7 @@
  * The board's grouping rules, pure: what goes in Questions, which sessions are yours, what is ready, queued,
  * running, done and failed. The views only draw what these return; board.test.ts pins every rule.
  */
-import { TRIES_MAX, type AgentRow, type Installed, type Links, type MapTicket, type Message, type Question, type QueueItem, type State, type TicketRow } from "@sb-hub/contract";
+import { TRIES_MAX, type AgentRow, type Build, type Installed, type Links, type MapTicket, type Message, type Question, type QueueItem, type State, type TicketRow } from "@sb-hub/contract";
 
 /** A ticket's estimate when the queue's end is reckoned: 1.5 h. */
 export const ESTIMATE = 5400;
@@ -363,6 +363,18 @@ export function pageOf<T>(rows: readonly T[], page: number): { rows: T[]; page: 
 // ---- queue items ----
 
 /** A title, never a bare id: the ticket's own, else what the hub stored, else its map and number. */
+/** One line per repo whose checkout keeps a landing that does not compile and could not be backed out: "sk4te: the
+ * build is broken in HeldCostsEnergyTests.cs, since <the ticket that broke it>". */
+export function brokenBuilds(builds: Readonly<Record<string, Build>> | undefined, title: (key: string) => string): string[] {
+  return Object.entries(builds ?? {})
+    .filter(([, b]) => b.broken === true)
+    .map(([repo, b]) => {
+      const files = [...new Set((b.errors ?? []).map((e) => (e.split("(")[0] ?? e).split("/").pop() ?? e))];
+      const since = b.errors_by ? `, since ${title(b.errors_by)}` : "";
+      return `${repo.split("/").pop() ?? repo}: the build is broken in ${files.length > 0 ? files.join(", ") : "files the hub could not name"}${since}`;
+    });
+}
+
 export function itemTitle(i: QueueItem, t: TicketRow | null | undefined): string {
   if (t) return t.title;
   if (i.title) return i.title;

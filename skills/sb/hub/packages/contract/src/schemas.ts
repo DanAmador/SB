@@ -285,6 +285,18 @@ export const RepoLoad = z.strictObject({
 });
 export type RepoLoad = z.infer<typeof RepoLoad>;
 
+/** A repo's build as its after-landing checks last saw it: `green`, the newest commit whose checks passed; `errors`,
+ * the last compile errors seen (by the landing of `errors_by`, at `errors_at`); `broken` while the checkout keeps a
+ * landing that does not compile and could not be backed out. */
+export const Build = z.strictObject({
+  green: z.string().optional(),
+  errors: z.array(z.string()).optional(),
+  errors_by: z.string().nullable().optional(),
+  errors_at: Seconds.optional(),
+  broken: z.boolean().optional(),
+});
+export type Build = z.infer<typeof Build>;
+
 export const Queue = z.strictObject({
   version: z.number().int(),
   seeded: z.boolean(),
@@ -310,6 +322,8 @@ export const Queue = z.strictObject({
   close_off_day: z.string().optional(),
   /** Repo -> its load, for each repo with anything queued or running. */
   repos: z.record(z.string(), RepoLoad).optional(),
+  /** Repo -> what the hub knows of its build from the after-landing checks. */
+  builds: z.record(z.string(), Build).optional(),
 });
 export type Queue = z.infer<typeof Queue>;
 

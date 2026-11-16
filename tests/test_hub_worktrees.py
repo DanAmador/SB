@@ -29,6 +29,9 @@ class WorktreeTest(RunnerCase):
         super().setUp()
         self.repo = self.repos["repo/one"]
         git(self.repo, "config", "sb.parallel", "3")
+        patcher = mock.patch.object(sbhub, "INDEX_LOCK_WAIT", 0.3)  # a stale index.lock fails a landing at once
+        patcher.start()
+        self.addCleanup(patcher.stop)
         with self.hub._lock:  # a third account, so the agents' own limit never decides these tests
             self.hub._data["installed"]["third"] = {"kind": "claude", "dir": str(self.root / ".claude-third"),
                                                     "model": None, "limited_until": None}
@@ -379,6 +382,212 @@ class AfterLandingTest(RunnerCase):
         self.assertEqual(git(self.repo, "diff", before, revert), "")
         self.assertEqual(ran["head"], git(self.repo, "rev-parse", "HEAD"))
         self.assertEqual((self.repo / "one" / "done.txt").read_text().count("work for"), 1)
+
+
+# stands in for sk4te's compile for the blame tests: one word of FAKE_COMPILE per run. `pass` passes (a stale
+# Editor that saw nothing), `75` could not run, `broken` fails naming FAKE_COMPILE_BROKEN while that file is in the
+# checkout, `sticky` names it and fails whatever is there. FAKE_COMPILE_LOCK makes it leave .git/index.lock behind as it ends (Unity or a chat's git in the
+# checkout at that moment): removed after that many seconds, or kept with `keep`
+BLAME_COMPILE = """import json, os, subprocess, sys, time
+log = os.environ["FAKE_COMPILE_LOG"]
+runs = open(log).read().count("\\n") if os.path.exists(log) else 0
+head = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+with open(log, "a") as f:
+    f.write(json.dumps({"head": head, "at": time.time()}) + "\\n")
+modes = os.environ.get("FAKE_COMPILE", "pass").split(",")
+mode = modes[min(runs, len(modes) - 1)]
+lock = os.environ.get("FAKE_COMPILE_LOCK")
+if lock and mode != "pass":
+    open(".git/index.lock", "w").close()
+    if lock != "keep":
+        subprocess.Popen(["sh", "-c", "sleep {}; rm -f .git/index.lock".format(lock)])
+if mode == "75":
+    print("the Editor did not answer")
+    sys.exit(75)
+broken = os.environ.get("FAKE_COMPILE_BROKEN", "")
+if mode == "sticky" or mode == "broken" and broken and os.path.exists(broken):
+    print("compile errors:")
+    print(broken + "(49,92): error CS0117: 'Lash' does not contain a definition for 'HitHeldSeconds'")
+    sys.exit(1)
+"""
+
+
+class BlameTest(RunnerCase):
+    """A compile after landing that fails in files the landing did not touch blames the earlier landing that last
+    touched them (2026-11-16: 1223 landed a test that did not compile, and 1231 and 1221 were backed out for it)."""
+    MAPS = (("repo/one", "game", ("A", "one/"), ("B", "two/")),)
+
+    def setUp(self):
+        super().setUp()
+        self.repo = self.repos["repo/one"]
+        git(self.repo, "config", "sb.parallel", "2")  # worktrees: a ticket lands into the checkout
+        self.sb("mapset", "repo/one", "checks=")
+        (self.repo / ".sb").mkdir()
+        (self.repo / ".sb" / "checks").write_text(SK4TE_CHECKS)
+        (self.repo / ".sb" / "checks-compile.py").write_text(BLAME_COMPILE)
+        git(self.repo, "add", ".sb")
+        git(self.repo, "commit", "-q", "-m", "checks")
+        self.log = self.root / "compile.jsonl"
+        os.environ.update(FAKE_COMPILE_LOG=str(self.log), FAKE_COMPILE_BROKEN="one/done.txt")
+        for k in ("FAKE_COMPILE", "FAKE_COMPILE_LOCK"):
+            self.addCleanup(os.environ.pop, k, None)
+        patcher = mock.patch.multiple(sbhub, LAND_LOCK_POLL=0.05, LAND_LOCK_WAIT=30)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.addCleanup(lambda: (self.repo / ".git" / "index.lock").unlink(missing_ok=True))
+        self.lock = "unity:" + self.repo.name
+
+    def reverts(self):
+        return git(self.repo, "log", "--format=%H", "--grep=Undoes-landing:", "HEAD").split()
+
+    def build(self):
+        return (self.hub.state()["queue"].get("builds") or {}).get(str(self.repo), {})
+
+    def test_a_ticket_that_lands_on_a_broken_build_backs_out_the_one_that_broke_it_and_stays(self):
+        os.environ["FAKE_COMPILE"] = "pass,broken"  # A's own compile passes on a stale Editor; B's sees A's error
+        self.sb("block", "repo/one", "2", "1")  # B starts once A landed, as 1231 came after 1223
+        self.only(1, 2)
+        a = self.until(lambda: (self.items().get("repo/one#1") or {}).get("fails") and
+                       self.state_of("repo/one#2") in ("landed", "done") and self.items()["repo/one#1"])
+        [revert] = self.reverts()
+        mark = git(self.repo, "log", "-1", "--format=%B", revert)
+        self.assertIn("error CS0117", mark)
+        self.assertIn("once repo/one#2 landed on top", mark)
+        landed_a = re.search(r"Undoes-landing: (\w+)\.\.(\w+)", mark).group(2)
+        self.assertIn("Ticket: repo/one/001", git(self.repo, "log", "-1", "--format=%B", landed_a))
+        # B stays landed and the build is green on top of A's back-out
+        self.assertTrue((self.repo / "two" / "done.txt").exists())
+        self.assertFalse((self.repo / "one" / "done.txt").exists())
+        self.assertEqual(self.build().get("green"), git(self.repo, "rev-parse", "HEAD"))
+        self.assertEqual(len(self.compiles()), 3)  # A's, B's, and B's again once A was out
+        # A goes back to the front, its work replayed on its branch on top of the revert, its worker told why
+        self.assertIn(a["state"], ("queued", "running"))
+        self.assertIn("the hub backed your landing out", a["retry"])
+        self.assertIn("one/done.txt(49,92): error CS0117", a["retry"])
+        self.assertEqual(a["first_base"], revert)
+        self.assertIn("work for repo/one/001", (Path(a["tree"]) / "one" / "done.txt").read_text())
+        self.assertEqual(git(a["tree"], "merge-base", "--is-ancestor", revert, "HEAD"), "")
+        self.assertEqual(self.hub.state()["locks"], {})
+
+    def test_a_blame_that_does_not_mend_the_build_is_undone_and_the_new_landing_is_backed_out(self):
+        os.environ["FAKE_COMPILE"] = "pass,sticky"  # the error stays whatever is backed out: A was not the cause
+        self.sb("block", "repo/one", "2", "1")
+        self.only(1, 2)
+        b = self.until(lambda: (self.items().get("repo/one#2") or {}).get("fails") and self.items()["repo/one#2"])
+        subjects = git(self.repo, "log", "--format=%s", "HEAD").splitlines()[:3]
+        self.assertTrue(subjects[0].startswith("revert: back out feat: work"))  # B, backed out last
+        self.assertTrue(subjects[1].startswith("revert: back out revert:"))  # A's back-out, undone
+        self.assertTrue(subjects[2].startswith("revert: back out feat: work"))  # A's back-out
+        self.assertTrue((self.repo / "one" / "done.txt").exists())  # A's work stays landed
+        self.assertFalse((self.repo / "two" / "done.txt").exists())
+        self.assertIn("after landing, check failed", b["retry"])
+        self.assertEqual(self.items()["repo/one#1"].get("fails"), None)  # A was not queued again
+
+    def test_a_ticket_whose_own_files_break_is_backed_out_itself_and_never_the_one_before(self):
+        os.environ["FAKE_COMPILE"] = "broken"
+        self.only(1)
+        self.until(lambda: (self.items().get("repo/one#1") or {}).get("fails"))
+        [revert] = self.reverts()
+        self.assertIn("repo/one/001", git(self.repo, "log", "-1", "--format=%B",
+                                          re.search(r"\.\.(\w+)", git(self.repo, "log", "-1", "--format=%B",
+                                                                      revert)).group(1)))
+        self.assertEqual(self.build()["errors_by"], "repo/one#1")
+        self.assertFalse(self.build().get("broken"))
+
+    def test_a_back_out_waits_for_a_git_lock_someone_holds_for_a_moment(self):
+        os.environ.update(FAKE_COMPILE="broken,pass", FAKE_COMPILE_LOCK="1")
+        self.only(1)
+        self.until(lambda: (self.items().get("repo/one#1") or {}).get("fails"))
+        self.assertEqual(len(self.reverts()), 1)  # the revert waited for the lock instead of failing
+        self.assertFalse(self.build().get("broken"))
+        self.assertEqual(self.hub.state()["locks"], {})
+
+    def test_a_landing_that_cannot_be_backed_out_keeps_the_lock_so_nothing_lands_on_the_broken_build(self):
+        os.environ.update(FAKE_COMPILE="broken", FAKE_COMPILE_LOCK="keep")
+        with mock.patch.multiple(sbhub, INDEX_LOCK_WAIT=0.3, LAND_LOCK_WAIT=0.2):
+            self.only(1)
+            a = self.until(lambda: self.state_of("repo/one#1") == "failed" and self.items()["repo/one#1"])
+            # its work is still in the checkout: it waits for the owner instead of landing again on top
+            self.assertIn("could NOT be backed out", a["note"])
+            self.assertIn("lock stays held", a["note"])
+            self.assertEqual(len(a["fails"]), 1)
+            self.assertEqual(self.reverts(), [])
+            self.assertEqual(self.hub.state()["locks"][self.lock]["by"], "sb-hub landing repo/one#1")
+            build = self.build()
+            self.assertTrue(build["broken"])
+            self.assertEqual(build["errors_by"], "repo/one#1")
+            head = git(self.repo, "rev-parse", "HEAD")
+            self.only(2)
+            # the next ticket's work waits on its branch: it does not land on the broken build
+            b = self.until(lambda: "could not land yet" in ((self.items().get("repo/one#2") or {}).get("note") or "")
+                           and self.items()["repo/one#2"])
+            self.assertIn(self.lock, b["note"])
+            self.assertEqual(git(self.repo, "rev-parse", "HEAD"), head)
+
+    def test_a_check_that_could_not_run_says_what_was_last_known_broken(self):
+        os.environ["FAKE_COMPILE"] = "broken,75"
+        self.only(1)
+        a = self.until(lambda: self.state_of("repo/one#1") == "recheck" and self.items()["repo/one#1"])
+        self.assertIn("could not run", a["note"])
+        self.assertIn("not judged; the last compile errors the hub saw were in done.txt (after repo/one#1",
+                      a["note"].splitlines()[0])
+
+    def compiles(self):
+        return [json.loads(l) for l in self.log.read_text().splitlines()] if self.log.exists() else []
+
+
+class LandingOfTest(unittest.TestCase):
+    """Real data: sk4te's landings of 2026-11-16 18:40-18:48, their messages as the workers wrote them (1223's
+    Ticket line sits above a Co-Authored-By paragraph, so it is not a git trailer)."""
+
+    def setUp(self):
+        import tempfile
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        self.repo = Path(d.name)
+        git(self.repo, "init", "-q", "-b", "main")
+        git(self.repo, "config", "user.email", "t@t")
+        git(self.repo, "config", "user.name", "t")
+        self.base = self.commit("Assets/Scripts/Lash.cs", "base")
+        self.market = self.commit("Assets/Scripts/Market.cs", "fix(market): Hot Potato becomes Switchblade\n\n"
+                                  "Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>\n\n"
+                                  "Ticket: sk4te/party-playtest/1222")
+        self.held = self.commit("Assets/Tests/PlayMode/HeldCostsEnergyTests.cs", "test(energy): a Play probe reads a "
+                                "held lash draining per second\n\nTicket: sk4te/party-playtest/1223\n\n"
+                                "Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>")
+        self.cards = self.commit("Assets/Tests/EditMode/SocketCountTests.cs", "test(cards): a count per socket\n\n"
+                                 "Ticket: sk4te/party-playtest/1231\n\n"
+                                 "Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>")
+        self.files = sbhub.compile_errors("compile errors:\nAssets/Tests/PlayMode/HeldCostsEnergyTests.cs(49,92): "
+                                          "error CS0117: 'Lash' does not contain a definition for 'HitHeldSeconds'")[0]
+
+    def commit(self, path, msg):
+        f = self.repo / path
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(f.read_text() + "x\n" if f.exists() else "x\n")
+        git(self.repo, "add", path)
+        git(self.repo, "commit", "-q", "-m", msg)
+        return git(self.repo, "rev-parse", "HEAD")
+
+    def test_the_compile_errors_name_their_files_once(self):
+        self.assertEqual(self.files, ["Assets/Tests/PlayMode/HeldCostsEnergyTests.cs"])
+
+    def test_the_ticket_landing_on_top_blames_1223_not_itself(self):
+        got = sbhub.landing_of(self.repo, self.files, self.cards + "^")
+        self.assertEqual(got, {"key": "sk4te/party-playtest#1223", "ticket": "sk4te/party-playtest/1223",
+                               "before": self.market, "sha": self.held})
+
+    def test_a_landing_before_tonight_is_never_blamed(self):
+        self.assertIsNone(sbhub.landing_of(self.repo, self.files, self.cards, since=self.held))
+
+    def test_a_fix_with_no_ticket_is_never_blamed(self):
+        fixed = self.commit("Assets/Tests/PlayMode/HeldCostsEnergyTests.cs", "fix(test): reads it from LashNode")
+        self.assertIsNone(sbhub.landing_of(self.repo, self.files, fixed))
+
+    def test_a_landing_already_backed_out_is_never_blamed_again(self):
+        err, _ = sbhub.revert_landing(self.repo, self.market, self.held, "it broke the build")
+        self.assertIsNone(err)
+        self.assertIsNone(sbhub.landing_of(self.repo, self.files, self.cards))
 
 
 class ProjectRootTest(unittest.TestCase):

@@ -5,6 +5,7 @@ import { parse } from "./api.ts";
 import { State, addLinks, type AgentRow, type Question, type QueueItem, type TicketRow } from "@sb-hub/contract";
 import {
   SILENT,
+  brokenBuilds,
   WEEK,
   addable,
   canTickAgain,
@@ -419,5 +420,20 @@ describe("a hub a field ahead of the page", () => {
     expect(s.queue).not.toHaveProperty("mystery");
     expect(splitAgents(s).sessions).toBeDefined();
     expect(() => parse("GET /api/state", 200, { ...ahead, now: undefined })).toThrow(/does not match the contract/);
+  });
+});
+
+describe("brokenBuilds", () => {
+  const title = (k: string) => (k === "sk4te/party-playtest#1223" ? "A held lash drains energy" : k);
+  it("names the broken files and the ticket that broke them, for a repo whose build is broken", () => {
+    const builds = {
+      "/Users/x/sk4te": { broken: true, errors_by: "sk4te/party-playtest#1223", errors: ["Assets/Tests/PlayMode/HeldCostsEnergyTests.cs(49,92): error CS0117: 'Lash' does not contain a definition for 'HitHeldSeconds'"] },
+      "/Users/x/web": { green: "abc", errors: ["src/a.ts(1,1): error TS1"] },
+    };
+    expect(brokenBuilds(builds, title)).toEqual(["sk4te: the build is broken in HeldCostsEnergyTests.cs, since A held lash drains energy"]);
+  });
+  it("says nothing when no build is broken", () => {
+    expect(brokenBuilds(undefined, title)).toEqual([]);
+    expect(brokenBuilds({ "/r": { green: "abc" } }, title)).toEqual([]);
   });
 });

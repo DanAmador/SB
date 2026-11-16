@@ -29,3 +29,13 @@ describe("a queue the hub paused by itself", () => {
     expect(Queue.parse({ ...paused, note: undefined }).note).toBeUndefined();
   });
 });
+
+describe("a queue that knows a repo's build", () => {
+  it("parses a broken build with its errors and the ticket that broke it", () => {
+    const builds = { "/Users/x/sk4te": { broken: true, errors: ["Assets/X.cs(49,92): error CS0117: no HitHeldSeconds"], errors_by: "sk4te/party-playtest#1223", errors_at: 1763315233 } };
+    expect(Queue.parse({ ...paused, builds }).builds).toEqual(builds);
+  });
+  it("parses a green build", () => {
+    expect(Queue.parse({ ...paused, builds: { "/r": { green: "abc" } } }).builds?.["/r"]?.green).toBe("abc");
+  });
+});

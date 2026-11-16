@@ -1895,10 +1895,18 @@ def log_spend(path, start=0):
     return out if seen else None
 
 
+# The hub's own reads (`git status`, `diff`) never take the checkout's index.lock, so they cannot make a landing's
+# merge or revert fail; a write that meets someone else's index.lock waits for it (INDEX_LOCK_WAIT seconds).
+# On 2026-11-16 a revert met one, the broken landing stayed, and the next ticket was blamed for its error.
+GIT_ENV = {**os.environ, "GIT_OPTIONAL_LOCKS": "0"}
+INDEX_LOCK_WAIT = 5
+UNDO_FAILED = "could NOT be backed out"
+
+
 def _git(repo, *args):
     try:
         r = subprocess.run(["git", "-c", "core.fsmonitor=false", "-C", str(repo), *args], capture_output=True,
-                           text=True, timeout=60)
+                           text=True, timeout=60, env=GIT_ENV)
     except (OSError, subprocess.SubprocessError):
         return ""
     return r.stdout.strip() if r.returncode == 0 else ""
@@ -1919,12 +1927,16 @@ MOVED = "moved"
 def _git_run(repo, *args, timeout=120, strip=True):
     """(returncode, stdout, stderr) of one git command in `repo`; (1, '', why) when git could not run. strip=False
     keeps stdout as git wrote it, for output whose leading spaces mean something (`status --porcelain`)."""
-    try:
-        r = subprocess.run(["git", "-c", "core.fsmonitor=false", "-C", str(repo), *args], capture_output=True,
-                           text=True, timeout=timeout)
-    except (OSError, subprocess.SubprocessError) as e:
-        return 1, "", str(e)
-    return r.returncode, r.stdout.strip() if strip else r.stdout, r.stderr.strip()
+    end = time.time() + INDEX_LOCK_WAIT
+    while True:
+        try:
+            r = subprocess.run(["git", "-c", "core.fsmonitor=false", "-C", str(repo), *args], capture_output=True,
+                               text=True, timeout=timeout, env=GIT_ENV)
+        except (OSError, subprocess.SubprocessError) as e:
+            return 1, "", str(e)
+        if r.returncode == 0 or "index.lock" not in r.stderr or time.time() >= end:
+            return r.returncode, r.stdout.strip() if strip else r.stdout, r.stderr.strip()
+        time.sleep(0.25)  # another git in this checkout holds its index for a moment: wait it out
 
 
 def project_root(path):
@@ -2126,6 +2138,53 @@ def undo_landing(landing, why):
         return err
     head = new or _git(landing["repo"], "rev-parse", "HEAD")
     return replay_tree(landing.get("tree"), landing["before"], head) if head else None
+
+
+# a compiler's error line names its file: "Assets/Tests/X.cs(49,92): error CS0117: ..." (C#, tsc --pretty false)
+ERROR_LINE = re.compile(r"^\s*([^\s(:][^(:]*?\.\w+)\(\d+,\d+\): error\b.*$", re.M)
+
+
+def compile_errors(text):
+    """(files, lines) a check's output names in its compile errors, each once, in order."""
+    found = list(ERROR_LINE.finditer(text or ""))
+    return (list(dict.fromkeys(m.group(1).strip() for m in found)),
+            list(dict.fromkeys(m.group(0).strip() for m in found)))
+
+
+def landing_of(repo, files, upto, since=None):
+    """The ticket landing that last touched `files` on the checkout's branch, after `since` (tonight's first base;
+    None: no lower bound) up to `upto`: {key, ticket, before, sha}, its commits being
+    the run of first-parent commits that carry its `Ticket:` trailer. None when no landing in that range touched
+    them, when the newest commit touching them carries no trailer (someone's own fix, not a ticket), or when that
+    landing is already backed out."""
+    span = "{}..{}".format(since, upto) if since and _git_run(repo, "merge-base", "--is-ancestor", since,
+                                                             upto)[0] == 0 else upto
+    last = _git(repo, "log", "--first-parent", "-n1", "--format=%H", span, "--", *files)
+    if not last:
+        return None
+    # the Ticket line, wherever it sits in the message (a worker may put Co-Authored-By after it)
+    rows = [r.split("\x1f") for r in _git(repo, "log", "--first-parent", "-n", "400", span, "--format=%H\x1f%B\x1e")
+            .split("\x1e")]
+    rows = [(r[0].strip(), (re.findall(r"^Ticket: *(\S+) *$", r[1], re.M) or [""])[-1])
+            for r in rows if len(r) == 2 and r[0].strip()]
+    at = next((n for n, (sha, _) in enumerate(rows) if sha == last), None)
+    if at is None or not rows[at][1]:
+        return None
+    ticket, newest, oldest = rows[at][1], at, at
+    while newest > 0 and rows[newest - 1][1] == ticket:
+        newest -= 1
+    while oldest + 1 < len(rows) and rows[oldest + 1][1] == ticket:
+        oldest += 1
+    before = _git(repo, "rev-parse", rows[oldest][0] + "^")
+    sha = rows[newest][0]
+    if not before:
+        return None
+    mark = "Undoes-landing: {}..{}".format(before, sha)
+    if _git(repo, "log", "--format=%H", "--fixed-strings", "--grep=" + mark, "{}..HEAD".format(sha)):
+        return None
+    m = re.fullmatch(r"(.+)/0*(\d+)", ticket)
+    return {"key": "{}#{}".format(m.group(1), int(m.group(2))) if m else ticket, "ticket": ticket,
+            "before": before, "sha": sha}
 
 
 def _tail(path, start=0, size=LOG_TAIL):
@@ -2424,6 +2483,7 @@ class TicketRun:
     def __init__(self, hub, port, limit=WORKER_LIMIT, stopping=lambda: False):
         self.hub, self.port, self.limit, self.stopping = hub, port, limit, stopping
         self.rebuild = Rebuild(hub)
+        self.backed_out = None  # the Supervisor's: an earlier landing was backed out for a later one's compile
 
     @staticmethod
     def sbmap(*args):
@@ -2607,14 +2667,16 @@ class TicketRun:
                                                    "why": firstline(reason)[:300], "commit": sha}]
         last = [(_fail_class(f["why"]) or f["why"], f["commit"]) for f in fails[-SAME_MAX:]]
         same = len(last) == SAME_MAX and len(set(last)) == 1
-        if len(fails) < TRIES_MAX and not same:
+        stuck = UNDO_FAILED in reason  # its work is still in the checkout: another try would land on top of it
+        if len(fails) < TRIES_MAX and not same and not stuck:
             opus = len(fails) + 1 >= OPUS_FROM and (run.get("inst") or {}).get("kind") != "agy"  # agy keeps its model
             model = "opus" if opus else fails[-1]["model"]
             self.release(item["key"])
             return self.result(item, "retry", "try {} of {} failed, try {} {}: {}".format(
                 len(fails), TRIES_MAX, len(fails) + 1, "on " + model, firstline(reason)), run, sha, checks,
                 retry={"model": model, "reason": reason, "fails": fails})
-        why = ("the same failure {} tries in a row with no new commit".format(SAME_MAX) if same else
+        why = ("its landing could not be backed out" if stuck else
+               "the same failure {} tries in a row with no new commit".format(SAME_MAX) if same else
                "{} tries, the most it gets".format(len(fails)))
         every = "\n".join("try {} ({}): {}{}".format(n, f["model"], f["why"], ", commit " + f["commit"][:9]
                                                     if f.get("commit") else "") for n, f in enumerate(fails, 1))
@@ -2711,22 +2773,102 @@ class TicketRun:
         """Run the after-landing checks in the checkout, which holds the ticket's work now; then let go of the Unity
         lock. None when they pass, else (passed, reason): False when one failed (the landing is reverted, the ticket
         tried again or failed as any failed check), None when one could not run (reverted too: it lands again at
-        its recheck)."""
-        repo = landing["repo"]
+        its recheck).
+        A compile that fails only in files this landing did not touch blames the earlier landing that last touched
+        them since the build was last green: that one is backed out (and queued again through `backed_out`), the
+        checks run again, and this ticket stays landed when they pass. A landing that cannot be backed out keeps
+        the Unity lock, so nothing lands on a broken build until it is fixed."""
+        repo, keep = landing["repo"], False
         try:
             changed = _git(repo, "diff", "--name-only", landing["before"], landing["sha"])
             failed = sbqueue._run_checks(cmds, repo, _recording(checks), changed)
+            if failed and not failed.startswith(sbqueue.NOT_RUN):
+                failed = self._blame_earlier(landing, failed, set(changed.split()), cmds, checks)
             if not failed:
+                self.build_mark(repo, green=_git(repo, "rev-parse", "HEAD"))
                 return None
+            files, lines = compile_errors(failed)
+            if failed.startswith(sbqueue.NOT_RUN):  # the board shows the first line: what was last known broken
+                head, _, rest = failed.partition("\n")
+                failed = "{}; {}\n{}".format(head, self.last_errors(repo), rest)
+            elif lines:
+                self.build_mark(repo, errors=lines, by=landing["key"])
             why = "{}\nIt landed on {} as {}; the hub backed it out.".format(
                 failed, Path(repo).name, landing["sha"][:9])
             err = undo_landing(landing, failed.splitlines()[0])
-            if err:  # the checkout keeps the broken work: the owner must see it
-                why = "{}\nIt landed on {} as {} and could NOT be backed out: {}".format(
-                    failed, Path(repo).name, landing["sha"][:9], err)
+            if err:  # the checkout keeps the broken work: nothing lands on it, and the owner must see it
+                keep = True
+                self.build_mark(repo, broken=True, errors=lines, by=landing["key"])
+                why = ("{}\nIt landed on {} as {} and " + UNDO_FAILED + ": {}\nThe {} lock stays held, so nothing "
+                       "else lands on the broken build: fix it, then free the lock.").format(
+                    failed, Path(repo).name, landing["sha"][:9], err, unity_lock(repo))
+                threading.Thread(target=notify, daemon=True, args=("sb hub: needs you", "{}: the build is broken "
+                                 "and {} could not be backed out".format(Path(repo).name, landing["key"]))).start()
             return (None if failed.startswith(sbqueue.NOT_RUN) and not err else False), "after landing, " + why
         finally:
-            self.hub.unlock(unity_lock(repo), _landing_by(landing))
+            if not keep:
+                self.hub.unlock(unity_lock(repo), _landing_by(landing))
+
+    def _blame_earlier(self, landing, failed, mine, cmds, checks):
+        """`failed` when this landing's own files are among the errors' or no earlier landing of tonight is to
+        blame; else the earlier landing that last touched the error files is backed out and the checks run again.
+        The blame sticks only when that makes them pass (None); when they still fail, the back-out is undone and
+        what failed is returned, so this landing is backed out as before."""
+        repo = landing["repo"]
+        files, lines = compile_errors(failed)
+        if not files or mine & set(files):
+            return failed
+        with self.hub._lock:
+            since = ((self.hub._data["queue"].get("bases") or {}).get(str(repo)) or {}).get("sha")
+        culprit = landing_of(repo, files, landing["before"], since)
+        if culprit is None or culprit["key"] == landing["key"]:
+            return failed
+        err, revert = revert_landing(repo, culprit["before"], culprit["sha"], "its files do not compile once {} "
+                                     "landed on top: {}".format(landing["key"], lines[0] if lines else firstline(failed)))
+        if err or not revert:
+            return failed
+        again = sbqueue._run_checks(cmds, repo, _recording(checks),
+                                    _git(repo, "diff", "--name-only", landing["before"], landing["sha"]))
+        if again:  # backing it out did not mend the build: it was not that landing, so it goes back in
+            revert_landing(repo, _git(repo, "rev-parse", revert + "^"), revert,
+                           "backing out {} did not mend the build".format(culprit["key"]))
+            return again
+        if self.backed_out:
+            self.backed_out({**culprit, "repo": repo, "revert": revert, "files": files, "errors": lines,
+                             "after": landing["key"]})
+        return None
+
+    def build_of(self, repo):
+        with self.hub._lock:
+            return dict((self.hub._data["queue"].get("builds") or {}).get(str(repo)) or {})
+
+    def build_mark(self, repo, green=None, broken=None, errors=None, by=None):
+        """What the hub knows of a repo's build: `green`, the newest commit whose after-landing checks passed (it
+        clears the rest); `errors`, the last compile errors it saw, with the ticket and time; `broken` while the
+        checkout keeps a build that does not compile (the board says so)."""
+        with self.hub._lock:
+            q = self.hub._data["queue"]
+            b = q.setdefault("builds", {}).setdefault(str(repo), {})
+            if green:
+                b.clear()
+                b["green"] = green
+            if errors:
+                b.update(errors=list(errors)[:10], errors_by=by, errors_at=self.hub.now())
+            if broken:
+                b["broken"] = True
+            q["version"] += 1
+            self.hub._save()
+
+    def last_errors(self, repo):
+        """For a check that could not run, one line: not judged, and the last compile errors the hub saw in this repo
+        (their files, the landing and the time), or that it saw none since its last green build; the errors follow."""
+        b = self.build_of(repo)
+        if not b.get("errors"):
+            return "not judged; the hub has seen no compile error in {} since its last green build".format(
+                Path(str(repo)).name)
+        files = list(dict.fromkeys((e.split("(")[0] or e).rsplit("/", 1)[-1] for e in b["errors"]))
+        return "not judged; the last compile errors the hub saw were in {} (after {}, {}):\n{}".format(
+            ", ".join(files), b.get("errors_by"), _hm(b["errors_at"]), "\n".join(b["errors"]))
 
     def report_checks(self, t, run, passed, reason, sha, checks):
         """Append the hub's verdict and every check to the worker's report in the run folder (a run file, not a
@@ -2929,6 +3071,7 @@ class Supervisor:
     def __init__(self, hub, port=None, limit=WORKER_LIMIT, probe=None):
         self.hub, self.port = hub, port or default_port()
         self.runner = TicketRun(hub, self.port, limit, stopping=lambda: self.stopped)  # every ticket's try runs here
+        self.runner.backed_out = self._backed_out
         self.probe = probe or probe_usage  # (agent entry, cwd) -> its output; tests hand in their own
         self.probe_async, self.probing = True, []  # probes run in their own thread (tests may run them inline)
         self.close_off = True  # the daily morning close-off job (tests of other things turn it off)
@@ -3514,6 +3657,39 @@ class Supervisor:
                 q["version"] += 1
                 self.hub._save()
             self.streak = (None, 0)
+
+    def _backed_out(self, c):
+        """A landed ticket whose files broke the build once a later ticket landed on top: its landing was reverted
+        (TicketRun._blame_earlier). It goes back to the front of the queue as its next try, its work replayed on its
+        branch on top of the revert and its worker told why; one that was no longer waiting for its review is left
+        as it is and the owner is told."""
+        key, repo = c["key"], c["repo"]
+        with self.hub._lock:
+            item = next((dict(i) for i in self.hub._data["queue"]["items"] if i["key"] == key), None)
+        why = ("after {} landed on top, the build did not compile in your files, so the hub backed your landing "
+               "out (revert {}):\n{}").format(c["after"], c["revert"][:9], "\n".join(c["errors"][:5]))
+        note = "backed out: its files broke the build ({}); queued again".format(", ".join(c["files"][:3]))
+        if item is None or item.get("state") != "landed" or item.get("kind") != "ticket":
+            threading.Thread(target=notify, daemon=True, args=("sb hub: needs you", "{}: backed out, its files broke "
+                             "the build; it was {}, so it is not queued again".format(
+                                 key, item.get("state") if item else "not in the queue"))).start()
+            return
+        fails = list(item.get("fails") or []) + [{"model": item.get("model") or "sonnet", "why": firstline(why)[:300],
+                                                   "commit": c["sha"]}]
+        if len(fails) >= TRIES_MAX:
+            self._end(key, "failed", note="{}\nIt waits for you after {} tries.".format(why, len(fails)), fails=fails,
+                      tries=len(fails))
+            return
+        tree, branch = item.get("tree"), item.get("branch")
+        if not tree or not branch:
+            m = re.fullmatch(r"(.+)#(\d+)", key)
+            tree, branch = tree_of(self.hub.home, repo, m.group(1), m.group(2))
+        err = make_tree(repo, tree, branch, c["sha"]) or replay_tree(tree, c["before"], c["revert"])
+        self._update(key, front=True, state="queued", tries=len(fails), fails=fails, retry=why, commit=c["sha"],
+                     tree=None if err else tree, branch=None if err else branch, first_base=c["revert"],
+                     landed_at=None, verdict=None, review=None, checked=None, pid=None, pid_start=None,
+                     started=None, ended=None, note=note + ("" if not err else "; its work could not be replayed on "
+                                                             "a branch: " + firstline(err)))
 
     def _unland(self):
         """A hub that stopped while a landing held a repo's Unity lock (its work fast-forwarded into the checkout,

@@ -3,13 +3,13 @@
  * ticket now, then a block per map (a checklist of its tickets in run order), then the maps that can be queued and
  * the search that finds one ticket to queue.
  */
-import { IconArrowBackUp, IconBan, IconChevronDown, IconChevronRight, IconChevronUp, IconCircleCheck, IconCircleDashed, IconClock, IconGripVertical, IconHourglass, IconLoader2, IconMail, IconMessages, IconPlus, IconRobot, IconX, IconZzz } from "@tabler/icons-react";
+import { IconAlertTriangle, IconArrowBackUp, IconBan, IconChevronDown, IconChevronRight, IconChevronUp, IconCircleCheck, IconCircleDashed, IconClock, IconGripVertical, IconHourglass, IconLoader2, IconMail, IconMessages, IconPlus, IconRobot, IconX, IconZzz } from "@tabler/icons-react";
 import { useState } from "react";
 import type * as React from "react";
 import type { QueueItem } from "@sb-hub/contract";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ago, blockerTitles, dur, endsAt, firstLine, hm, itemTitle, mapTitle, plainReason, plural, projOf, runRows, tryOf, showOf, type RunRow, type RunTone, itemInScope, ticketInScope } from "@/lib/board.ts";
+import { ago, blockerTitles, brokenBuilds, dur, endsAt, firstLine, hm, itemTitle, mapTitle, plainReason, plural, projOf, runRows, tryOf, showOf, type RunRow, type RunTone, itemInScope, ticketInScope } from "@/lib/board.ts";
 import { healthOf, liveState, MARK_WORDS, nightBlocks, nightLine, pairNight, type MapPair, type Mark, type NightBlock, type NightRow, type Pairing } from "@/lib/night.ts";
 import { helperCards, sessionCards, type SessionCard } from "@/lib/sessions.ts";
 import { setLink, useLink } from "@/lib/link.ts";
@@ -59,6 +59,12 @@ export function RunView(): React.JSX.Element {
         )}
         {state.queue.paused && <Badge tone="warn">paused</Badge>}
       </p>
+      {brokenBuilds(state.queue.builds, (k) => ix.byKey.get(k)?.title ?? k).map((line) => (
+        <p key={line} role="alert" data-testid="build-broken" className="flex items-center gap-2 rounded-xl bg-destructive-soft px-3 py-2 text-sm text-destructive">
+          <IconAlertTriangle className="size-4 shrink-0" aria-hidden />
+          {line}
+        </p>
+      ))}
       <Limits />
       <RunningNow />
       <section aria-label="The night, map by map" data-testid="blocks" className="flex flex-col gap-3">
