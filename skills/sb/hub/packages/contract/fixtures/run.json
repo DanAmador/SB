@@ -8,11 +8,11 @@
         "tail": ""
       }
     ],
-    "log": "argv: [\"--session-id\", \"00000005-0000-0000-0000-000000000000\", \"--permission-mode\", \"auto\", \"--model\", \"sonnet\", \"--settings\", \"{\\\"hooks\\\": {\\\"PreToolUse\\\": [{\\\"matcher\\\": \\\"Bash|Write|Edit|MultiEdit|NotebookEdit\\\", \\\"hooks\\\": [{\\\"type\\\": \\\"command\\\", \\\"command\\\": \\\"python3 /fixture/sb/hooks/guard_git.py\\\"}]}]}}\", \"--output-format\", \"stream-json\", \"--verbose\"]\nenv: {\"CLAUDE_CONFIG_DIR\": \"/fixture/.claude-main\", \"SB_HUB_AGENT\": \"repo/one#1\", \"SB_HUB_PARENT\": \"queue\", \"SB_HUB_PORT\": \"4321\"}\ncwd: /fixture/repo\nresult: done",
-    "report": "# A\n\n## Self-checks\n\n- `true`: exit 0\n\n## Hub checks\n\nChecked by the sb hub at 2026-11-13 01:00: passed, commit d8d88e804.\n\n- `true`: exit 0, 0.0 s\n\n  ```\n  ```\n\n### The worker's self-checks\n\n- `true`: exit 0\n",
+    "log": "argv: [\"--session-id\", \"00000005-0000-0000-0000-000000000000\", \"--permission-mode\", \"auto\", \"--model\", \"sonnet\", \"--settings\", \"{\\\"hooks\\\": {\\\"PreToolUse\\\": [{\\\"matcher\\\": \\\"Bash|Write|Edit|MultiEdit|NotebookEdit\\\", \\\"hooks\\\": [{\\\"type\\\": \\\"command\\\", \\\"command\\\": \\\"python3 /fixture/sb/hooks/guard_git.py\\\"}]}]}}\", \"--output-format\", \"stream-json\", \"--verbose\", \"--setting-sources\", \"project,local\", \"--strict-mcp-config\", \"--plugin-dir\", \"/fixture/mods/hub-report\", \"--mcp-config\", \"/fixture/mods/hub-report/.mcp.json\"]\nenv: {\"CLAUDE_CONFIG_DIR\": \"/fixture/.claude-main\", \"SB_HUB_AGENT\": \"repo/one#1\", \"SB_HUB_PARENT\": \"queue\", \"SB_HUB_PORT\": \"4321\"}\ncwd: /fixture/repo\nresult: done",
+    "report": "# A\n\n## Self-checks\n\n- `true`: exit 0\n\n## Hub checks\n\nChecked by the sb hub at 2026-11-13 01:00: passed, commit 29bcff914.\n\n- `true`: exit 0, 0.0 s\n\n  ```\n  ```\n\n### The worker's self-checks\n\n- `true`: exit 0\n",
     "run": {
       "account": null,
-      "commit": "d8d88e8049de73d87e5d3ef7dbd589ee7cda6720",
+      "commit": "29bcff914f5018bfbabf0733ef6d12a82f7b7335",
       "ended": 1794528000.0,
       "key": "repo/one#1",
       "links": {

@@ -74,7 +74,9 @@ class ContractFixturesTest(unittest.TestCase):
         git(self.repo, "config", "user.email", "t@example.com")
         git(self.repo, "config", "user.name", "T")
         (self.repo / "README.md").write_text("x\n")
-        git(self.repo, "add", "README.md")
+        (self.repo / ".sb").mkdir()  # the worker gets only named variables: the pinned commit dates must be named
+        (self.repo / ".sb" / "env").write_text("GIT_AUTHOR_DATE\nGIT_COMMITTER_DATE\n")
+        git(self.repo, "add", "README.md", ".sb/env")
         git(self.repo, "commit", "-q", "-m", "init")
         self.sb("init", "repo/one", "--title", "One", "--why", "Why.", "--destination", "Somewhere.", "--repo", str(self.repo))
         self.sb("mapset", "repo/one", "checks=true")
@@ -168,7 +170,9 @@ class ContractFixturesTest(unittest.TestCase):
         self.subs.update({str(self.root): "/fixture", quote(str(self.root), safe=""): quote("/fixture", safe=""),
                           date.today().isoformat(): DAY,
                           # the git guard hook in a worker's argv names this machine's python and checkout
-                          str(sbhub.GUARD): "/fixture/sb/hooks/guard_git.py", sys.executable: "python3"})
+                          str(sbhub.GUARD): "/fixture/sb/hooks/guard_git.py", sys.executable: "python3",
+                          # the hub plugin a worker loads lives in whichever checkout runs the tests
+                          str(sbhub.PLUGIN): "/fixture/mods/hub-report"})
         r = lambda name, data, status=200: self.record(name.replace("_", "-"), "/api/" + name.replace("_", "/", 1), data, status)
 
         # agents: a session, its alias, a worker it spawned, one that needs you
