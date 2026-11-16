@@ -5,7 +5,9 @@ Reads one Claude Code hook event on stdin and denies:
   Bash  `git stash`; in the repo's main checkout `git checkout`, `restore`, `switch`, `rebase` and any `git reset`;
         `git commit --allow-empty` or `--amend`, `git push`, `git tag` (listing tags is fine);
         an sbmap write other than `comment` (resolve, close, new, set, block, claim, init, mapset, summary:
-        the hub closes the ticket); `rm`, `mv` or a `>` redirect aimed inside a `.git` folder.
+        the hub closes the ticket); `rm`, `mv` or a `>` redirect aimed inside a `.git` folder;
+        with SB_HUB_UNITY=off (a ticket worker of a Unity project), any `unity` command: the Unity stage is the
+        integrator's, on the main folder, after the work lands.
   Write, Edit, MultiEdit, NotebookEdit  a file outside the worker's repo or worktree, its run folder
         (SB_HUB_RUN) and the system temp folder.
 Anything else is allowed; a hook that cannot read its event allows too (exit 0, no output).
@@ -37,6 +39,10 @@ ALWAYS = {"stash"}
 MAIN_ONLY = {"checkout", "switch", "rebase", "restore"}
 GIT_OPTS_WITH_ARG = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path"}
 WRAPPERS = ("env", "sudo", "command", "time", "nohup")
+UNITY_WAY_OUT = ("Unity is the ticket's last stage, not yours: after you commit, the hub lands your work on the main "
+                 "folder and an integrator compiles and plays it in the one Unity Editor, one ticket at a time. Write "
+                 "what to play under `## Play checks` in your report, and check the APIs you call by reading their "
+                 "source instead.")
 
 
 def segments(command):
@@ -108,9 +114,20 @@ def other_refusal(command):
     return None
 
 
-def refusal(command, cwd, main=in_main_checkout):
+def unity_refusal(command, env=os.environ):
+    """A worker of a Unity project (SB_HUB_UNITY=off) never drives the Editor: any `unity` command is refused."""
+    if env.get("SB_HUB_UNITY") != "off":
+        return None
+    for toks in segments(command):
+        toks = _bare(toks)
+        if toks and (toks[0].rsplit("/", 1)[-1] == "unity" or "/Unity.app/" in toks[0]):
+            return "`{}` is refused for a ticket worker. {}".format(" ".join(toks[:3]), UNITY_WAY_OUT)
+    return None
+
+
+def refusal(command, cwd, main=in_main_checkout, env=os.environ):
     """The reason to refuse this command line, or None."""
-    other = other_refusal(command)
+    other = other_refusal(command) or unity_refusal(command, env)
     if other:
         return other
     for where, sub, args in git_calls(command):

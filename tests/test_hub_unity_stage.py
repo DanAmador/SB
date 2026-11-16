@@ -1,0 +1,141 @@
+"""A Unity project's tickets end in a Unity stage: the worker codes in its own worktree and may not drive the Editor;
+once its work lands in the main folder, an integrator runs there holding the repo's Unity lock, compiles and plays it,
+fixes what is broken, and only then is the ticket judged. One ticket at a time: the others wait for the Editor with
+no try spent. Same harness as test_hub_worktrees (tests/fake_worker.py is the worker and the integrator)."""
+import json
+import os
+import sys
+import unittest
+from pathlib import Path
+from unittest import mock
+
+from test_hub_runner import TEMPLATES, RunnerCase, git
+from test_hub_worktrees import FAKE_COMPILE, SK4TE_CHECKS
+import sbhub
+from sbhub import Hub, Supervisor
+
+
+def tearDownModule():
+    for t in TEMPLATES.values():
+        t.cleanup()
+    TEMPLATES.clear()
+
+
+class UnityStageTest(RunnerCase):
+    MAPS = (("repo/one", "game", ("A", "one/"), ("B", "two/")),)
+
+    def setUp(self):
+        super().setUp()
+        self.repo = self.repos["repo/one"]
+        git(self.repo, "config", "sb.parallel", "2")
+        self.sb("mapset", "repo/one", "checks=")  # the repo's .sb/checks decides, as in sk4te
+        (self.repo / ".sb").mkdir()
+        (self.repo / ".sb" / "checks").write_text(SK4TE_CHECKS)
+        (self.repo / ".sb" / "checks-compile.py").write_text(FAKE_COMPILE)
+        (self.repo / "ProjectSettings").mkdir()
+        (self.repo / "ProjectSettings" / "ProjectVersion.txt").write_text("m_EditorVersion: 6000.5.5f1\n")
+        (self.repo / "Player.prefab").write_text("prefab\n")
+        git(self.repo, "add", ".sb", "ProjectSettings", "Player.prefab")
+        git(self.repo, "commit", "-q", "-m", "a unity project")
+        self.log, self.calls = self.root / "compile.jsonl", self.root / "integrate.jsonl"
+        env = mock.patch.dict(os.environ, FAKE_COMPILE_LOG=str(self.log), FAKE_INTEGRATE_CALLS=str(self.calls),
+                              FAKE_COMPILE_STATE=str(self.root / "hub" / "state.json"))
+        env.start()  # every FAKE_ variable as it was once the test ends
+        self.addCleanup(env.stop)
+        for k in ("FAKE_INTEGRATE", "FAKE_INTEGRATE_DIRTY", "FAKE_INTEGRATE_SLEEP", "FAKE_COMPILE"):
+            os.environ.pop(k, None)
+        patcher = mock.patch.multiple(sbhub, LAND_LOCK_POLL=0.05, LAND_LOCK_WAIT=30, UNITY_POLL=0)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.lock = "unity:" + self.repo.name
+
+    def stages(self):
+        return [json.loads(l) for l in self.calls.read_text().splitlines()] if self.calls.exists() else []
+
+    def compiles(self):
+        return [json.loads(l) for l in self.log.read_text().splitlines()] if self.log.exists() else []
+
+    def workers(self):
+        return [l for l in self.launched if not l["brief"].startswith("# Bring ")]
+
+    def test_the_worker_is_fenced_off_unity_and_the_integrator_plays_it_on_main_holding_the_lock(self):
+        os.environ["FAKE_INTEGRATE_DIRTY"] = "Player.prefab"
+        before = git(self.repo, "rev-parse", "HEAD")
+        self.only(1)
+        self.until(lambda: self.state_of("repo/one#1") == "done")
+        [worker] = self.workers()
+        self.assertIn("## Unity is the last stage, not yours", worker["brief"])
+        self.assertIn('"SB_HUB_UNITY": "off"', Path(worker["log"]).read_text())
+        self.assertIn("/worktrees/", Path(worker["log"]).read_text())  # it worked in its own worktree
+        [stage] = self.stages()
+        self.assertEqual(os.path.realpath(stage["cwd"]), os.path.realpath(self.repo))  # the main folder
+        self.assertEqual(stage["unity"], "integrator")
+        self.assertEqual(stage["locks"][self.lock]["by"], "sb-hub landing repo/one#1")  # it held the Editor
+        [ran] = self.compiles()
+        self.assertGreaterEqual(ran["at"], stage["end"])  # the compile ran after the integrator, with its fix in
+        self.assertEqual(ran["head"], git(self.repo, "rev-parse", "HEAD"))
+        self.assertEqual(git(self.repo, "log", "--format=%s", before + "..HEAD").splitlines(),
+                         ["fix(integrate): it builds", "feat: work"])
+        self.assertEqual(self.hub.state()["locks"], {})
+        self.assertEqual((self.repo / "Player.prefab").read_text(), "prefab\n")  # Unity's own write restored
+        folder = Path(self.items()["repo/one#1"]["run"])
+        self.assertIn("written by Unity during Play", (folder / "1-unity-leftovers.patch").read_text())
+        self.assertNotIn("integrate", self.items()["repo/one#1"])
+        self.assertNotIn(1, self.open_tickets())
+
+    def test_an_integrator_that_cannot_make_it_work_backs_the_whole_stage_out_and_the_worker_tries_again(self):
+        os.environ["FAKE_INTEGRATE"] = "broken"
+        before = git(self.repo, "rev-parse", "HEAD")
+        self.only(1)
+        self.until(lambda: len(self.workers()) == 2)
+        self.assertEqual(git(self.repo, "diff", before, "HEAD"), "")  # main's files as before the landing
+        retry = self.workers()[1]["brief"]
+        self.assertIn("the integrator could not make it work in Unity", retry)
+        self.assertIn("1-integrate.md", retry)  # told to read the integrator's report
+        self.assertEqual(self.compiles(), [])  # nothing compiled a stage the integrator called broken
+        self.until(lambda: self.hub.state()["locks"] == {})
+
+    def test_a_second_ticket_waits_for_the_editor_with_no_try_spent_and_the_stages_never_overlap(self):
+        os.environ["FAKE_INTEGRATE_SLEEP"] = "1.5"
+        self.only(1, 2)
+        self.until(lambda: self.state_of("repo/one#1") == "done" and self.state_of("repo/one#2") == "done",
+                   timeout=240)
+        a, b = sorted(self.stages(), key=lambda s: s["start"])
+        self.assertGreaterEqual(b["start"], a["end"])  # one Unity stage at a time
+        self.assertEqual(len(self.workers()), 2)  # each worker ran once: waiting was no try
+        for key in ("repo/one#1", "repo/one#2"):
+            self.assertLessEqual(self.items()[key].get("tries") or 0, 1)
+        self.assertEqual(self.hub.state()["locks"], {})
+
+    def test_a_hub_restart_during_a_stage_whose_integrator_died_backs_it_out_and_lands_it_again(self):
+        os.environ["FAKE_INTEGRATE_SLEEP"] = "30"
+        before = git(self.repo, "rev-parse", "HEAD")
+        self.only(1)
+        self.until(lambda: self.items()["repo/one#1"].get("integrate"))
+        run = self.sup.procs.pop("repo/one#1")
+        sbhub._kill_group(run["p"], grace=0)  # the integrator dies with its hub
+        self.assertNotEqual(git(self.repo, "rev-parse", "HEAD"), before)
+        os.environ["FAKE_INTEGRATE_SLEEP"] = "0"
+        hub = Hub(self.root / "hub", now=self.clock, launcher=self.launcher)
+        sup = Supervisor(hub)
+        sup.close_off = False
+        self.addCleanup(sup.stop)
+        self.hub, self.sup = hub, sup
+        self.until(lambda: self.state_of("repo/one#1") == "done")
+        self.assertEqual(len(self.workers()), 1)  # landed again without running its worker
+        self.assertEqual(len(self.launched) - len(self.workers()), 2)  # a second integrator, to the end
+        self.assertEqual(len(git(self.repo, "log", "--format=%H", "--grep=Undoes-landing:", "HEAD").split()), 1)
+        self.assertEqual(hub.state()["locks"], {})
+
+
+class GuardTest(unittest.TestCase):
+    def test_a_unity_worker_may_not_run_the_unity_cli_and_others_may(self):
+        sys.path.insert(0, str(Path(sbhub.__file__).resolve().parents[1] / "hooks"))
+        import guard_git
+        off = {"SB_HUB_UNITY": "off"}
+        for line in ("unity command recompile", "~/.unity/bin/unity status --json", "cd x && unity command eval 'a'",
+                     "/Applications/Unity/Hub/Editor/6000.5.5f1/Unity.app/Contents/MacOS/Unity -batchmode"):
+            self.assertIn("Unity is the ticket's last stage", guard_git.refusal(line, ".", main=lambda d: False, env=off))
+        self.assertIsNone(guard_git.refusal("grep -rn unity Assets", ".", main=lambda d: False, env=off))
+        for env in ({}, {"SB_HUB_UNITY": "integrator"}):
+            self.assertIsNone(guard_git.refusal("unity command recompile", ".", main=lambda d: False, env=env))

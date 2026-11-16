@@ -23,6 +23,12 @@ A brief that opens `# Mend ` (templates/fix-build.md) makes it the fake build fi
 what it does: `commit` writes base/fix.txt and commits it, `slow` sleeps 3 seconds and commits nothing, anything else
 commits nothing. Each exits 0 with a one-line result.
 
+A brief that opens the integrator's (templates/integrate.md) makes it the fake integrator, whatever the mode: it
+appends a JSON line to FAKE_INTEGRATE_CALLS (cwd, env, start and end time, the hub's locks from FAKE_COMPILE_STATE),
+then does what FAKE_INTEGRATE says (default works): `works` commits a fix (fix.txt), appends a line to the tracked
+file FAKE_INTEGRATE_DIRTY when set (Unity writing during Play) and writes its report with `VERDICT: works`;
+`broken` writes `VERDICT: broken`; `silent` writes no report. FAKE_INTEGRATE_SLEEP: seconds it takes first.
+
 A brief that names a review file (`Write your review to: <path>`, templates/review-brief.md) makes it the fake
 reviewer instead, whatever the mode (it names one review file per landed ticket, `<num>-review.md`). FAKE_REVIEW
 says what it does with each, a mode for all or a JSON object {"<num>": mode} (default finished):
@@ -105,16 +111,47 @@ def reviewer(paths):
     return 0
 
 
+def integrator(brief):
+    """The fake integrator (see the module's doc)."""
+    start = time.time()
+    time.sleep(float(os.environ.get("FAKE_INTEGRATE_SLEEP") or 0))
+    mode = os.environ.get("FAKE_INTEGRATE", "works")
+    out = re.search(r"Write it to `([^`]+)`", brief).group(1)
+    ticket = re.search(r"^# Bring (\S+) into", brief).group(1)
+    if mode == "works":
+        with open("fix.txt", "a", encoding="utf-8") as f:
+            f.write("fix for {}\n".format(ticket))
+        subprocess.run(["git", "add", "fix.txt"], check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "fix(integrate): it builds\n\nTicket: " + ticket], check=True)
+        if os.environ.get("FAKE_INTEGRATE_DIRTY"):
+            with open(os.environ["FAKE_INTEGRATE_DIRTY"], "a", encoding="utf-8") as f:
+                f.write("written by Unity during Play\n")
+    if mode != "silent":
+        with open(out, "w", encoding="utf-8") as f:
+            f.write("## In plain words\n\nPlayed it.\n\nVERDICT: {}\n".format("works" if mode == "works" else "broken"))
+    calls = os.environ.get("FAKE_INTEGRATE_CALLS")
+    if calls:
+        state = os.environ.get("FAKE_COMPILE_STATE")
+        locks = json.load(open(state)).get("locks", {}) if state and os.path.exists(state) else {}
+        with open(calls, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"ticket": ticket, "cwd": os.getcwd(), "unity": os.environ.get("SB_HUB_UNITY"),
+                                "locks": locks, "start": start, "end": time.time()}) + "\n")
+    result({"type": "result", "subtype": "success", "is_error": False, "result": "integrated"})
+    return 0
+
+
 def main():
     argv = sys.argv[1:]
     brief = argv[argv.index("-p") + 1]
     print("argv: " + json.dumps(argv[argv.index("-p") + 2:]), flush=True)
     print("env: " + json.dumps({k: os.environ.get(k) for k in
-                                ("CLAUDE_CONFIG_DIR", "SB_HUB_AGENT", "SB_HUB_PARENT", "SB_HUB_PORT")}), flush=True)
+                                ("CLAUDE_CONFIG_DIR", "SB_HUB_AGENT", "SB_HUB_PARENT", "SB_HUB_PORT", "SB_HUB_UNITY")}), flush=True)
     print("cwd: " + os.getcwd(), flush=True)
     if brief == "reply ok":  # the hub's usage probe
         print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "result": "ok"}))
         return 0
+    if brief.startswith("# Bring ") and "You are the sb hub's integrator" in brief:
+        return integrator(brief)
     review = re.findall(r"^Write your review to: (.+)$", brief, re.M)
     if review:
         return reviewer([r.strip() for r in review])

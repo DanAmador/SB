@@ -41,6 +41,25 @@ the vault. Only the running hub writes the queue (`$SB_HUB_HOME/state.json`); CL
   backed out too and lands again at its recheck. A hub that stops mid-landing keeps the landing in
   the lock; the next hub backs it out, lets go of the lock and lands the ticket again without its
   worker. A ticket that ran in the checkout itself (no worktree) runs the line there like any other.
+  **The Unity stage** (a repo with `ProjectSettings/ProjectVersion.txt`): Unity is a ticket's last stage, one
+  ticket at a time.
+  1. **The worker codes without Unity.** It always runs in its own worktree, and its guard refuses any `unity`
+     command (`SB_HUB_UNITY=off`). Its brief asks for a `## Play checks` section in its report.
+  2. **The integrator plays it on the checkout.** Once the work lands, the hub keeps the lock `unity:<repo>` and
+     starts an integrator (Opus, `templates/integrate.md`) in the checkout. The integrator compiles, plays the
+     Play checks, fixes what is broken and commits, then writes `<num>-integrate.md`, which ends in
+     `VERDICT: works|broken|no unity`.
+  3. **The hub judges when it ends.**
+     - **Files Unity changed on its own during Play** are saved to `<num>-unity-leftovers.patch` and restored.
+     - **`works`:** the after-landing lines run with the integrator's fixes in, and the ticket is landed when
+       they pass.
+     - **`broken`, or past its limit:** the whole stage is backed out by one revert, and the worker tries again,
+       told the integrator's report.
+     - **`no unity`:** the stage is backed out, and the ticket lands again at its recheck.
+
+  **While a stage runs**, every other ticket of that repo waits for the Editor (`waits for Unity`). Waiting costs
+  it no try and no recheck. **After a hub restart**, a live integrator is adopted. A stage whose integrator died
+  is backed out and lands again. **Stop** on a ticket in its stage backs the stage out.
 - **Tier**: `sbmap set <map> <NNN> tier=opus` on a complex ticket; Sonnet when absent. A failed
   Sonnet ticket retries once on Opus.
 - **Order**, fixed: after its blockers; then priority S→F; then the ticket that unblocks the most

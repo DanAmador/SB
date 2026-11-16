@@ -2105,6 +2105,58 @@ def unity_lock(repo):
     return "unity:" + Path(str(repo)).name
 
 
+# ---- the Unity stage: a Unity project's workers never drive the Editor; each landed ticket gets an integrator run
+# in the main folder, holding the repo's Unity lock until it ends, one ticket at a time (templates/integrate.md)
+INTEGRATE = Path(__file__).resolve().parents[1] / "templates" / "integrate.md"
+INTEGRATE_MODEL = "opus"
+INTEGRATE_MINUTES = 45
+UNITY_WAIT = "waits for Unity"  # a recheck note: another ticket is in its Unity stage; not a try, not counted
+UNITY_POLL = 2 * 60
+UNITY_WORKER = ("\n\n## Unity is the last stage, not yours\n\nThis is a Unity project, and you work in your own folder. "
+                "The one Unity Editor has the main folder open, so it never sees your code: any `unity` command is "
+                "refused for you, and so is starting a batch Editor or a clone. This overrides the repo's rule to "
+                "validate in the live Editor. After you commit, the hub lands your work on the main folder, and an "
+                "integrator compiles it and plays it there, one ticket at a time. You cannot compile, so read the "
+                "source of every type and member you call before you use it. In your report, add a section "
+                "`## Play checks`: numbered steps that show your change working in Play, each with what should "
+                "happen and the numbers to measure.\n")
+
+
+def is_unity(repo):
+    """A Unity project (it has ProjectSettings/ProjectVersion.txt): its tickets end in a Unity stage."""
+    return bool(repo) and (Path(str(repo)) / "ProjectSettings" / "ProjectVersion.txt").is_file()
+
+
+def dirty_files(repo):
+    """The tracked files with unsaved changes in the checkout."""
+    rc, out, _ = _git_run(repo, "status", "--porcelain", "--untracked-files=no", timeout=60, strip=False)
+    return sorted({l[3:].split(" -> ")[-1].strip('"') for l in out.splitlines() if len(l) > 3}) if rc == 0 else []
+
+
+def tidy_stage(repo, before, patch):
+    """Tracked files the Unity stage left changed that were clean when it began (Unity writes some during Play): their
+    changes saved to `patch`, then the files restored, so the next landing meets a clean checkout. The files."""
+    left = [f for f in dirty_files(repo) if f not in set(before)]
+    if left:
+        rc, out, _ = _git_run(repo, "diff", "--", *left, timeout=60)
+        try:
+            Path(patch).write_text(out if rc == 0 else "", encoding="utf-8")
+        except OSError:
+            return []  # nothing restored when its changes could not be kept
+        _git_run(repo, "checkout", "--", *left, timeout=60)
+    return left
+
+
+def stage_verdict(report):
+    """The integrator's last `VERDICT:` line (works, broken, no unity), or None when it wrote none."""
+    try:
+        text = Path(report).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    found = re.findall(r"^\s*VERDICT:\s*(works|broken|no unity)\s*$", text, re.M | re.I)
+    return found[-1].lower() if found else None
+
+
 def revert_landing(repo, before, sha, why):
     """Undo one landing, the commits before..sha, by one new commit on the checkout's branch: the files as they were
     before it, whatever came after it kept. History is never rewritten. (None, the revert's sha), or (why not, None).
@@ -2619,6 +2671,9 @@ class TicketRun:
             start = os.path.getsize(log)  # launch appends: this try's output begins here
         except OSError:
             start = 0
+        if is_unity(t["repo"]):  # the guard refuses the Editor to the worker; the integrator has it after landing
+            env["SB_HUB_UNITY"] = "off"
+            brief += UNITY_WORKER
         run = {**bare, "base": base, "first_base": item.get("first_base") or base, "log": log, "start": start,
                "folder": str(folder), "resumed": bool(sid)}
         try:
@@ -2655,6 +2710,9 @@ class TicketRun:
         else:
             passed, reason, sha, checks = self.land(t, run, tree)
             self.report_checks(t, run, passed, reason, sha, checks)
+            if run.get("integrate"):  # landed in the checkout, the Unity lock held: the Supervisor starts its stage
+                return {**self.result(item, "integrate", "landed; its Unity stage starts", run, sha, checks),
+                        "integrate": run["integrate"], "t": t}
         if run.get("blocking"):
             return {**self.result(item, "unclean", "landed on its branch {}, waiting for a clean checkout: unsaved "
                                   "changes to {}".format(branch, ", ".join(run["blocking"])), run, sha, checks),
@@ -2760,8 +2818,9 @@ class TicketRun:
                 return None, "{} ({}): {}".format(HELD, ", ".join(elsewhere[:3]), reason), sha, checks
             if not passed:
                 return passed, reason, sha, checks
-            locked = after and sha and {"key": sbqueue.key(t), "repo": str(t["repo"]), "before": head, "sha": sha,
-                                        "tree": str(tree), "branch": run.get("branch") or ""}
+            stage = is_unity(t["repo"])
+            locked = (after or stage) and sha and {"key": sbqueue.key(t), "repo": str(t["repo"]), "before": head,
+                                                   "sha": sha, "tree": str(tree), "branch": run.get("branch") or ""}
             if locked:
                 held = self.take_unity(locked)
                 if held:
@@ -2769,6 +2828,9 @@ class TicketRun:
             why = land(t["repo"], sha) if sha else None
             if why is None and sha:
                 run["landed_on"] = head
+            if locked and why is None and stage:  # its Unity stage: the lock stays held until the integrator ends
+                run["integrate"] = {**locked, "dirty": dirty_files(t["repo"])}
+                return True, reason, sha, checks
             if locked and why is None:
                 failed = self.after_landing(locked, after, checks)
                 if failed:
@@ -2786,6 +2848,51 @@ class TicketRun:
             return passed, reason, sha, checks
         return False, "could not land: the checkout kept gaining commits ({} tries)".format(LAND_TRIES), sha, checks
 
+    def integrated(self, item, run, over):
+        """The result of a ticket whose Unity stage ended: the integrator's run in the main folder, the repo's Unity
+        lock held since the landing. Files Unity left changed are saved to a patch and restored, then:
+        `works` (or no verdict): the after-landing checks run on the main folder with the integrator's fixes in
+        (after_landing, which lets go of the lock), and it is `landed` when they pass;
+        `broken`, or a run past its limit: the whole stage is backed out, and the ticket is tried again, told the
+        integrator's report; `no unity`: backed out, not a try, it lands again at its recheck."""
+        t, stage = run["t"], dict(item.get("integrate") or run.get("integrate"))
+        repo, num = stage["repo"], int(t["num"])
+        folder = Path(stage.get("folder") or run.get("folder") or Path(run["log"]).parent)
+        report = folder / "{}-integrate.md".format(num)
+        tidy_stage(repo, stage.get("dirty") or [], folder / "{}-unity-leftovers.patch".format(num))
+        head = _git(repo, "rev-parse", "HEAD") or stage["sha"]
+        landing = {**{k: stage.get(k) for k in ("key", "repo", "before", "tree", "branch")}, "sha": head}
+        verdict = "broken" if over else stage_verdict(report)
+        tell = "\nThe integrator's report: {}".format(report) if report.is_file() else ""
+        checks = []
+        if verdict in ("broken", "no unity"):
+            why = ("the integrator ran past {} minutes".format(int(self.limit // 60)) if over else
+                   "the integrator could not make it work in Unity" if verdict == "broken" else
+                   "the integrator could not reach the Unity Editor")
+            err = undo_landing(landing, why)
+            if err:  # the lock stays held, so nothing lands on top until the owner looks
+                self.build_mark(repo, broken=True, by=landing["key"])
+                threading.Thread(target=notify, daemon=True, args=("sb hub: needs you", "{}: {} could not be backed "
+                                 "out of the main folder".format(Path(repo).name, landing["key"]))).start()
+                return self.fail(item, run, "{}, and {}: {}\nThe {} lock stays held: fix the main folder, then free "
+                                 "it.{}".format(why, UNDO_FAILED, err, unity_lock(repo), tell), head, checks)
+            self.hub.unlock(unity_lock(repo), _landing_by(landing))
+            if verdict == "no unity":
+                return self.result(item, "recheck", why + "; backed out, it lands again", run, stage["sha"], checks)
+            return self.again(item, run, "{}; its landing was backed out.{}".format(why, tell), stage["sha"], checks)
+        failed = self.after_landing(landing, sbqueue.after_landing(t["checks"]), checks)
+        if failed:
+            passed, reason = failed
+            if passed is None:
+                return self.result(item, "recheck", reason.splitlines()[0], run, stage["sha"], checks)
+            return self.again(item, run, reason + tell, stage["sha"], checks)
+        drop_tree(repo, stage.get("tree"), stage.get("branch") or "")
+        run["landed_on"] = stage["before"]
+        note = "landed and played in Unity{}; the Opus review judges it when its map's run ends".format(
+            "" if verdict else " (the integrator wrote no verdict)")
+        return {**self.result(item, "landed", note, run, head, checks),
+                "checked": "the integrator's verdict: {}".format(verdict or "none")}
+
     def take_unity(self, landing):
         """Take the repo's Unity lock for this landing, waiting up to LAND_LOCK_WAIT while someone else holds it:
         None once held, else who holds it."""
@@ -2795,6 +2902,8 @@ class TicketRun:
             got = self.hub.lock(key, by, landing=landing)
             if got.get("ok"):
                 return None
+            if str(got.get("held_by") or "").startswith("sb-hub landing "):  # another ticket's Unity stage
+                return "{}: {} is in its Unity stage".format(UNITY_WAIT, got["held_by"][len("sb-hub landing "):])
             if time.time() >= end or self.stopping():
                 return "{} is held by {}".format(key, got.get("held_by"))
             time.sleep(LAND_LOCK_POLL)
@@ -3588,6 +3697,8 @@ class Supervisor:
                     pass
         if run is not None and run.get("log"):
             self._add_spend(item, run)
+        if item.get("integrate"):
+            self._unstage(item, "stopped by you during its Unity stage", None, requeue=False)
         where = self._work_left(item)
         note = "stopped by you: " + asked["reason"]
         if left:
@@ -3662,6 +3773,14 @@ class Supervisor:
             more = {"resume": {"agent": stop["agent"], "log": res["log"], "why": STOP_WHY[stop["kind"]]}} if stop else {}
             self._update(key, front=True, drop=("session", "session_dir") if res.get("fresh") else (), state="queued",
                          pid=None, pid_start=None, started=None, stops=res["stops"], note=res["note"], **more)
+            return
+        if state == "integrate":
+            self._integrate(item, res)
+            return
+        if state == "recheck" and UNITY_WAIT in (res.get("note") or ""):  # another ticket holds the Editor
+            self._update(key, state="recheck", ended=None, commit=res["commit"], pid=None, pid_start=None, started=None,
+                         recheck_at=self.hub.now() + UNITY_POLL, checked=None,
+                         note=res["note"] + "; it lands when the Editor is free, with no try spent")
             return
         if state == "landed":  # the checks passed and the work landed: its map's second pass judges it (_reviews)
             self._update(key, state="landed", ended=None, landed_at=self.hub.now(), commit=res["commit"],
@@ -3778,6 +3897,13 @@ class Supervisor:
             held = [(k, dict(v)) for k, v in self.hub._data["locks"].items() if v.get("landing")]
         for k, v in held:
             landing = v["landing"]
+            with self.hub._lock:
+                it = next((dict(i) for i in self.hub._data["queue"]["items"] if i["key"] == landing["key"]), None)
+            if it and it.get("integrate"):
+                if it.get("pid") and it.get("pid_start") and _proc_start(it["pid"]) == it["pid_start"]:
+                    continue  # its integrator still runs: _recover adopts it, and it is judged when it ends
+                self._unstage(it, "the hub stopped during its Unity stage", landing.get("tree"))
+                continue
             err = undo_landing(landing, "the hub stopped before its after-landing checks passed")
             if err:  # the lock stays, so nothing else lands on top until the owner looks
                 print("sb hub: could not undo the landing of {}: {}".format(landing["key"], err), file=sys.stderr,
@@ -3789,6 +3915,64 @@ class Supervisor:
             if item and item["state"] in ("running", "recheck"):
                 self._update(item["key"], state="recheck", recheck_at=self.hub.now(), pid=None, pid_start=None,
                              note="the hub stopped while it landed: backed out, it lands again")
+
+    def _integrate(self, item, res):
+        """A Unity project's ticket landed in the main folder and holds the repo's Unity lock: its integrator starts
+        there (templates/integrate.md) and the item runs until it ends; _finish judges it (TicketRun.integrated).
+        One whose integrator cannot start (or whose agent is not Claude) is judged at once, on its checks alone."""
+        key, t = item["key"], res["t"]
+        num, folder = int(t["num"]), Path(res["run"])
+        stage = {**res["integrate"], "folder": str(folder), "log": str(folder / "{}-integrate.log".format(num))}
+        with self.hub._lock:
+            name = item.get("runner")
+            inst = dict(self.hub._data["installed"].get(name) or {})
+        run = {"t": t, "agent": name, "inst": inst, "base": res["base"], "first_base": item.get("first_base"),
+               "log": stage["log"], "start": 0, "folder": str(folder), "tree": stage["tree"],
+               "branch": stage["branch"], "integrate": stage}
+        repo, nnn = stage["repo"], "{:03d}".format(num)
+        try:
+            if inst.get("kind") == "agy" or not inst:
+                raise OSError("its agent cannot run the integrator")
+            brief = INTEGRATE.read_text(encoding="utf-8").format(
+                ticket="{}/{}".format(t["map"], nnn), repo_name=Path(repo).name, repo=repo, title=t["title"],
+                before=stage["before"][:12], sha=stage["sha"][:12], lock=unity_lock(repo),
+                sbmap="python3 " + shlex.quote(str(SBMAP)), map=t["map"], num3=nnn,
+                done_when=t.get("done_when") or "(none written)", minutes=INTEGRATE_MINUTES,
+                report=res.get("report") or folder / "{}.md".format(num), out=folder / "{}-integrate.md".format(num))
+            env = {"SB_HUB_AGENT": key, "SB_HUB_PARENT": "queue", "SB_HUB_PORT": str(self.runner.port),
+                   "SB_HUB_RUN": str(folder), "SB_HUB_UNITY": "integrator"}
+            if self.runner.stopping():
+                raise OSError("the hub is stopping")
+            run["p"] = self.hub.launcher(inst, brief, repo, INTEGRATE_MODEL, env, stage["log"])
+        except (OSError, ValueError, KeyError, subprocess.SubprocessError) as e:
+            print("sb hub queue: {}: no integrator ({}); judged on its checks".format(key, e), file=sys.stderr,
+                  flush=True)
+            got = self.runner.integrated({**item, "integrate": stage}, run, False)
+            self._apply(item, got)
+            return
+        self._track(key, run)
+        self._update(key, state="running", integrate=stage, commit=res["commit"], started=self.hub.now(),
+                     pid=run["p"].pid, pid_start=_proc_start(run["p"].pid),
+                     note="in its Unity stage: the integrator builds and plays it on the main folder")
+
+    def _unstage(self, item, why, tree=None, requeue=True):
+        """Back a Unity stage out whole (the landing and the integrator's commits after it) and let go of the Unity
+        lock; with `requeue`, it lands again as a recheck (its worker does not run again)."""
+        stage = item["integrate"]
+        repo = stage["repo"]
+        tidy_stage(repo, stage.get("dirty") or [], Path(stage.get("folder") or self.hub.home) /
+                   "{}-unity-leftovers.patch".format(item["key"].rsplit("#", 1)[-1]))
+        landing = {**stage, "tree": tree or stage.get("tree"), "sha": _git(repo, "rev-parse", "HEAD") or stage["sha"]}
+        err = undo_landing(landing, why)
+        if err:  # the lock stays, so nothing else lands on top until the owner looks
+            print("sb hub: could not undo the Unity stage of {}: {}".format(item["key"], err), file=sys.stderr,
+                  flush=True)
+            return
+        self.hub.unlock(unity_lock(repo), _landing_by(landing))
+        self._update(item["key"], drop=("integrate",))
+        if requeue and item["state"] in ("running", "recheck"):
+            self._update(item["key"], state="recheck", recheck_at=self.hub.now(), pid=None, pid_start=None,
+                         note=why + ": backed out, it lands again")
 
     def _recover(self, item):
         """A `running` item this hub did not start (it restarted). When its worker still runs, it is waited for
@@ -3803,7 +3987,9 @@ class Supervisor:
                 inst = dict(self.hub._data["installed"].get(item.get("runner")) or {})
             self.procs[item["key"]] = {"p": _Adopted(pid, started if sure else None), "t": None, "adopted": True,
                                        "agent": item.get("runner"), "inst": inst, "base": item.get("base_sha"),
-                                       "first_base": item.get("first_base"), "log": item.get("log"), "start": item.get("log_start") or 0, "alone": False,
+                                       "first_base": item.get("first_base"),
+                                       "log": (item.get("integrate") or {}).get("log") or item.get("log"),
+                                       "start": 0 if item.get("integrate") else item.get("log_start") or 0, "alone": False,
                                        "tree": item.get("tree"), "branch": item.get("branch"), "folder": item.get("run")}
             self._update(item["key"], note="running on {}, started before the hub restarted".format(item.get("runner")))
             return
@@ -3824,7 +4010,11 @@ class Supervisor:
                           + ("the ticket is no longer open" if found else "the tickets could not be read to check it"))
                 return
             run["t"] = row
-        res = self.runner.finish(item, run, over)
+        if item.get("integrate"):  # its Unity stage ended: judged on the integrator's verdict and the checks
+            res = self.runner.integrated(item, run, over)
+            self._update(key, drop=("integrate",))
+        else:
+            res = self.runner.finish(item, run, over)
         self._add_spend(item, run, res, over)
         if not over:
             self._update(key, checks=res["checks"])
@@ -4448,7 +4638,7 @@ class Supervisor:
                     continue  # a blocker is queued ahead of it: it waits for it (one that landed does not hold it)
                 model = (item.get("model") if item.get("tries") or item.get("model") else
                          inst.get("model") if inst.get("kind") == "agy" else t.get("tier") or "sonnet")
-                if parallel(t["repo"]) > 1:  # its own worktree; a later try keeps the one it had
+                if parallel(t["repo"]) > 1 or is_unity(t["repo"]):  # its own worktree; a later try keeps it
                     tree, branch = ((item["tree"], item["branch"]) if item.get("tree") and item.get("branch")
                                     else tree_of(self.hub.home, t["repo"], t["map"], t["num"]))
                     paths = list(t.get("paths") or [])
