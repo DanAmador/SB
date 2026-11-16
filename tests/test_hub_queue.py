@@ -439,6 +439,18 @@ class TicketActionTest(unittest.TestCase):
         self.h.ticket_action("checks", "repo/one#1", "true; echo ok")
         self.assertEqual(self.row(2)["checks"], ["true", "echo ok"])
 
+    def test_an_answer_from_the_page_is_the_tickets_ruling_and_takes_it_off_the_owners_list(self):
+        self.sb("new", "repo/one", "--title", "Which look", "--why", "Because.", "--type", "grilling", "--option", "Badges",
+                "--option", "Text", "--default", "2", "--no-sync", "--not-a-duplicate")
+        self.h.tickets(fresh=True)
+        num = max(r["num"] for r in self.h.tickets() if r["map"] == "repo/one")
+        self.assertEqual(self.row(num)["state"], "waits for you")
+        with self.assertRaisesRegex(ValueError, "type a line first"):
+            self.h.ticket_action("rule", "repo/one#{}".format(num), "  ")
+        self.h.ticket_action("rule", "repo/one#{}".format(num), "Text")
+        self.assertEqual((self.row(num)["ruling"], self.row(num)["state"]), ("Text", "not ready"))
+        self.assertIn("R: Text (the owner's ruling)", self.text(num))
+
     def test_done_when_files_and_what_it_comes_after_change_and_each_leaves_a_dated_comment(self):
         today = date.today().isoformat()
         self.h.ticket_action("done_when", "repo/one#1", "It works\nand is tested.")

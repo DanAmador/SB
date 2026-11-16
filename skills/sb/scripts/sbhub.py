@@ -1066,7 +1066,7 @@ class Hub:
         except KeyError:
             raise ValueError("no such ticket") from None
         words = " ".join(str(text or "").split())
-        if action in ("done", "drop", "comment", "checks", "tier", "done_when") and not words:
+        if action in ("done", "drop", "comment", "rule", "checks", "tier", "done_when") and not words:
             raise ValueError("type a line first")
         if action != "comment" and row is None:
             raise ValueError("the ticket is no longer open")
@@ -1086,6 +1086,8 @@ class Hub:
             if path is None:
                 raise ValueError("no such ticket")
             calls = [["comment", name, nnn, "--text", words]]
+        elif action == "rule":
+            calls = [["rule", name, nnn, "--text", words]]
         elif action == "tier":
             calls = [["set", name, nnn, "tier=" + words]]
         elif action in STEER:
@@ -1113,11 +1115,28 @@ class Hub:
         return {"ok": True}
 
     def recheck_now(self, key):
-        """The Recheck button: the ticket's checks run again at the next tick, and the count starts over."""
+        """The Recheck button: the ticket's checks run again at the next tick, and the count starts over. Also Land
+        again: a failed run whose commit waits in its kept worktree goes back to its checks on the kept commit, so
+        it is rebased, checked, landed and reviewed without its worker running again."""
         with self._lock:
-            item = next((i for i in self._data["queue"]["items"] if i["key"] == key and i["state"] == "recheck"), None)
+            item = next((dict(i) for i in self._data["queue"]["items"]
+                         if i["key"] == key and (i["state"] == "recheck" or landing_failed(i))), None)
+        if item is None:
+            raise ValueError("its checks are not waiting to be run again")
+        if item["state"] != "recheck":  # a failed run let go of its ticket: the hub holds it again, so the review can close it
+            name, _, num = key.rpartition("#")
+            rc, out, err = sbmap_call("claim", name, "{:03d}".format(int(num)), "--by", "hub " + str(item.get("runner") or "land-again"))
+            if rc != 0:
+                raise ValueError("could not take the ticket back: " + (err or out).strip())
+            self.tickets(fresh=True)
+        with self._lock:
+            item = next((i for i in self._data["queue"]["items"]
+                         if i["key"] == key and (i["state"] == "recheck" or landing_failed(i))), None)
             if item is None:
                 raise ValueError("its checks are not waiting to be run again")
+            if item["state"] != "recheck":
+                item.update(state="recheck", checked=None, ended=None, review=None, verdict=None,
+                            note="lands again: its checks run on the commit it kept")
             item.update(recheck_at=0, rechecks=0)
             self._data["queue"]["version"] += 1
             self._save()
@@ -1337,7 +1356,7 @@ def hub_checks_section(passed, reason, sha, checks, report_text, stamp):
     return "\n".join(lines)
 
 
-TICKET_ACTIONS = ("done", "drop", "release", "comment", "tier", "checks", "recheck", "done_when", "paths", "after")
+TICKET_ACTIONS = ("done", "drop", "release", "comment", "rule", "tier", "checks", "recheck", "done_when", "paths", "after")
 # the steering fields: action -> (what the comment calls it, the ticket row's key for its old value)
 STEER = {"done_when": ("Done when", "done_when"), "paths": ("files", "paths"), "after": ("what it comes after", "blocked_by")}
 
@@ -1828,6 +1847,13 @@ def make_tree(repo, tree, branch, base):
     Path(tree).parent.mkdir(parents=True, exist_ok=True)
     rc, out, err = _git_run(repo, "worktree", "add", "--quiet", "-B", branch, tree, base)
     return None if rc == 0 else (err or out or "git worktree add failed")
+
+
+def landing_failed(item):
+    """A failed ticket run whose commit waits in its kept worktree (it could not land, or a check of it failed or
+    broke): Land again checks it once more and lands it, without its worker running again."""
+    return (item.get("kind") == "ticket" and item.get("state") == "failed" and bool(item.get("tree"))
+            and bool(item.get("commit")) and Path(item["tree"]).is_dir())
 
 
 def drop_tree(repo, tree, branch):

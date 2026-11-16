@@ -16,6 +16,7 @@
       "map_order": 1,
       "map_title": "One",
       "num": 2,
+      "options": [],
       "out": "",
       "paths": [
         "two/"
@@ -25,6 +26,7 @@
       "queued": true,
       "reason": "ready",
       "repo": "/fixture/repo",
+      "ruling": null,
       "state": "ready",
       "status": "open",
       "tier": "sonnet",
@@ -48,6 +50,7 @@
       "map_order": 2,
       "map_title": "One",
       "num": 3,
+      "options": [],
       "out": "",
       "paths": [
         "three/"
@@ -57,6 +60,7 @@
       "queued": true,
       "reason": "ready",
       "repo": "/fixture/repo",
+      "ruling": null,
       "state": "ready",
       "status": "open",
       "tier": "sonnet",
@@ -80,6 +84,7 @@
       "map_order": 3,
       "map_title": "One",
       "num": 4,
+      "options": [],
       "out": "",
       "paths": [
         "four/"
@@ -89,6 +94,7 @@
       "queued": false,
       "reason": "ready",
       "repo": "/fixture/repo",
+      "ruling": null,
       "state": "ready",
       "status": "open",
       "tier": "sonnet",
@@ -112,6 +118,7 @@
       "map_order": 0,
       "map_title": "Two",
       "num": 5,
+      "options": [],
       "out": "",
       "paths": [
         "five/"
@@ -121,6 +128,7 @@
       "queued": true,
       "reason": "ready",
       "repo": "/fixture/repo",
+      "ruling": null,
       "state": "ready",
       "status": "open",
       "tier": "sonnet",
@@ -144,6 +152,7 @@
       "map_order": 1,
       "map_title": "Two",
       "num": 6,
+      "options": [],
       "out": "",
       "paths": [
         "five/"
@@ -153,6 +162,7 @@
       "queued": true,
       "reason": "ready",
       "repo": "/fixture/repo",
+      "ruling": null,
       "state": "ready",
       "status": "open",
       "tier": "sonnet",
@@ -176,6 +186,16 @@
       "map_order": 2,
       "map_title": "Two",
       "num": 7,
+      "options": [
+        {
+          "recommended": true,
+          "text": "Yes"
+        },
+        {
+          "recommended": false,
+          "text": "No"
+        }
+      ],
       "out": "",
       "paths": [],
       "priority": "C",
@@ -183,6 +203,7 @@
       "queued": false,
       "reason": "a grilling ticket needs you",
       "repo": "/fixture/repo",
+      "ruling": null,
       "state": "waits for you",
       "status": "open",
       "tier": "sonnet",

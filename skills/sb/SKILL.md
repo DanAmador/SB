@@ -20,7 +20,7 @@ reads the vault, not the chat: results are written there, and chat only points a
   session; what to report, ask and lock there: [hub.md](reference/hub.md).
 - **Notes written by hand** (handoffs, reports, research): load `obsidian-markdown` first;
   `obsidian-bases` before editing a `.base`; `obsidian-cli` for vault reads sbmap lacks.
-- **Ticket types:** `task` (one commit, ~1.5 h), `grilling` (a talk with the owner), `research`
+- **Ticket types:** `task` (one commit, ~1.5 h), `grilling` (a talk with the owner: `--option`s and a `--default`, answered with `sbmap rule`), `research`
   (a subagent spike into `<map>/research/`), `prototype` (throwaway code), `architecture` (a
   structure, drawn in mermaid: [architecture.md](reference/architecture.md)).
 

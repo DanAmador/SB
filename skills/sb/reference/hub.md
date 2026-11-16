@@ -80,7 +80,7 @@ filters (project, map, text) kept in the page link. Columns:
 
 | column | holds |
 |---|---|
-| Needs you | open questions, sessions that need you, signed-out accounts, grilling and architecture tickets |
+| Needs you | open questions, sessions that need you, signed-out accounts, grilling and architecture tickets (their options as buttons, the recommended one filled, and a line for your own answer) |
 | Ready | what can be queued, by project then map; the rest of the open tickets folded underneath |
 | Queued | tonight's order: drag to reorder, drag back to Ready to untick (or a card's menu) |
 | Running | queue workers and the sessions you run by hand ("yours"), each with its latest step |

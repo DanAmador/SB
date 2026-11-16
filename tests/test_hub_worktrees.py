@@ -103,6 +103,31 @@ class WorktreeTest(RunnerCase):
         self.assertEqual(self.open_tickets()[1]["status"], "open")
         self.assertEqual(git(Path(item["tree"]), "status", "--porcelain"), "")  # no rebase left half done
 
+    def test_a_run_a_stale_git_lock_kept_from_landing_lands_again_without_its_worker(self):
+        self.modes = {"repo/one#2": "slow"}  # keeps the night going a while, so the failed run stays on the line
+        os.environ["FAKE_WORKER_SLEEP"] = "6"
+        self.hub.queue_set(["repo/one#1", "repo/one#2"], self.hub.state()["queue"]["version"])
+        self.hub.queue_item_agent("repo/one#2", "spare")
+        lock = self.repo / ".git" / "index.lock"
+        lock.write_text("")  # a git command that crashed long ago left its lock
+        self.hub.queue_pause(False)
+        self.until(lambda: self.state_of("repo/one#1") == "failed")
+        item = self.items()["repo/one#1"]
+        self.assertTrue(item["note"].startswith("could not land"))
+        self.assertTrue(Path(item["tree"]).is_dir())
+        workers = len(self.launched)
+        with self.assertRaisesRegex(ValueError, "not waiting"):
+            self.hub.recheck_now("repo/one#2")  # running, not failed
+        lock.unlink()
+        self.hub.ticket_action("recheck", "repo/one#1")
+        self.assertEqual(self.state_of("repo/one#1"), "recheck")
+        self.until(lambda: self.state_of("repo/one#1") in ("done", "skipped", "failed"), timeout=60)
+        self.assertEqual(self.state_of("repo/one#1"), "done")  # reviewed and closed: the hub held its ticket again
+        self.assertNotIn(1, self.open_tickets())
+        self.assertEqual(len(self.launched), workers)  # the worker did not run again; only the review did
+        git(self.repo, "merge-base", "--is-ancestor", self.items()["repo/one#1"]["commit"], "HEAD")
+        self.assertNotIn(item["tree"], self.trees())
+
     def test_a_worktree_worker_that_outlived_its_hub_is_judged_and_landed_by_the_next_one(self):
         self.modes = {"repo/one#1": "slow"}
         os.environ["FAKE_WORKER_SLEEP"] = "1.5"

@@ -45,6 +45,8 @@ Bases see the whole route. It answers what an agent should never compute or type
     sbmap.py new      <map> --title "<sentence>" --why "<plain words: the problem and what changes>"
                             [--type task] [--priority S..F|high|normal|low]
                             [--question "..."] [--done-when "..."] [--out "<what this ticket leaves alone>"]
+                            [--option "<choice>" ... --default <N>]   (grilling and architecture need
+                                        two options or more, one of them the ➡️ default)
                             [--blocked-by 622,623] [--paths src/a.py,docs/] [--comments "..."] [--no-sync]
                             [--said "<the owner's exact words, dated and quoted at the top>"]
                             [--not-a-duplicate]
@@ -56,7 +58,11 @@ Bases see the whole route. It answers what an agent should never compute or type
                                         an owner quote (--said) already there stays
     sbmap.py comment  <map> <NNN> --text "<ruling or comment>"
                                         appends dated entry to ## Comments
-    sbmap.py set      <map> <NNN> key=value ... [--no-sync]
+    sbmap.py rule     <map> <NNN> [--pick <N>] [--text "<the owner's own words>"]
+                                        the owner's answer to a decision ticket: option N of its
+                                        ## Options, their words, or both; stored as `ruling` and an R: comment
+    sbmap.py set      <map> <NNN> key=value ... [--no-sync]   (question=, options= and done_when= write
+                                        those sections; options= one a line, the recommended one ➡️)
                                         ticket properties (status, type, claimed_by, ...)
     sbmap.py mapset   <map> key=value ...
                                         map properties (checks="cmd one; cmd two"); `set` also takes
@@ -152,7 +158,7 @@ SHAPES = {  # mermaid node shape per ticket type
     "architecture": ('{{"', '"}}'),
 }
 TICKET_KEYS = ["wayfinder", "operonId", "number", "title", "why", "project", "aliases", "status", "type",
-               "priority", "tier", "check", "created", "filed_during", "completed", "review", "review_note",
+               "priority", "tier", "check", "ruling", "created", "filed_during", "completed", "review", "review_note",
                "map", "blocked_by", "claimed_by",
                "paths", "repo", "commit", "ref", "pr", "github", "tags"]
 MAP_KEYS = ["wayfinder", "project", "status", "aliases", "repo", "github", "tags"]
@@ -546,6 +552,34 @@ def opt(args, name, default=None):
         if idx + 1 < len(args):
             return args[idx + 1]
     return default
+
+
+def opt_all(args, name):
+    """Every value given for a repeatable flag, in order."""
+    return [args[i + 1] for i, a in enumerate(args[:-1]) if a == name]
+
+
+DECIDES = ("grilling", "architecture")  # ticket types the owner answers
+PICK = "➡️"
+
+
+def options_of(body):
+    """The `## Options` list of a ticket body: [{text, recommended}], the ➡️ one recommended."""
+    out = []
+    for line in sections(body).get("Options", "").splitlines():
+        item = re.match(r"\s*(?:[-*]|\d+[.)])\s+(.*\S)", line)
+        if item:
+            text = item.group(1)
+            out.append({"text": text.removeprefix(PICK).strip(), "recommended": text.startswith(PICK)})
+        elif line.strip() and out:  # a wrapped line continues the option above
+            out[-1]["text"] += " " + line.strip()
+    return out
+
+
+def options_md(options, default):
+    """The `## Options` list, option `default` (1-based) marked ➡️."""
+    return "\n".join(f"- {PICK + ' ' if i == default else ''}{o.removeprefix(PICK).strip()}"
+                      for i, o in enumerate(options, 1))
 
 
 def owner_quote(args):
@@ -1296,6 +1330,12 @@ def cmd_new(args):
     question = opt(args, "--question", "")
     done_when = opt(args, "--done-when", "")
     comments = opt(args, "--comments", "") or opt(args, "--ruling", "")
+    options = opt_all(args, "--option")
+    marked = [i for i, o in enumerate(options, 1) if o.startswith(PICK)]
+    default = int(opt(args, "--default") or (marked[0] if marked else 0))
+    if type_ in DECIDES and (len(options) < 2 or not 1 <= default <= len(options)):
+        sys.exit(f"sbmap: a {type_} ticket is a question the owner answers from the hub: give two --option or more "
+                 f"and --default <N>, the one you recommend")
     same = [] if "--not-a-duplicate" in args else look_alikes(m, title, why)
     if same:
         lines = "\n".join(f"  {rel(t.path)}  ({c:.2f})  {t.title}" for c, t in same[:5])
@@ -1315,7 +1355,9 @@ def cmd_new(args):
     dw_text = done_when.replace("\\n", "\n").strip() if done_when else ""
     body = owner_quote(args)
     body += f"## Not this ticket\n\n{out.strip()}\n\n" if out.strip() else ""
-    body += f"## Question\n\n{q_text}\n\n## Done when\n\n{dw_text}\n\n## Comments\n"
+    body += f"## Question\n\n{q_text}\n\n"
+    body += f"## Options\n\n{options_md(options, default)}\n\n" if options else ""
+    body += f"## Done when\n\n{dw_text}\n\n## Comments\n"
     if comments:
         c_text = comments.replace("\\n", "\n").strip()
         body += f"\n- **{date.today().isoformat()}**: {c_text}\n"
@@ -1345,6 +1387,25 @@ def cmd_comment(args):
         body = body.rstrip() + f"\n\n## Comments\n\n{entry}\n"
     t.save(t.props, body)
     print(f"added comment to {t.id}")
+
+
+def cmd_rule(args):
+    """The owner's answer to a decision ticket: an option of its list (--pick N), their own words (--text), or both."""
+    m = load(args[0])
+    t = m.ticket(args[1])
+    options = options_of(t.body)
+    pick, words = opt(args, "--pick"), " ".join((opt(args, "--text") or "").split())
+    if pick is not None and not (pick.isdigit() and 1 <= int(pick) <= len(options)):
+        sys.exit(f"sbmap: --pick takes 1 to {len(options)}: the ticket's options" if options else
+                 "sbmap: this ticket lists no options; answer with --text")
+    chosen = options[int(pick) - 1]["text"] if pick else ""
+    ruling = f"{chosen} {words}".strip() if chosen and words else chosen or words
+    if not ruling:
+        sys.exit("sbmap: give --pick <N>, --text, or both")
+    props = dict(t.props)
+    props["ruling"] = ruling
+    t.save(props)
+    cmd_comment([args[0], args[1], "--text", f"R: {ruling} (the owner's ruling)"])
 
 
 SPEND_ADD = ("run_minutes", "check_minutes", "tries", "tokens_in", "tokens_out", "cache_read", "cost_usd")
@@ -1405,8 +1466,21 @@ def cmd_set(args):
     body = None
     for kv in kv_args:
         k, _, v = kv.partition("=")
-        if k == "done_when":
-            body = replace_section(body if body is not None else t.body, "Done when", v.replace("\\n", "\n").strip())
+        if k in ("done_when", "question", "options"):
+            text = v.replace("\\n", "\n").strip()
+            if k == "options":  # one option a line, the recommended one starting with ➡️
+                lines = [o.strip().lstrip("-* ").strip() for o in text.splitlines() if o.strip()]
+                picks = [i for i, o in enumerate(lines, 1) if o.startswith(PICK)]
+                if len(lines) < 2 or len(picks) != 1:
+                    sys.exit("sbmap: options= takes two options or more, one a line, exactly one starting with ➡️")
+                text = options_md(lines, picks[0])
+            name = {"done_when": "Done when", "question": "Question", "options": "Options"}[k]
+            body = replace_section(body if body is not None else t.body, name, text)
+            if k == "options" and "## Options" not in t.body and "## Done when" in body:  # keep Options above Done when
+                sec = re.search(r"^## Options[ \t]*\n.*?(?=^## |\Z)", body, re.M | re.S)
+                body = body[:sec.start()] + body[sec.end():]
+                at = re.search(r"^## Done when", body, re.M).start()
+                body = body[:at] + sec.group(0).rstrip() + "\n\n" + body[at:]
             continue
         if k == "status":
             wf_stat = OPERON_TO_WF_STATUS.get(v.lower(), v.lower())
@@ -2661,6 +2735,7 @@ def cmd_tickets(args):
                 "check": str(t.props.get("check") or "tests"),
                 "has_done_when": bool(sec.get("Done when")), "done_when": sec.get("Done when", ""),
                 "question": sec.get("Question", ""), "out": sec.get("Not this ticket", ""),
+                "options": options_of(t.body), "ruling": str(t.props.get("ruling") or "") or None,
                 "checks": checks, "checks_from": checks_from if checks else "",
                 "repo": str(m.props.get("repo", "")), "file": str(t.path),
                 "map_title": m.title, "map_order": i, "claimed_by": t.claimed_by or None})
@@ -2670,7 +2745,7 @@ def cmd_tickets(args):
 COMMANDS = {"info": cmd_info, "maps": cmd_maps, "status": cmd_status, "frontier": cmd_frontier, "lanes": cmd_lanes, "show": cmd_show,
             "next": cmd_next, "mapset": cmd_mapset, "tickets": cmd_tickets, "link": cmd_link, "uri": cmd_uri, "check": cmd_check, "verify": cmd_verify,
             "init": cmd_init, "summary": cmd_summary, "new": cmd_new, "set": cmd_set, "claim": cmd_claim,
-            "comment": cmd_comment, "spend": cmd_spend, "ruling": cmd_comment, "block": cmd_block, "move": cmd_move,
+            "comment": cmd_comment, "rule": cmd_rule, "spend": cmd_spend, "ruling": cmd_comment, "block": cmd_block, "move": cmd_move,
             "resolve": cmd_resolve, "diagram": cmd_diagram, "board": cmd_board, "migrate": cmd_migrate,
             "close": cmd_close, "run": cmd_run, "wiki": cmd_wiki}
 

@@ -3,13 +3,17 @@
  * pictures, Looks good), then tickets that wait for a decision, then accounts and widgets in trouble.
  */
 import { IconAlertTriangle, IconBan, IconCheck, IconChecks, IconCircleCheck, IconExternalLink, IconGitCommit, IconLock, IconRefresh, IconX } from "@tabler/icons-react";
+import { useState } from "react";
 import type * as React from "react";
 import type { QueueItem, TicketRow } from "@sb-hub/contract";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { IN_WIDGET, READONLY } from "@/lib/api.ts";
 import { ago, canTickAgain, folder, hm, itemProject, itemTitle, mapTitle, plainReason, projOf, seenKey, tkey, type Waits } from "@/lib/board.ts";
 import { cn } from "@/lib/utils";
 import { setLink } from "@/lib/link.ts";
 import { say } from "@/lib/notice.ts";
+import { Markdown } from "./Markdown.tsx";
 import { QuestionCard } from "./QuestionCard.tsx";
 import { Checks, Empty, FileLinks, Fold, MapName, Pictures, SectionTitle, TicketTitle, ToneIcon } from "./bits.tsx";
 import { useBoard } from "./context.tsx";
@@ -175,10 +179,24 @@ function RunLine({ i }: { i: QueueItem }): React.JSX.Element {
               Looks good
             </Button>
           )}
-          {!done && again && (
+          {landAgain(i) && (
             <Button
               size="xs"
               variant="brand"
+              disabled={down || busy}
+              title="Its work is kept: rebase it, run its checks, land it and review it, without running the worker again"
+              onClick={() => {
+                void writes.ticket("recheck", { key: i.key }, "It lands again: its checks run now.").then(say);
+              }}
+            >
+              <IconGitCommit aria-hidden />
+              Land again
+            </Button>
+          )}
+          {!done && again && (
+            <Button
+              size="xs"
+              variant={landAgain(i) ? "outline" : "brand"}
               disabled={down || busy}
               onClick={() => {
                 void enqueue(i.key);
@@ -212,10 +230,26 @@ function RunLine({ i }: { i: QueueItem }): React.JSX.Element {
   );
 }
 
+/** A failed run whose commit waits in its kept worktree (the hub checks the worktree is there): it could not land, or a check broke. */
+const landAgain = (i: QueueItem): boolean => i.kind === "ticket" && i.state === "failed" && Boolean(i.tree) && Boolean(i.commit);
+
+/** One decision ticket: its question, its options as buttons (the recommended one filled), and a line for the owner's own answer. */
 function DecideLine({ t }: { t: TicketRow }): React.JSX.Element {
+  const { writes, down } = useBoard();
+  const [sending, setSending] = useState<string | null>(null);
+  const [own, setOwn] = useState("");
+  const options = t.options ?? [];
+  const off = down || sending !== null || (READONLY && !IN_WIDGET);
+  const rule = async (text: string): Promise<void> => {
+    setSending(text);
+    const out = await writes.ticket("rule", { key: tkey(t), text }, "Answer saved on the ticket.");
+    setSending(null);
+    say(out);
+    if (out.ok) setOwn("");
+  };
   return (
-    <li className="flex items-center gap-3 px-4 py-2.5">
-      <div className="min-w-0 flex-1">
+    <li className="flex flex-col gap-2 px-4 py-2.5">
+      <div className="min-w-0">
         <div className="flex items-center gap-1">
           <TicketTitle itemKey={tkey(t)} links={t.links} className="truncate">
             {t.title}
@@ -227,6 +261,49 @@ function DecideLine({ t }: { t: TicketRow }): React.JSX.Element {
           {` · ${t.type}`}
         </p>
       </div>
+      {options.length > 0 && (
+        <>
+          {t.question !== "" && <Markdown text={t.question} className="text-sm text-muted-foreground" />}
+          <div role="group" aria-label="Options" className="flex flex-col gap-1.5">
+            {options.map((o) => (
+              <Button
+                key={o.text}
+                size="xs"
+                variant={o.recommended ? "default" : "outline"}
+                disabled={off}
+                className="h-auto min-h-7 justify-start py-1 text-left whitespace-normal"
+                onClick={() => {
+                  void rule(o.text);
+                }}
+              >
+                {sending === o.text ? "Saving…" : o.text}
+                {o.recommended && <span className="shrink-0 font-normal opacity-70">· recommended</span>}
+              </Button>
+            ))}
+          </div>
+          <form
+            className="flex gap-1.5"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (own.trim()) void rule(own.trim());
+            }}
+          >
+            <Input
+              value={own}
+              onChange={(e) => {
+                setOwn(e.target.value);
+              }}
+              placeholder="Or answer in your own words"
+              aria-label={`Your own answer to: ${t.title}`}
+              disabled={off}
+              className="h-7 min-w-0 flex-1 text-sm"
+            />
+            <Button type="submit" size="xs" variant="outline" disabled={off || !own.trim()}>
+              {sending === own.trim() && own.trim() ? "Saving…" : "Answer"}
+            </Button>
+          </form>
+        </>
+      )}
     </li>
   );
 }

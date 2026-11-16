@@ -87,7 +87,8 @@ class ContractFixturesTest(unittest.TestCase):
         for title in ("E", "F"):
             self.sb("new", "repo/two", "--title", title, "--why", "Because.", "--done-when", "It works.", "--paths", "five/",
                     "--no-sync")
-        self.sb("new", "repo/two", "--title", "G", "--why", "Because.", "--type", "grilling", "--no-sync")
+        self.sb("new", "repo/two", "--title", "G", "--why", "Because.", "--type", "grilling", "--option", "Yes",
+                "--option", "No", "--default", "1", "--no-sync")
         (self.vault / "wayfinder" / "repo" / "one" / "handoff.md").write_text(
             "---\ntitle: Handoff\n---\n# Handoff\n\nPick up at B.\n", encoding="utf-8")
         self.clock = Clock(START)

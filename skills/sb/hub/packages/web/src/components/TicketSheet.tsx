@@ -278,6 +278,7 @@ function RunningActions({ itemKey }: { itemKey: string }): React.JSX.Element {
 /** A ticket action: the button that picks it, what the confirmation says, and the yes button. */
 const ACTS: Readonly<Record<TicketAction, readonly [string, string, string]>> = {
   comment: ["Comment", "Add this comment", "Yes, add it"],
+  rule: ["Answer", "Save this as your answer", "Yes, answer"],
   done: ["Done", "Mark it done with this line", "Yes, mark it done"],
   drop: ["Drop", "Drop it, out of scope, with this reason", "Yes, drop it"],
   release: ["Release", "Release the claim: it goes back to open", "Yes, release it"],

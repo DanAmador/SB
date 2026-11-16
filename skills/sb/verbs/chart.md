@@ -19,6 +19,12 @@ later run alone. This replaces the wayfinder skill's *Chart the map*: load no ot
    - `--paths`: the files or folders it will change, when the code already says. `sbmap lanes` runs
      tickets with disjoint paths in parallel; a ticket without paths runs alone.
    - Structural decisions are `architecture` tickets.
+   - **A `grilling` or `architecture` ticket is a question the owner answers from the hub page.**
+     `--question` holds the context in 1–4 plain sentences ending with the question; each choice is an
+     `--option "<what the owner will see or get, effort>"` (2–4 of them), and `--default <N>` names
+     the one you recommend. sbmap refuses one without them. The owner's answer lands as `sbmap rule`
+     (the `ruling` property and an `R:` comment); a ruled ticket leaves the owner's list, and the
+     session that next charts the map files the work from it.
    - **One layer per ticket.** The hub's code and its contract in one ticket, the page that shows it in
      the next, `--blocked-by` the first. Tickets that edit the same file get a `--blocked-by` chain now,
      so they never meet at landing.
