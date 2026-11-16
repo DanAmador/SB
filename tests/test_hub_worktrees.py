@@ -246,7 +246,7 @@ with open(log, "a") as f:
                         "locks": locks, "at": time.time()}) + "\\n")
 modes = os.environ.get("FAKE_COMPILE", "pass").split(",")
 if modes[min(runs, len(modes) - 1)] == "fail":
-    print("Assets/One.cs(3,1): error CS1002: ; expected")
+    print("one/done.txt(3,1): error CS1002: ; expected")  # the ticket's own file: its try
     sys.exit(1)
 """
 
@@ -469,18 +469,19 @@ class BlameTest(RunnerCase):
         self.assertEqual(git(a["tree"], "merge-base", "--is-ancestor", revert, "HEAD"), "")
         self.assertEqual(self.hub.state()["locks"], {})
 
-    def test_a_blame_that_does_not_mend_the_build_is_undone_and_the_new_landing_is_backed_out(self):
+    def test_a_blame_that_does_not_mend_the_build_is_undone_and_the_new_landing_is_backed_out_and_held(self):
         os.environ["FAKE_COMPILE"] = "pass,sticky"  # the error stays whatever is backed out: A was not the cause
         self.sb("block", "repo/one", "2", "1")
         self.only(1, 2)
-        b = self.until(lambda: (self.items().get("repo/one#2") or {}).get("fails") and self.items()["repo/one#2"])
+        b = self.until(lambda: (self.items().get("repo/one#2") or {}).get("held") and self.items()["repo/one#2"])
         subjects = git(self.repo, "log", "--format=%s", "HEAD").splitlines()[:3]
         self.assertTrue(subjects[0].startswith("revert: back out feat: work"))  # B, backed out last
         self.assertTrue(subjects[1].startswith("revert: back out revert:"))  # A's back-out, undone
         self.assertTrue(subjects[2].startswith("revert: back out feat: work"))  # A's back-out
         self.assertTrue((self.repo / "one" / "done.txt").exists())  # A's work stays landed
         self.assertFalse((self.repo / "two" / "done.txt").exists())
-        self.assertIn("after landing, check failed", b["retry"])
+        self.assertIn(sbhub.HELD, b["note"])  # the error is not in B's files either: B waits, no try spent
+        self.assertFalse(b.get("fails"))
         self.assertEqual(self.items()["repo/one#1"].get("fails"), None)  # A was not queued again
 
     def test_a_ticket_whose_own_files_break_is_backed_out_itself_and_never_the_one_before(self):
@@ -532,8 +533,92 @@ class BlameTest(RunnerCase):
         self.assertIn("not judged; the last compile errors the hub saw were in done.txt (after repo/one#1",
                       a["note"].splitlines()[0])
 
+    def break_main(self):
+        """Someone's own commit (no ticket) leaves a file in the checkout that does not compile."""
+        os.environ["FAKE_COMPILE_BROKEN"] = "base/broken.txt"
+        (self.repo / "base").mkdir()
+        (self.repo / "base" / "broken.txt").write_text("x\n")
+        git(self.repo, "add", "base")
+        git(self.repo, "commit", "-q", "-m", "wip: a half-done edit")
+
+    def mend_main(self):
+        git(self.repo, "rm", "-q", "base/broken.txt")
+        git(self.repo, "commit", "-q", "-m", "fix: the half-done edit goes")
+
+    def test_a_compile_failing_outside_its_files_holds_it_with_no_try_and_it_lands_once_main_builds(self):
+        os.environ["FAKE_COMPILE"] = "broken"
+        self.break_main()
+        self.only(1)
+        a = self.until(lambda: (self.items().get("repo/one#1") or {}).get("held") and self.items()["repo/one#1"])
+        self.assertEqual(a["state"], "recheck")
+        self.assertIsNone(a.get("recheck_at"))
+        self.assertFalse(a.get("fails"))  # not its try
+        self.assertIn(sbhub.HELD + " (base/broken.txt)", a["note"])
+        self.assertIn("no try spent", a["note"])
+        self.assertEqual(len(self.reverts()), 1)  # its landing is backed out, its work kept on its branch
+        held = self.build()["held"]
+        self.assertEqual((held["files"], held["after"]), (["base/broken.txt"], True))
+        # the repo starts nothing new while it does not build
+        self.hub.queue_set(["repo/one#2"], self.hub.state()["queue"]["version"])
+        self.until(lambda: (self.items()["repo/one#2"].get("waits") or {}).get("kind") == "build")
+        self.assertEqual(self.state_of("repo/one#2"), "queued")
+        self.assertEqual(len(self.launched), 1)
+        # mended by hand: the check runs again on the new commit, passes, and A lands without its worker
+        self.mend_main()
+        self.until(lambda: self.state_of("repo/one#1") in ("landed", "done") and self.state_of("repo/one#2") != "queued")
+        a = self.items()["repo/one#1"]
+        self.assertFalse(a.get("fails"))
+        self.assertIsNone(a.get("held"))
+        self.assertTrue((self.repo / "one" / "done.txt").exists())
+        self.assertNotIn("held", self.build())
+        self.assertEqual(sum(1 for l in self.launched if "repo/one/001" in l["brief"]), 1)  # A's worker ran once
+
+    def test_a_compile_failing_in_its_own_files_is_its_try_and_the_repo_is_not_held(self):
+        os.environ["FAKE_COMPILE"] = "broken"
+        self.only(1)
+        a = self.until(lambda: (self.items().get("repo/one#1") or {}).get("fails") and self.items()["repo/one#1"])
+        self.assertIsNone(a.get("held"))
+        self.assertIn("## This is try 2", self.launched[-1]["brief"] if len(self.launched) > 1 else "## This is try 2")
+        self.assertNotIn("held", self.build())
+
+    def test_a_check_before_landing_failing_outside_its_files_holds_it_until_main_builds(self):
+        (self.repo / ".sb" / "checks").write_text("python3 .sb/checks-compile.py\n")  # runs in its worktree
+        git(self.repo, "commit", "-q", "-am", "checks before landing")
+        os.environ["FAKE_COMPILE"] = "broken"
+        self.break_main()
+        self.only(1)
+        a = self.until(lambda: (self.items().get("repo/one#1") or {}).get("held") and self.items()["repo/one#1"])
+        self.assertFalse(a.get("fails"))
+        self.assertEqual(self.reverts(), [])  # it never landed
+        self.assertFalse(self.build()["held"]["after"])
+        self.mend_main()
+        self.until(lambda: self.state_of("repo/one#1") in ("landed", "done"))
+        self.assertTrue((self.repo / "one" / "done.txt").exists())
+        self.assertFalse(self.items()["repo/one#1"].get("fails"))
+
     def compiles(self):
         return [json.loads(l) for l in self.log.read_text().splitlines()] if self.log.exists() else []
+
+
+class BrokenElsewhereTest(unittest.TestCase):
+    """Real data: sk4te's 05:28 break on 2026-11-16. 1179 (the fit checker's speed-up) landed FitMemoryTests.cs
+    without `using Sk4te.PlayerCore;`; 1178, changing three other files, then failed on its errors."""
+    OUT = ("check failed: python3 .sb/checks-compile.py\ncompile errors:\n"
+           "Assets/Tests/EditMode/FitMemoryTests.cs(54,57): error CS0103: The name 'PlayerStat' does not exist in the "
+           "current context\nAssets/Tests/EditMode/FitMemoryTests.cs(69,57): error CS0103: The name 'PlayerStat' does "
+           "not exist in the current context")
+
+    def test_the_ticket_after_the_break_is_not_to_blame(self):
+        changed_1178 = ["Assets/Scripts/PlayerCore/Items/Fit.Bare.cs", "Assets/Scripts/PlayerCore/Items/ModuleValidation.cs",
+                        "Assets/Tests/EditMode/FitBareTests.cs"]
+        self.assertEqual(sbhub.broken_elsewhere(self.OUT, changed_1178), ["Assets/Tests/EditMode/FitMemoryTests.cs"])
+        self.assertEqual(sbhub._failed_cmd(self.OUT), "python3 .sb/checks-compile.py")
+
+    def test_the_ticket_that_wrote_the_file_is(self):
+        self.assertEqual(sbhub.broken_elsewhere(self.OUT, ["Assets/Tests/EditMode/FitMemoryTests.cs"]), [])
+
+    def test_a_failure_naming_no_file_is_the_tickets_own(self):
+        self.assertEqual(sbhub.broken_elsewhere("check failed: pytest\n3 failed", ["a.py"]), [])
 
 
 class LandingOfTest(unittest.TestCase):

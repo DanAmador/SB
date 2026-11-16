@@ -432,6 +432,10 @@ describe("brokenBuilds", () => {
     };
     expect(brokenBuilds(builds, title)).toEqual(["sk4te: the build is broken in HeldCostsEnergyTests.cs, since A held lash drains energy"]);
   });
+  it("says nothing new starts while a build broken outside any ticket holds its repo", () => {
+    const builds = { "/Users/x/sk4te": { errors_by: "sk4te/party-playtest#1178", held: { cmd: "python3 .sb/checks-compile.py", after: true, files: ["Assets/Tests/EditMode/FitMemoryTests.cs"], head: "abc", at: 1 } } };
+    expect(brokenBuilds(builds, title)).toEqual(["sk4te: the build is broken in FitMemoryTests.cs, since sk4te/party-playtest#1178; nothing new starts until it builds again"]);
+  });
   it("says nothing when no build is broken", () => {
     expect(brokenBuilds(undefined, title)).toEqual([]);
     expect(brokenBuilds({ "/r": { green: "abc" } }, title)).toEqual([]);

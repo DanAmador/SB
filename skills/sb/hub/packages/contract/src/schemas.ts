@@ -159,7 +159,7 @@ export type CheckRun = z.infer<typeof CheckRun>;
 
 /** What a queued item waits for. `with` names the ticket (files, after) or map (after) it waits on. */
 export const Waits = z.strictObject({
-  kind: z.enum(["files", "limit", "after", "account", "paused", "time"]),
+  kind: z.enum(["files", "limit", "after", "account", "paused", "time", "build"]),
   with: z.string().nullable(),
   text: z.string(),
 });
@@ -201,6 +201,8 @@ const itemFields = {
   recheck_at: Seconds.nullable().optional(),
   /** unclean: the checkout's files with unsaved changes that its work waits for. */
   blocking: z.array(z.string()).optional(),
+  /** recheck: the repo whose build is broken outside its files; it lands once that builds again (no try spent). */
+  held: z.string().nullable().optional(),
   /** When it last landed (checks passed): the review timer counts from it, across hub restarts. */
   landed_at: Seconds.optional(),
   media: z.array(z.string()).optional(),
@@ -287,13 +289,19 @@ export type RepoLoad = z.infer<typeof RepoLoad>;
 
 /** A repo's build as its after-landing checks last saw it: `green`, the newest commit whose checks passed; `errors`,
  * the last compile errors seen (by the landing of `errors_by`, at `errors_at`); `broken` while the checkout keeps a
- * landing that does not compile and could not be backed out. */
+ * landing that does not compile and could not be backed out; `held` while it does not build for a reason outside
+ * any ticket's files. */
 export const Build = z.strictObject({
   green: z.string().optional(),
   errors: z.array(z.string()).optional(),
   errors_by: z.string().nullable().optional(),
   errors_at: Seconds.optional(),
   broken: z.boolean().optional(),
+  /** While the build is broken outside any ticket's files: the check that failed, whether it runs after landing, the
+   * files it names, and the commit and time it last ran on. Its repo starts nothing new until it passes. */
+  held: z
+    .strictObject({ cmd: z.string(), after: z.boolean(), files: z.array(z.string()), head: z.string(), at: Seconds })
+    .optional(),
 });
 export type Build = z.infer<typeof Build>;
 

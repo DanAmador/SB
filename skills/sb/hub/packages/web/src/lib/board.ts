@@ -363,15 +363,18 @@ export function pageOf<T>(rows: readonly T[], page: number): { rows: T[]; page: 
 // ---- queue items ----
 
 /** A title, never a bare id: the ticket's own, else what the hub stored, else its map and number. */
-/** One line per repo whose checkout keeps a landing that does not compile and could not be backed out: "sk4te: the
- * build is broken in HeldCostsEnergyTests.cs, since <the ticket that broke it>". */
+/** One line per repo whose build is broken: "sk4te: the build is broken in HeldCostsEnergyTests.cs, since <the
+ * ticket that broke it>" while a landing that broke it could not be backed out, or "... nothing new starts until it
+ * builds again" while it is broken outside any ticket's files and holds its tickets. */
 export function brokenBuilds(builds: Readonly<Record<string, Build>> | undefined, title: (key: string) => string): string[] {
   return Object.entries(builds ?? {})
-    .filter(([, b]) => b.broken === true)
+    .filter(([, b]) => b.broken === true || b.held !== undefined)
     .map(([repo, b]) => {
-      const files = [...new Set((b.errors ?? []).map((e) => (e.split("(")[0] ?? e).split("/").pop() ?? e))];
+      const named = b.held?.files ?? (b.errors ?? []).map((e) => e.split("(")[0] ?? e);
+      const files = [...new Set(named.map((f) => f.split("/").pop() ?? f))];
       const since = b.errors_by ? `, since ${title(b.errors_by)}` : "";
-      return `${repo.split("/").pop() ?? repo}: the build is broken in ${files.length > 0 ? files.join(", ") : "files the hub could not name"}${since}`;
+      const held = b.held !== undefined && b.broken !== true ? "; nothing new starts until it builds again" : "";
+      return `${repo.split("/").pop() ?? repo}: the build is broken in ${files.length > 0 ? files.join(", ") : "files the hub could not name"}${since}${held}`;
     });
 }
 

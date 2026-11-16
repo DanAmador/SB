@@ -1901,6 +1901,11 @@ def log_spend(path, start=0):
 GIT_ENV = {**os.environ, "GIT_OPTIONAL_LOCKS": "0"}
 INDEX_LOCK_WAIT = 5
 UNDO_FAILED = "could NOT be backed out"
+# a check that fails only in files the ticket never touched: the build is broken by something else, so it is not
+# the ticket's try; the ticket waits (`held`), its repo starts nothing new, and the failing check runs again on the
+# checkout's newest commit when that moves or every HELD_EVERY seconds until it passes
+HELD = "the build is broken outside its files"
+HELD_EVERY = 5 * 60
 
 
 def _git(repo, *args):
@@ -2149,6 +2154,19 @@ def compile_errors(text):
     found = list(ERROR_LINE.finditer(text or ""))
     return (list(dict.fromkeys(m.group(1).strip() for m in found)),
             list(dict.fromkeys(m.group(0).strip() for m in found)))
+
+
+def broken_elsewhere(failed, changed):
+    """The files a failed check's compile errors name when none of them is one the ticket changed (`changed`): the
+    build is broken by something else. [] when they name a file of its own, or no file at all."""
+    files, _ = compile_errors(failed)
+    return files if files and not set(files) & set(changed) else []
+
+
+def _failed_cmd(failed):
+    """The command of a check failure in words ("check failed: <cmd>")."""
+    first = (failed or "").splitlines()[0] if failed else ""
+    return first.split(": ", 1)[1] if ": " in first else first
 
 
 def landing_of(repo, files, upto, since=None):
@@ -2728,6 +2746,13 @@ class TicketRun:
                 return False, "could not land: " + why, None, checks
             passed, reason, sha = sbqueue.verdict(first, tree, head, run=_recording(checks), report=report,
                                                     first_base=run.get("first_base"))
+            elsewhere = broken_elsewhere(reason, _git(tree, "diff", "--name-only", head, sha).split()) \
+                if passed is False and sha else []
+            if elsewhere:  # the newest commit it was rebased on does not build either: not this ticket's try
+                self.build_mark(t["repo"], errors=compile_errors(reason)[1], by=sbqueue.key(t), held={
+                    "cmd": _failed_cmd(reason), "after": False, "files": elsewhere, "head": head,
+                    "at": self.hub.now()})
+                return None, "{} ({}): {}".format(HELD, ", ".join(elsewhere[:3]), reason), sha, checks
             if not passed:
                 return passed, reason, sha, checks
             locked = after and sha and {"key": sbqueue.key(t), "repo": str(t["repo"]), "before": head, "sha": sha,
@@ -2788,6 +2813,7 @@ class TicketRun:
                 self.build_mark(repo, green=_git(repo, "rev-parse", "HEAD"))
                 return None
             files, lines = compile_errors(failed)
+            elsewhere = [] if failed.startswith(sbqueue.NOT_RUN) else broken_elsewhere(failed, changed.split())
             if failed.startswith(sbqueue.NOT_RUN):  # the board shows the first line: what was last known broken
                 head, _, rest = failed.partition("\n")
                 failed = "{}; {}\n{}".format(head, self.last_errors(repo), rest)
@@ -2804,6 +2830,10 @@ class TicketRun:
                     failed, Path(repo).name, landing["sha"][:9], err, unity_lock(repo))
                 threading.Thread(target=notify, daemon=True, args=("sb hub: needs you", "{}: the build is broken "
                                  "and {} could not be backed out".format(Path(repo).name, landing["key"]))).start()
+            elif elsewhere:  # backed out, its work kept on its branch: it lands again once the build is green
+                self.build_mark(repo, held={"cmd": _failed_cmd(failed), "after": True, "files": elsewhere,
+                                            "head": _git(repo, "rev-parse", "HEAD"), "at": self.hub.now()})
+                return None, "after landing, {} ({}): {}".format(HELD, ", ".join(elsewhere[:3]), why)
             return (None if failed.startswith(sbqueue.NOT_RUN) and not err else False), "after landing, " + why
         finally:
             if not keep:
@@ -2842,10 +2872,11 @@ class TicketRun:
         with self.hub._lock:
             return dict((self.hub._data["queue"].get("builds") or {}).get(str(repo)) or {})
 
-    def build_mark(self, repo, green=None, broken=None, errors=None, by=None):
+    def build_mark(self, repo, green=None, broken=None, errors=None, by=None, held=None):
         """What the hub knows of a repo's build: `green`, the newest commit whose after-landing checks passed (it
         clears the rest); `errors`, the last compile errors it saw, with the ticket and time; `broken` while the
-        checkout keeps a build that does not compile (the board says so)."""
+        checkout keeps a build that does not compile (the board says so); `held` while the build is broken outside
+        any ticket's files: {cmd, after, files, head, at}, the check that failed and where it last ran."""
         with self.hub._lock:
             q = self.hub._data["queue"]
             b = q.setdefault("builds", {}).setdefault(str(repo), {})
@@ -2856,8 +2887,37 @@ class TicketRun:
                 b.update(errors=list(errors)[:10], errors_by=by, errors_at=self.hub.now())
             if broken:
                 b["broken"] = True
+            if held:
+                b["held"] = held
             q["version"] += 1
             self.hub._save()
+
+    def check_main(self, repo, held, head):
+        """Whether the check that held `repo` passes on its newest commit `head` now: True, False, or None when it
+        could not run (the Unity lock is busy, or the tool did not answer). An after-landing check runs in the
+        checkout under the Unity lock; any other in a clean copy of `head`."""
+        if held.get("after"):
+            by = "sb-hub build check"
+            if not self.hub.lock(unity_lock(repo), by).get("ok"):
+                return None
+            try:
+                failed = sbqueue._run_checks([held["cmd"]], repo, subprocess.run, "")
+            finally:
+                self.hub.unlock(unity_lock(repo), by)
+        else:
+            d = sbqueue._clean_copy(repo, head, subprocess.run)
+            if d is None:
+                return None
+            try:
+                failed = sbqueue._run_checks([held["cmd"]], d, subprocess.run, "")
+            finally:
+                sbqueue._drop_clean_copy(repo, d, subprocess.run)
+        if failed and failed.startswith(sbqueue.NOT_RUN):
+            return None
+        if failed:
+            self.build_mark(repo, errors=compile_errors(failed)[1], by=self.build_of(repo).get("errors_by"),
+                            held={**held, "head": head, "at": self.hub.now()})
+        return not failed
 
     def last_errors(self, repo):
         """For a check that could not run, one line: not judged, and the last compile errors the hub saw in this repo
@@ -3142,6 +3202,7 @@ class Supervisor:
         self._close_off()
         self._settle_night(False)  # a night that stops starts nothing new
         if not self.stopped:
+            self._held_builds()
             self._rechecks()
             self._unclean()
             self._reviews()  # and one a recheck asked for starts at once
@@ -3604,6 +3665,11 @@ class Supervisor:
                 threading.Thread(target=notify, daemon=True, args=("sb hub: needs you", "{}: waiting for a clean "
                                  "checkout: save or clear {}".format(key, ", ".join(res["blocking"])))).start()
             return
+        if state == "recheck" and HELD in (res.get("note") or ""):  # not its try: it waits for a green build
+            self._update(key, state="recheck", ended=None, commit=res["commit"], pid=None, pid_start=None, started=None,
+                         rechecks=None, recheck_at=None, checked=None, held=item.get("repo"),
+                         note=res["note"] + "; it lands once the build is green again, with no try spent")
+            return
         if state == "recheck":
             again = item.get("state") == "recheck" or item.get("state") == "review" and item.get("rechecks") is not None
             n = (item.get("rechecks") or 0) + 1 if again else 0
@@ -3768,6 +3834,27 @@ class Supervisor:
             except Exception as e:  # tried again at the next due time, never failed for it
                 self._update(item["key"], recheck_at=self.hub.now() + RECHECK_EVERY,
                              note="the recheck did not run: {}: {}".format(type(e).__name__, e))
+
+    def _held_builds(self):
+        """A repo whose build is broken outside any ticket's files holds its tickets: the check that failed runs
+        again on the checkout's newest commit when that moved or every HELD_EVERY; once it passes the build is green
+        and every ticket it held lands again at once (a recheck, its worker not run), with no try spent."""
+        now = self.hub.now()
+        with self.hub._lock:
+            builds = {r: dict(b["held"]) for r, b in (self.hub._data["queue"].get("builds") or {}).items()
+                      if b.get("held")}
+        for repo, h in builds.items():
+            head = _git(repo, "rev-parse", "HEAD")
+            if not head or head == h.get("head") and now < (h.get("at") or 0) + HELD_EVERY:
+                continue
+            if self.runner.check_main(repo, h, head):
+                self.runner.build_mark(repo, green=head)
+        with self.hub._lock:
+            builds = self.hub._data["queue"].get("builds") or {}
+            free = [i["key"] for i in self.hub._data["queue"]["items"]
+                    if i.get("held") and not (builds.get(i["held"]) or {}).get("held")]
+        for key in free:
+            self._update(key, held=None, recheck_at=now, note="the build is green again: it lands now")
 
     def _unclean(self):
         """Each item waiting for a clean checkout whose blocking files are now saved or cleared (one git status on
@@ -4239,6 +4326,8 @@ class Supervisor:
                 repo = (t or {}).get("repo") or item.get("repo")
                 if repo in current and current[repo] != sbqueue.map_of(item["key"]):
                     continue  # an earlier map of its repo is not finished: it waits its map's turn
+                if ((q.get("builds") or {}).get(str(repo)) or {}).get("held"):
+                    continue  # its repo's build is broken outside any ticket: nothing new starts on it
                 if first.get(repo, item["key"]) != item["key"]:
                     continue  # a failed ticket its map waits on goes again before anything else of its repo
                 if t is not None and not room(t.get("repo"), t.get("paths")):
@@ -4333,6 +4422,10 @@ class Supervisor:
                     w = ("paused", None, "the queue is paused: nothing new starts")
                 elif (i.get("not_before") or 0) > now:
                     w = ("time", None, "starts at {}".format(_hm(i["not_before"])))
+                elif ((q.get("builds") or {}).get(str(repo)) or {}).get("held"):
+                    h = q["builds"][str(repo)]["held"]
+                    w = ("build", None, "{}'s build is broken in {}: nothing new starts until it builds again".format(
+                        Path(repo or "").name, ", ".join(Path(f).name for f in h.get("files") or []) or "files"))
                 elif t is not None and ahead(t):
                     w = ("after", ahead(t), "comes after {}, which has not landed".format(ahead(t)))
                 elif repo in current and current[repo] != sbqueue.map_of(i["key"]):
