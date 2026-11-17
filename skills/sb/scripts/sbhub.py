@@ -93,6 +93,7 @@ AGENT_FIELDS = ("name", "title", "asked", "project", "role", "parent", "ticket",
 ALERT_STATES = ("needs you", "blocked")
 SILENT_LIMIT = 86400
 ORPHAN_LOCK_LIMIT = 600
+SILENT_LOCK_LIMIT = 1800  # a lock whose holder has not reported this long is let go: a dead session held Unity 5 h
 NOTE_EVERY = 300  # hub-now.md is rewritten at most this often while something runs
 TRAIL_KEPT = 40  # actions kept per agent for the Sessions view
 TRAIL_LIMIT = 600  # an ended agent's trail goes this long after it ended
@@ -212,7 +213,10 @@ class Hub:
         for k, held in list(self._data["locks"].items()):
             if held.get("landing"):
                 continue  # the hub's own landing: it lets go when the landing ends, a restarted hub undoes it
-            if self._resolve(held["by"]) not in self._data["agents"] and now - held["at"] > ORPHAN_LOCK_LIMIT:
+            holder = self._data["agents"].get(self._resolve(held["by"]))
+            gone = holder is None and now - held["at"] > ORPHAN_LOCK_LIMIT
+            silent = holder is not None and now - max(holder.get("at", now), held["at"]) > SILENT_LOCK_LIMIT
+            if gone or silent:
                 del self._data["locks"][k]
                 changed = True
         messages = self._data["messages"]
