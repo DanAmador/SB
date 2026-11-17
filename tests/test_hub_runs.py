@@ -95,3 +95,44 @@ class RunsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StoppingNightTest(unittest.TestCase):
+    """A stopping night ends once nothing of it runs (the shape is a copy of the real night-20261117-014410)."""
+
+    def night(self):
+        # shape as ~/.sb-hub/state.json holds the stuck night: items stay on the line while it stops
+        real = {"id": "night-20261117-014410", "name": "Night of 2026-11-17, 01:44", "started": 1794876250.78,
+                "by": None, "state": "stopping", "ended": None, "how": None,
+                "not_reached": [{"key": "sk4te/chase#1034", "title": "A held weapon has weight"}]}
+        done = {"key": "sk4te/party-playtest#1056", "kind": "ticket", "agent": None, "state": "done", "note": "resolved",
+                "commit": "48219f64", "tries": 1, "started": 1794880412.7, "ended": 1794883111.4, "night": real["id"],
+                "runner": "assembio", "map": "sk4te/party-playtest"}
+        return real, [done, {**done, "key": "sk4te/party-playtest#1046", "state": "landed", "ended": None},
+                      {**done, "key": "sk4te/party-playtest#1047", "state": "running", "ended": None}]
+
+    def hub(self, items, home):
+        import sbhub
+        real, _ = self.night()
+        q = {"version": 3, "seeded": True, "paused": False, "agent": None, "night": real["id"], "items": items}
+        (home / "state.json").write_text(json.dumps({"queue": q, "nights": [real]}))
+        return sbhub.Hub(home, run=lambda: "[]")
+
+    def test_it_ends_once_its_last_running_ticket_ends(self):
+        with tempfile.TemporaryDirectory() as t:
+            _, items = self.night()
+            h = self.hub(items, Path(t))
+            self.assertEqual(h._data["nights"][0]["state"], "stopping")
+            with h._lock:
+                next(i for i in h._data["queue"]["items"] if i["state"] == "running").update(state="failed")
+                h._night_settle()
+            n = h._data["nights"][0]
+            self.assertEqual((n["state"], n["how"], h._data["queue"]["night"]), ("ended", "stopped", None))
+
+    def test_a_hub_started_with_a_stopping_night_and_nothing_running_ends_it(self):
+        with tempfile.TemporaryDirectory() as t:
+            _, items = self.night()
+            h = self.hub(items[:2], Path(t))  # one done, one landed (waits for a review that will not start)
+            n = h._data["nights"][0]
+            self.assertEqual((n["state"], n["how"], h._data["queue"]["night"]), ("ended", "stopped", None))
+            self.assertEqual(json.loads((Path(t) / "state.json").read_text())["nights"][0]["state"], "ended")

@@ -155,6 +155,8 @@ class Hub:
         self._sync_maps(self._data["queue"])  # a queue saved before maps: its maps in their first tickets' order
         with self._lock:
             self._end_rows()  # rows of items that ended while no hub was watching
+            if self._night_settle():  # a night left stopping with nothing at work ends now
+                self._save()
 
     def _save(self):
         self.home.mkdir(parents=True, exist_ok=True)
@@ -891,7 +893,12 @@ class Hub:
                 mine.remove(i)
                 changed = True
             q["maps"] = [m for m in q.get("maps") or [] if any(sbqueue.map_of(i["key"]) == m for i in q["items"])]
-        if not ending or any(i["state"] not in self.NIGHT_ENDED for i in mine) or not (stopping or mine):
+        # A stopping night waits only for work in flight: an item that landed, rechecks or waits on a clean
+        # checkout cannot be started or judged while the night stops, so it must not hold the night open
+        # (night-20261117-014410 stayed 'stopping' 17 hours on such items).
+        open_states = ("running", "review") if stopping else None
+        if not ending or any((i["state"] in open_states) if stopping else (i["state"] not in self.NIGHT_ENDED)
+                             for i in mine) or not (stopping or mine):
             return changed
         how = "stopped" if stopping else "stop_time" if night.get("stop_time") else "finished"
         night.pop("stop_time", None)
