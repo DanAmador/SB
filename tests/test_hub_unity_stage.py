@@ -168,6 +168,13 @@ class UnityStageTest(RunnerCase):
         with self.assertRaises(ValueError):
             self.hub.queue_integrate(["repo/one#2"])
 
+    def test_a_refused_pass_changes_none_of_the_tickets_it_named(self):
+        self.failed_in_main()
+        with self.assertRaises(ValueError):
+            self.hub.queue_integrate(["repo/one#1", "repo/one#2"])  # 2 never ran
+        self.assertEqual(self.state_of("repo/one#1"), "failed")
+        self.assertFalse(any(i.get("integrate_only") for i in self.hub._data["queue"]["items"]))
+
 
 class GuardTest(unittest.TestCase):
     def test_a_unity_worker_may_not_run_the_unity_cli_and_others_may(self):

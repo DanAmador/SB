@@ -1169,28 +1169,31 @@ class Hub:
         if not keys:
             raise ValueError("name the tickets")
 
-        def failed(i, k):
-            return i["key"] == k and i["kind"] == "ticket" and i["state"] == "failed" and is_unity(i.get("repo"))
+        def failed(i, k):  # failed, or queued again by the keep-trying rule (it has a try's commit) and not started
+            return (i["key"] == k and i["kind"] == "ticket" and is_unity(i.get("repo"))
+                    and (i["state"] == "failed" or i["state"] == "queued" and i.get("commit") and i.get("fails")))
 
-        def change(q, rows):
-            bad = []
+        def change(q, rows):  # every ticket is found before any is changed: a refusal changes nothing
+            plan, bad = [], []
             for k in keys:
                 item = next((i for i in q["items"] if failed(i, k)), None)
+                old = None
                 if item is None and not any(i["key"] == k for i in q["items"] if i["state"] not in self.NIGHT_ENDED):
                     old = next((i for n in reversed(self._data["nights"]) for i in reversed(n.get("items") or [])
                                 if failed(i, k)), None)
-                    if old is not None:
-                        q["items"] = [i for i in q["items"] if i["key"] != k]
-                        item = {**json.loads(json.dumps(old)), "night": None}
-                        q["items"].append(item)
-                if item is None:
+                if item is None and old is None:
                     bad.append(k)
-                    continue
+                plan.append((k, item, old))
+            if bad:
+                raise ValueError("not a failed ticket of a Unity project: " + ", ".join(bad))
+            for k, item, old in plan:
+                if item is None:
+                    q["items"] = [i for i in q["items"] if i["key"] != k]
+                    item = {**json.loads(json.dumps(old)), "night": None}
+                    q["items"].append(item)
                 item.update(state="queued", integrate_only=True, ended=None, started=None, pid=None, pid_start=None,
                             note="queued for a Unity pass: the integrator plays what its review found short, on the "
                             "main folder")
-            if bad:
-                raise ValueError("not a failed ticket of a Unity project: " + ", ".join(bad))
         out = self._queue_write(None, change)
         return {"ok": out["ok"], "queued": keys}
 
@@ -5728,7 +5731,8 @@ def cmd_queue(a):
         if len(rest) < 2:
             print("usage: queue integrate <map> <NNN>...", file=sys.stderr)
             return 1
-        code, out = call(port, "/api/queue/integrate", {"keys": ["{}#{}".format(rest[0], int(n)) for n in rest[1:]]})
+        code, out = call(port, "/api/queue/integrate", {"keys": ["{}#{}".format(rest[0], int(n)) for n in rest[1:]]},
+                         timeout=60)  # it reads every night it may copy a ticket from
         if out.get("ok"):
             print("queued for a Unity pass: " + ", ".join(out["queued"]))
     elif act in ("pause", "resume"):
