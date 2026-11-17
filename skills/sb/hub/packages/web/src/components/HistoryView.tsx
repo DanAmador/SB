@@ -13,7 +13,7 @@ import { itemInScope, itemTitle, mapInScope, plural, projOf, withBlockers } from
 import { filterItems, itemOutcome, nightWords, OUTCOMES, outcomeOf, sortNights, type ItemOutcome } from "@/lib/history.ts";
 import { useNight, useNights, useRuns } from "@/lib/hub.ts";
 import { setLink, useLink } from "@/lib/link.ts";
-import { stateWords } from "@/lib/night.ts";
+import { chatItems, stateWords, withChats } from "@/lib/night.ts";
 import { cn } from "@/lib/utils";
 import { Empty, ToneIcon } from "./bits.tsx";
 import { useBoard } from "./context.tsx";
@@ -87,7 +87,8 @@ function NightDetail({ night }: { night: Night }): React.JSX.Element {
   const link = useLink();
   const detail = useNight(night.id);
   const runs = useRuns(0, 300);
-  const all = detail.data?.night.items ?? [];
+  // the chats' work on this run is kept beside the queue's items
+  const all = withChats(detail.data?.night.items ?? [], chatItems(state, night.id));
   const inScope = all.filter((i) => itemInScope(scope, i));
   const titleOf = (i: QueueItem): string => itemTitle(i, ix.byKey.get(i.key) ?? (tickets ?? []).find((t) => `${t.map}#${String(t.num)}` === i.key));
   const outcome = outcomeOf(link.out);

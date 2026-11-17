@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { AgentRow, QueueItem, State, TicketRow } from "@sb-hub/contract";
+import type { AgentRow, ChatRun, QueueItem, State, TicketRow } from "@sb-hub/contract";
 import { CHAT_RUNNER, ticketIndex } from "./board.ts";
-import { accountLines, countsLine, headLine, healthOf, liveItems, liveState, nightBlocks, nightLine, pairNight, poolWith, QUEUE_HEAD, repoLines, runItems, stateWords, stopAsk, stoppingWords, waitWords } from "./night.ts";
+import { accountLines, chatItems, countsLine, headLine, healthOf, liveItems, liveState, nightBlocks, nightLine, pairNight, poolWith, QUEUE_HEAD, repoLines, runItems, stateWords, stopAsk, stoppingWords, waitWords, withChats } from "./night.ts";
 import { helperCards, sessionCards } from "./sessions.ts";
 
 const NOW = 1_800_000_000;
@@ -115,24 +115,36 @@ describe("the live run", () => {
     expect(liveItems(s(undefined).queue)).toHaveLength(9);
     expect(liveState(s("n2")).queue.items).toHaveLength(6);
   });
-  it("counts the tickets the owner's chats work on in the live run", () => {
-    const chat = (id: string, ref: string, more: Partial<AgentRow> = {}): AgentRow => ({ agent: id, ref, state: "working", at: NOW - 60, since: NOW - 600, ...more });
+  it("counts the tickets the owner's chats work on in the live run, and keeps the ones they ended", () => {
+    const chat = (id: string, ref: string, more: Partial<AgentRow> = {}): AgentRow => ({ agent: id, ref, state: "working", at: NOW - 60, ...more });
+    const stretch = (agent: string, key: string, more: Partial<ChatRun> = {}): ChatRun => ({ key, agent, night: "n2", started: NOW - 600, last: NOW - 60, ...more });
     const agents = {
       c1: chat("c1", "q/b#9"), // a ticket the queue does not hold
-      c2: chat("c2", "q/b#1", { title: "fixing it by hand" }), // the queue ended it as failed: the chat's work shows
+      c2: chat("c2", "q/b#1"), // the queue ended it as failed: the chat's work shows
       c3: chat("c3", "p/a#2"), // the queue runs it: the queue's item stays
-      c4: chat("c4", "q/b#8", { at: NOW - 4000 }), // quiet for over an hour: not counted
-      c5: chat("c5", "q/b#7", { state: "your turn" }), // finished its turn: not counted
-      w: chat("w", "q/b#6", { parent: "queue" }), // a queue worker counts through its item only
+      c4: chat("c4", "q/b#8", { state: "your turn" }), // it finished its turn: its stretch ended, ticket still open
+      c5: chat("c5", "q/b#7"), // it moved on: its old ticket was resolved during the stretch
+      c6: chat("c6", "q/b#6", { state: "idle" }), // a stretch of an earlier run, ended: not this run's
     };
-    const st = { ...s("n2"), agents };
+    const chat_runs = [
+      stretch("c1", "q/b#9"), stretch("c2", "q/b#1"), stretch("c3", "p/a#2"), stretch("c4", "q/b#8"),
+      stretch("c5", "q/b#5", { closed: true, last: NOW - 300 }), stretch("c6", "q/b#6", { night: "n1" }),
+    ];
+    const st = { ...s("n2"), agents, chat_runs };
     const live = liveItems(st.queue, st);
-    expect(live.map((i) => `${i.key} ${i.state}`)).toEqual(["p/a#1 done", "p/a#2 running", "p/a#3 queued", "q/b#2 queued", "q/b#3 queued", "q/b#9 running", "q/b#1 running"]);
+    expect(live.map((i) => `${i.key} ${i.state}`)).toEqual([
+      "p/a#1 done", "p/a#2 running", "p/a#3 queued", "q/b#2 queued", "q/b#3 queued",
+      "q/b#9 running", "q/b#1 running", "q/b#8 skipped", "q/b#5 done",
+    ]);
     const mine = live.filter((i) => i.runner === CHAT_RUNNER);
-    expect(mine.map((i) => [i.agent, i.night, i.started])).toEqual([["c1", "n2", NOW - 600], ["c2", "n2", NOW - 600]]);
-    expect(headLine(live)).toBe("1 done · 3 running · 3 next");
-    expect(liveItems(st.queue)).toHaveLength(6); // without the agents: the hub's items only
+    expect(mine.map((i) => [i.agent, i.night, i.started, i.ended])).toEqual([
+      ["c1", "n2", NOW - 600, null], ["c2", "n2", NOW - 600, null], ["c4", "n2", NOW - 600, NOW - 60], ["c5", "n2", NOW - 600, NOW - 300],
+    ]);
+    expect(headLine(live)).toBe("2 done · 3 running · 3 next · 1 stopped");
+    expect(liveItems(st.queue)).toHaveLength(6); // without the chats: the hub's items only
     expect(liveItems(s(null).queue, st)).toEqual([]); // no live run: nothing counts
+    // an ended run's history keeps what a chat did in it
+    expect(withChats([], chatItems(st, "n1")).map((i) => `${i.key} ${i.state}`)).toEqual(["q/b#6 skipped"]);
   });
   it("says the head's counts in one line", () => {
     expect(headLine(liveItems(s("n2").queue))).toBe("1 done · 1 running · 3 next · 1 fell short");

@@ -49,6 +49,38 @@ class HubTest(unittest.TestCase):
         h.report({"agent": "a", "state": "working", "note": "Bash"})
         self.assertEqual(h.state()["agents"]["a"]["ref"], "homestudio/one-clean-program#525")
 
+    def test_a_chats_work_on_a_ticket_is_kept_from_its_first_report_to_its_last(self):
+        h = self.h
+        h._tcache = (self.t, [{"map": "sk4te/party-playtest", "num": 1055, "title": "Hit feels right"}])
+        h._data["queue"]["night"] = "n1"
+        h.report({"agent": "c", "state": "working", "ticket": "party-playtest 1055", "map": "sk4te/party-playtest"})
+        self.t += 600
+        h.report({"agent": "c", "state": "working", "note": "Bash"})  # a hook's report extends it
+        self.t += 60
+        h.report({"agent": "c", "state": "your turn"})  # not working: nothing changes
+        runs = h.state()["chat_runs"]
+        self.assertEqual(runs, [{"key": "sk4te/party-playtest#1055", "agent": "c", "night": "n1", "started": 1000.0, "last": 1600.0}])
+        self.t += 4000  # back after more than half an hour: a new stretch
+        h.report({"agent": "c", "state": "working", "note": "Bash"})
+        self.assertEqual([r["started"] for r in h.state()["chat_runs"]], [1000.0, 5660.0])
+
+    def test_a_chats_stretch_is_closed_when_its_ticket_is_resolved(self):
+        h = self.h
+        h._tcache = (self.t, [{"map": "p/m", "num": 3, "title": "T"}])
+        h.report({"agent": "c", "state": "working", "ticket": "p/m#3"})
+        h._tcache = (self.t, [])  # sbmap resolve: the ticket left the open list
+        self.t += 60
+        h.report({"agent": "c", "state": "working", "note": "Bash"})
+        run = h.state()["chat_runs"][0]
+        self.assertTrue(run["closed"])
+        self.assertNotIn("ref", h.state()["agents"]["c"])
+
+    def test_a_queue_worker_keeps_no_chat_run(self):
+        h = self.h
+        h._tcache = (self.t, [{"map": "p/m", "num": 3, "title": "T"}])
+        h.report({"agent": "p/m#3", "role": "worker", "parent": "queue", "state": "working", "ticket": "p/m#3"})
+        self.assertNotIn("chat_runs", h.state())
+
     def test_a_report_before_the_tickets_are_read_has_no_ref(self):
         out = self.h.report({"agent": "a", "state": "working", "ticket": "525"})
         self.assertNotIn("ref", out)

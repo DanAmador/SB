@@ -204,14 +204,21 @@ export function pairNight(state: State, night: Night, cards: readonly SessionCar
  * The items of the live run: those that carry its id. A close-off job belongs to no run, an ended run's items are
  * off the line. A hub that knows no runs (queue.night absent) keeps every item.
  */
-export function liveItems(queue: Pick<State["queue"], "items" | "night">, chats?: Pick<State, "agents" | "now">): QueueItem[] {
+export function liveItems(queue: Pick<State["queue"], "items" | "night">, chats?: Pick<State, "agents" | "now" | "chat_runs">): QueueItem[] {
   const hub = queue.night === undefined ? queue.items : queue.night === null ? [] : queue.items.filter((i) => i.night === queue.night);
   if (chats === undefined || queue.night === null) return hub;
-  const mine = chatItems(chats, queue.night);
+  return withChats(hub, chatItems(chats, queue.night));
+}
+
+/**
+ * A run's items with the chats' work on it: a ticket the queue holds keeps the queue's item, unless the queue ended it
+ * and a chat works on it now (then the chat's shows). A ticket only a chat touched is added, ended or not.
+ */
+export function withChats(hub: readonly QueueItem[], chats: readonly QueueItem[]): QueueItem[] {
+  const keys = new Set(hub.map((i) => i.key));
   const busy = new Set(hub.filter((i) => !ENDED.has(i.state)).map((i) => i.key));
-  const add = mine.filter((c) => !busy.has(c.key));
+  const add = chats.filter((c) => !keys.has(c.key) || (c.state === "running" && !busy.has(c.key)));
   const taken = new Set(add.map((c) => c.key));
-  // a ticket the queue ended that a chat now works on shows as the chat's
   return [...hub.filter((i) => !taken.has(i.key)), ...add];
 }
 
@@ -220,23 +227,28 @@ const ENDED: ReadonlySet<QueueItem["state"]> = new Set(["done", "failed", "skipp
 const CHAT_WORKING: ReadonlySet<string> = new Set(["working", "waiting", "needs you", "blocked"]);
 
 /**
- * The tickets the owner's chats work on now, as running items of the live run: a session whose report the hub
- * matched to an open ticket (its `ref`), not a queue worker, still working and heard from within IDLE. The newest
- * report wins when two chats name one ticket. `runner` is "chat", which tells them from the queue's own.
+ * The owner's chats' work on tickets as items of a run (`night`; undefined: every run's), from the stretches the hub
+ * keeps (chat_runs). A stretch runs while its chat still reports that ticket, working, heard from within IDLE; an
+ * ended one is done when its ticket was resolved during it, else stopped with the ticket still open. One item per
+ * ticket: a running stretch wins, else the latest. `runner` is "chat", which tells them from the queue's own.
  */
-export function chatItems(s: Pick<State, "agents" | "now">, night: string | undefined): QueueItem[] {
-  const by = new Map<string, AgentRow>();
-  for (const a of Object.values(s.agents)) {
-    if (a.ref === undefined || a.parent === "queue" || !CHAT_WORKING.has(a.state ?? "") || s.now - a.at >= IDLE) continue;
-    const had = by.get(a.ref);
-    if (had === undefined || had.at < a.at) by.set(a.ref, a);
+export function chatItems(s: Pick<State, "agents" | "now" | "chat_runs">, night: string | null | undefined): QueueItem[] {
+  const out = new Map<string, QueueItem>();
+  for (const r of s.chat_runs ?? []) {
+    if (night !== undefined && (r.night ?? null) !== night) continue;
+    const a: AgentRow | undefined = s.agents[r.agent];
+    const live = a?.ref === r.key && CHAT_WORKING.has(a.state ?? "") && s.now - a.at < IDLE && s.now - r.last < IDLE;
+    const item: QueueItem = {
+      key: r.key, kind: "ticket", agent: r.agent, state: live ? "running" : r.closed === true ? "done" : "skipped",
+      note: live ? (a.note ?? "") : r.closed === true ? "done in a chat" : "the chat stopped; the ticket is still open",
+      commit: null, tries: 0, started: r.started, ended: live ? null : r.last, runner: CHAT_RUNNER,
+      ...(r.night == null ? {} : { night: r.night }),
+      links: { ticket: null, map: null, board: null, report: null, log: null },
+    };
+    const had = out.get(r.key);
+    if (had === undefined || live || (had.state !== "running" && (had.started ?? 0) <= r.started)) out.set(r.key, item);
   }
-  return [...by.entries()].map(([key, a]): QueueItem => ({
-    key, kind: "ticket", agent: a.agent, state: "running", note: a.note ?? "", commit: null, tries: 0,
-    started: a.since ?? a.at, ended: null, runner: CHAT_RUNNER, ...(night === undefined ? {} : { night }),
-    ...(a.title === undefined ? {} : { title: a.title }),
-    links: { ticket: null, map: null, board: null, report: null, log: null },
-  }));
+  return [...out.values()];
 }
 
 /** The state the Run tab reads: the queue holds the live run's items, the chats' tickets among them, and no cleared log. */

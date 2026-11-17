@@ -479,8 +479,23 @@ export type RunsPage = z.infer<typeof RunsPage>;
 export const RunDetail = z.strictObject({ run: Run, checks: z.array(CheckRun), report: z.string().nullable(), log: z.string().nullable() });
 export type RunDetail = z.infer<typeof RunDetail>;
 
+/** One stretch of work a chat (not a queue worker) did on a ticket: from its first report on it to its last. */
+export const ChatRun = z.strictObject({
+  key: z.string(),
+  agent: z.string(),
+  /** The run that was live when it started; null when none was. */
+  night: z.string().nullable().optional(),
+  started: Seconds,
+  last: Seconds,
+  /** The ticket left the open list while the chat worked on it: resolved. */
+  closed: z.boolean().optional(),
+});
+export type ChatRun = z.infer<typeof ChatRun>;
+
 export const State = z.strictObject({
   agents: z.record(z.string(), AgentRow),
+  /** The chats' stretches of work of the last 7 days, oldest first; absent until a chat has reported a matched ticket. */
+  chat_runs: z.array(ChatRun).optional(),
   locks: z.record(z.string(), Lock),
   questions: z.record(z.string(), Question),
   /** Session id -> the agent id it reports as. */

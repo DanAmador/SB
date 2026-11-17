@@ -323,7 +323,7 @@ export function nightGraph(input: NightInput): NightGraph {
       item: i,
       title: info.tickets.get(i.key)?.title ?? itemTitle(i, null),
       state: boxState(i, p),
-      foot: p !== null ? `${STATE_WORDS[i.state]} ${String(p)}` : i.runner === CHAT_RUNNER ? "In a chat" : landedShort(i) ? "Landed, needs your look" : STATE_WORDS[i.state],
+      foot: p !== null ? `${STATE_WORDS[i.state]} ${String(p)}` : i.runner === CHAT_RUNNER ? (i.state === "running" ? "In a chat" : i.state === "done" ? "Done in a chat" : "A chat stopped, still open") : landedShort(i) ? "Landed, needs your look" : STATE_WORDS[i.state],
       place: p,
       outcome: outcomeOf(i),
       report: outcomeOf(i) !== null ? i.links.report : null,

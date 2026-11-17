@@ -50,7 +50,7 @@ describe("sidebarTree", () => {
   });
 
   it("counts a ticket one of the owner's chats works on as running, so Active only shows its project", () => {
-    const chat = { ...state([]), agents: { c: { agent: "c", ref: "other/live#1", state: "working", at: 0 } } } as unknown as State;
+    const chat = { ...state([]), agents: { c: { agent: "c", ref: "other/live#1", state: "working", at: 0 } }, chat_runs: [{ key: "other/live#1", agent: "c", night: null, started: 0, last: 0 }] } as unknown as State;
     const t = sidebarTree(chat, tickets, none);
     expect(t.projects.find((p) => p.project === "other")?.running).toBe(true);
     expect(activeOnly(t, none).projects.map((p) => p.project)).toContain("other");

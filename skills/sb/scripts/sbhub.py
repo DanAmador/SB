@@ -90,6 +90,11 @@ import sbhub_snapshot
 import sbqueue
 import sbruns
 
+# A chat's ticket counts as worked on while it reports one of these and was heard from within CHAT_IDLE seconds;
+# every stretch of work is kept in chat_runs for CHAT_RUNS_KEPT seconds, so a run's history shows it after it ends.
+CHAT_WORKING = ("working", "waiting", "needs you", "blocked")
+CHAT_IDLE = 1800
+CHAT_RUNS_KEPT = 7 * 86400
 AGENT_FIELDS = ("name", "title", "asked", "project", "role", "parent", "ticket", "map", "state", "note", "done", "total")
 ALERT_STATES = ("needs you", "blocked")
 SILENT_LIMIT = 86400
@@ -361,12 +366,16 @@ class Hub:
                 a[f] = self._resolve(d[f]) if f == "parent" else d[f]
             rows = self._tcache[1]
             if rows is not None and a.get("ticket"):  # every report, a hook's too: a chat started before counts
+                was = a.get("ref")
                 ref = ticket_ref(a.get("ticket"), a.get("map"), a.get("project"), rows)
                 if ref:
                     a["ref"] = ref  # the open ticket it works on, so the run counts and draws it
                 else:
                     a.pop("ref", None)
+                if was and was != ref and was not in {sbqueue.key(t) for t in rows}:
+                    self._chat_closed(agent, was)
             a["at"] = self.now()
+            self._chat_run(agent, a)
             after = a.get("state")
             if after is not None and (after != before or "since" not in a):
                 a["since"] = a["at"]  # when the agent entered its current state, for "working 14m"
@@ -377,6 +386,26 @@ class Hub:
             if d.get("ticket") not in (None, "") and rows is not None:
                 out["ref"] = a.get("ref")  # null: the ticket named no open ticket the hub knows
             return out
+
+    def _chat_run(self, agent, a):
+        """Keep the stretch of work a chat (not a queue worker) does on its matched ticket: one row from its first
+        report on it to its last, in the run that was live when it started. A gap over CHAT_IDLE starts a new row."""
+        ref, now = a.get("ref"), self.now()
+        if not ref or a.get("parent") == "queue" or a.get("state") not in CHAT_WORKING:
+            return
+        runs = self._data.setdefault("chat_runs", [])
+        run = next((r for r in reversed(runs) if r["agent"] == agent and r["key"] == ref), None)
+        if run is not None and now - run["last"] < CHAT_IDLE:
+            run["last"] = now
+            return
+        runs.append({"key": ref, "agent": agent, "night": self._data["queue"].get("night"), "started": now, "last": now})
+        self._data["chat_runs"] = [r for r in runs if now - r["last"] < CHAT_RUNS_KEPT][-500:]
+
+    def _chat_closed(self, agent, key):
+        """The ticket a chat worked on left the open list (resolved): its latest stretch on it ended with it done."""
+        run = next((r for r in reversed(self._data.get("chat_runs") or []) if r["agent"] == agent and r["key"] == key), None)
+        if run is not None:
+            run["closed"] = True
 
     def _queue_title(self, key):
         item = next((i for i in self._data["queue"]["items"] if i["key"] == key), None)
