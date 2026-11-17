@@ -51,8 +51,11 @@ export const Landing = z.strictObject({
   repo: z.string(),
   before: z.string(),
   sha: z.string(),
-  tree: z.string(),
+  /** null for a Unity pass (sbhub _pass): it plays the checkout as it stands, with no worktree. */
+  tree: z.string().nullable(),
   branch: z.string(),
+  /** A Unity pass: nothing to merge, only the integrator's play. */
+  only: z.boolean().optional(),
 });
 export const Lock = z.strictObject({ by: z.string(), at: Seconds, landing: Landing.optional() });
 export type Lock = z.infer<typeof Lock>;
