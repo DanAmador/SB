@@ -217,7 +217,7 @@ function RunLine({ i }: { i: QueueItem }): React.JSX.Element {
           {!done && again && (
             <Button
               size="xs"
-              variant={landAgain(i) ? "outline" : "brand"}
+              variant={landAgain(i) || st === "landed" ? "outline" : "brand"}
               disabled={down || busy}
               onClick={() => {
                 void enqueue(i.key);
