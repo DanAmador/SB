@@ -256,6 +256,12 @@ export const TicketItem = z.strictObject({
    * try resumes it (`claude --resume`); dropped when that resume fails or the try ran on agy. */
   session: z.string().optional(),
   session_dir: z.string().optional(),
+  /** While it is in its Unity stage (landed, the Unity lock held, an integrator compiling and playing it on the main
+   * folder): the landing's commits, the lock, the integrator's pid, log and report folder. Its fields are the
+   * hub's own bookkeeping and may grow, so they are not listed. */
+  integrate: z.record(z.string(), z.unknown()).optional(),
+  /** Queued for a Unity pass: its work is already in the main folder, so no worker runs; the integrator plays it. */
+  integrate_only: z.boolean().optional(),
 });
 export type TicketItem = z.infer<typeof TicketItem>;
 
