@@ -159,7 +159,7 @@ const ARROW = { type: MarkerType.ArrowClosed, width: 16, height: 16 } as const;
 export function NightGraph({ items: given, title }: { items?: readonly QueueItem[]; title?: string }): React.JSX.Element | null {
   const { state, tickets, scope } = useBoard();
   const wide = useWide();
-  const live = liveItems(state.queue);
+  const live = liveItems(state.queue, state);
   const items = given ?? live;
   const maps = useMemo(() => [...new Set([...(state.queue.maps ?? []), ...items.filter((i) => i.kind === "ticket").map((i) => i.key.replace(/#\d+$/, ""))])], [state.queue.maps, items]);
   const routes = useMapRoutes(maps);

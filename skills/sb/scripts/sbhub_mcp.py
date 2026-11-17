@@ -346,8 +346,13 @@ def build_server():
         d = {"agent": agent, "state": state, "note": note, "ticket": ticket, "parent": parent, "name": name,
              "role": role, "map": map, "project": os.path.abspath(project) if project else ""}
         d.update({k: str(v) for k, v in (("done", done), ("total", total)) if v is not None})
-        code, _ = hub("/api/report", {k: v for k, v in d.items() if v not in ("", None)})
-        return "reported" if code == 200 else "hub not reachable; carry on"
+        code, out = hub("/api/report", {k: v for k, v in d.items() if v not in ("", None)})
+        if code != 200:
+            return "hub not reachable; carry on"
+        if ticket and "ref" in out and out["ref"] is None:
+            return ("reported, but '{}' names no open ticket, so the run page cannot show it: report the ticket "
+                    "as '<project>/<map>#<number>', e.g. 'sk4te/party-playtest#1060'").format(ticket)
+        return "reported" + (" as " + out["ref"] if out.get("ref") else "")
 
     @mcp.tool(description="Take a lock on a shared resource only one agent may use at a time. Returns 'ok' or "
                           "'held by <agent>': do work that needs no lock, then try again.")

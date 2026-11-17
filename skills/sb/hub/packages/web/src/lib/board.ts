@@ -440,6 +440,10 @@ export function usageOf(e: Installed, now: number): { pct: number; resets: numbe
 
 /** A worker silent this long turns amber. */
 export const SILENT = 300;
+/** The `runner` of a running item that is one of the owner's chats working on a ticket, not a queue worker. */
+export const CHAT_RUNNER = "chat";
+/** The session that works on a running item: a queue worker goes by the item's key, a chat by its own id. */
+export const sessionOf = (i: QueueItem): string => (i.runner === CHAT_RUNNER && i.agent !== null ? i.agent : i.key);
 
 export type RunTone = "ok" | "quiet" | "blocked";
 export interface RunRow {
@@ -467,7 +471,7 @@ export function runRows(state: State, ix: TicketIndex): RunRow[] {
     .filter((i) => i.state === "running")
     .map((i): RunRow => {
       const t = ix.byKey.get(i.key);
-      const a = agentOf(state, i.key);
+      const a = agentOf(state, sessionOf(i));
       const started = i.started ?? state.now;
       const lastAt = Math.max(a?.at ?? started, started);
       const tone: RunTone = a !== null && rank(a) === 0 ? "blocked" : state.now - lastAt >= SILENT ? "quiet" : "ok";
@@ -479,7 +483,7 @@ export function runRows(state: State, ix: TicketIndex): RunRow[] {
         map,
         mapName: map.split("/").pop() ?? "",
         project: itemProject(i, t),
-        account: i.runner ?? i.agent ?? state.queue.agent ?? "",
+        account: i.runner === CHAT_RUNNER ? "in a chat" : (i.runner ?? i.agent ?? state.queue.agent ?? ""),
         runFor: state.now - started,
         last: (a?.note ?? firstLine(i.note)) || "starting",
         lastAt,

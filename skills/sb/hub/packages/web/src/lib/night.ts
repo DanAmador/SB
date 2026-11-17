@@ -1,8 +1,8 @@
 /** The Run tab's grouping: the night map by map. Pure: no React, no DOM. */
-import type { Night as NightRecord, Queue, QueueItem, State, Waits } from "@sb-hub/contract";
+import type { AgentRow, Night as NightRecord, Queue, QueueItem, State, Waits } from "@sb-hub/contract";
 import { countsLine as itemCounts, tally } from "./nightGraph.ts";
-import type { SessionCard } from "./sessions.ts";
-import { agentOf, dur, landedShort, endedToday, itemInScope, itemMap, mapTitle, projOf, type Scope, type TicketIndex, itemProject, EVERYTHING } from "./board.ts";
+import { IDLE, type SessionCard } from "./sessions.ts";
+import { agentOf, CHAT_RUNNER, dur, landedShort, endedToday, itemInScope, itemMap, mapTitle, projOf, type Scope, type TicketIndex, itemProject, EVERYTHING } from "./board.ts";
 
 /** What a row's mark says. */
 export type Mark = "done" | "landed" | "running" | "checking" | "next" | "short" | "stopped" | "recheck" | "unclean";
@@ -204,17 +204,46 @@ export function pairNight(state: State, night: Night, cards: readonly SessionCar
  * The items of the live run: those that carry its id. A close-off job belongs to no run, an ended run's items are
  * off the line. A hub that knows no runs (queue.night absent) keeps every item.
  */
-export function liveItems(queue: Pick<State["queue"], "items" | "night">): QueueItem[] {
-  if (queue.night === undefined) return queue.items;
-  const id = queue.night;
-  return id === null ? [] : queue.items.filter((i) => i.night === id);
+export function liveItems(queue: Pick<State["queue"], "items" | "night">, chats?: Pick<State, "agents" | "now">): QueueItem[] {
+  const hub = queue.night === undefined ? queue.items : queue.night === null ? [] : queue.items.filter((i) => i.night === queue.night);
+  if (chats === undefined || queue.night === null) return hub;
+  const mine = chatItems(chats, queue.night);
+  const busy = new Set(hub.filter((i) => !ENDED.has(i.state)).map((i) => i.key));
+  const add = mine.filter((c) => !busy.has(c.key));
+  const taken = new Set(add.map((c) => c.key));
+  // a ticket the queue ended that a chat now works on shows as the chat's
+  return [...hub.filter((i) => !taken.has(i.key)), ...add];
 }
 
-/** The state the Run tab reads: the queue holds the live run's items only and keeps no cleared log. */
-export const liveState = (state: State): State => ({ ...state, queue: { ...state.queue, items: liveItems(state.queue), cleared: [] } });
+const ENDED: ReadonlySet<QueueItem["state"]> = new Set(["done", "failed", "skipped"]);
+/** What a chat that works on a ticket reports as, for it to count: working, and heard from in the last half hour. */
+const CHAT_WORKING: ReadonlySet<string> = new Set(["working", "waiting", "needs you", "blocked"]);
+
+/**
+ * The tickets the owner's chats work on now, as running items of the live run: a session whose report the hub
+ * matched to an open ticket (its `ref`), not a queue worker, still working and heard from within IDLE. The newest
+ * report wins when two chats name one ticket. `runner` is "chat", which tells them from the queue's own.
+ */
+export function chatItems(s: Pick<State, "agents" | "now">, night: string | undefined): QueueItem[] {
+  const by = new Map<string, AgentRow>();
+  for (const a of Object.values(s.agents)) {
+    if (a.ref === undefined || a.parent === "queue" || !CHAT_WORKING.has(a.state ?? "") || s.now - a.at >= IDLE) continue;
+    const had = by.get(a.ref);
+    if (had === undefined || had.at < a.at) by.set(a.ref, a);
+  }
+  return [...by.entries()].map(([key, a]): QueueItem => ({
+    key, kind: "ticket", agent: a.agent, state: "running", note: a.note ?? "", commit: null, tries: 1,
+    started: a.since ?? a.at, ended: null, runner: CHAT_RUNNER, ...(night === undefined ? {} : { night }),
+    ...(a.title === undefined ? {} : { title: a.title }),
+    links: { ticket: null, map: null, board: null, report: null, log: null },
+  }));
+}
+
+/** The state the Run tab reads: the queue holds the live run's items, the chats' tickets among them, and no cleared log. */
+export const liveState = (state: State): State => ({ ...state, queue: { ...state.queue, items: liveItems(state.queue, state), cleared: [] } });
 
 /** The live run's items inside the sidebar's pick (Everything: all; a project: its maps'; a map: its own). */
-export const runItems = (state: State, scope: Scope): QueueItem[] => liveItems(state.queue).filter((i) => itemInScope(scope, i));
+export const runItems = (state: State, scope: Scope): QueueItem[] => liveItems(state.queue, state).filter((i) => itemInScope(scope, i));
 
 /** The head's one line: '6 done · 2 running · 9 next · 1 fell short'. */
 export const headLine = (items: readonly QueueItem[]): string => itemCounts(tally(items)) || "nothing queued yet";

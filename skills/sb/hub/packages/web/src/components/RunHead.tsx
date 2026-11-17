@@ -58,12 +58,14 @@ function NoRun({ last }: { last: Night | null }): React.JSX.Element {
 
 function Live({ rec }: { rec: Night | null }): React.JSX.Element {
   const { state, ix, writes, down, busy, tickets } = useBoard();
-  const items = liveItems(state.queue);
+  // the counts take the chats' tickets too; Stop asks only about what the hub itself runs
+  const items = liveItems(state.queue, state);
+  const hubItems = liveItems(state.queue);
   const [asking, setAsking] = useState(false);
   const [naming, setNaming] = useState<string | null>(null);
   const stopping = rec?.state === "stopping";
   const can = !down && !busy;
-  const ask = stopAsk(items);
+  const ask = stopAsk(hubItems);
   const by = rec?.by == null ? null : (agentOf(state, rec.by)?.title ?? rec.by);
   const titleOf = (i: (typeof items)[number]): string => itemTitle(i, ix.byKey.get(i.key) ?? (tickets ?? []).find((t) => `${t.map}#${String(t.num)}` === i.key));
   const rename = async (): Promise<void> => {
@@ -120,7 +122,7 @@ function Live({ rec }: { rec: Night | null }): React.JSX.Element {
         </p>
       )}
       <p className="text-sm font-medium" data-testid="head-counts">{headLine(items)}</p>
-      {stopping && <p role="status" data-testid="stopping" className="text-sm text-warn">{stoppingWords(items, titleOf)}</p>}
+      {stopping && <p role="status" data-testid="stopping" className="text-sm text-warn">{stoppingWords(hubItems, titleOf)}</p>}
       {asking && !stopping && (
         <div role="group" aria-label="Stop the run?" className="flex flex-col gap-2 rounded-lg border border-warn/40 bg-warn-soft px-3 py-2 text-sm">
           <p>{ask.text}</p>

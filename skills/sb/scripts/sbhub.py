@@ -359,6 +359,13 @@ class Hub:
                 if agent != sid and (f in ("name", "role") or f == "project" and f in a):
                     continue  # a session's hook events never rename the agent it reports as
                 a[f] = self._resolve(d[f]) if f == "parent" else d[f]
+            rows = self._tcache[1]
+            if rows is not None and d.get("ticket") not in (None, ""):
+                ref = ticket_ref(a.get("ticket"), a.get("map"), a.get("project"), rows)
+                if ref:
+                    a["ref"] = ref  # the open ticket it works on, so the run counts and draws it
+                else:
+                    a.pop("ref", None)
             a["at"] = self.now()
             after = a.get("state")
             if after is not None and (after != before or "since" not in a):
@@ -366,7 +373,10 @@ class Hub:
             if after == "done" and a.get("role") == "worker":
                 self._trail_ended(agent)
             self._save()
-            return {"ok": True, "needs_you": after in ALERT_STATES and after != before, "agent": agent}
+            out = {"ok": True, "needs_you": after in ALERT_STATES and after != before, "agent": agent}
+            if d.get("ticket") not in (None, "") and rows is not None:
+                out["ref"] = a.get("ref")  # null: the ticket named no open ticket the hub knows
+            return out
 
     def _queue_title(self, key):
         item = next((i for i in self._data["queue"]["items"] if i["key"] == key), None)
@@ -5070,6 +5080,28 @@ def generic_provider(project):
 def _provider_error(name, reason):
     return {"title": name, "widgets": [
         {"kind": "status", "label": "provider", "value": str(reason)[:120], "level": "bad"}]}
+
+
+def ticket_ref(text, map_, project, rows):
+    """The open ticket ('<map>#<num>') a session's free-text `ticket` names, or None when it names none for sure.
+    Ticket numbers are unique within a repo, so a number is enough once the project or map narrows the rows:
+    'sk4te/party-playtest#1060', 'party-playtest 1060', '#1060' or '1060' with the project known, or the exact title."""
+    if not isinstance(text, str) or not text.strip() or not rows:
+        return None
+    keys = {sbqueue.key(t) for t in rows}
+    m = re.search(r"([\w.-]+/[\w.-]+)#0*(\d+)", text)
+    if m:
+        k = "{}#{}".format(m.group(1), int(m.group(2)))
+        return k if k in keys else None
+    pool = rows
+    if isinstance(map_, str) and "/" in map_:
+        pool = [t for t in rows if t["map"].split("/")[0] == map_.split("/")[0]]
+    elif isinstance(project, str) and project:
+        pool = [t for t in rows if t["map"].split("/")[0].lower() == Path(project).name.lower()]
+    nums = {int(n) for n in re.findall(r"(?<![\w.])#?0*(\d{1,5})(?![\w.])", text)}
+    hit = (len(nums) == 1 and [t for t in pool if int(t["num"]) in nums]) or \
+          [t for t in pool if (t.get("title") or "").strip().lower() == text.strip().lower()]
+    return sbqueue.key(hit[0]) if len(hit) == 1 else None
 
 
 def usable_project(p):

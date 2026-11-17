@@ -25,6 +25,27 @@ class HubTest(unittest.TestCase):
         a = h.state()["agents"]["a"]
         self.assertEqual((a["state"], a["total"], a["project"]), ("idle", 5, "/p"))
 
+    def test_a_chats_ticket_text_becomes_the_open_ticket_it_names(self):
+        h = self.h
+        h._tcache = (self.t, [{"map": "sk4te/party-playtest", "num": 1060, "title": "Landing feels right"},
+                              {"map": "sk4te/playthrough-fixes", "num": 1226, "title": "Doors open"},
+                              {"map": "homestudio/one-clean-program", "num": 525, "title": "Check words fixed"}])
+        said = lambda agent, **d: h.report({"agent": agent, "state": "working", **d})
+        self.assertEqual(said("a", ticket="party-playtest 1060", map="sk4te/party-playtest")["ref"], "sk4te/party-playtest#1060")
+        self.assertEqual(said("b", ticket="525", project="/x/HomeStudio")["ref"], "homestudio/one-clean-program#525")
+        self.assertEqual(said("c", ticket="sk4te/playthrough-fixes#1226")["ref"], "sk4te/playthrough-fixes#1226")
+        self.assertEqual(said("d", ticket="doors open")["ref"], "sk4te/playthrough-fixes#1226")
+        self.assertIsNone(said("e", ticket="the checks read the words")["ref"])  # names nothing for sure
+        self.assertIsNone(said("f", ticket="1060 and 525")["ref"])  # two numbers: no guess
+        h.report({"agent": "a", "state": "working", "note": "Bash"})  # a hook's report keeps it
+        self.assertEqual(h.state()["agents"]["a"]["ref"], "sk4te/party-playtest#1060")
+        said("a", ticket="something else")
+        self.assertNotIn("ref", h.state()["agents"]["a"])
+
+    def test_a_report_before_the_tickets_are_read_has_no_ref(self):
+        out = self.h.report({"agent": "a", "state": "working", "ticket": "525"})
+        self.assertNotIn("ref", out)
+
     def test_a_message_waits_for_its_session_and_is_taken_once(self):
         h = self.h
         h.report({"agent": "a", "state": "working"})

@@ -7,6 +7,7 @@
         "in_charge": "sess-1",
         "map": "repo/one",
         "parent": "queue",
+        "ref": "repo/one#1",
         "role": "worker",
         "since": 1794528000.0,
         "state": "done",
@@ -18,6 +19,7 @@
         "in_charge": "sess-1",
         "map": "repo/one",
         "parent": "queue",
+        "ref": "repo/one#2",
         "role": "worker",
         "ticket": "B"
       },

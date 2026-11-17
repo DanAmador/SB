@@ -2,7 +2,8 @@
   "body": {
     "agent": "repo/one#1",
     "needs_you": false,
-    "ok": true
+    "ok": true,
+    "ref": "repo/one#1"
   },
   "contentType": "application/json",
   "request": {

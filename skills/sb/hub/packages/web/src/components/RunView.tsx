@@ -9,7 +9,7 @@ import type * as React from "react";
 import type { QueueItem } from "@sb-hub/contract";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ago, blockerTitles, brokenBuilds, dur, endsAt, firstLine, hm, itemTitle, mapTitle, plainReason, plural, projOf, runRows, tryOf, showOf, type RunRow, type RunTone, itemInScope, ticketInScope } from "@/lib/board.ts";
+import { ago, blockerTitles, sessionOf, brokenBuilds, dur, endsAt, firstLine, hm, itemTitle, mapTitle, plainReason, plural, projOf, runRows, tryOf, showOf, type RunRow, type RunTone, itemInScope, ticketInScope } from "@/lib/board.ts";
 import { healthOf, liveState, MARK_WORDS, nightBlocks, nightLine, pairNight, type MapPair, type Mark, type NightBlock, type NightRow, type Pairing } from "@/lib/night.ts";
 import { helperCards, sessionCards, type SessionCard } from "@/lib/sessions.ts";
 import { setLink, useLink } from "@/lib/link.ts";
@@ -161,7 +161,7 @@ function RunLine({ r }: { r: RunRow }): React.JSX.Element {
           aria-label={`Message the worker on ${r.title}`}
           title="Message this worker"
           onClick={() => {
-            openMessage(r.item.key);
+            openMessage(sessionOf(r.item));
           }}
         >
           <IconMail aria-hidden />
@@ -330,7 +330,7 @@ function Row({ r, worker }: { r: NightRow; worker: SessionCard | undefined }): R
         {r.mark === "running" && (
           <>
             {worker === undefined && <span className="tabular-nums">{`${String(Math.floor((state.now - (i.started ?? state.now)) / 60))} min`}</span>}
-            <Button variant="ghost" size="icon-sm" disabled={down} aria-label={`Message the worker on ${title}`} title="Message this worker" onClick={() => { openMessage(i.key); }}>
+            <Button variant="ghost" size="icon-sm" disabled={down} aria-label={`Message the worker on ${title}`} title="Message this worker" onClick={() => { openMessage(sessionOf(i)); }}>
               <IconMail aria-hidden />
             </Button>
           </>
@@ -440,9 +440,14 @@ function HelperList({ list }: { list: readonly SessionCard[] }): React.JSX.Eleme
   );
 }
 
-/** Chats in charge of no map, each with its helpers folded under it. */
+/** A chat heard from longer ago than this folds away under "Quiet for over an hour". */
+const QUIET_CHAT = 3600;
+
+/** Chats in charge of no map, each with its helpers folded under it; the quiet ones folded away. */
 function OtherChats({ pairing }: { pairing: Pairing }): React.JSX.Element | null {
   if (pairing.chats.length === 0) return null;
+  const awake = pairing.chats.filter((c) => c.chat.quiet < QUIET_CHAT);
+  const quiet = pairing.chats.filter((c) => c.chat.quiet >= QUIET_CHAT);
   return (
     <section aria-label="Other chats" data-testid="other-chats" className="rounded-xl border bg-card">
       <header className="flex items-center gap-2 px-3 py-2">
@@ -450,23 +455,35 @@ function OtherChats({ pairing }: { pairing: Pairing }): React.JSX.Element | null
         <h3 className="font-medium">Other chats</h3>
         <span className="text-xs text-muted-foreground">{`${String(pairing.liveChats)} live`}</span>
       </header>
-      <ul className="flex flex-col divide-y border-t">
-        {pairing.chats.map(({ chat, helpers }) => (
-          <li key={chat.id} className="px-3 py-2 text-sm">
-            <SessionButton c={chat} label="Open the chat: " className="gap-2">
-              <span className="truncate font-medium">{chat.title}</span>
-              <span className="shrink-0 text-xs text-muted-foreground">{`${chat.project !== "" ? `${chat.project} · ` : ""}${chat.agent.state ?? "working"}${chat.silent ? ` · silent ${dur(chat.quiet)}` : ""}`}</span>
-            </SessionButton>
-            {helpers.length > 0 && (
-              <details className="mt-1">
-                <summary className="cursor-pointer text-xs text-muted-foreground">{`Helpers (${String(helpers.length)})`}</summary>
-                <HelperList list={helpers} />
-              </details>
-            )}
-          </li>
-        ))}
-      </ul>
+      {awake.length > 0 && <ChatList list={awake} />}
+      {quiet.length > 0 && (
+        <details data-testid="quiet-chats" className="border-t">
+          <summary className="cursor-pointer px-3 py-2 text-xs text-muted-foreground">{`Quiet for over an hour (${String(quiet.length)})`}</summary>
+          <ChatList list={quiet} />
+        </details>
+      )}
     </section>
+  );
+}
+
+function ChatList({ list }: { list: Pairing["chats"] }): React.JSX.Element {
+  return (
+    <ul className="flex flex-col divide-y border-t">
+      {list.map(({ chat, helpers }) => (
+        <li key={chat.id} className="px-3 py-2 text-sm">
+          <SessionButton c={chat} label="Open the chat: " className="gap-2">
+            <span className="truncate font-medium">{chat.title}</span>
+            <span className="shrink-0 text-xs text-muted-foreground">{`${chat.project !== "" ? `${chat.project} · ` : ""}${chat.agent.state ?? "working"}${chat.silent ? ` · silent ${dur(chat.quiet)}` : ""}`}</span>
+          </SessionButton>
+          {helpers.length > 0 && (
+            <details className="mt-1">
+              <summary className="cursor-pointer text-xs text-muted-foreground">{`Helpers (${String(helpers.length)})`}</summary>
+              <HelperList list={helpers} />
+            </details>
+          )}
+        </li>
+      ))}
+    </ul>
   );
 }
 

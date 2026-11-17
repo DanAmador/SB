@@ -6,7 +6,7 @@
  * projects, and each project's last ticket points at one Done box. Pure: no React, no DOM.
  */
 import type { MapRoute, Queue, QueueItem, TicketRow } from "@sb-hub/contract";
-import { folder, itemInScope, landedShort, itemMapKey, itemTitle, mapTitle, projOf, type Scope } from "./board.ts";
+import { CHAT_RUNNER, folder, itemInScope, landedShort, itemMapKey, itemTitle, mapTitle, projOf, type Scope } from "./board.ts";
 import { mapState, NODE_H, NODE_W, type MapState } from "./map.ts";
 
 /** Between rows, and between boxes side by side in a column. */
@@ -323,7 +323,7 @@ export function nightGraph(input: NightInput): NightGraph {
       item: i,
       title: info.tickets.get(i.key)?.title ?? itemTitle(i, null),
       state: boxState(i, p),
-      foot: p !== null ? `${STATE_WORDS[i.state]} ${String(p)}` : landedShort(i) ? "Landed, needs your look" : STATE_WORDS[i.state],
+      foot: p !== null ? `${STATE_WORDS[i.state]} ${String(p)}` : i.runner === CHAT_RUNNER ? "In a chat" : landedShort(i) ? "Landed, needs your look" : STATE_WORDS[i.state],
       place: p,
       outcome: outcomeOf(i),
       report: outcomeOf(i) !== null ? i.links.report : null,

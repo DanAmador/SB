@@ -29,6 +29,8 @@ export const AgentRow = z.strictObject({
   role: z.string().optional(),
   parent: z.string().optional(),
   ticket: z.string().optional(),
+  /** The open ticket ("<map>#<num>") its `ticket` names, when the hub could match it: the run counts and draws it. */
+  ref: z.string().optional(),
   /** The map ("<project>/<map>") the session is in charge of, or the map of a queue worker's ticket. */
   map: z.string().optional(),
   /** A queue worker's row: the id of the live session in charge of its map, when there is one. */
@@ -726,7 +728,8 @@ export const Ok = z.strictObject({ ok: z.literal(true) });
 export const ApiError = z.strictObject({ ok: z.literal(false), error: z.string() });
 export type ApiError = z.infer<typeof ApiError>;
 
-export const ReportAnswer = z.strictObject({ ok: z.literal(true), needs_you: z.boolean(), agent: z.string() });
+/** `ref`: sent when the report named a ticket and the hub had read the tickets; null when it matched none. */
+export const ReportAnswer = z.strictObject({ ok: z.literal(true), needs_you: z.boolean(), agent: z.string(), ref: z.string().nullable().optional() });
 export const LockHeld = z.strictObject({ ok: z.literal(false), held_by: z.string() });
 export const IdAnswer = z.strictObject({ ok: z.literal(true), id: z.string() });
 export const TakeAnswer = z.strictObject({ ok: z.literal(true), messages: z.array(z.string()) });
