@@ -2893,6 +2893,11 @@ class TicketRun:
         return {**self.result(item, "landed", note, run, head, checks),
                 "checked": "the integrator's verdict: {}".format(verdict or "none")}
 
+    def in_stage(self, key):
+        """True while the queue item `key` is in its Unity stage (its integrator runs)."""
+        with self.hub._lock:
+            return any(i["key"] == key and i.get("integrate") for i in self.hub._data["queue"]["items"])
+
     def take_unity(self, landing):
         """Take the repo's Unity lock for this landing, waiting up to LAND_LOCK_WAIT while someone else holds it:
         None once held, else who holds it."""
@@ -2902,8 +2907,9 @@ class TicketRun:
             got = self.hub.lock(key, by, landing=landing)
             if got.get("ok"):
                 return None
-            if str(got.get("held_by") or "").startswith("sb-hub landing "):  # another ticket's Unity stage
-                return "{}: {} is in its Unity stage".format(UNITY_WAIT, got["held_by"][len("sb-hub landing "):])
+            other = str(got.get("held_by") or "")[len("sb-hub landing "):]
+            if other and str(got.get("held_by")).startswith("sb-hub landing ") and self.in_stage(other):
+                return "{}: {} is in its Unity stage".format(UNITY_WAIT, other)  # it may hold it long: no wait
             if time.time() >= end or self.stopping():
                 return "{} is held by {}".format(key, got.get("held_by"))
             time.sleep(LAND_LOCK_POLL)
