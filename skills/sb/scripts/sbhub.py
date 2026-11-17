@@ -2135,6 +2135,50 @@ def land(repo, sha):
     return blocking or "git merge --ff-only into the checkout failed: " + (err or out or "no reason given")
 
 
+_DROP_UNSAVED_SCENES = r"""
+if (UnityEngine.Application.isPlaying) return "";
+var dirty = new System.Collections.Generic.List<string>();
+for (int i = 0; i < UnityEngine.SceneManagement.SceneManager.sceneCount; i++)
+{
+    var s = UnityEngine.SceneManagement.SceneManager.GetSceneAt(i);
+    if (s.isDirty) dirty.Add(string.IsNullOrEmpty(s.path) ? "(untitled)" : s.path);
+}
+if (dirty.Count == 0) return "";
+var setup = System.Array.FindAll(UnityEditor.SceneManagement.EditorSceneManager.GetSceneManagerSetup(),
+    x => !string.IsNullOrEmpty(x.path));
+UnityEditor.SceneManagement.EditorSceneManager.NewScene(
+    UnityEditor.SceneManagement.NewSceneSetup.EmptyScene, UnityEditor.SceneManagement.NewSceneMode.Single);
+if (setup.Length > 0)
+{
+    if (!System.Array.Exists(setup, x => x.isActive)) setup[0].isActive = true;
+    if (!System.Array.Exists(setup, x => x.isLoaded)) setup[0].isLoaded = true;
+    UnityEditor.SceneManagement.EditorSceneManager.RestoreSceneManagerSetup(setup);
+}
+return string.Join(", ", dirty);
+"""
+
+
+def drop_unsaved_scenes(repo):
+    """Reload every open scene with unsaved changes from disk, so a landing or a revert that rewrites a scene file
+    never stops the Editor on Unity's "scene has been modified externally" dialog, which blocks its main thread
+    until someone clicks it (2026-11-17: a night of Unity passes timed out behind one). Unsaved scene edits are
+    lost; a scripted scene change never asks. Does nothing in Play mode, outside a Unity project, or with the
+    Editor down. The scenes it dropped, or ""."""
+    if not is_unity(repo):
+        return ""
+    try:
+        r = subprocess.run(["unity", "command", "eval", "--project-path", str(repo), "--format", "json",
+                            "--code", _DROP_UNSAVED_SCENES], capture_output=True, text=True, timeout=60)
+        out = r.stdout
+        data = json.JSONDecoder().raw_decode(out[out.find("{"):])[0] if r.returncode == 0 and "{" in out else {}
+        dropped = ((data.get("data") or {}).get("result") or {}).get("result") or ""
+    except (OSError, subprocess.TimeoutExpired, ValueError, AttributeError):
+        return ""
+    if dropped:
+        print("sb hub: dropped unsaved scenes before taking Unity: {}".format(dropped), file=sys.stderr, flush=True)
+    return str(dropped)
+
+
 def _landing_by(landing):
     return "sb-hub landing " + landing["key"]
 
@@ -2951,6 +2995,7 @@ class TicketRun:
         while True:
             got = self.hub.lock(key, by, landing=landing)
             if got.get("ok"):
+                drop_unsaved_scenes(landing["repo"])
                 return None
             other = str(got.get("held_by") or "")[len("sb-hub landing "):]
             if other and str(got.get("held_by")).startswith("sb-hub landing ") and self.in_stage(other):
@@ -4026,6 +4071,7 @@ class Supervisor:
             self._update(key, state="queued", started=None, note="{}: {} holds the Editor".format(
                 UNITY_WAIT, got.get("held_by")))
             return
+        drop_unsaved_scenes(repo)
         rc, out, err = self.runner.sbmap("claim", t["map"], nnn, "--by", "hub " + name)
         if rc != 0:
             self.hub.unlock(unity_lock(repo), _landing_by(landing))
