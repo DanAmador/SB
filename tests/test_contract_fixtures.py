@@ -164,6 +164,32 @@ class ContractFixturesTest(unittest.TestCase):
         self.written.append(f.name)
         return body
 
+    def record_unity_stage(self):
+        """The state answer while a ticket of a Unity project is in its stage (Supervisor._integrate) and another
+        is queued for a Unity pass (Hub.queue_integrate). This repo is no Unity project, so the two items carry
+        what the Supervisor writes there for the one answer, then go back as they were."""
+        head = git(self.repo, "rev-parse", "HEAD")
+        folder = self.vault / "wayfinder" / "repo" / "runs" / "2026-11-14-one"
+        stage = {"key": None, "repo": str(self.repo), "before": head, "sha": head, "tree": None, "branch": "",
+                 "only": True, "dirty": [], "folder": str(folder), "log": str(folder / "integrate.log")}
+        with self.hub._lock:
+            staged, passed = [i for i in self.hub._data["queue"]["items"] if i["kind"] == "ticket"][:2]
+            kept = {i["key"]: json.loads(json.dumps(i)) for i in (staged, passed)}
+            stage["key"] = staged["key"]
+            staged.update(integrate=stage, integrate_only=True)
+            passed.update(integrate_only=True)
+        try:
+            body = self.record("state-unity-stage", "/api/state")
+        finally:
+            with self.hub._lock:
+                for i in (staged, passed):
+                    was = kept[i["key"]]
+                    i.clear()
+                    i.update(was)
+        got = {i["key"]: i for i in body["queue"]["items"]}
+        self.assertEqual(got[staged["key"]]["integrate"]["sha"], head)
+        self.assertTrue(got[passed["key"]]["integrate_only"])
+
     # ---- the run ----
 
     def test_every_route_answers_in_its_contract_shape(self):
@@ -309,6 +335,7 @@ class ContractFixturesTest(unittest.TestCase):
 
         # every GET, in the state above
         self.record("state", "/api/state")
+        self.record_unity_stage()
         self.record("runs", "/api/runs")
         self.record("runs-page", "/api/runs?limit=1&offset=1&since={}".format(int(START - 2 * 86400)))
         self.record("run", "/api/run?key=" + quote("repo/one#1"))

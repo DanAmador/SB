@@ -1,0 +1,341 @@
+{
+  "body": {
+    "agents": {
+      "repo/one#1": {
+        "agent": "repo/one#1",
+        "at": 1794528000.0,
+        "in_charge": "sess-1",
+        "map": "repo/one",
+        "parent": "queue",
+        "role": "worker",
+        "since": 1794528000.0,
+        "state": "done",
+        "ticket": "A"
+      },
+      "repo/one#2": {
+        "agent": "repo/one#2",
+        "at": 1794528060.0,
+        "in_charge": "sess-1",
+        "map": "repo/one",
+        "parent": "queue",
+        "role": "worker",
+        "ticket": "B"
+      },
+      "sess-1": {
+        "agent": "sess-1",
+        "asked": "chart it",
+        "at": 1794528006.0,
+        "done": 1,
+        "map": "fixture/map",
+        "name": "repo sess-1",
+        "note": "Grep: claim",
+        "project": "/fixture/repo",
+        "role": "orchestrator",
+        "since": 1794528000.0,
+        "spawns": [],
+        "state": "working",
+        "title": "Charting the hub",
+        "total": 3
+      },
+      "sess-3": {
+        "agent": "sess-3",
+        "at": 1794528000.0,
+        "name": "other",
+        "note": "which port?",
+        "since": 1794528000.0,
+        "state": "needs you"
+      },
+      "w-1": {
+        "agent": "w-1",
+        "at": 1794528005.0,
+        "name": "scout",
+        "note": "started",
+        "parent": "sess-1",
+        "project": "/fixture/repo",
+        "role": "worker",
+        "since": 1794528000.0,
+        "state": "working",
+        "ticket": "Read the routes"
+      }
+    },
+    "aliases": {
+      "sess-2": "sess-1"
+    },
+    "charge": {
+      "repo/one": "sess-1"
+    },
+    "installed": {
+      "agy": {
+        "dir": null,
+        "kind": "agy",
+        "limited_until": null,
+        "model": null
+      },
+      "main": {
+        "dir": "/fixture/.claude-main",
+        "kind": "claude",
+        "limited_until": null,
+        "model": null,
+        "probed": 1794528000.0
+      },
+      "spare": {
+        "dir": "/fixture/.claude-spare",
+        "kind": "claude",
+        "limited_until": null,
+        "model": null,
+        "probed": 1794528000.0
+      }
+    },
+    "locks": {
+      "port:5173": {
+        "at": 1794528000.0,
+        "by": "sess-1"
+      }
+    },
+    "messages": {
+      "00000003": {
+        "at": 1794528000.0,
+        "delivered": 1794528000.0,
+        "how": "UserPromptSubmit",
+        "text": "Use port 5174.",
+        "to": "sess-1"
+      },
+      "00000004": {
+        "at": 1794528000.0,
+        "delivered": null,
+        "how": null,
+        "text": "Stop after the tests.",
+        "to": "w-1"
+      }
+    },
+    "now": 1794528060.0,
+    "providers": {
+      "/fixture/repo": [
+        {
+          "icon": "git",
+          "title": "Repo and maps",
+          "widgets": [
+            {
+              "kind": "status",
+              "label": "Branch",
+              "level": "ok",
+              "value": "main"
+            },
+            {
+              "kind": "status",
+              "label": "Uncommitted files",
+              "level": "ok",
+              "value": "0"
+            },
+            {
+              "kind": "status",
+              "label": "Last commit",
+              "level": "ok",
+              "value": "init (1 minute ago)"
+            },
+            {
+              "kind": "log",
+              "label": "Maps in the vault",
+              "lines": [
+                "repo/one                         open       4 on frontier \u00b7 4 open",
+                "                                 One",
+                "repo/two                         open       3 on frontier \u00b7 3 open",
+                "                                 Two"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "questions": {
+      "00000001": {
+        "agent": "sess-3",
+        "answer": null,
+        "asked": 1794528000.0,
+        "by": null,
+        "deadline": 1794531600.0,
+        "default": "5173",
+        "options": [
+          "5173",
+          "5174"
+        ],
+        "q": "Which port?"
+      },
+      "00000002": {
+        "agent": "sess-1",
+        "answer": "yes",
+        "answered": 1794528000.0,
+        "asked": 1794528000.0,
+        "by": "you",
+        "deadline": 1794528600.0,
+        "default": "no",
+        "options": [
+          "yes",
+          "no"
+        ],
+        "q": "Ship it?"
+      }
+    },
+    "queue": {
+      "agent": "main",
+      "agents": [
+        "main",
+        "spare"
+      ],
+      "bases": {},
+      "final_review": true,
+      "items": [
+        {
+          "agent": null,
+          "commit": null,
+          "ended": null,
+          "integrate": {
+            "before": "29bcff914f5018bfbabf0733ef6d12a82f7b7335",
+            "branch": "",
+            "dirty": [],
+            "folder": "/fixture/Vault/wayfinder/repo/runs/2026-11-14-one",
+            "key": "repo/two#5",
+            "log": "/fixture/Vault/wayfinder/repo/runs/2026-11-14-one/integrate.log",
+            "only": true,
+            "repo": "/fixture/repo",
+            "sha": "29bcff914f5018bfbabf0733ef6d12a82f7b7335",
+            "tree": null
+          },
+          "integrate_only": true,
+          "key": "repo/two#5",
+          "kind": "ticket",
+          "night": "night-20261113-010100",
+          "note": "",
+          "started": null,
+          "state": "queued",
+          "tries": 0,
+          "waits": {
+            "kind": "paused",
+            "text": "the queue is paused: nothing new starts",
+            "with": null
+          }
+        },
+        {
+          "agent": null,
+          "commit": null,
+          "ended": null,
+          "integrate_only": true,
+          "key": "repo/two#6",
+          "kind": "ticket",
+          "night": "night-20261113-010100",
+          "note": "",
+          "started": null,
+          "state": "queued",
+          "tries": 0,
+          "waits": {
+            "kind": "paused",
+            "text": "the queue is paused: nothing new starts",
+            "with": null
+          }
+        },
+        {
+          "agent": null,
+          "commit": null,
+          "ended": null,
+          "key": "repo/one#3",
+          "kind": "ticket",
+          "night": "night-20261113-010100",
+          "note": "",
+          "started": null,
+          "state": "queued",
+          "tries": 0,
+          "waits": {
+            "kind": "paused",
+            "text": "the queue is paused: nothing new starts",
+            "with": null
+          }
+        },
+        {
+          "agent": "spare",
+          "commit": null,
+          "ended": null,
+          "key": "repo/one#2",
+          "kind": "ticket",
+          "night": "night-20261113-010100",
+          "note": "",
+          "refused": 2,
+          "refused_lines": [
+            "refused: Bash: `git push` is refused",
+            "refused: Bash: `git stash` is refused"
+          ],
+          "started": null,
+          "state": "queued",
+          "tries": 0,
+          "waits": {
+            "kind": "paused",
+            "text": "the queue is paused: nothing new starts",
+            "with": null
+          }
+        },
+        {
+          "agent": "main",
+          "commit": null,
+          "created": 1794528060.0,
+          "ended": null,
+          "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "key": "job:aaaaaaaaaaaa:1",
+          "kind": "job",
+          "model": "opus",
+          "name": "audit",
+          "night": "night-20261113-010100",
+          "not_before": 1794609000.0,
+          "note": "",
+          "project": "/fixture/repo",
+          "prompt": "Audit the hub",
+          "repo": "/fixture/repo",
+          "started": null,
+          "state": "queued",
+          "title": "audit",
+          "tries": 0
+        },
+        {
+          "agent": null,
+          "commit": null,
+          "created": 1794528060.0,
+          "ended": null,
+          "hash": "tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+          "key": "job:tttttttttttt:1",
+          "kind": "job",
+          "model": null,
+          "name": "job-tttttt",
+          "night": "night-20261113-010100",
+          "note": "",
+          "project": "/fixture/repo",
+          "prompt": "Tidy the README",
+          "repo": "/fixture/repo",
+          "started": null,
+          "state": "queued",
+          "title": "job-tttttt",
+          "tries": 0
+        }
+      ],
+      "maps": [
+        "repo/two",
+        "repo/one"
+      ],
+      "night": "night-20261113-010100",
+      "paused": true,
+      "repos": {
+        "/fixture/repo": {
+          "at_once": 2,
+          "running": 0,
+          "side_by_side": 3
+        }
+      },
+      "runs": {},
+      "seeded": true,
+      "stop_at": 1794549600.0,
+      "version": 27
+    },
+    "review_next_at": null,
+    "seen": []
+  },
+  "contentType": "application/json",
+  "route": "GET /api/state",
+  "status": 200
+}
