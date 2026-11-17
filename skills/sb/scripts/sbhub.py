@@ -57,7 +57,8 @@ running or in checks left, ONE second pass on Opus (`claude -p` from templates/r
 ticket of it against its Done when and writes <run>/<num>-review.md for each; only a `finished` verdict resolves a
 ticket (pausing the queue counts as the run's end). Partly or not met queue it once more at the front, its brief
 naming the first commit and the review's not-met lines; a second verdict short of finished leaves it open with
-both findings, failed, for the owner. The hub never reverts a commit.
+both findings, failed, for the owner. A review never reverts a commit; only a failed after-landing check or Unity
+stage does, and only the ticket's own commits, each named on an `Undoes:` line.
 
 It paces each Claude account: workers print their account's 5-hour and weekly use (stream-json), a one-line
 Haiku probe reads an idle one, and an item starts only where its learned cost fits under GATE_5H (weekly under
@@ -1537,7 +1538,7 @@ REVIEW_MODEL = "opus"  # the second pass runs on Opus, whichever model did the w
 #   rechecks  a check that exited 75, or a review that could not run, run again alone (RECHECKS_MAX)
 #   redo      the one more try the Opus review asks for: its first verdict was partly or not met. The field holds the
 #             first try's commit and findings; once it is set there is no other, and a second verdict that is not
-#             finished leaves the ticket open, waiting for the owner. No commit is ever reverted.
+#             finished leaves the ticket open, waiting for the owner. A verdict never reverts a commit.
 LOG_TAIL = 65536  # the end of a worker's log that is searched for a limit message
 # what an agent prints when its plan's usage runs out (case-insensitive); any other failure is just `failed`
 LIMIT_PATTERNS = ("usage limit reached", "hit your session limit", "hit your weekly limit", "spend limit")
@@ -2244,21 +2245,45 @@ def stage_verdict(report):
     return found[-1].lower() if found else None
 
 
-def revert_landing(repo, before, sha, why):
-    """Undo one landing, the commits before..sha, by one new commit on the checkout's branch: the files as they were
-    before it, whatever came after it kept. History is never rewritten. (None, the revert's sha), or (why not, None).
+def stage_commits(repo, sha, key):
+    """The commits after the landing `sha` whose Ticket line names the ticket `key` (map#num): its Unity stage's own
+    fixes, newest first. Whatever anyone else committed meanwhile is not among them."""
+    own = []
+    for row in _git(repo, "log", "--format=%H\x1f%B\x1e", "{}..HEAD".format(sha)).split("\x1e"):
+        h, _, body = row.partition("\x1f")
+        m = re.fullmatch(r"(.+)/0*(\d+)", (re.findall(r"^Ticket: *(\S+) *$", body, re.M) or [""])[-1])
+        if h.strip() and m and "{}#{}".format(m.group(1), int(m.group(2))) == key:
+            own.append(h.strip())
+    return own
+
+def revert_landing(repo, before, sha, why, own=()):
+    """Undo one landing, the commits before..sha, and `own`, the commits its Unity stage made after it (newest first),
+    by one new commit on the checkout's branch that names each of them on an `Undoes:` line. Only those: whatever
+    else came after the landing is kept. History is never rewritten. (None, the revert's sha), or (why not, None).
     Nothing to undo when sha is not on the branch or a revert of it is already there."""
+    own = list(own)
     head = _git(repo, "rev-parse", "HEAD")
-    if not head or before == sha or _git_run(repo, "merge-base", "--is-ancestor", sha, head)[0] != 0:
+    if not head or (before == sha and not own) or _git_run(repo, "merge-base", "--is-ancestor", sha, head)[0] != 0:
         return None, None
     mark = "Undoes-landing: {}..{}".format(before, sha)
     if _git(repo, "log", "--format=%H", "--fixed-strings", "--grep=" + mark, "{}..{}".format(sha, head)):
         return None, None
-    rc, out, err = _git_run(repo, "merge-tree", "--write-tree", "--merge-base", sha, head, before)
-    if rc != 0:
-        return "git merge-tree could not undo it: " + firstline(err or out), None
-    msg = "revert: back out {}\n\n{}\n\n{}\n".format(_git(repo, "log", "-1", "--format=%s", sha), why, mark)
-    rc, new, err = _git_run(repo, "commit-tree", out.split()[0], "-p", head, "-m", msg)
+    top = head
+    steps = [(c + "^", c) for c in own] + ([(before, sha)] if before != sha else [])
+    for n, (base, tip) in enumerate(steps):  # each undone on top of the last; a step is a commit only in between
+        rc, out, err = _git_run(repo, "merge-tree", "--write-tree", "--merge-base", tip, top, base)
+        if rc != 0:
+            return "git merge-tree could not undo {}: {}".format(tip[:9], firstline(err or out)), None
+        tree = out.split()[0]
+        if n < len(steps) - 1:
+            rc, top, err = _git_run(repo, "commit-tree", tree, "-p", top, "-m", "sb hub: a step of a back-out")
+            if rc != 0:
+                return "git commit-tree failed: " + firstline(err), None
+            top = top.strip()
+    undone = own + (_git(repo, "rev-list", "{}..{}".format(before, sha)).split() if before != sha else [])
+    msg = "revert: back out {}\n\n{}\n\n{}\n{}\n".format(_git(repo, "log", "-1", "--format=%s", sha), why, mark,
+                                                       "\n".join("Undoes: " + c for c in undone))
+    rc, new, err = _git_run(repo, "commit-tree", tree, "-p", head, "-m", msg)
     if rc != 0:
         return "git commit-tree failed: " + firstline(err), None
     rc, out, err = _git_run(repo, "merge", "--ff-only", "--quiet", new.strip(), timeout=300)
@@ -2281,7 +2306,7 @@ def replay_tree(tree, before, onto):
 
 def undo_landing(landing, why):
     """A landing's revert in the checkout, then its work replayed in its worktree: None, or why not."""
-    err, new = revert_landing(landing["repo"], landing["before"], landing["sha"], why)
+    err, new = revert_landing(landing["repo"], landing["before"], landing["sha"], why, landing.get("own") or ())
     if err:
         return err
     head = new or _git(landing["repo"], "rev-parse", "HEAD")
@@ -2948,7 +2973,8 @@ class TicketRun:
         report = folder / "{}-integrate.md".format(num)
         tidy_stage(repo, stage.get("dirty") or [], folder / "{}-unity-leftovers.patch".format(num))
         head = _git(repo, "rev-parse", "HEAD") or stage["sha"]
-        landing = {**{k: stage.get(k) for k in ("key", "repo", "before", "tree", "branch")}, "sha": head}
+        landing = {**{k: stage.get(k) for k in ("key", "repo", "before", "tree", "branch", "sha")},
+                   "own": stage_commits(repo, stage["sha"], stage["key"])}
         verdict = "broken" if over else stage_verdict(report)
         tell = "\nThe integrator's report: {}".format(report) if report.is_file() else ""
         checks = []
@@ -3019,7 +3045,8 @@ class TicketRun:
         the Unity lock, so nothing lands on a broken build until it is fixed."""
         repo, keep = landing["repo"], False
         try:
-            changed = _git(repo, "diff", "--name-only", landing["before"], landing["sha"])
+            changed = "\n".join([_git(repo, "diff", "--name-only", landing["before"], landing["sha"])] + [
+                _git(repo, "show", "--name-only", "--format=", c) for c in landing.get("own") or ()]).strip()
             failed = sbqueue._run_checks(cmds, repo, _recording(checks), changed)
             if failed and not failed.startswith(sbqueue.NOT_RUN):
                 failed = self._blame_earlier(landing, failed, set(changed.split()), cmds, checks)
@@ -4095,7 +4122,7 @@ class Supervisor:
         repo = stage["repo"]
         tidy_stage(repo, stage.get("dirty") or [], Path(stage.get("folder") or self.hub.home) /
                    "{}-unity-leftovers.patch".format(item["key"].rsplit("#", 1)[-1]))
-        landing = {**stage, "tree": tree or stage.get("tree"), "sha": _git(repo, "rev-parse", "HEAD") or stage["sha"]}
+        landing = {**stage, "tree": tree or stage.get("tree"), "own": stage_commits(repo, stage["sha"], stage["key"])}
         err = undo_landing(landing, why)
         if err:  # the lock stays, so nothing else lands on top until the owner looks
             print("sb hub: could not undo the Unity stage of {}: {}".format(item["key"], err), file=sys.stderr,

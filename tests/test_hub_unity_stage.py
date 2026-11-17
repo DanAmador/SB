@@ -95,6 +95,54 @@ class UnityStageTest(RunnerCase):
         self.assertEqual(self.compiles(), [])  # nothing compiled a stage the integrator called broken
         self.until(lambda: self.hub.state()["locks"] == {})
 
+    def chat_commit(self):
+        """Someone else's commit on main while a Unity stage holds the Editor (sk4te 2026-11-17 18:38: a chat
+        session's tools/play and pen fix)."""
+        (self.repo / "chat.txt").write_text("a chat session's work\n")
+        git(self.repo, "add", "chat.txt")
+        git(self.repo, "commit", "-q", "-m", "fix(tools): a chat session's own fix")
+        return git(self.repo, "rev-parse", "HEAD")
+
+    def back_out(self):
+        [sha] = git(self.repo, "log", "--format=%H", "--grep=Undoes-landing:", "HEAD").split()
+        return sha
+
+    def test_a_back_out_undoes_only_the_ticket_and_its_integrator_never_a_commit_made_meanwhile(self):
+        os.environ.update(FAKE_INTEGRATE="tried", FAKE_INTEGRATE_SLEEP="1.5")
+        before = git(self.repo, "rev-parse", "HEAD")
+        self.only(1)
+        self.until(lambda: self.items()["repo/one#1"].get("integrate"))
+        landed = git(self.repo, "rev-parse", "HEAD")
+        chat = self.chat_commit()
+        self.until(lambda: len(self.workers()) == 2)
+        revert = self.back_out()
+        self.assertEqual(git(self.repo, "diff", "--name-only", revert + "^", revert).split(),
+                         ["fix.txt", "one/done.txt"])  # the ticket's file and the integrator's, nothing else
+        self.assertEqual(git(self.repo, "show", "HEAD:chat.txt"), "a chat session's work")
+        fix = git(self.repo, "log", "--format=%H", "--grep=^fix(integrate)", before + "..HEAD").split()
+        undoes = [l.split()[1] for l in git(self.repo, "log", "-1", "--format=%B", revert).splitlines()
+                  if l.startswith("Undoes: ")]
+        self.assertEqual(sorted(undoes), sorted(fix + [landed]))
+        self.assertNotIn(chat, undoes)
+
+    def test_a_restart_backs_out_only_the_stage_and_keeps_a_commit_made_meanwhile(self):
+        os.environ["FAKE_INTEGRATE_SLEEP"] = "30"
+        self.only(1)
+        self.until(lambda: self.items()["repo/one#1"].get("integrate"))
+        run = self.sup.procs.pop("repo/one#1")
+        sbhub._kill_group(run["p"], grace=0)  # the integrator dies with its hub
+        chat = self.chat_commit()
+        os.environ["FAKE_INTEGRATE_SLEEP"] = "0"
+        hub = Hub(self.root / "hub", now=self.clock, launcher=self.launcher)
+        sup = Supervisor(hub)
+        sup.close_off = False
+        self.addCleanup(sup.stop)
+        self.hub, self.sup = hub, sup
+        self.until(lambda: self.state_of("repo/one#1") == "done")
+        self.assertNotIn("chat.txt", git(self.repo, "diff", "--name-only", self.back_out() + "^", self.back_out()))
+        self.assertEqual(git(self.repo, "show", "HEAD:chat.txt"), "a chat session's work")
+        self.assertEqual(git(self.repo, "merge-base", "--is-ancestor", chat, "HEAD"), "")
+
     def test_a_second_ticket_waits_for_the_editor_with_no_try_spent_and_the_stages_never_overlap(self):
         os.environ["FAKE_INTEGRATE_SLEEP"] = "1.5"
         self.only(1, 2)

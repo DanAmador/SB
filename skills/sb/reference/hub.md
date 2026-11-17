@@ -35,7 +35,8 @@ the vault. Only the running hub writes the queue (`$SB_HUB_HOME/state.json`); CL
   `unity:<repo folder name>` (chat sessions take the same one with `sb_lock` before they use that
   Unity; the hub waits up to 10 minutes while one holds it, then rechecks later), fast-forwards, runs
   the after-landing lines, and lets go. If one fails, the landing is backed out by **one revert commit**
-  (the checkout's files as before it; history is never rewritten), the work is replayed on the
+  that undoes only the ticket's commits and its integrator's (each named on an `Undoes:` line); anything
+  else committed meanwhile is kept, and history is never rewritten, the work is replayed on the
   ticket's branch, and the ticket goes back to its worker with the failure in its brief (the one Opus
   retry), so the next ticket lands on a building main. One that exits 75 (Unity did not answer) is
   backed out too and lands again at its recheck. A hub that stops mid-landing keeps the landing in

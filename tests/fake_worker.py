@@ -27,7 +27,8 @@ A brief that opens the integrator's (templates/integrate.md) makes it the fake i
 appends a JSON line to FAKE_INTEGRATE_CALLS (cwd, env, start and end time, the hub's locks from FAKE_COMPILE_STATE),
 then does what FAKE_INTEGRATE says (default works): `works` commits a fix (fix.txt), appends a line to the tracked
 file FAKE_INTEGRATE_DIRTY when set (Unity writing during Play) and writes its report with `VERDICT: works`;
-`broken` writes `VERDICT: broken`; `silent` writes no report. FAKE_INTEGRATE_SLEEP: seconds it takes first.
+`broken` writes `VERDICT: broken`; `tried` commits the fix as `works` does, then writes `VERDICT: broken`;
+`silent` writes no report. FAKE_INTEGRATE_SLEEP: seconds it takes first.
 
 A brief that names a review file (`Write your review to: <path>`, templates/review-brief.md) makes it the fake
 reviewer instead, whatever the mode (it names one review file per landed ticket, `<num>-review.md`). FAKE_REVIEW
@@ -118,7 +119,7 @@ def integrator(brief):
     mode = os.environ.get("FAKE_INTEGRATE", "works")
     out = re.search(r"Write it to `([^`]+)`", brief).group(1)
     ticket = re.search(r"^# Bring (\S+) into", brief).group(1)
-    if mode == "works":
+    if mode in ("works", "tried"):
         with open("fix.txt", "a", encoding="utf-8") as f:
             f.write("fix for {}\n".format(ticket))
         subprocess.run(["git", "add", "fix.txt"], check=True)
