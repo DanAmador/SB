@@ -42,6 +42,13 @@ class HubTest(unittest.TestCase):
         said("a", ticket="something else")
         self.assertNotIn("ref", h.state()["agents"]["a"])
 
+    def test_a_chat_that_named_its_ticket_before_is_matched_on_its_next_hook_report(self):
+        h = self.h
+        h.report({"agent": "a", "state": "working", "ticket": "525"})  # the tickets are not read yet
+        h._tcache = (self.t, [{"map": "homestudio/one-clean-program", "num": 525, "title": "Check words fixed"}])
+        h.report({"agent": "a", "state": "working", "note": "Bash"})
+        self.assertEqual(h.state()["agents"]["a"]["ref"], "homestudio/one-clean-program#525")
+
     def test_a_report_before_the_tickets_are_read_has_no_ref(self):
         out = self.h.report({"agent": "a", "state": "working", "ticket": "525"})
         self.assertNotIn("ref", out)

@@ -360,7 +360,7 @@ class Hub:
                     continue  # a session's hook events never rename the agent it reports as
                 a[f] = self._resolve(d[f]) if f == "parent" else d[f]
             rows = self._tcache[1]
-            if rows is not None and d.get("ticket") not in (None, ""):
+            if rows is not None and a.get("ticket"):  # every report, a hook's too: a chat started before counts
                 ref = ticket_ref(a.get("ticket"), a.get("map"), a.get("project"), rows)
                 if ref:
                     a["ref"] = ref  # the open ticket it works on, so the run counts and draws it
