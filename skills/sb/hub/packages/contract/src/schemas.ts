@@ -726,6 +726,9 @@ export const QueueAnswer = z.strictObject({ ok: z.literal(true), queue: Queue })
 export const QueueStale = z.strictObject({ ok: z.literal(false), stale: z.literal(true), queue: Queue });
 export type QueueStale = z.infer<typeof QueueStale>;
 export const QueueJobAnswer = QueueAnswer.extend({ key: z.string() });
+/** A Unity pass for failed tickets whose work is in the checkout (sbhub queue integrate). */
+export const QueueIntegrateBody = z.strictObject({ keys: z.array(z.string()).min(1) });
+export const QueueIntegrateAnswer = z.strictObject({ ok: z.literal(true), queued: z.array(z.string()) });
 /** Each ticket of the map left out, with why: it needs the owner, has no done-when or checks, is claimed, or waits
  * on a map that is not queued. */
 export const QueueMapAnswer = QueueAnswer.extend({

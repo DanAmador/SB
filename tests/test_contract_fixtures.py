@@ -275,6 +275,7 @@ class ContractFixturesTest(unittest.TestCase):
         v = self.hub.state()["queue"]["version"]
         r("queue_parallel", {"repo": str(self.repo), "n": 2, "version": v})
         self.record("queue-parallel-refused", "/api/queue/parallel", {"repo": str(self.repo), "n": 9, "version": v + 1}, 400)
+        self.record("queue-integrate-refused", "/api/queue/integrate", {"keys": []}, 400)  # a Unity pass names tickets
         self.sup._set_waits()  # each queued item says what it waits for (the queue is paused)
         for prompt in ("Audit the hub", "Tidy the README"):
             digest = hashlib.sha256((project + "\n" + prompt).encode("utf-8")).hexdigest()

@@ -1,0 +1,12 @@
+{
+  "body": {
+    "error": "name the tickets",
+    "ok": false
+  },
+  "contentType": "application/json",
+  "request": {
+    "keys": []
+  },
+  "route": "POST /api/queue/integrate",
+  "status": 400
+}

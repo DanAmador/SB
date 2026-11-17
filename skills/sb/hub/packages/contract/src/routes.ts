@@ -48,6 +48,7 @@ export const ROUTES = {
   "POST /api/queue/agents": post(s.QueueAgentsBody, { 200: s.QueueAnswer, 409: s.QueueStale }),
   "POST /api/queue/options": post(s.QueueOptionsBody, { 200: s.QueueAnswer, 409: s.QueueStale }),
   "POST /api/queue/job": post(s.QueueJobBody, { 200: s.QueueJobAnswer }),
+  "POST /api/queue/integrate": post(s.QueueIntegrateBody, { 200: s.QueueIntegrateAnswer }),
   "POST /api/queue/remove_job": post(s.QueueRemoveJobBody, { 200: s.QueueAnswer, 409: s.QueueStale }),
   "POST /api/queue/stop": post(s.QueueStopBody, { 200: s.QueueAnswer, 409: s.QueueStale }),
   "POST /api/night/start": post(s.NightStartBody, { 200: s.NightAnswer }),
