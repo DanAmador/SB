@@ -232,7 +232,7 @@ export function chatItems(s: Pick<State, "agents" | "now">, night: string | unde
     if (had === undefined || had.at < a.at) by.set(a.ref, a);
   }
   return [...by.entries()].map(([key, a]): QueueItem => ({
-    key, kind: "ticket", agent: a.agent, state: "running", note: a.note ?? "", commit: null, tries: 1,
+    key, kind: "ticket", agent: a.agent, state: "running", note: a.note ?? "", commit: null, tries: 0,
     started: a.since ?? a.at, ended: null, runner: CHAT_RUNNER, ...(night === undefined ? {} : { night }),
     ...(a.title === undefined ? {} : { title: a.title }),
     links: { ticket: null, map: null, board: null, report: null, log: null },

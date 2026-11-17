@@ -7,6 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { sidebarTree } from "@/lib/sidebar.ts";
 import { itemInScope, plural, projOf, queueView, scopeWaits, splitAgents, ticketIndex, waitsFor, withBlockers } from "@/lib/board.ts";
+import { liveItems } from "@/lib/night.ts";
 import { READONLY } from "@/lib/api.ts";
 import { useHubState, useTickets, useWrites, type Outcome } from "@/lib/hub.ts";
 import { setLink, useLink, VIEWS, type View } from "@/lib/link.ts";
@@ -77,7 +78,7 @@ function Loaded({ state, tickets, down, lastOk }: { state: State; tickets: Board
   const waits = scopeWaits(allWaits, scope, state);
   const alerts = waits.count;
   const counts: Readonly<Record<View, number>> = {
-    run: qv.running.filter((i) => itemInScope(scope, i)).length,
+    run: liveItems(state.queue, state).filter((i) => i.state === "running" && itemInScope(scope, i)).length,
     waits: alerts,
     history: 0,
   };
