@@ -244,6 +244,9 @@ describe("failure reasons", () => {
   it("are said in plain words", () => {
     const r = (note: string, st: QueueItem["state"] = "failed"): string => plainReason({ note, state: st });
     expect(r("no commit after b4fe872cf")).toBe("ended without a commit");
+    expect(plainReason({ note: "judged partly by the Opus review after its second try: In Play, holding does nothing: not met.", state: "failed", landed_at: 1, verdict: "partly" })).toBe(
+      "its work landed; the review found it partly done: In Play, holding does nothing: not met.",
+    );
     expect(r("check failed: /Users/x/.sb-hub/checks/sk4te-compile.py\nUnity Editor not reachable")).toBe("the sk4te compile check failed");
     expect(r("check failed: pnpm typecheck\nsrc/a.ts(1,1): error")).toBe("pnpm typecheck failed");
     expect(r("commits since the start touch files outside the ticket's paths: a.ts, b.ts")).toBe("it changed 2 files outside its list");

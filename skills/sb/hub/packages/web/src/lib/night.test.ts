@@ -31,7 +31,7 @@ describe("nightBlocks", () => {
   it("counts each block and says it in one line", () => {
     expect(night.blocks.map((b) => b.line)).toEqual(["2 next · 1 fell short", "1 done · 1 running · 1 next"]);
     expect(nightLine(night)).toBe("1 running · 3 next · 1 done · 1 fell short");
-    expect(countsLine({ done: 3, running: 1, checking: 0, recheck: 0, unclean: 0, next: 4, short: 1, stopped: 0 })).toBe("3 done · 1 running · 4 next · 1 fell short");
+    expect(countsLine({ done: 3, landed: 0, running: 1, checking: 0, recheck: 0, unclean: 0, next: 4, short: 1, stopped: 0 })).toBe("3 done · 1 running · 4 next · 1 fell short");
   });
   it("lists a block's rows in run order with the right marks, and the place in the whole line", () => {
     const a = night.blocks[1];
@@ -118,6 +118,13 @@ describe("the live run", () => {
   it("says the head's counts in one line", () => {
     expect(headLine(liveItems(s("n2").queue))).toBe("1 done · 1 running · 3 next · 1 fell short");
     expect(headLine([])).toBe("nothing queued yet");
+  });
+  it("tells a run that landed and that its review judged partly apart from one that fell short", () => {
+    const items = liveItems(s("n2").queue);
+    const short = items.find((i) => i.state === "failed");
+    if (short === undefined) throw new Error("n2 has a failed run");
+    const landed = { ...short, landed_at: 1, verdict: "partly" as const };
+    expect(headLine(items.map((i) => (i === short ? landed : i)))).toBe("1 done · 1 landed, need your look · 1 running · 3 next");
   });
   it("scopes: Everything is the whole run, a project its maps, a map its own", () => {
     const keys = (scope: { project: string; map: string }): string[] => runItems(s("n2"), scope).map((i) => i.key);

@@ -144,7 +144,7 @@ describe("nightGraph", () => {
   it("counts for the run, leaving out zeros, and narrows to a project", () => {
     expect(g.frames[0]?.line).toBe("1 done · 1 running · 1 next");
     expect(g.line).toBe("1 done · 1 running · 3 next · 1 fell short");
-    expect(countsLine({ done: 5, running: 2, checking: 0, next: 9, "fell short": 1, stopped: 0 })).toBe("5 done · 2 running · 9 next · 1 fell short");
+    expect(countsLine({ done: 5, landed: 0, running: 2, checking: 0, next: 9, "fell short": 1, stopped: 0 })).toBe("5 done · 2 running · 9 next · 1 fell short");
     const one = run({ scope: { project: "alpha", map: "" } });
     expect(one.frames.map((f) => f.title)).toEqual(["Map one", "Jobs"]);
     expect(one.edges.filter((e) => e.to !== DONE_ID)).toHaveLength(2);

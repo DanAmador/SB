@@ -1,6 +1,6 @@
 /** History's rules: which runs a filter keeps, how they group by day, and what the time range asks the hub for. */
 import type { Night, QueueItem, Run, RunOutcome } from "@sb-hub/contract";
-import { dayStart, mapInScope, type Scope } from "./board.ts";
+import { dayStart, landedShort, mapInScope, type Scope } from "./board.ts";
 
 export const RANGES = ["today", "7d", "30d", "all"] as const;
 export type Range = (typeof RANGES)[number];
@@ -111,8 +111,8 @@ export function nightWords(c: Night["counts"]): string {
 }
 
 /** An item's outcome in a run's list: how it ended, or that the stop never reached it. */
-export type ItemOutcome = "done" | "fell short" | "stopped" | "running" | "next";
-export const itemOutcome = (i: QueueItem): ItemOutcome => (i.state === "done" ? "done" : i.state === "failed" ? "fell short" : i.state === "skipped" ? "stopped" : i.state === "queued" ? "next" : "running");
+export type ItemOutcome = "done" | "landed" | "fell short" | "stopped" | "running" | "next";
+export const itemOutcome = (i: QueueItem): ItemOutcome => (i.state === "done" ? "done" : i.state === "failed" ? (landedShort(i) ? "landed" : "fell short") : i.state === "skipped" ? "stopped" : i.state === "queued" ? "next" : "running");
 
 export interface ItemFilters {
   readonly q: string;
@@ -121,7 +121,7 @@ export interface ItemFilters {
   readonly account: string;
   readonly model: string;
 }
-const RUN_OUTCOME: Readonly<Record<ItemOutcome, RunOutcome | "">> = { done: "done", "fell short": "failed", stopped: "skipped", running: "", next: "" };
+const RUN_OUTCOME: Readonly<Record<ItemOutcome, RunOutcome | "">> = { done: "done", landed: "failed", "fell short": "failed", stopped: "skipped", running: "", next: "" };
 
 /** The items of one run a ticket filter keeps: the same search, outcome, pictures, account and model as before. */
 export function filterItems(items: readonly QueueItem[], f: ItemFilters, titleOf: (i: QueueItem) => string): QueueItem[] {

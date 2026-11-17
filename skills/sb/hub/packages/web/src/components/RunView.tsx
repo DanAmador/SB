@@ -3,7 +3,7 @@
  * ticket now, then a block per map (a checklist of its tickets in run order), then the maps that can be queued and
  * the search that finds one ticket to queue.
  */
-import { IconAlertTriangle, IconArrowBackUp, IconBan, IconChevronDown, IconChevronRight, IconChevronUp, IconCircleCheck, IconCircleDashed, IconClock, IconGripVertical, IconHourglass, IconLoader2, IconMail, IconMessages, IconPlus, IconRobot, IconX, IconZzz } from "@tabler/icons-react";
+import { IconAlertTriangle, IconArrowBackUp, IconBan, IconChevronDown, IconChevronRight, IconChevronUp, IconCircleCheck, IconCircleDashed, IconClock, IconGitCommit, IconGripVertical, IconHourglass, IconLoader2, IconMail, IconMessages, IconPlus, IconRobot, IconX, IconZzz } from "@tabler/icons-react";
 import { useState } from "react";
 import type * as React from "react";
 import type { QueueItem } from "@sb-hub/contract";
@@ -176,6 +176,7 @@ function RunLine({ r }: { r: RunRow }): React.JSX.Element {
 
 const MARKS: Readonly<Record<Mark, [typeof IconCircleCheck, "ok" | "bad" | "warn" | "brand" | "muted"]>> = {
   done: [IconCircleCheck, "ok"],
+  landed: [IconGitCommit, "warn"],
   running: [IconLoader2, "brand"],
   checking: [IconHourglass, "brand"],
   next: [IconCircleDashed, "muted"],
@@ -315,7 +316,7 @@ function Row({ r, worker }: { r: NightRow; worker: SessionCard | undefined }): R
         <TicketTitle itemKey={i.key} links={i.links} className="line-clamp-2">
           {title}
         </TicketTitle>
-        {(r.mark === "short" || r.mark === "stopped" || r.mark === "recheck" || r.mark === "unclean") && <p className={cn("truncate text-xs", r.mark === "short" ? "text-destructive" : "text-warn")}>{plainReason(i)}</p>}
+        {(r.mark === "short" || r.mark === "landed" || r.mark === "stopped" || r.mark === "recheck" || r.mark === "unclean") && <p className={cn("truncate text-xs", r.mark === "short" ? "text-destructive" : "text-warn")}>{plainReason(i)}</p>}
         {r.mark === "next" && <WaitReason item={i} />}
         {r.mark === "running" && worker === undefined && (
           <p className="truncate text-xs text-muted-foreground" title={firstLine(i.note)}>

@@ -513,6 +513,12 @@ export function endedToday(state: Pick<State, "queue" | "now">): QueueItem[] {
 
 // ---- waits for you ----
 
+/**
+ * A run whose work landed but whose second pass said partly or not met after its last try. The hub keeps it as
+ * failed, but nothing broke: its commit is in the code and it waits for the owner's look, not for a fix.
+ */
+export const landedShort = (i: Pick<QueueItem, "state" | "landed_at">): boolean => i.state === "failed" && (i.landed_at ?? 0) > 0;
+
 /** One ended run, once: what "Looks good" and "Set aside" remember. */
 export const seenKey = (i: Pick<QueueItem, "key" | "ended">): string => `${i.key}@${String(i.ended ?? 0)}`;
 
@@ -577,8 +583,12 @@ export function tryOf(i: Pick<QueueItem, "tries" | "state">): string {
   return i.tries > 0 && (i.state === "queued" || i.state === "running") ? `try ${String(i.tries + 1)} of ${String(TRIES_MAX)}` : "";
 }
 
-export function plainReason(i: Pick<QueueItem, "note" | "state">): string {
+export function plainReason(i: Pick<QueueItem, "note" | "state"> & Partial<Pick<QueueItem, "landed_at" | "verdict">>): string {
   const first = firstLine(i.note);
+  if (landedShort(i)) {
+    const unmet = /^judged [^:]+: (.+)$/.exec(first)?.[1];
+    return `its work landed; the review found it ${i.verdict === "not met" ? "not done" : "partly done"}${unmet ? `: ${unmet}` : ""}`;
+  }
   if (!first) return i.state === "skipped" ? "skipped, no reason recorded" : "no reason recorded";
   if (first.startsWith("no commit after ")) return "ended without a commit";
   const check = /^check failed: (.+)$/.exec(first);

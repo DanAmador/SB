@@ -6,7 +6,7 @@
  * projects, and each project's last ticket points at one Done box. Pure: no React, no DOM.
  */
 import type { MapRoute, Queue, QueueItem, TicketRow } from "@sb-hub/contract";
-import { folder, itemInScope, itemMapKey, itemTitle, mapTitle, projOf, type Scope } from "./board.ts";
+import { folder, itemInScope, landedShort, itemMapKey, itemTitle, mapTitle, projOf, type Scope } from "./board.ts";
 import { mapState, NODE_H, NODE_W, type MapState } from "./map.ts";
 
 /** Between rows, and between boxes side by side in a column. */
@@ -24,18 +24,20 @@ export const HUES = ["#2563eb", "#d97706", "#0d9488", "#c026d3", "#65a30d", "#dc
 export const JOB_HUE = "#64748b";
 
 /** How an ended ticket is told. */
-export type Outcome = "done" | "fell short" | "stopped";
+export type Outcome = "done" | "landed" | "fell short" | "stopped";
 export interface Counts {
   done: number;
+  landed: number;
   running: number;
   checking: number;
   next: number;
   "fell short": number;
   stopped: number;
 }
-const ORDER = ["done", "running", "checking", "next", "fell short", "stopped"] as const;
+const ORDER = ["done", "landed", "running", "checking", "next", "fell short", "stopped"] as const;
 const COUNT_WORDS: Readonly<Record<(typeof ORDER)[number], string>> = {
   done: "done",
+  landed: "landed, need your look",
   running: "running",
   checking: "in checks",
   next: "next",
@@ -47,13 +49,13 @@ const COUNT_WORDS: Readonly<Record<(typeof ORDER)[number], string>> = {
 export const countsLine = (c: Counts): string =>
   ORDER.filter((k) => c[k] > 0).map((k) => `${String(c[k])} ${COUNT_WORDS[k]}`).join(" · ");
 
-const emptyCounts = (): Counts => ({ done: 0, running: 0, checking: 0, next: 0, "fell short": 0, stopped: 0 });
+const emptyCounts = (): Counts => ({ done: 0, landed: 0, running: 0, checking: 0, next: 0, "fell short": 0, stopped: 0 });
 function countOf(i: QueueItem): keyof Counts {
   switch (i.state) {
     case "done": return "done";
     case "running": return "running";
     case "queued": return "next";
-    case "failed": return "fell short";
+    case "failed": return landedShort(i) ? "landed" : "fell short";
     case "skipped": return "stopped";
     case "landed":
     case "review":
@@ -85,12 +87,13 @@ export function boxState(i: QueueItem, place: number | null): MapState {
   switch (i.state) {
     case "queued": return mapState({ state: "ready", status: "open", place }, true);
     case "done": return mapState({ state: "done", status: "resolved", place: null }, true);
-    case "failed": return mapState({ state: "ready", status: "open", place: null }, false);
+    // landed, the review said partly: amber like a decision, not the red of a ticket with no checks
+    case "failed": return mapState({ state: landedShort(i) ? "waits for you" : "ready", status: "open", place: null }, false);
     case "skipped": return mapState({ state: "out of scope", status: "out-of-scope", place: null }, true);
     default: return mapState({ state: "claimed", status: "claimed", place: null }, true);
   }
 }
-const outcomeOf = (i: QueueItem): Outcome | null => (i.state === "done" ? "done" : i.state === "failed" ? "fell short" : i.state === "skipped" ? "stopped" : null);
+const outcomeOf = (i: QueueItem): Outcome | null => (i.state === "done" ? "done" : i.state === "failed" ? (landedShort(i) ? "landed" : "fell short") : i.state === "skipped" ? "stopped" : null);
 
 /** What the run knows of a ticket besides its queue item: its title and the tickets it comes after (as map#num). */
 export interface TicketInfo {
@@ -320,7 +323,7 @@ export function nightGraph(input: NightInput): NightGraph {
       item: i,
       title: info.tickets.get(i.key)?.title ?? itemTitle(i, null),
       state: boxState(i, p),
-      foot: p !== null ? `${STATE_WORDS[i.state]} ${String(p)}` : STATE_WORDS[i.state],
+      foot: p !== null ? `${STATE_WORDS[i.state]} ${String(p)}` : landedShort(i) ? "Landed, needs your look" : STATE_WORDS[i.state],
       place: p,
       outcome: outcomeOf(i),
       report: outcomeOf(i) !== null ? i.links.report : null,

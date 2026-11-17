@@ -3,7 +3,7 @@
  * opens (?night=<id>) to its graph, the tickets it did with outcome, report, review and log links, and the
  * tickets its stop never reached, which can be queued again. The ticket filters work inside the open run.
  */
-import { IconArrowLeft, IconBan, IconCircleCheck, IconCircleDashed, IconLoader2, IconPhoto, IconRobot, IconX } from "@tabler/icons-react";
+import { IconArrowLeft, IconBan, IconCircleCheck, IconCircleDashed, IconGitCommit, IconLoader2, IconPhoto, IconRobot, IconX } from "@tabler/icons-react";
 import type * as React from "react";
 import type { Night, QueueItem, RunOutcome } from "@sb-hub/contract";
 import { Badge } from "@/components/ui/badge";
@@ -75,6 +75,7 @@ function NightRow({ n }: { n: Night }): React.JSX.Element {
 
 const MARK: Readonly<Record<ItemOutcome, [typeof IconCircleCheck, "ok" | "bad" | "warn" | "brand" | "muted"]>> = {
   done: [IconCircleCheck, "ok"],
+  landed: [IconGitCommit, "warn"],
   "fell short": [IconX, "bad"],
   stopped: [IconBan, "warn"],
   running: [IconLoader2, "brand"],

@@ -2,13 +2,14 @@
 import type { Night as NightRecord, Queue, QueueItem, State, Waits } from "@sb-hub/contract";
 import { countsLine as itemCounts, tally } from "./nightGraph.ts";
 import type { SessionCard } from "./sessions.ts";
-import { agentOf, dur, endedToday, itemInScope, itemMap, mapTitle, projOf, type Scope, type TicketIndex, itemProject, EVERYTHING } from "./board.ts";
+import { agentOf, dur, landedShort, endedToday, itemInScope, itemMap, mapTitle, projOf, type Scope, type TicketIndex, itemProject, EVERYTHING } from "./board.ts";
 
 /** What a row's mark says. */
-export type Mark = "done" | "running" | "checking" | "next" | "short" | "stopped" | "recheck" | "unclean";
+export type Mark = "done" | "landed" | "running" | "checking" | "next" | "short" | "stopped" | "recheck" | "unclean";
 
 export const MARK_WORDS: Readonly<Record<Mark, string>> = {
   done: "done",
+  landed: "landed, needs your look",
   running: "running",
   checking: "in checks or second pass",
   next: "next",
@@ -40,14 +41,14 @@ export interface NightBlock {
 }
 
 export interface Night {
-  readonly line: { readonly running: number; readonly next: number; readonly done: number; readonly short: number; readonly stopAt: number | null };
+  readonly line: { readonly running: number; readonly next: number; readonly done: number; readonly landed: number; readonly short: number; readonly stopAt: number | null };
   readonly blocks: readonly NightBlock[];
   /** The queued maps in run order (what move_map counts places in). */
   readonly queuedMaps: readonly string[];
 }
 
-const ORDER: readonly Mark[] = ["done", "running", "checking", "recheck", "unclean", "next", "short", "stopped"];
-const WORDS: Readonly<Record<Mark, string>> = { done: "done", running: "running", checking: "checking", recheck: "check could not run", unclean: "waits for a clean checkout", next: "next", short: "fell short", stopped: "stopped" };
+const ORDER: readonly Mark[] = ["done", "landed", "running", "checking", "recheck", "unclean", "next", "short", "stopped"];
+const WORDS: Readonly<Record<Mark, string>> = { done: "done", landed: "landed, need your look", running: "running", checking: "checking", recheck: "check could not run", unclean: "waits for a clean checkout", next: "next", short: "fell short", stopped: "stopped" };
 
 export function markOf(i: QueueItem): Mark {
   switch (i.state) {
@@ -59,7 +60,7 @@ export function markOf(i: QueueItem): Mark {
     case "unclean": return "unclean";
     case "done": return "done";
     case "skipped": return "stopped";
-    default: return "short";
+    default: return landedShort(i) ? "landed" : "short";
   }
 }
 
@@ -67,7 +68,7 @@ export function countsLine(c: Readonly<Record<Mark, number>>): string {
   return ORDER.filter((m) => c[m] > 0).map((m) => `${String(c[m])} ${WORDS[m]}`).join(" · ");
 }
 
-const GROUP_ORDER: Readonly<Record<Mark, number>> = { done: 0, short: 0, stopped: 0, running: 1, checking: 1, recheck: 2, unclean: 2, next: 3 };
+const GROUP_ORDER: Readonly<Record<Mark, number>> = { done: 0, landed: 0, short: 0, stopped: 0, running: 1, checking: 1, recheck: 2, unclean: 2, next: 3 };
 
 /** Every map with something running, queued or ended today, in the hub's map order; then Jobs. */
 export function nightBlocks(state: State, ix: TicketIndex, scope: Scope = EVERYTHING, wholeRun = false): Night {
@@ -110,13 +111,13 @@ export function nightBlocks(state: State, ix: TicketIndex, scope: Scope = EVERYT
       rows,
       counts,
       line: countsLine(counts),
-      open: counts.running + counts.checking + counts.short + counts.recheck > 0,
+      open: counts.running + counts.checking + counts.landed + counts.short + counts.recheck > 0,
       at: queuedMaps.indexOf(map),
     };
   });
   const sum = (m: Mark): number => blocks.reduce((n, b) => n + b.counts[m], 0);
   return {
-    line: { running: sum("running") + sum("checking"), next: sum("next"), done: sum("done"), short: sum("short"), stopAt: q.stop_at ?? null },
+    line: { running: sum("running") + sum("checking"), next: sum("next"), done: sum("done"), landed: sum("landed"), short: sum("short"), stopAt: q.stop_at ?? null },
     blocks,
     queuedMaps,
   };
@@ -125,7 +126,7 @@ export function nightBlocks(state: State, ix: TicketIndex, scope: Scope = EVERYT
 /** The one line for the night: '1 running · 4 next · 3 done · 1 fell short'. */
 export function nightLine(n: Night): string {
   const l = n.line;
-  return [`${String(l.running)} running`, `${String(l.next)} next`, `${String(l.done)} done`, `${String(l.short)} fell short`].join(" · ");
+  return [`${String(l.running)} running`, `${String(l.next)} next`, `${String(l.done)} done`, ...(l.landed > 0 ? [`${String(l.landed)} landed, need your look`] : []), `${String(l.short)} fell short`].join(" · ");
 }
 
 // ---- who is on each ticket ----

@@ -9,7 +9,7 @@ import type { QueueItem, TicketRow } from "@sb-hub/contract";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { IN_WIDGET, READONLY } from "@/lib/api.ts";
-import { ago, canTickAgain, folder, hm, itemProject, itemTitle, mapTitle, plainReason, projOf, seenKey, tkey, type Waits } from "@/lib/board.ts";
+import { ago, canTickAgain, folder, hm, itemProject, itemTitle, landedShort, mapTitle, plainReason, projOf, seenKey, tkey, type Waits } from "@/lib/board.ts";
 import { cn } from "@/lib/utils";
 import { setLink } from "@/lib/link.ts";
 import { say } from "@/lib/notice.ts";
@@ -50,7 +50,8 @@ export function WaitsView({ w }: { w: Waits }): React.JSX.Element {
           </div>
         </Part>
       )}
-      <Ended title="Failed" id="failed" runs={w.failed} />
+      <Ended title="Landed, needs your look" id="landed" runs={w.failed.filter(landedShort)} />
+      <Ended title="Failed" id="failed" runs={w.failed.filter((i) => !landedShort(i))} />
       <Ended title="Done" id="done" runs={w.done} />
       {w.tickets.length > 0 && (
         <Part id="decide" title="Tickets that need a decision">
@@ -98,6 +99,7 @@ function Part({ id, title, children, aside }: { id: string; title: string; child
 
 const ENDED = {
   done: [IconCircleCheck, "done", "ok"],
+  landed: [IconGitCommit, "landed, needs your look", "warn"],
   failed: [IconX, "failed", "bad"],
   skipped: [IconBan, "skipped", "warn"],
 } as const;
@@ -119,7 +121,7 @@ function Ended({ title, id, runs }: { title: string; id: string; runs: readonly 
 /** An ended run: its reason in plain words, its checks and pictures, and what to do about it. */
 function RunLine({ i }: { i: QueueItem }): React.JSX.Element {
   const { state, ix, enqueue, down, busy, writes } = useBoard();
-  const st = i.state === "done" || i.state === "skipped" ? i.state : "failed";
+  const st = i.state === "done" || i.state === "skipped" ? i.state : landedShort(i) ? "landed" : "failed";
   const [Ic, word, tone] = ENDED[st];
   const t = ix.byKey.get(i.key);
   const title = itemTitle(i, t);
@@ -152,7 +154,7 @@ function RunLine({ i }: { i: QueueItem }): React.JSX.Element {
             {ago(state.now, i.ended)}
           </span>
         </div>
-        {!done && <p className={cn("text-sm", i.state === "skipped" ? "text-warn" : "text-destructive")}>{plainReason(i)}</p>}
+        {!done && <p className={cn("text-sm", i.state === "skipped" || st === "landed" ? "text-warn" : "text-destructive")}>{plainReason(i)}</p>}
         <Checks checks={i.checks ?? []} />
         <Pictures item={i} />
         <div className="flex flex-wrap items-center gap-2">
@@ -177,6 +179,25 @@ function RunLine({ i }: { i: QueueItem }): React.JSX.Element {
             >
               <IconCheck aria-hidden />
               Looks good
+            </Button>
+          )}
+          {st === "landed" && (
+            <Button
+              size="xs"
+              variant="brand"
+              disabled={down || busy}
+              title="Closes the ticket with the commit that landed; what the review found missing stays in its comments"
+              onClick={() => {
+                void writes
+                  .ticket("done", { key: i.key, text: "Good enough: its work landed and the owner closed it; the review's open items are in its comments.", commit: i.commit ?? undefined }, "Closed: its work stays as it landed.")
+                  .then((o) => {
+                    say(o);
+                    if (o.ok) void writes.seen([seenKey(i)]);
+                  });
+              }}
+            >
+              <IconCheck aria-hidden />
+              Good enough, close it
             </Button>
           )}
           {landAgain(i) && (
@@ -231,7 +252,7 @@ function RunLine({ i }: { i: QueueItem }): React.JSX.Element {
 }
 
 /** A failed run whose commit waits in its kept worktree (the hub checks the worktree is there): it could not land, or a check broke. */
-const landAgain = (i: QueueItem): boolean => i.kind === "ticket" && i.state === "failed" && Boolean(i.tree) && Boolean(i.commit);
+const landAgain = (i: QueueItem): boolean => i.kind === "ticket" && i.state === "failed" && !landedShort(i) && Boolean(i.tree) && Boolean(i.commit);
 
 /** One decision ticket: its question, its options as buttons (the recommended one filled), and a line for the owner's own answer. */
 function DecideLine({ t }: { t: TicketRow }): React.JSX.Element {
