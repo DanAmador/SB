@@ -13,7 +13,7 @@ const ticket = (map: string, num: number, more: Partial<TicketRow> = {}): Ticket
   });
 const item = (key: string, state: QueueItem["state"], more: Partial<QueueItem> = {}): QueueItem =>
   ({ key, kind: "ticket", agent: null, state, note: "", commit: null, tries: 0, started: null, ended: null, links: NO_LINKS, ...more }) as QueueItem;
-const state = (items: QueueItem[]): State => ({ queue: { items } }) as unknown as State;
+const state = (items: QueueItem[]): State => ({ queue: { items }, agents: {}, now: 0 }) as unknown as State;
 
 // sb/busy: 2 ready, 1 queued, 1 running; sb/idle: 1 ready; sb/quiet: only a claimed ticket; sb/nocheck: ready-looking but no checks
 // other/old: nothing at all; other/live: a queued job-free ticket, nothing ready
@@ -47,6 +47,13 @@ describe("sidebarTree", () => {
     expect(t.projects.map((p) => [p.project, p.running])).toEqual([["other", false], ["sb", true]]);
     expect(t.projects[1]?.maps.map((m) => [m.map, m.running])).toEqual([["sb/busy", true], ["sb/idle", false], ["sb/nocheck", false], ["sb/quiet", false]]);
     expect(sidebarTree(state([]), tickets, none).all.running).toBe(false);
+  });
+
+  it("counts a ticket one of the owner's chats works on as running, so Active only shows its project", () => {
+    const chat = { ...state([]), agents: { c: { agent: "c", ref: "other/live#1", state: "working", at: 0 } } } as unknown as State;
+    const t = sidebarTree(chat, tickets, none);
+    expect(t.projects.find((p) => p.project === "other")?.running).toBe(true);
+    expect(activeOnly(t, none).projects.map((p) => p.project)).toContain("other");
   });
 
   it("has no quiet list: every map is listed, running, can run, queued, stuck, ties by name", () => {

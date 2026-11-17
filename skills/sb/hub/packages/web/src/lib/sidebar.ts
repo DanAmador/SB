@@ -1,6 +1,7 @@
 /** The sidebar's tree: per map and project, what can run now and what is queued; a running dot; every map in one list, busiest first. Pure. */
 import type { QueueItem, State, TicketRow } from "@sb-hub/contract";
 import { folder, itemMapKey, projOf, tkey, type Scope } from "./board.ts";
+import { chatItems } from "./night.ts";
 
 export interface Counts {
   /** Tickets in state ready that are not yet in line. */
@@ -43,7 +44,9 @@ export function activeOnly(tree: Sidebar, scope: Scope): Sidebar {
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function sidebarTree(state: State, tickets: readonly TicketRow[] | null, _scope?: Scope): Sidebar {
   const live = new Set<string>();
-  for (const i of state.queue.items) if (i.state === "queued" || i.state === "running") live.add(i.key);
+  // the chats' tickets run too, so their projects and maps count as running and show under Active only
+  const items = [...state.queue.items, ...chatItems(state, undefined)];
+  for (const i of items) if (i.state === "queued" || i.state === "running") live.add(i.key);
   const proj = new Map<string, Set<string>>();
   const see = (project: string, map: string): void => {
     if (project === "") return;
@@ -74,7 +77,7 @@ export function sidebarTree(state: State, tickets: readonly TicketRow[] | null, 
   }
   const jobsLine = new Map<string, number>();
   const jobsRun = new Map<string, number>();
-  for (const i of state.queue.items) {
+  for (const i of items) {
     if (i.state !== "queued" && i.state !== "running") continue;
     const map = itemMapKey(i);
     const project = map === "" ? jobProject(i) : projOf(map);

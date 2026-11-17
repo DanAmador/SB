@@ -6,7 +6,7 @@
  * projects, and each project's last ticket points at one Done box. Pure: no React, no DOM.
  */
 import type { MapRoute, Queue, QueueItem, TicketRow } from "@sb-hub/contract";
-import { CHAT_RUNNER, folder, itemInScope, landedShort, itemMapKey, itemTitle, mapTitle, projOf, type Scope } from "./board.ts";
+import { CHAT_RUNNER, ESTIMATE, folder, itemInScope, landedShort, itemMapKey, itemTitle, mapTitle, projOf, type Scope } from "./board.ts";
 import { mapState, NODE_H, NODE_W, type MapState } from "./map.ts";
 
 /** Between rows, and between boxes side by side in a column. */
@@ -372,13 +372,14 @@ export function nightGraph(input: NightInput): NightGraph {
   // the clock: when a row's first ticket started; about when a row to come would, from the night's usual run
   const t = input.now ?? Date.now() / 1000;
   const runs = all.filter((i) => i.started != null && i.ended != null && i.state !== "skipped").map((i) => (i.ended ?? 0) - (i.started ?? 0)).sort((a, b) => a - b);
-  const usual = runs.length > 0 ? (runs[Math.floor(runs.length / 2)] ?? null) : null;
+  // no ticket ended yet: the same rough 1.5 h a ticket the toolbar's end time counts with
+  const usual = runs[Math.floor(runs.length / 2)] ?? ESTIMATE;
   const running = all.filter((i) => i.state === "running");
-  const nextAt = usual === null ? null : Math.max(t, ...running.map((i) => (i.started ?? t) + usual));
+  const nextAt = Math.max(t, ...running.map((i) => (i.started ?? t) + usual));
   const rows: NightRow[] = oldRows.map((o, n) => {
     const ph = phaseOf(o);
     const starts = boxes.filter((b) => b.row === n).map((b) => startOf(b.item));
-    const c = ph === "ran" ? clock(Math.min(...starts)) : ph === "now" ? "now" : nextAt !== null && usual !== null ? `≈${clock(nextAt + (o - now - 1) * usual)}` : o === now + 1 ? "next" : "then";
+    const c = ph === "ran" ? clock(Math.min(...starts)) : ph === "now" ? `now ${clock(t)}` : `≈${clock(nextAt + (o - now - 1) * usual)}`;
     return { row: n, y: yOf(n), clock: c, phase: ph };
   });
   const firstLive = rows.find((r) => r.phase !== "ran");

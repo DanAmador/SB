@@ -83,7 +83,7 @@ describe("nightGraph", () => {
     expect(at("beta/two#3")).toEqual([1, "ran"]);
     expect(at("alpha/one#2")).toEqual([2, "now"]);
     expect(at("alpha/one#3")).toEqual([3, "next"]);
-    expect(x.rows.map((r) => r.clock.replace(/\d\d:\d\d/, "hh:mm"))).toEqual(["hh:mm", "hh:mm", "now", "≈hh:mm"]);
+    expect(x.rows.map((r) => r.clock.replace(/\d\d:\d\d/, "hh:mm"))).toEqual(["hh:mm", "hh:mm", "now hh:mm", "≈hh:mm"]);
     expect(x.rows[0]?.clock).toBe(clock(1000));
     expect(x.nowY).toBeLessThan(box("alpha/one#2", x)?.y ?? 0);
     expect(x.nowY).toBeGreaterThan(box("beta/two#3", x)?.y ?? 0);
@@ -108,6 +108,8 @@ describe("nightGraph", () => {
     expect(row("beta/two#2")).toBe(0);
     expect(row("beta/two#1")).toBe(2);
     expect(one.boxes.every((b) => b.phase === "next")).toBe(true);
+    // nothing ended yet: every row to come still has a rough time, 1.5 h apart, not 'next' and 'then'
+    expect(one.rows.map((r) => r.clock.replace(/\d\d:\d\d/, "hh:mm"))).toEqual(["≈hh:mm", "≈hh:mm", "≈hh:mm"]);
     // alpha runs two at once: #2 and #3 (both after #1) share a row, side by side
     const two = run({ items, atOnce: new Map([["alpha", 2]]) });
     expect([row("alpha/one#1", two), row("alpha/one#2", two), row("alpha/one#3", two)]).toEqual([0, 1, 1]);
