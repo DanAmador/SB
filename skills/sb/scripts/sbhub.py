@@ -23,6 +23,8 @@ and never fail a session when it is down.
   sbhub.py night start [--name N]     open tonight's night (queuing with none live opens one too); a second start is refused
   sbhub.py night stop [--mode after]  start nothing new, let what runs finish, end the night as stopped; lists what it never reached
   sbhub.py night [show]               every night, newest first, with its counts
+  sbhub.py queue integrate <map> <NNN>...   a Unity pass for failed tickets whose work is in the checkout: no
+                                      worker, the integrator plays what the review found short and fixes it
   sbhub.py queue pause|resume         hold or release the queue
   sbhub.py queue job --project P --agent A [--model M] [--name N] [--at HH:MM] (--prompt T | --prompt-file F)
                                       queue a one-off job (never started before --at);
@@ -1158,6 +1160,40 @@ class Hub:
         self._fresh_tickets()
         return {"ok": True}
 
+    def queue_integrate(self, keys):
+        """A Unity pass for failed tickets of a Unity project whose work is in the checkout already: each is queued
+        again (a ticket of a night that ended joins the live one, as a copy of its last item), and when it starts
+        no worker runs: the integrator takes the repo's Unity lock, plays what the ticket's review found short on
+        the checkout and fixes it (Supervisor._pass)."""
+        keys = [self._moved(k) for k in keys]
+        if not keys:
+            raise ValueError("name the tickets")
+
+        def failed(i, k):
+            return i["key"] == k and i["kind"] == "ticket" and i["state"] == "failed" and is_unity(i.get("repo"))
+
+        def change(q, rows):
+            bad = []
+            for k in keys:
+                item = next((i for i in q["items"] if failed(i, k)), None)
+                if item is None and not any(i["key"] == k for i in q["items"] if i["state"] not in self.NIGHT_ENDED):
+                    old = next((i for n in reversed(self._data["nights"]) for i in reversed(n.get("items") or [])
+                                if failed(i, k)), None)
+                    if old is not None:
+                        q["items"] = [i for i in q["items"] if i["key"] != k]
+                        item = {**json.loads(json.dumps(old)), "night": None}
+                        q["items"].append(item)
+                if item is None:
+                    bad.append(k)
+                    continue
+                item.update(state="queued", integrate_only=True, ended=None, started=None, pid=None, pid_start=None,
+                            note="queued for a Unity pass: the integrator plays what its review found short, on the "
+                            "main folder")
+            if bad:
+                raise ValueError("not a failed ticket of a Unity project: " + ", ".join(bad))
+        out = self._queue_write(None, change)
+        return {"ok": out["ok"], "queued": keys}
+
     def recheck_now(self, key):
         """The Recheck button: the ticket's checks run again at the next tick, and the count starts over. Also Land
         again: a failed run whose commit waits in its kept worktree goes back to its checks on the kept commit, so
@@ -2162,7 +2198,7 @@ def revert_landing(repo, before, sha, why):
     before it, whatever came after it kept. History is never rewritten. (None, the revert's sha), or (why not, None).
     Nothing to undo when sha is not on the branch or a revert of it is already there."""
     head = _git(repo, "rev-parse", "HEAD")
-    if not head or _git_run(repo, "merge-base", "--is-ancestor", sha, head)[0] != 0:
+    if not head or before == sha or _git_run(repo, "merge-base", "--is-ancestor", sha, head)[0] != 0:
         return None, None
     mark = "Undoes-landing: {}..{}".format(before, sha)
     if _git(repo, "log", "--format=%H", "--fixed-strings", "--grep=" + mark, "{}..{}".format(sha, head)):
@@ -2877,16 +2913,22 @@ class TicketRun:
                 return self.fail(item, run, "{}, and {}: {}\nThe {} lock stays held: fix the main folder, then free "
                                  "it.{}".format(why, UNDO_FAILED, err, unity_lock(repo), tell), head, checks)
             self.hub.unlock(unity_lock(repo), _landing_by(landing))
+            if stage.get("only"):  # a Unity pass: its fixes undone, the ticket is the owner's again
+                return self.fail(item, run, "the Unity pass: {}; its fixes were backed out.{}".format(why, tell),
+                                 stage["sha"], checks)
             if verdict == "no unity":
                 return self.result(item, "recheck", why + "; backed out, it lands again", run, stage["sha"], checks)
             return self.again(item, run, "{}; its landing was backed out.{}".format(why, tell), stage["sha"], checks)
         failed = self.after_landing(landing, sbqueue.after_landing(t["checks"]), checks)
         if failed:
             passed, reason = failed
+            if stage.get("only"):
+                return self.fail(item, run, "the Unity pass: " + reason + tell, stage["sha"], checks)
             if passed is None:
                 return self.result(item, "recheck", reason.splitlines()[0], run, stage["sha"], checks)
             return self.again(item, run, reason + tell, stage["sha"], checks)
-        drop_tree(repo, stage.get("tree"), stage.get("branch") or "")
+        if stage.get("tree"):
+            drop_tree(repo, stage["tree"], stage.get("branch") or "")
         run["landed_on"] = stage["before"]
         note = "landed and played in Unity{}; the Opus review judges it when its map's run ends".format(
             "" if verdict else " (the integrator wrote no verdict)")
@@ -3939,9 +3981,14 @@ class Supervisor:
         try:
             if inst.get("kind") == "agy" or not inst:
                 raise OSError("its agent cannot run the integrator")
+            landed = ("Its work landed earlier and is in this folder. The Opus review judged it short: read its findings "
+                      "in `{}` and play each one it marks not met or not played. Fix what is really broken, or "
+                      "measure that it works.".format(res.get("review") or "(no review file kept)")
+                      if stage.get("only") else "Its work has just landed in this folder as `{}..{}`.".format(
+                          stage["before"][:12], stage["sha"][:12]))
             brief = INTEGRATE.read_text(encoding="utf-8").format(
                 ticket="{}/{}".format(t["map"], nnn), repo_name=Path(repo).name, repo=repo, title=t["title"],
-                before=stage["before"][:12], sha=stage["sha"][:12], lock=unity_lock(repo),
+                landed=landed, lock=unity_lock(repo),
                 sbmap="python3 " + shlex.quote(str(SBMAP)), map=t["map"], num3=nnn,
                 done_when=t.get("done_when") or "(none written)", minutes=INTEGRATE_MINUTES,
                 report=res.get("report") or folder / "{}.md".format(num), out=folder / "{}-integrate.md".format(num))
@@ -3961,6 +4008,33 @@ class Supervisor:
                      pid=run["p"].pid, pid_start=_proc_start(run["p"].pid),
                      note="in its Unity stage: the integrator builds and plays it on the main folder")
 
+    def _pass(self, item, t, name):
+        """A Unity pass (Hub.queue_integrate): no worker. The integrator takes the repo's Unity lock on the checkout
+        as it stands and plays what the ticket's review found short; it is judged as any Unity stage
+        (TicketRun.integrated), except that a pass that fails goes back to the owner. With the Editor busy it
+        waits in the queue."""
+        key, repo, nnn = item["key"], t["repo"], "{:03d}".format(int(t["num"]))
+        head = _git(repo, "rev-parse", "HEAD")
+        landing = {"key": key, "repo": str(repo), "before": head, "sha": head, "tree": None, "branch": "",
+                   "only": True}
+        got = self.hub.lock(unity_lock(repo), _landing_by(landing), landing=landing) if head else {
+            "ok": False, "held_by": "nobody (the checkout has no commit)"}
+        if not got.get("ok"):
+            self._update(key, state="queued", started=None, note="{}: {} holds the Editor".format(
+                UNITY_WAIT, got.get("held_by")))
+            return
+        rc, out, err = self.runner.sbmap("claim", t["map"], nnn, "--by", "hub " + name)
+        if rc != 0:
+            self.hub.unlock(unity_lock(repo), _landing_by(landing))
+            self._end(key, "skipped", note="could not claim it: " + (err or out))
+            return
+        board = self._board(t["map"])
+        folder = Path(board).parent if board else Path(item.get("run") or self.hub.home)
+        report = folder / "{}.md".format(int(t["num"]))
+        self._integrate(item, {"t": t, "run": str(folder), "integrate": {**landing, "dirty": dirty_files(repo)},
+                               "base": head, "commit": item.get("commit") or head, "review": item.get("review"),
+                               "report": str(report) if report.is_file() else None})
+
     def _unstage(self, item, why, tree=None, requeue=True):
         """Back a Unity stage out whole (the landing and the integrator's commits after it) and let go of the Unity
         lock; with `requeue`, it lands again as a recheck (its worker does not run again)."""
@@ -3975,7 +4049,11 @@ class Supervisor:
                   flush=True)
             return
         self.hub.unlock(unity_lock(repo), _landing_by(landing))
-        self._update(item["key"], drop=("integrate",))
+        if requeue and stage.get("only") and item["state"] == "running":  # a Unity pass starts over
+            self._update(item["key"], drop=("integrate",), state="queued", pid=None, pid_start=None, started=None,
+                         note=why + ": its fixes backed out, the pass runs again")
+            return
+        self._update(item["key"], drop=("integrate", "integrate_only"))
         if requeue and item["state"] in ("running", "recheck"):
             self._update(item["key"], state="recheck", recheck_at=self.hub.now(), pid=None, pid_start=None,
                          note=why + ": backed out, it lands again")
@@ -4018,7 +4096,7 @@ class Supervisor:
             run["t"] = row
         if item.get("integrate"):  # its Unity stage ended: judged on the integrator's verdict and the checks
             res = self.runner.integrated(item, run, over)
-            self._update(key, drop=("integrate",))
+            self._update(key, drop=("integrate", "integrate_only"))
         else:
             res = self.runner.finish(item, run, over)
         self._add_spend(item, run, res, over)
@@ -4785,6 +4863,9 @@ class Supervisor:
         self.procs[key] = run
 
     def _launch(self, item, t, name, inst):
+        if item.get("integrate_only"):
+            self._pass(item, t, name)
+            return
         run, res = self.runner.start(item, t, name, inst, board=self._board(t["map"]))
         if res is not None:
             self._apply(item, res, judged=False)
@@ -5205,6 +5286,8 @@ def make_handler(hub):
                 elif path == "/api/queue/job":
                     out = hub.queue_job(d["project"], d["prompt"], d.get("agent"), d.get("model"), d.get("name"),
                                         d.get("at") or None)
+                elif path == "/api/queue/integrate":
+                    out = hub.queue_integrate(d["keys"])
                 elif path == "/api/queue/remove_job":
                     out = hub.queue_remove_job(d["key"], d["version"])
                 elif path == "/api/queue/stop":
@@ -5641,6 +5724,13 @@ def cmd_queue(a):
         if out.get("ok"):
             moved = sorted(set(want) - set(have)) if act == "add" else sorted(set(have) - set(want))
             print("{} {}".format("queued" if act == "add" else "unqueued", ", ".join(moved) or "nothing new (already so)"))
+    elif act == "integrate":
+        if len(rest) < 2:
+            print("usage: queue integrate <map> <NNN>...", file=sys.stderr)
+            return 1
+        code, out = call(port, "/api/queue/integrate", {"keys": ["{}#{}".format(rest[0], int(n)) for n in rest[1:]]})
+        if out.get("ok"):
+            print("queued for a Unity pass: " + ", ".join(out["queued"]))
     elif act in ("pause", "resume"):
         code, out = call(port, "/api/queue/pause", {"paused": act == "pause"})
     elif act == "job":

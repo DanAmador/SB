@@ -60,6 +60,10 @@ the vault. Only the running hub writes the queue (`$SB_HUB_HOME/state.json`); CL
   **While a stage runs**, every other ticket of that repo waits for the Editor (`waits for Unity`). Waiting costs
   it no try and no recheck. **After a hub restart**, a live integrator is adopted. A stage whose integrator died
   is backed out and lands again. **Stop** on a ticket in its stage backs the stage out.
+  **A Unity pass** (`sbhub queue integrate <map> <NNN>...`) is for a failed ticket whose work is already in the
+  checkout, for example one judged short because nobody could play it. No worker runs: the integrator takes the
+  lock on the checkout as it stands, plays what the review found short and fixes it, and the review judges the
+  ticket again. A pass that cannot fix it backs out only its own fixes, and the ticket goes back to the owner.
 - **Tier**: `sbmap set <map> <NNN> tier=opus` on a complex ticket; Sonnet when absent. A failed
   Sonnet ticket retries once on Opus.
 - **Order**, fixed: after its blockers; then priority S→F; then the ticket that unblocks the most

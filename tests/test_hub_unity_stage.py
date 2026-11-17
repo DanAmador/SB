@@ -128,6 +128,47 @@ class UnityStageTest(RunnerCase):
         self.assertEqual(hub.state()["locks"], {})
 
 
+    def failed_in_main(self):
+        """Ticket 1 landed and played, then judged partly by its review twice (as party-playtest's were): failed,
+        open again, its work in main."""
+        self.verdicts["repo/one#1"] = "partly"
+        self.only(1)
+        self.until(lambda: self.state_of("repo/one#1") == "failed", timeout=180)
+        self.assertIn(1, self.open_tickets())
+        return git(self.repo, "rev-parse", "HEAD")
+
+    def test_a_unity_pass_plays_a_failed_ticket_on_main_with_no_worker_and_it_lands(self):
+        before = self.failed_in_main()
+        workers, stages = len(self.workers()), len(self.stages())
+        self.verdicts["repo/one#1"] = "finished"  # the review judges it again after the pass, met this time
+        self.hub.queue_integrate(["repo/one#1"])
+        self.until(lambda: len(self.stages()) == stages + 1 and self.state_of("repo/one#1") == "done")
+        self.assertEqual(len(self.workers()), workers)  # no worker ran
+        brief = self.launched[-1]["brief"]
+        self.assertIn("Its work landed earlier", brief)
+        stage = self.stages()[-1]
+        self.assertEqual(stage["locks"][self.lock]["by"], "sb-hub landing repo/one#1")
+        self.assertEqual(git(self.repo, "log", "--format=%s", before + "..HEAD"), "fix(integrate): it builds")
+        self.assertEqual(self.hub.state()["locks"], {})
+        self.assertNotIn("integrate_only", self.items()["repo/one#1"])
+        self.assertNotIn(1, self.open_tickets())  # resolved by the review after the pass
+
+    def test_a_unity_pass_that_cannot_fix_it_undoes_its_fixes_and_goes_back_to_the_owner(self):
+        before = self.failed_in_main()
+        workers, stages = len(self.workers()), len(self.stages())
+        os.environ["FAKE_INTEGRATE"] = "broken"
+        self.hub.queue_integrate(["repo/one#1"])
+        self.until(lambda: len(self.stages()) == stages + 1 and self.state_of("repo/one#1") == "failed")
+        self.assertEqual(len(self.workers()), workers)
+        self.assertIn("the Unity pass: the integrator could not make it work", self.items()["repo/one#1"]["note"])
+        self.assertEqual(git(self.repo, "rev-parse", "HEAD"), before)  # nothing to undo: no empty revert either
+        self.assertEqual(self.hub.state()["locks"], {})
+
+    def test_only_a_failed_unity_ticket_can_be_queued_for_a_pass(self):
+        with self.assertRaises(ValueError):
+            self.hub.queue_integrate(["repo/one#2"])
+
+
 class GuardTest(unittest.TestCase):
     def test_a_unity_worker_may_not_run_the_unity_cli_and_others_may(self):
         sys.path.insert(0, str(Path(sbhub.__file__).resolve().parents[1] / "hooks"))
