@@ -16,19 +16,20 @@ import sbhub  # noqa: E402
 import sbhub_snapshot  # noqa: E402
 
 SNAP = str(Path(SCRIPT).with_name("sbhub_snapshot.py"))
-CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+sys.path.insert(0, str(Path(SNAP).parent))
+import sbhub_snapshot  # noqa: E402
 
 
 class SnapshotTest(HubCase):
     def run_snap(self, *args):
         return subprocess.run([sys.executable, SNAP, *args], capture_output=True, text=True, env=self.env, timeout=120)
 
-    @unittest.skipUnless(os.path.exists(CHROME), "Chrome is not installed")
+    @unittest.skipUnless(sbhub_snapshot.chrome(), "Chrome is not installed")
     def test_no_hub_is_refused_in_one_line(self):
         r = self.run_snap("--port", str(free_port()))
         self.assertEqual((r.returncode, r.stdout, len(r.stderr.strip().splitlines())), (2, "", 1))
 
-    @unittest.skipUnless(os.path.exists(CHROME), "Chrome is not installed")
+    @unittest.skipUnless(sbhub_snapshot.chrome(), "Chrome is not installed")
     def test_writes_a_png(self):
         out = os.path.join(self._tmp.name, "board.png")
         r = self.run_snap("--port", str(self.port), "--out", out)

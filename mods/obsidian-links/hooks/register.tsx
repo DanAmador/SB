@@ -27,6 +27,9 @@ const vaultPath = (href: string): string | null => {
   return path !== null && VAULT !== null && path.startsWith(VAULT) ? path : null
 }
 
+// Opens its first argument with the platform's URL opener.
+const OPEN = 'if [ "$(uname)" = Darwin ]; then exec open "$1"; else exec xdg-open "$1"; fi'
+
 const fileHref = (path: string): string =>
   'file://' + path.split('/').map(encodeURIComponent).join('/')
 
@@ -66,7 +69,8 @@ export const register: Register = on => {
         onLinkPress={link => {
           const path = vaultPath(link.href)
           if (path !== null) {
-            void $.process.run(['open', 'obsidian://open?path=' + encodeURIComponent(path)])
+            // `open` on macOS, `xdg-open` elsewhere (Debian's `open` is openvt).
+            void $.process.run(['sh', '-c', OPEN, 'sh', 'obsidian://open?path=' + encodeURIComponent(path)])
           }
         }}
       />
