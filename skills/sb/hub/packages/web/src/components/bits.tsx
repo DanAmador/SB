@@ -9,18 +9,19 @@ import {
   IconLoader2,
   IconMessage,
   IconNotebook,
+  IconPhoto,
   IconPlayerPause,
   IconPlayerPlay,
   IconX,
   IconZzz,
   type Icon,
 } from "@tabler/icons-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type * as React from "react";
 import type { CheckRun, Links, QueueItem } from "@sb-hub/contract";
 import { mediaUrl } from "@/lib/api.ts";
-import { plural } from "@/lib/board.ts";
-import { setLink } from "@/lib/link.ts";
+import { plural, projOf } from "@/lib/board.ts";
+import { setLink, useLink } from "@/lib/link.ts";
 import { cn } from "@/lib/utils";
 import { isClip, PictureViewer } from "./PictureViewer.tsx";
 
@@ -139,12 +140,12 @@ export function Checks({ checks }: { checks: readonly CheckRun[] }): React.JSX.E
 
 const MEDIA = /\.(png|jpe?g|gif|webp|mp4|webm)$/i;
 
-/** A worker's pictures and clips: three thumbnails in a row, or every one full width. */
 /**
- * A run's pictures: a click opens the picture viewer over the page (Esc closes it), so nothing leaves the board;
- * Cmd- or Ctrl-click still opens the file in its own tab.
+ * A run's pictures: three thumbnails in a row, every one full width, or (compact) one small link that names how many.
+ * A click opens the picture viewer over the page (Esc closes it), so nothing leaves the board; Cmd- or Ctrl-click
+ * still opens the file in its own tab.
  */
-export function Pictures({ item, full }: { item: QueueItem; full?: boolean }): React.JSX.Element | null {
+export function Pictures({ item, full, compact }: { item: QueueItem; full?: boolean; compact?: boolean }): React.JSX.Element | null {
   const [open, setOpen] = useState("");
   const ms = (item.media ?? []).filter((n) => MEDIA.test(n));
   if (ms.length === 0) return null;
@@ -154,6 +155,24 @@ export function Pictures({ item, full }: { item: QueueItem; full?: boolean }): R
     setOpen(n);
   };
   const viewer = open !== "" && <PictureViewer runKey={item.key} names={ms} name={open} onPick={setOpen} onClose={() => { setOpen(""); }} />;
+  if (compact === true) {
+    const first = ms[0] ?? "";
+    return (
+      <>
+        <a
+          href={mediaUrl(item.key, first)}
+          onClick={show(first)}
+          aria-label={`${plural(ms.length, "picture")}: open ${first}${ms.length > 1 ? ` and ${String(ms.length - 1)} more` : ""}`}
+          title={ms.join(", ")}
+          className="inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-xs text-muted-foreground hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+        >
+          <IconPhoto className="size-3.5" aria-hidden />
+          {plural(ms.length, "picture")}
+        </a>
+        {viewer}
+      </>
+    );
+  }
   if (full === true) {
     return (
       <div className="flex flex-col gap-3">
@@ -255,6 +274,92 @@ export function FileLinks({ item }: { item: QueueItem }): React.JSX.Element | nu
           {word}
         </a>
       ))}
+    </div>
+  );
+}
+
+/** Names counted, the most first. */
+export function tally(names: readonly string[]): [string, number][] {
+  const by = new Map<string, number>();
+  for (const n of names) if (n !== "") by.set(n, (by.get(n) ?? 0) + 1);
+  return [...by].sort(([a, x], [b, y]) => y - x || a.localeCompare(b));
+}
+
+/**
+ * A chip per project, and All: a click narrows the page to that project, as the sidebar does, so the filter is at hand
+ * where the sidebar is folded away. Nothing when there is only one project and none is picked.
+ */
+export function ProjectChips({ counts, label }: { counts: readonly [string, number][]; label: string }): React.JSX.Element | null {
+  const link = useLink();
+  const current = link.project || projOf(link.map);
+  if (counts.length < 2 && current === "") return null;
+  const chip = (on: boolean): string =>
+    cn(
+      "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full border px-2.5 text-xs focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+      on ? "border-foreground bg-foreground text-background" : "text-muted-foreground hover:text-foreground",
+    );
+  return (
+    <ScrollRow label={label}>
+      <button type="button" aria-pressed={current === ""} className={chip(current === "")} onClick={() => { setLink({ project: "", map: "" }); }}>
+        All projects
+      </button>
+      {counts.map(([p, n]) => (
+        <button
+          key={p}
+          type="button"
+          aria-pressed={current === p}
+          className={chip(current === p)}
+          onClick={() => { setLink({ project: current === p ? "" : p, map: "" }); }}
+        >
+          {p}
+          <span className="tabular-nums opacity-70">{n}</span>
+        </button>
+      ))}
+    </ScrollRow>
+  );
+}
+
+/**
+ * A row of chips that scrolls sideways with no scrollbar: an edge fades while there is more past it, and the mouse
+ * wheel scrolls it sideways.
+ */
+export function ScrollRow({ children, className, label }: { children: React.ReactNode; className?: string; label: string }): React.JSX.Element {
+  const ref = useRef<HTMLDivElement>(null);
+  const [edges, setEdges] = useState({ left: false, right: false });
+  useEffect(() => {
+    const el = ref.current;
+    if (el === null) return;
+    const measure = (): void => {
+      const left = el.scrollLeft > 1;
+      const right = el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
+      setEdges((e) => (e.left === left && e.right === right ? e : { left, right }));
+    };
+    const wheel = (ev: WheelEvent): void => {
+      if (el.scrollWidth <= el.clientWidth || Math.abs(ev.deltaX) > Math.abs(ev.deltaY)) return;
+      ev.preventDefault();
+      el.scrollLeft += ev.deltaY;
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    el.addEventListener("scroll", measure, { passive: true });
+    el.addEventListener("wheel", wheel, { passive: false });
+    return () => {
+      ro.disconnect();
+      el.removeEventListener("scroll", measure);
+      el.removeEventListener("wheel", wheel);
+    };
+  }, []);
+  const fade = `linear-gradient(to right, ${edges.left ? "transparent, black 2rem" : "black"}, ${edges.right ? "black calc(100% - 2rem), transparent" : "black"})`;
+  return (
+    <div
+      ref={ref}
+      role="group"
+      aria-label={label}
+      style={{ maskImage: fade, WebkitMaskImage: fade }}
+      className={cn("flex items-center gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden", className)}
+    >
+      {children}
     </div>
   );
 }

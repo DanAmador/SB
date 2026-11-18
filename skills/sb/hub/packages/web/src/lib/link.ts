@@ -8,8 +8,15 @@ export const VIEWS = ["run", "waits", "history"] as const;
 export type View = (typeof VIEWS)[number];
 export const DEFAULT_VIEW: View = "run";
 
+/** The Run view's own tabs: the graph, who runs now, the night map by map, and what can be queued. */
+export const RUN_TABS = ["flow", "now", "maps", "queue"] as const;
+export type RunTab = (typeof RUN_TABS)[number];
+export const DEFAULT_RUN_TAB: RunTab = "flow";
+
 export interface Link {
   readonly view: View;
+  /** The Run view's open tab. The old ?view=queue lands on Queue, ?view=sessions on Now. */
+  readonly rt: RunTab;
   /** The Queue's search words, and which open tickets. */
   readonly q: string;
   /** The sidebar's pick: a project, and one of its maps. Both empty is Everything. */
@@ -45,14 +52,16 @@ export interface Link {
   readonly page: string;
 }
 
-const KEYS = ["view", "q", "project", "map", "s", "t", "run", "night", "pic", "range", "out", "pics", "acct", "model", "sess", "mv", "ms", "act", "ts", "tt", "tp", "sort", "page"] as const;
+const KEYS = ["view", "rt", "q", "project", "map", "s", "t", "run", "night", "pic", "range", "out", "pics", "acct", "model", "sess", "mv", "ms", "act", "ts", "tt", "tp", "sort", "page"] as const;
 
 export function readLink(search: string): Link {
   const s = new URLSearchParams(search);
   const v = s.get("view");
   const show = s.get("s");
+  const rt = s.get("rt");
   return {
     view: v === "runs" || v === "queue" ? "run" : (VIEWS.find((x) => x === v) ?? DEFAULT_VIEW),
+    rt: RUN_TABS.find((x) => x === rt) ?? (v === "queue" ? "queue" : v === "sessions" ? "now" : DEFAULT_RUN_TAB),
     q: s.get("q") ?? "",
     project: s.get("project") ?? "",
     map: s.get("map") ?? "",
@@ -82,7 +91,7 @@ export function writeLink(link: Link): string {
   const s = new URLSearchParams();
   for (const k of KEYS) {
     const v = link[k];
-    if (v && !(k === "view" && v === DEFAULT_VIEW) && !(k === "s" && v === "ready")) s.set(k, v);
+    if (v && !(k === "view" && v === DEFAULT_VIEW) && !(k === "rt" && v === DEFAULT_RUN_TAB) && !(k === "s" && v === "ready")) s.set(k, v);
   }
   const qs = s.toString();
   return qs ? `?${qs}` : "";
@@ -109,7 +118,7 @@ export function setLink(change: Partial<Link>): void {
   const next: Link = { ...now, ...change, ...(pChanged ? { map: "" } : {}) };
   // Going somewhere (another view, opening a run, a ticket or a picture) is a step Back returns from; a filter is not.
   const opens = (k: "run" | "t" | "pic"): boolean => now[k] === "" && next[k] !== "";
-  const step = next.view !== now.view || opens("run") || opens("t") || opens("pic");
+  const step = next.view !== now.view || next.rt !== now.rt || opens("run") || opens("t") || opens("pic");
   try {
     history[step ? "pushState" : "replaceState"](null, "", `${location.pathname}${writeLink(next)}${location.hash}`);
   } catch {

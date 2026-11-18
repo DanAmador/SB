@@ -4,8 +4,8 @@
  * Map chips above it show or hide each map. Below 768 px it is a list grouped by map. It reads the queue the page
  * already polls, so a box changes in place when its ticket does.
  */
-import { IconArrowUpRight, IconFlag, IconTopologyStar3 } from "@tabler/icons-react";
-import { Background, Controls, Handle, MarkerType, Position, ReactFlow, type Edge, type Node, type NodeProps, type ReactFlowInstance } from "@xyflow/react";
+import { IconArrowUpRight, IconFlag, IconFocus2, IconTopologyStar3 } from "@tabler/icons-react";
+import { Background, Controls, Handle, MarkerType, MiniMap, Panel, Position, ReactFlow, useReactFlow, type Edge, type Node, type NodeProps, type ReactFlowInstance } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useEffect, useMemo, useState } from "react";
 import type * as React from "react";
@@ -16,6 +16,8 @@ import { liveItems } from "@/lib/night.ts";
 import { NODE_H, NODE_W, type MapNode } from "@/lib/map.ts";
 import { atOnceOf, CLOCK_W, DONE_ID, focusOf, HEAD, infoOf, nightGraph, type NightBox, type NightDone, type NightFrame, type NightMemo } from "@/lib/nightGraph.ts";
 import { cn } from "@/lib/utils";
+import { itemProject } from "@/lib/board.ts";
+import { ProjectChips, ScrollRow, tally } from "./bits.tsx";
 import { Box, StateGlyph, TONE, useWide, type Data } from "./MapView.tsx";
 import { useNow } from "./QuestionCard.tsx";
 import { useBoard } from "./context.tsx";
@@ -41,9 +43,33 @@ function Clock({ data }: NodeProps<Node<TextData>>): React.JSX.Element {
     <div className={cn("flex size-full items-center text-xs tabular-nums", data.now === true ? "font-semibold text-brand" : "text-muted-foreground")}>{data.text}</div>
   );
 }
-/** A project's name above its column. */
-function Head({ data }: NodeProps<Node<TextData>>): React.JSX.Element {
-  return <div className="flex size-full items-end truncate pb-2 text-sm font-semibold">{data.text}</div>;
+interface FrameData extends Record<string, unknown> {
+  text: string;
+  ids: string[];
+}
+/**
+ * A project's column as one framed group behind its boxes: its name and box count on top, and a button that fits the
+ * view to just that column. The frame lets clicks through to the boxes; only its label takes them.
+ */
+function Head({ data }: NodeProps<Node<FrameData>>): React.JSX.Element {
+  const rf = useReactFlow();
+  return (
+    <div className="size-full rounded-xl border border-dashed border-muted-foreground/30 bg-muted/25">
+      <div className="pointer-events-auto flex h-9 items-center gap-2 px-3 text-sm">
+        <span className="truncate font-semibold">{data.text}</span>
+        <span className="text-xs text-muted-foreground tabular-nums">{data.ids.length}</span>
+        <button
+          type="button"
+          aria-label={`Fit ${data.text} in view`}
+          title="Fit this project in view"
+          onClick={() => { void rf.fitView({ nodes: data.ids.map((id) => ({ id })), padding: 0.15, duration: 300 }); }}
+          className="ml-auto inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+        >
+          <IconFocus2 className="size-3.5" aria-hidden />
+        </button>
+      </div>
+    </div>
+  );
 }
 /** The now line, across every column. */
 function Now(): React.JSX.Element {
@@ -74,11 +100,33 @@ function Done({ data }: NodeProps<Node<DoneData>>): React.JSX.Element {
 const nodeTypes = { box: Box, clock: Clock, head: Head, now: Now, done: Done };
 
 /** One chip per map (spans, not list rows, so j and k skip them): pressed shows it, unpressed hides it with its arrows; the arrow opens the map's own graph. */
-function Chips({ frames, hide }: { frames: readonly NightFrame[]; hide: (map: string) => void }): React.JSX.Element {
+function Chips({ frames, hide, fit }: { frames: readonly NightFrame[]; hide: (map: string) => void; fit?: (project: string) => void }): React.JSX.Element {
+  // grouped by project, each group led by the project's name
+  const projectOf = (f: NightFrame): string => (f.map === "" ? "" : (f.map.split("/")[0] ?? ""));
+  const order = [...new Set(frames.map(projectOf))];
+  const sorted = order.flatMap((p) => frames.filter((f) => projectOf(f) === p));
   return (
-    <div role="group" aria-label="Maps" className="flex items-center gap-1.5 overflow-x-auto text-xs [scrollbar-width:thin]">
-      {frames.map((f) => (
-        <span key={f.id} className="inline-flex shrink-0 items-center rounded-full border">
+    <ScrollRow label="Maps" className="text-xs">
+      {sorted.map((f, n) => (
+        <span key={f.id} className="inline-flex shrink-0 items-center gap-1.5">
+          {projectOf(f) !== "" && (n === 0 || projectOf(sorted[n - 1] ?? f) !== projectOf(f)) && (
+            <span className={cn("inline-flex shrink-0 items-center", n > 0 && "ml-2 border-l pl-2")}>
+              {fit === undefined ? (
+                <span className="px-1 font-semibold text-muted-foreground">{projectOf(f)}</span>
+              ) : (
+                <button
+                  type="button"
+                  title={`Fit ${projectOf(f)} in view`}
+                  onClick={() => { fit(projectOf(f)); }}
+                  className="inline-flex h-7 items-center gap-1 rounded-md px-1 font-semibold text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                >
+                  <IconFocus2 className="size-3.5" aria-hidden />
+                  {projectOf(f)}
+                </button>
+              )}
+            </span>
+          )}
+        <span className="inline-flex shrink-0 items-center rounded-full border bg-card">
           <button
             type="button"
             aria-pressed={!f.hidden}
@@ -105,9 +153,20 @@ function Chips({ frames, hide }: { frames: readonly NightFrame[]; hide: (map: st
             </button>
           )}
         </span>
+        </span>
       ))}
-    </div>
+    </ScrollRow>
   );
+}
+
+/** The map chips inside the graph: a project's name fits the view to that project's boxes. */
+function FlowChips({ frames, hide, boxes }: { frames: readonly NightFrame[]; hide: (map: string) => void; boxes: readonly NightBox[] }): React.JSX.Element {
+  const rf = useReactFlow();
+  const fit = (project: string): void => {
+    const ids = boxes.filter((b) => b.map.split("/")[0] === project).map((b) => ({ id: b.id }));
+    if (ids.length > 0) void rf.fitView({ nodes: ids, padding: 0.15, maxZoom: 1, duration: 300 });
+  };
+  return <Chips frames={frames} hide={hide} fit={fit} />;
 }
 
 function List({ frames }: { frames: readonly NightFrame[] }): React.JSX.Element {
@@ -154,10 +213,12 @@ function List({ frames }: { frames: readonly NightFrame[] }): React.JSX.Element 
 }
 
 const ARROW = { type: MarkerType.ArrowClosed, width: 16, height: 16 } as const;
+/** The room a project's frame leaves around its boxes. */
+const FRAME_PAD = 12;
 
 /** The live run's graph, or the graph of the run it is given (History's). Either narrows to the sidebar's pick. */
 export function NightGraph({ items: given, title }: { items?: readonly QueueItem[]; title?: string }): React.JSX.Element | null {
-  const { state, tickets, scope } = useBoard();
+  const { state, tickets, scope, ix } = useBoard();
   const wide = useWide();
   const live = liveItems(state.queue, state);
   const items = given ?? live;
@@ -198,11 +259,21 @@ export function NightGraph({ items: given, title }: { items?: readonly QueueItem
     for (const b of g.boxes) last.set(b.id, b.item.state);
   }, [g, last]);
 
-  if (g.frames.length === 0) return null;
+  // every project of the run, whatever the page is narrowed to, so another one is a click away
+  const projects = tally(items.map((i) => itemProject(i, ix.byKey.get(i.key))));
+  const chips = <ProjectChips counts={projects} label="Projects in the run" />;
+  if (g.frames.length === 0) return scope.project !== "" && projects.length > 0 ? chips : null;
   const right = Math.max(CLOCK_W + NODE_W, ...g.columns.map((c) => c.x + c.w));
   const fixed = { draggable: false, connectable: false, selectable: false, focusable: false } as const;
   const nodes: Node[] = [
-    ...g.columns.map((c): Node => ({ id: `head:${c.project}`, type: "head", position: { x: c.x, y: 0 }, width: c.w, height: HEAD, data: { text: c.project }, ...fixed })),
+    ...g.columns.map((c): Node => {
+      const its = g.boxes.filter((b) => b.project === c.project);
+      const bottom = Math.max(HEAD, ...its.map((b) => b.y + NODE_H)) + FRAME_PAD;
+      return {
+        id: `head:${c.project}`, type: "head", position: { x: c.x - FRAME_PAD, y: 0 }, width: c.w + 2 * FRAME_PAD, height: bottom,
+        data: { text: c.project, ids: its.map((b) => b.id) }, zIndex: -1, style: { pointerEvents: "none" }, ...fixed,
+      };
+    }),
     ...g.rows.map((r): Node => ({ id: `clock:${String(r.row)}`, type: "clock", position: { x: 0, y: r.y }, width: CLOCK_W - 12, height: NODE_H, data: { text: r.clock, now: r.phase === "now" }, ...fixed })),
     ...(g.nowY !== null ? [{ id: "now", type: "now", position: { x: 0, y: g.nowY - 6 }, width: right, height: 12, data: {}, zIndex: -1, ...fixed } satisfies Node] : []),
     ...g.boxes.map((b): Node<Data> => ({
@@ -233,10 +304,7 @@ export function NightGraph({ items: given, title }: { items?: readonly QueueItem
         <span className="text-xs font-normal text-muted-foreground" data-testid="run-counts">{g.line}</span>
       </h2>
       {wide ? (
-        <div data-testid="night-graph" className="flex h-[min(70dvh,720px)] min-h-80 w-full flex-col rounded-lg border bg-card">
-          <div className="border-b px-3 py-2">
-            <Chips frames={g.frames} hide={hide} />
-          </div>
+        <div data-testid="night-graph" className="flex h-[calc(100dvh-17rem)] min-h-96 w-full flex-col overflow-hidden rounded-lg border bg-card">
           <div className="min-h-0 flex-1">
           <ReactFlow
             nodes={nodes}
@@ -253,12 +321,26 @@ export function NightGraph({ items: given, title }: { items?: readonly QueueItem
             colorMode={document.documentElement.classList.contains("dark") ? "dark" : "light"}
           >
             <Background gap={24} />
+            <Panel position="top-left" className="!m-2 flex max-w-[calc(100%-1rem)] flex-col gap-1.5 rounded-lg border bg-card/90 p-1.5 shadow-sm backdrop-blur">
+              {chips}
+              <FlowChips frames={g.frames} hide={hide} boxes={g.boxes} />
+            </Panel>
             <Controls showInteractive={false} />
+            <MiniMap
+              pannable
+              zoomable
+              ariaLabel="Overview of the run"
+              className="!bg-card"
+              maskColor="color-mix(in oklab, var(--background) 70%, transparent)"
+              nodeColor={(n) => (n.type === "box" ? String((n.data as { hue?: string }).hue ?? "var(--muted-foreground)") : n.type === "head" ? "var(--muted)" : "transparent")}
+              nodeStrokeWidth={0}
+            />
           </ReactFlow>
           </div>
         </div>
       ) : (
         <>
+          {chips}
           <Chips frames={g.frames} hide={hide} />
           <List frames={g.frames} />
         </>

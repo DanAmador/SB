@@ -316,7 +316,7 @@ export function MapView({ map }: { map: string }): React.JSX.Element {
       {table ? (
         <TicketTable />
       ) : wide ? (
-        <div ref={box} data-testid="map-graph" className="relative h-[min(70dvh,720px)] min-h-80 w-full rounded-lg border bg-card [&_.react-flow__nodesselection]:hidden">
+        <div ref={box} data-testid="map-graph" className="relative h-[calc(100dvh-8rem)] min-h-96 w-full rounded-lg border bg-card [&_.react-flow__nodesselection]:hidden">
           <ReactFlow
             nodes={nodes}
             edges={edges}

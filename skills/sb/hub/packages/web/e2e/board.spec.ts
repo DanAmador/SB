@@ -8,6 +8,11 @@ const queuedKeys = async (page: Page): Promise<string[]> => {
   return state.queue.items.filter((i) => i.state === "queued").map((i) => i.key);
 };
 
+/** Opens one of the Run view's own tabs. */
+const runTab = async (page: Page, name: "Flow" | "Now" | "Maps" | "Queue"): Promise<void> => {
+  await page.getByRole("tablist", { name: "Run" }).getByRole("tab", { name: new RegExp(`^${name}`) }).click();
+};
+
 // the hub keeps the seen marks, so every test starts with none
 test.beforeEach(async ({ request }) => {
   await request.post("/api/__reset-seen");
@@ -16,7 +21,7 @@ test.beforeEach(async ({ request }) => {
 test("Run is the landing page: one row per worker run, the silent one amber, never a chat session", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(String(e)));
-  await page.goto("/next/");
+  await page.goto("/next/?rt=now");
   await expect(page.getByRole("tab", { name: /^Run\b/ })).toHaveAttribute("aria-selected", "true");
   const runs = page.getByRole("list", { name: "Running now" });
   await expect(runs.getByRole("listitem")).toHaveCount(3);
@@ -52,7 +57,7 @@ test("Run is the landing page: one row per worker run, the silent one amber, nev
 test("the panel's Stop asks why, confirms and calls the stop route; no message is sent", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(String(e)));
-  await page.goto("/next/");
+  await page.goto("/next/?rt=now");
   const row = page.getByRole("list", { name: "Running now" }).getByRole("listitem").filter({ hasText: "writing the copy" });
   await row.getByRole("button", { name: "Show details" }).click();
   const sheet = page.getByRole("dialog");
@@ -108,8 +113,8 @@ test.describe("The run's graph", () => {
     await expect(box(page, /Show the queue in order.*Queued\s*next 1/)).toBeVisible();
     await expect(box(page, /Show the queue in order/)).toHaveClass(/border-dashed/);
     await expect(night(page).locator(".react-flow__edge")).toHaveCount(1 + 2);
-    // the graph sits above the running tickets
-    await expect(page.getByRole("list", { name: "Running now" })).toBeVisible();
+    // the graph is the Run view's first tab
+    await expect(page.getByRole("tablist", { name: "Run" }).getByRole("tab", { name: /^Flow/ })).toHaveAttribute("aria-selected", "true");
     // any box opens the ticket's panel
     await box(page, /Run the board against the real hub/).click();
     await expect(page.getByRole("dialog")).toBeVisible();
@@ -211,17 +216,17 @@ test.describe("Run tab", () => {
   const calls = async (page: Page): Promise<{ moveMap: number; map: number }> => (await page.request.get("/api/__calls")).json() as Promise<{ moveMap: number; map: number }>;
   const order = (page: Page) => page.getByTestId("map-block").evaluateAll((els) => els.map((e) => e.getAttribute("data-map")));
 
-  test("?view=runs and ?view=queue open the Run tab", async ({ page }) => {
-    for (const v of ["runs", "queue"]) {
+  test("?view=runs opens the Run tab on Flow, ?view=queue on its Queue tab", async ({ page }) => {
+    for (const [v, tab] of [["runs", /^Flow/], ["queue", /^Queue/]] as const) {
       await page.goto(`/next/?view=${v}`);
       await expect(page.getByRole("tab", { name: /^Run\b/ })).toHaveAttribute("aria-selected", "true");
-      await expect(page.getByTestId("blocks")).toBeVisible();
+      await expect(page.getByRole("tablist", { name: "Run" }).getByRole("tab", { name: tab })).toHaveAttribute("aria-selected", "true");
     }
-    await expect(page.getByRole("tab", { name: /^Queue/ })).toHaveCount(0);
+    await expect(page.getByRole("tablist", { name: "Views" }).getByRole("tab", { name: /^Queue/ })).toHaveCount(0);
   });
 
   test("one line for the night, a block per map in the queue's order with its counts; Running now holds only what runs", async ({ page }) => {
-    await page.goto("/next/");
+    await page.goto("/next/?rt=maps");
     await expect(page.getByTestId("night-line")).toContainText("3 running · 1 next · 1 done · 2 fell short");
     expect(await order(page)).toEqual(["demo/board", "other/site"]);
     const board = page.getByRole("region", { name: "The demo board" });
@@ -231,27 +236,29 @@ test.describe("Run tab", () => {
     await expect(board.locator("li[data-mark]").first()).toHaveAttribute("data-mark", "done");
     await expect(board.locator("li[data-mark]").last()).toHaveAttribute("data-mark", "next");
     await expect(board.locator("li[data-key='demo/board#3']")).toContainText("#1");
-    // Running now: exactly the three workers; a ticket nobody queued is in neither it nor the blocks
-    await expect(page.getByRole("list", { name: "Running now" }).getByRole("listitem")).toHaveCount(3);
-    await expect(page.getByTestId("blocks")).not.toContainText("Drag a ticket into the queue");
-    await expect(page.getByRole("list", { name: "Running now" })).not.toContainText("Drag a ticket into the queue");
     await expect(page.getByRole("button", { name: /Unqueue this map: The demo board/ })).toBeVisible();
+    // Running now: exactly the three workers; a ticket nobody queued is in neither it nor the blocks
+    await expect(page.getByTestId("blocks")).not.toContainText("Drag a ticket into the queue");
+    await runTab(page, "Now");
+    await expect(page.getByRole("list", { name: "Running now" }).getByRole("listitem")).toHaveCount(3);
+    await expect(page.getByRole("list", { name: "Running now" })).not.toContainText("Drag a ticket into the queue");
   });
 
   test("Running now also holds the tickets in their checks and second pass, and still no unqueued one", async ({ page, request }) => {
     await request.post("/api/__between");
-    await page.goto("/next/");
+    await page.goto("/next/?rt=now");
     const now = page.getByRole("list", { name: "Running now" });
     await expect(now.getByRole("listitem")).toHaveCount(5);
     await expect(now.locator("li[data-key='other/site#5']")).toContainText("in checks");
     await expect(now.locator("li[data-key='demo/board#4']")).toContainText("second pass");
     await expect(now).not.toContainText("Drag a ticket into the queue");
+    await runTab(page, "Maps");
     await expect(page.getByTestId("blocks")).not.toContainText("Drag a ticket into the queue");
     await request.post("/api/__restore");
   });
 
   test("moving a map up calls the route and moves its block", async ({ page }) => {
-    await page.goto("/next/");
+    await page.goto("/next/?rt=maps");
     const before = await calls(page);
     await page.getByRole("button", { name: "Move The shop site up" }).click();
     await expect.poll(async () => order(page)).toEqual(["other/site", "demo/board"]);
@@ -263,7 +270,7 @@ test.describe("Run tab", () => {
 
   test("at 375 px the tab is one column and nothing scrolls sideways", async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 800 });
-    await page.goto("/next/");
+    await page.goto("/next/?rt=maps");
     await expect(page.getByTestId("blocks")).toBeVisible();
     const wide = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
     expect(wide).toBe(false);
@@ -274,7 +281,7 @@ test.describe("Run tab", () => {
     test.skip(dir === undefined, "SB_SHOTS names the folder to write to");
     const to = (n: string): string => `${dir ?? ""}/${n}`;
     await page.emulateMedia({ colorScheme: "light" });
-    await page.goto("/next/");
+    await page.goto("/next/?rt=maps");
     await expect(page.getByTestId("blocks")).toBeVisible();
     await page.waitForTimeout(300);
     await page.screenshot({ path: to("run-light.png"), fullPage: true });
@@ -287,7 +294,7 @@ test.describe("Run tab", () => {
   });
 
   test("Queue on a map's row calls the route once, its block appears and the row leaves Queue a map", async ({ page }) => {
-    await page.goto("/next/");
+    await page.goto("/next/?rt=queue");
     const offer = page.getByRole("region", { name: "Queue a map" });
     const row = offer.locator("li[data-map='demo/batch']");
     await expect(row).toContainText("The batch map");
@@ -296,8 +303,9 @@ test.describe("Run tab", () => {
     const before = await calls(page);
     await row.getByRole("button", { name: "Queue The batch map" }).click();
     await expect(page.getByRole("status")).toContainText("Queued 5 tickets of The batch map");
-    await expect(page.getByRole("region", { name: "The batch map" }).getByTestId("counts")).toHaveText("5 next");
     await expect(offer.locator("li[data-map='demo/batch']")).toHaveCount(0);
+    await runTab(page, "Maps");
+    await expect(page.getByRole("region", { name: "The batch map" }).getByTestId("counts")).toHaveText("5 next");
     expect((await calls(page)).map).toBe(before.map + 1);
     // put the fixture back for the tests after this one
     await page.request.post("/api/queue/set", { data: { keys: ["demo/board#3"], version: null } });
@@ -324,12 +332,13 @@ test("the table's filters live in the page link; the panel opens as a sheet; one
   await expect(sheet.getByRole("button", { name: "Queue it" })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(sheet).toHaveCount(0);
-  await expect(page).not.toHaveURL(/t=/);
+  await expect(page).not.toHaveURL(/[?&]t=/);
   await found.getByRole("checkbox", { name: "Tick Draw the header" }).check();
   await page.getByTestId("selection-bar").getByRole("button", { name: /^Queue 1/ }).click();
-  await expect(page.getByRole("region", { name: "The demo board" }).getByText("Draw the header")).toBeVisible();
   // queued, so no longer ticked: the bar is gone
   await expect(page.getByTestId("selection-bar")).toHaveCount(0);
+  await runTab(page, "Maps");
+  await expect(page.getByRole("region", { name: "The demo board" }).getByText("Draw the header")).toBeVisible();
 });
 
 test("Waits for you: the question first, then the failed run in plain words, then the done run with its checks", async ({ page }) => {
@@ -343,7 +352,7 @@ test("Waits for you: the question first, then the failed run in plain words, the
   const done = page.getByRole("region", { name: "Done" });
   await expect(done.getByText("1 check passed")).toBeVisible();
   // a picture opens over the page, not in a new tab, and Esc returns to the list
-  await done.getByRole("link", { name: "Open board-after.png" }).click();
+  await done.getByRole("link", { name: "Open board-before.png and 1 more" }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
   expect(page.context().pages()).toHaveLength(1);
   await page.keyboard.press("Escape");
@@ -362,7 +371,7 @@ test("Waits for you: the question first, then the failed run in plain words, the
 });
 
 test("Cmd-K opens the command menu with New job and Message", async ({ page }) => {
-  await page.goto("/next/");
+  await page.goto("/next/?rt=now");
   await expect(page.getByRole("list", { name: "Running now" })).toBeVisible();
   await page.keyboard.press("ControlOrMeta+k");
   const menu = page.getByRole("dialog");
@@ -372,7 +381,7 @@ test("Cmd-K opens the command menu with New job and Message", async ({ page }) =
 });
 
 test("the sidebar picks a map and every view narrows; the pick lives in the page link and the x clears it", async ({ page }) => {
-  await page.goto("/next/");
+  await page.goto("/next/?rt=now");
   const side = page.getByRole("navigation", { name: "Projects and maps" });
   // Everything, then each project with its maps and two counts each
   await expect(side.getByRole("button", { name: "Everything" })).toHaveAttribute("aria-current", "page");
@@ -399,11 +408,13 @@ test("the sidebar picks a map and every view narrows; the pick lives in the page
   await expect(crumb).toContainText("site");
   await expect(page.getByRole("tab", { name: /^Run\b/ })).toContainText("1");
 
-  // the search under the blocks finds only this map's open tickets; no block of the other map
+  // the search in the Queue tab finds only this map's open tickets; no block of the other map
+  await runTab(page, "Queue");
   const found = page.getByTestId("ticket-rows");
   await expect(found.getByRole("row")).toHaveCount(3);
   await expect(found).toContainText("Draw the shop window");
   await expect(found).not.toContainText("Draw the header");
+  await runTab(page, "Maps");
   await expect(page.getByTestId("blocks")).not.toContainText("Show the queue in order");
 
   // Waits for you: the shop's failed run only, no question, no done run
@@ -425,6 +436,7 @@ test("the sidebar picks a map and every view narrows; the pick lives in the page
   // each key waits for the page to answer the one before: a loaded machine dropped the Enter on 2026-11-18
   await page.keyboard.press("1");
   await expect(page.getByRole("tab", { name: /^Run\b/ })).toHaveAttribute("aria-selected", "true");
+  await runTab(page, "Now");
   await expect(page.getByRole("list", { name: "Running now" }).getByRole("listitem").first()).toBeVisible();
   await page.keyboard.press("j");
   await expect(page.locator("main li:focus")).toHaveCount(1);
@@ -468,7 +480,7 @@ test("every map shows in one list with no fold; a picked map stays picked after 
 });
 
 test("Cmd-K jumps to a map or a ticket", async ({ page }) => {
-  await page.goto("/next/");
+  await page.goto("/next/?rt=now");
   await expect(page.getByRole("list", { name: "Running now" })).toBeVisible();
   await page.keyboard.press("ControlOrMeta+k");
   await page.getByRole("option", { name: "other/site", exact: true }).click();
@@ -480,7 +492,7 @@ test("Cmd-K jumps to a map or a ticket", async ({ page }) => {
 
 test("on a phone the sidebar is a sheet behind the menu button", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 800 });
-  await page.goto("/next/");
+  await page.goto("/next/?rt=now");
   await expect(page.getByRole("navigation", { name: "Projects and maps" })).toHaveCount(0);
   await page.getByRole("button", { name: "Projects and maps" }).click();
   const sheet = page.getByRole("dialog", { name: "Projects" });
@@ -513,8 +525,11 @@ test.describe("The live run and its history", () => {
     await expect(graph.locator(".react-flow__node-box")).toHaveCount(7);
     await expect(graph.getByText("Sweep the old attic")).toHaveCount(0);
     await expect(graph.getByText("The old attic")).toHaveCount(0);
+    await runTab(page, "Maps");
+    await expect(page.getByTestId("blocks")).toBeVisible();
     await expect(page.getByTestId("blocks").getByText("The old attic")).toHaveCount(0);
     await expect(page.getByTestId("blocks").getByText("Drag a ticket into the queue")).toHaveCount(0);
+    await runTab(page, "Now");
     await expect(page.getByRole("list", { name: "Running now" }).getByRole("listitem")).toHaveCount(3);
     expect(errors).toEqual([]);
   });
@@ -564,7 +579,9 @@ test.describe("The live run and its history", () => {
     await expect(head(page)).toContainText("No run is live");
     await expect(page.getByTestId("last-run")).toContainText("Night of 2026-11-14, 22:45");
     await expect(page.getByTestId("last-run")).toContainText("Finished");
+    await runTab(page, "Maps");
     await expect(page.getByTestId("blocks")).toHaveCount(0);
+    await runTab(page, "Queue");
     const offer = page.getByRole("region", { name: "Queue a map" });
     await offer.locator("li[data-map='demo/batch']").getByRole("button", { name: "Queue The batch map" }).click();
     await expect(head(page)).toHaveAttribute("data-live", "true");
@@ -689,7 +706,7 @@ for (const [view, scheme] of [["run", "light"], ["run", "dark"], ["waits", "ligh
     const { default: AxeBuilder } = await import("@axe-core/playwright");
     await page.emulateMedia({ colorScheme: scheme });
     await page.goto(`/next/?view=${view}`);
-    await expect(page.getByRole("tab", { selected: true })).toBeVisible();
+    await expect(page.getByRole("tablist", { name: "Views" }).getByRole("tab", { selected: true })).toBeVisible();
     await page.waitForTimeout(500);
     const r = await new AxeBuilder({ page }).analyze();
     const bad = r.violations.filter((v) => v.impact === "serious" || v.impact === "critical");
@@ -701,7 +718,7 @@ test.describe("Run tab: who is on each ticket", () => {
   test("the head names the session in charge, a row with a worker opens its panel, Helpers and Other chats", async ({ page }) => {
     const errors: string[] = [];
     page.on("pageerror", (e) => errors.push(String(e)));
-    await page.goto("/next/");
+    await page.goto("/next/?rt=maps");
     await expect(page.getByRole("tab", { name: /Sessions/ })).toHaveCount(0);
     const demo = page.locator("[data-testid=map-block][data-map='demo/board']");
     await expect(demo.getByTestId("in-charge")).toContainText("Charting the board");
@@ -724,6 +741,7 @@ test.describe("Run tab: who is on each ticket", () => {
     await helpers.getByRole("button", { name: /Scout the tests/ }).click();
     await expect(page.getByRole("dialog")).toContainText("Scout the tests");
     await page.keyboard.press("Escape");
+    await runTab(page, "Now");
     const other = page.getByTestId("other-chats");
     await expect(other).toContainText("1 live");
     await expect(other).toContainText("Reading the old notes");
@@ -734,7 +752,7 @@ test.describe("Run tab: who is on each ticket", () => {
   });
 
   test("a silent worker's row carries the silent mark", async ({ page }) => {
-    await page.goto("/next/");
+    await page.goto("/next/?rt=maps");
     const row = page.locator("li[data-key='demo/board#8']");
     await expect(row).toHaveAttribute("data-worker", "silent");
     await expect(row.getByTestId("silent")).toBeVisible();
@@ -743,20 +761,20 @@ test.describe("Run tab: who is on each ticket", () => {
 
   test("?view=sessions and a sess link land on the Run tab with the panel open", async ({ page }) => {
     await page.goto("/next/?view=sessions");
-    await expect(page.getByRole("tab", { selected: true })).toContainText("Run");
+    await expect(page.getByRole("tablist", { name: "Views" }).getByRole("tab", { selected: true })).toContainText("Run");
     await expect(page.getByRole("dialog")).toHaveCount(0);
     await page.goto("/next/?view=sessions&sess=demo%2Fboard%235");
     // the panel is modal: the tabs behind it are hidden from the accessibility tree until it closes
     await expect(page.getByRole("dialog").getByRole("list", { name: "Last actions" })).toBeVisible();
-    await expect(page.getByRole("tab", { selected: true, includeHidden: true })).toContainText("Run");
+    await expect(page.getByRole("tablist", { name: "Views", includeHidden: true }).getByRole("tab", { selected: true, includeHidden: true })).toContainText("Run");
     await page.keyboard.press("Escape");
     await expect(page.getByRole("dialog")).toHaveCount(0);
-    await expect(page.getByRole("tab", { selected: true })).toContainText("Run");
+    await expect(page.getByRole("tablist", { name: "Views" }).getByRole("tab", { selected: true })).toContainText("Run");
   });
 
   test("at 375 px nothing scrolls sideways", async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 800 });
-    await page.goto("/next/");
+    await page.goto("/next/?rt=now");
     await expect(page.getByTestId("other-chats")).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   });
@@ -801,7 +819,7 @@ test("screenshots of a check that could not run", async ({ page }) => {
     });
     await route.fulfill({ response: res, json: body });
   });
-  await page.goto("/next/?view=runs");
+  await page.goto("/next/?rt=maps");
   await expect(page.locator("li[data-mark=recheck]")).toBeVisible();
   await page.waitForTimeout(300);
   await page.screenshot({ path: to("runs-recheck.png") });
@@ -1207,9 +1225,10 @@ test.describe("Run tab: why it waits, how many at once, which account and model"
   const noSideways = (page: Page): Promise<boolean> => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
 
   test("a waiting row says what it waits for; plus calls the parallel route and the line changes", async ({ page }) => {
-    await page.goto("/next/");
+    await page.goto("/next/?rt=maps");
     const row = page.locator("li[data-key='demo/board#3']");
     await expect(row.getByTestId("wait-reason")).toHaveText("waits for Run the board against the real hub: both change src/");
+    await page.getByRole("button", { name: /^At once and accounts/ }).click();
     const line = page.getByTestId("repo-line").first();
     await expect(line.getByTestId("repo-words")).toHaveText("2 running of 2 at once · 0 more could run side by side");
     await line.getByRole("button", { name: /one more at once/ }).click();
@@ -1221,6 +1240,7 @@ test.describe("Run tab: why it waits, how many at once, which account and model"
 
   test("an account's two bars, and its switch calls the agents route", async ({ page }) => {
     await page.goto("/next/");
+    await page.getByRole("button", { name: /^At once and accounts/ }).click();
     const spare = page.locator("[data-testid=account-line][data-account='spare']");
     await expect(spare.getByRole("progressbar", { name: "5 hours use" })).toHaveAttribute("aria-valuenow", "90");
     await expect(spare.getByRole("progressbar", { name: "week use" })).toHaveAttribute("aria-valuenow", "70");
@@ -1235,7 +1255,7 @@ test.describe("Run tab: why it waits, how many at once, which account and model"
   });
 
   test("a row's menu sets its account and model; the row shows them; ticked rows get the same from the bar", async ({ page }) => {
-    await page.goto("/next/");
+    await page.goto("/next/?rt=maps");
     const row = page.locator("li[data-key='demo/board#3']");
     await row.getByRole("button", { name: /the account and model for/ }).click();
     await page.getByRole("option", { name: /^spare/ }).click();
@@ -1256,7 +1276,7 @@ test.describe("Run tab: why it waits, how many at once, which account and model"
 
   test("at 375 px nothing scrolls sideways, with a row ticked", async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 800 });
-    await page.goto("/next/");
+    await page.goto("/next/?rt=maps");
     await page.locator("li[data-key='demo/board#3']").getByRole("checkbox").check();
     await expect(page.getByTestId("tick-bar")).toBeVisible();
     expect(await noSideways(page)).toBe(true);
@@ -1269,7 +1289,7 @@ test.describe("Run tab: why it waits, how many at once, which account and model"
       const { default: AxeBuilder } = await import("@axe-core/playwright");
       await page.setViewportSize({ width: w, height: w === 375 ? 800 : 900 });
       await page.emulateMedia({ colorScheme: scheme });
-      await page.goto("/next/");
+      await page.goto("/next/?rt=maps");
       await page.locator("li[data-key='demo/board#3']").getByRole("checkbox").check();
       await page.waitForTimeout(500);
       const dir = process.env.SB_SHOTS;
@@ -1284,7 +1304,7 @@ test.describe("Run tab: why it waits, how many at once, which account and model"
 test("Review finished now: off while no ticket waits for a review, on with the count and the next look once one has landed", async ({ page, request }) => {
   await request.post("/api/__restore");
   await page.setViewportSize({ width: 375, height: 800 });
-  await page.goto("/next/");
+  await page.goto("/next/?rt=maps");
   const none = page.getByRole("button", { name: "Review finished now" });
   await expect(none).toBeDisabled();
   await request.post("/api/__between");
