@@ -268,7 +268,7 @@ export function NightGraph({ items: given, title }: { items?: readonly QueueItem
   const nodes: Node[] = [
     ...g.columns.map((c): Node => {
       const its = g.boxes.filter((b) => b.project === c.project);
-      const bottom = Math.max(HEAD, ...its.map((b) => b.y + NODE_H)) + FRAME_PAD;
+      const bottom = Math.max(HEAD, ...its.map((b) => b.y + b.h)) + FRAME_PAD;
       return {
         id: `head:${c.project}`, type: "head", position: { x: c.x - FRAME_PAD, y: 0 }, width: c.w + 2 * FRAME_PAD, height: bottom,
         data: { text: c.project, ids: its.map((b) => b.id) }, zIndex: -1, style: { pointerEvents: "none" }, ...fixed,
@@ -277,7 +277,7 @@ export function NightGraph({ items: given, title }: { items?: readonly QueueItem
     ...g.rows.map((r): Node => ({ id: `clock:${String(r.row)}`, type: "clock", position: { x: 0, y: r.y }, width: CLOCK_W - 12, height: NODE_H, data: { text: r.clock, now: r.phase === "now" }, ...fixed })),
     ...(g.nowY !== null ? [{ id: "now", type: "now", position: { x: 0, y: g.nowY - 6 }, width: right, height: 12, data: {}, zIndex: -1, ...fixed } satisfies Node] : []),
     ...g.boxes.map((b): Node<Data> => ({
-      id: b.id, type: "box", position: { x: b.x, y: b.y }, width: NODE_W, height: NODE_H, draggable: false, connectable: false, focusable: false, style: { pointerEvents: "all" },
+      id: b.id, type: "box", position: { x: b.x, y: b.y }, width: NODE_W, height: b.h, draggable: false, connectable: false, focusable: false, style: { pointerEvents: "all" },
       data: { n: nodeOf(b), map: b.map, ...(b.place === null && { foot: b.foot }), key: b.id, report: b.report, flash: changed.has(b.id), hue: b.hue, dashed: b.phase === "next" },
     })),
     ...(g.done !== null ? [{ id: DONE_ID, type: "done", position: { x: g.done.x, y: g.done.y }, width: NODE_W, height: NODE_H, data: { d: g.done }, ...fixed } satisfies Node] : []),
