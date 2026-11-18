@@ -55,9 +55,10 @@ class ContractFixturesTest(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.root = Path(tmp.name).resolve()
         self.vault, self.repo, home, binp = (self.root / n for n in ("Vault", "repo", "home", "bin"))
-        for d in (self.vault / "wayfinder", home, binp):
+        for d in (self.vault / "wayfinder", home, binp, home / ".codex"):
             d.mkdir(parents=True)
-        for name in ("claude", "agy"):
+        (home / ".codex" / "auth.json").write_text("{}")  # a signed-in Codex account for the scan
+        for name in ("claude", "agy", "codex"):
             f = binp / name
             f.write_text("#!/bin/sh\nexec {} {} \"$@\"\n".format(shlex.quote(sys.executable), shlex.quote(str(FAKE))))
             f.chmod(0o755)

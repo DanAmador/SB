@@ -531,6 +531,20 @@ class ScanTest(unittest.TestCase):
         self.assertEqual(out["agy"]["kind"], "agy")
         self.assertEqual(self.h.state()["installed"], out)
 
+    def test_signed_in_codex_accounts_are_found_only_with_the_cli_on_path(self):
+        for name, signed in ((".codex", True), (".codex-work", True), (".codex-out", False), (".codexy", True)):
+            (self.home / name).mkdir()
+            if signed:
+                (self.home / name / "auth.json").write_text("{}")
+        self.assertEqual(self.h.agents_scan(home=self.home, which=lambda n: None), {})
+        out = self.h.agents_scan(home=self.home, which=lambda n: "/bin/codex" if n == "codex" else None)
+        self.assertEqual(set(out), {"codex", "codex-work"})
+        self.assertEqual(out["codex-work"], {"kind": "codex", "dir": str(self.home / ".codex-work"), "model": None,
+                                             "limited_until": None})
+        self.assertIsNone(self.h.state()["queue"]["agent"])  # never the default
+        self.h.queue_agents(["codex-work"], self.h.state()["queue"]["version"])
+        self.assertEqual(self.h.state()["queue"]["agents"], ["codex-work"])
+
     def test_the_default_agent_is_never_agy_and_a_chosen_one_stays(self):
         self.h.agents_scan(home=self.home, which=lambda n: "/bin/agy")
         self.assertIsNone(self.h.state()["queue"]["agent"])

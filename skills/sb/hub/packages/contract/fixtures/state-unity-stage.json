@@ -73,6 +73,12 @@
         "limited_until": null,
         "model": null
       },
+      "codex": {
+        "dir": "/fixture/home/.codex",
+        "kind": "codex",
+        "limited_until": null,
+        "model": null
+      },
       "main": {
         "dir": "/fixture/.claude-main",
         "kind": "claude",

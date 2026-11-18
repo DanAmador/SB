@@ -97,7 +97,7 @@ class RunnerCase(unittest.TestCase):
         t = Path(cls._template.name).resolve()
         (t / "Vault" / "wayfinder").mkdir(parents=True)
         (t / "bin").mkdir()
-        for name in ("claude", "agy"):
+        for name in ("claude", "agy", "codex"):
             f = t / "bin" / name
             f.write_text("#!/bin/sh\nexec {} {} \"$@\"\n".format(shlex.quote(sys.executable), shlex.quote(str(FAKE))))
             f.chmod(0o755)
@@ -377,6 +377,84 @@ class LimitTextTest(unittest.TestCase):
                          datetime(2026, 11, 14, 1, 0).timestamp())
         self.assertIsNone(sbhub.limited_until("all good, it resets 4:40 nothing", START))
         self.assertEqual(sbhub.ran_past(90 * 60), "ran past 90 minutes")
+
+
+class CodexTextTest(unittest.TestCase):
+    def test_codex_names_its_wait_or_its_clock_time(self):
+        self.assertEqual(sbhub.limited_until("You've hit your usage limit. Upgrade to Pro or try again in 1 day "
+                                             "2 hours 5 minutes.", START), START + 86400 + 7200 + 300)
+        self.assertEqual(sbhub.limited_until("You've hit your usage limit. Try again at 9:31 PM.", START),
+                         datetime(2026, 11, 13, 21, 31).timestamp())
+        self.assertIsNone(sbhub.limited_until("try again in 5 minutes", START))  # no limit named: no stop
+
+    def test_codex_errors_are_what_it_said_and_tool_output_is_not(self):
+        log = "\n".join(json.dumps(e) for e in (
+            {"type": "item.completed", "item": {"type": "command_execution", "aggregated_output": "usage limit reached"}},
+            {"type": "error", "message": "boom"},
+            {"type": "turn.failed", "error": {"message": "401 Unauthorized"}},
+            {"id": "0", "msg": {"type": "error", "message": "old"}}))
+        said = sbhub._said(log)
+        self.assertEqual(said.splitlines(), ["boom", "401 Unauthorized", "old"])
+        self.assertTrue(sbhub.logged_out(said))
+
+    def test_a_codex_jobs_result_is_its_last_agent_message(self):
+        log = "\n".join(json.dumps(e) for e in (
+            {"type": "item.completed", "item": {"type": "agent_message", "text": "first"}},
+            {"type": "item.completed", "item": {"type": "agent_message", "text": "done: wrote it"}},
+            {"type": "turn.completed", "usage": {"input_tokens": 1}}))
+        self.assertEqual(sbhub._job_result(log), "done: wrote it")
+        self.assertEqual(sbhub._job_result(json.dumps({"msg": {"type": "agent_message", "message": "old"}})), "old")
+
+
+class CodexRunTest(RunnerCase):
+    """A Codex account in the pool takes tickets as a Claude account does; its limit and logout take it out."""
+
+    def setUp(self):
+        super().setUp()
+        with self.hub._lock:
+            self.hub._data["installed"] = {"codex": {"kind": "codex", "dir": str(self.root / ".codex"), "model": None,
+                                                     "limited_until": None}}
+            self.hub._data["queue"]["agent"] = "codex"
+
+    def test_a_ticket_runs_on_codex_exec_under_its_account_and_resolves(self):
+        self.only(1)
+        self.until(lambda: self.state_of("repo/one#1") == "done")
+        item, log = self.items()["repo/one#1"], self.launched[0]["log"]
+        argv = self.printed(log, 1)[0]
+        self.assertEqual(argv[:4], ["--json", "-C", str(self.repos["repo/one"]), "--skip-git-repo-check"])
+        self.assertNotIn("-m", argv)  # no model named: the account's own default, never sonnet
+        self.assertEqual(argv[argv.index("-s") + 1], "workspace-write")
+        roots = json.loads(next(a for a in argv if a.startswith("sandbox_workspace_write.writable_roots=")).split("=", 1)[1])
+        self.assertIn(str(self.repos["repo/one"] / ".git"), roots)
+        self.assertIsNone(item.get("session"))
+        self.assertEqual(json.loads(self.printed(log, 1, "env")[0])["CODEX_HOME"], str(self.root / ".codex"))
+        self.assertEqual(self.open_tickets(), {2: self.open_tickets()[2]})
+
+    def test_a_codex_usage_limit_takes_the_account_out_until_the_wait_it_names(self):
+        self.mode = "limit"
+        self.only(1)
+        self.until(lambda: self.hub.state()["installed"]["codex"]["limited_until"])
+        self.assertEqual(self.hub.state()["installed"]["codex"]["limited_until"], START + 86400 + 7200 + 300)
+        self.assertEqual(self.state_of("repo/one#1"), "queued")
+        self.assertEqual(self.open_tickets()[1]["status"], "open")
+
+    def test_a_signed_out_codex_account_is_marked_and_its_ticket_waits(self):
+        self.mode = "auth"
+        self.only(1)
+        self.until(lambda: self.hub.state()["installed"]["codex"].get("login") == "expired")
+        self.assertEqual(self.state_of("repo/one#1"), "queued")
+        self.assertEqual(len(self.launched), 1)
+
+    def test_failed_tries_on_codex_come_back_with_no_model_never_sonnet_or_opus(self):
+        script = self.root / "fails.sh"  # exits 1 twice, then 0
+        script.write_text('n=$(cat "{c}" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "{c}"; [ $n -le 2 ] && exit 1; '
+                          'exit 0\n'.format(c=self.root / "fails"))
+        self.sb("set", "repo/one", "001", "checks=sh " + str(script), "--no-sync")
+        self.only(1)
+        self.until(lambda: self.state_of("repo/one#1") == "done")
+        runs = [x for x in self.launched if x["key"] == "repo/one#1"]
+        self.assertEqual([x["model"] for x in runs], [None, None, None])
+        self.assertNotIn("-m", self.printed(runs[2]["log"], 3)[2])
 
 
 class TicketLoopTest(RunnerCase):
@@ -1928,6 +2006,19 @@ class LaunchAndHookTest(RunnerCase):
         self.assertNotIn("OPENAI_API_KEY", env)
         self.assertNotIn("OPENAI_API_KEY", popen.call_args_list[1].kwargs["env"])
         self.assertNotIn("UNITY_PATH", popen.call_args_list[1].kwargs["env"])
+
+    def test_launch_starts_codex_with_its_model_and_the_sandbox_its_entry_names(self):
+        log = self.root / "codex.log"
+        p = sbhub.launch({"kind": "codex", "dir": "/cx", "model": None, "sandbox": "bypass"}, "Ticket: m/001\n",
+                         str(self.repos["repo/one"]), "gpt-x", {"SB_HUB_AGENT": "m#1", "SB_HUB_PARENT": "queue",
+                                                                "SB_HUB_PORT": "1", "FAKE_WORKER_MODE": "nothing"}, str(log))
+        self.assertEqual(os.getpgid(p.pid), p.pid)
+        self.assertEqual(p.wait(timeout=10), 1)
+        self.assertIsNone(p.session)
+        text = log.read_text(encoding="utf-8")
+        self.assertIn('"-m", "gpt-x", "--dangerously-bypass-approvals-and-sandbox"]', text)
+        self.assertIn('"CODEX_HOME": "/cx"', text)
+        self.assertIsNone(sbhub.resumable({"session": "s", "session_dir": "/d"}, {"kind": "codex"}, self.root))
 
     def test_launch_starts_agy_in_its_own_group_with_its_model(self):
         log = self.root / "agy.log"
