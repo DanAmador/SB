@@ -1618,6 +1618,7 @@ def ran_past(limit):
 # ---- pacing: each Claude account's usage, read from its workers' stream-json and a one-line probe ----
 
 USAGE_STALE = 600  # a reading older than this is refreshed by a probe; at most one probe per agent this often
+IDLE_USAGE = 1800  # with nothing to start, each pool account is probed this often, so the board shows its use
 GATE_5H = 0.90  # nothing starts that would take an account's 5-hour window past this
 GATE_7D = 0.80  # nothing starts on an account whose week is used past this...
 GATE_7D_LAST = 0.98  # ...or past this in its week's last WEEK_LAST seconds: what is left would expire unused
@@ -3511,6 +3512,7 @@ class Supervisor:
         self.runner.backed_out = self._backed_out
         self.probe = probe or probe_usage  # (agent entry, cwd) -> its output; tests hand in their own
         self.probe_async, self.probing = True, []  # probes run in their own thread (tests may run them inline)
+        self.idle_usage = os.environ.get("SB_HUB_IDLE_USAGE") != "0"  # probe the pool with nothing to start
         self.close_off = True  # the daily morning close-off job (tests of other things turn it off)
         # item key -> {p, t (the ticket row it started from), agent, inst, base, log, start, pos (log read up to),
         # u0/u1 (its first and newest usage reading), alone (no other worker on its agent overlapped it), braked}
@@ -3753,14 +3755,20 @@ class Supervisor:
     def _probe(self):
         """A one-line Haiku call for each Claude agent of the pool (or named by an item) that could take a queued
         item, runs nothing, and has no reading newer than USAGE_STALE; at most one per agent per USAGE_STALE.
-        It is also how a signed-out agent is found signed in again."""
+        With nothing to start (paused, or nothing queued) each pool agent is probed every IDLE_USAGE instead, so
+        the board shows its use; SB_HUB_IDLE_USAGE=0 turns that off. It is also how a signed-out agent is found
+        signed in again."""
         now = self.hub.now()
         with self.hub._lock:
             q = self.hub._data["queue"]
-            if q["paused"]:
-                return
-            queued = [i for i in q["items"] if i["state"] == "queued" and (i.get("not_before") or 0) <= now]
+            queued = [] if q["paused"] else [
+                i for i in q["items"] if i["state"] == "queued" and (i.get("not_before") or 0) <= now]
             names = dict.fromkeys(n for i in queued for n in ([i["agent"]] if i.get("agent") else pool(q)))
+            every = USAGE_STALE
+            if not names:
+                if not self.idle_usage:
+                    return
+                names, every = dict.fromkeys(pool(q)), IDLE_USAGE
             busy = {i.get("runner") for i in q["items"] if i["state"] == "running"}
             todo = []
             for n in names:
@@ -3768,8 +3776,8 @@ class Supervisor:
                 if inst is None or inst.get("kind") != "claude" or n in busy or (inst.get("limited_until") or 0) > now:
                     continue
                 u = inst.get("usage")
-                fresh = u and now - u.get("at", 0) < USAGE_STALE and not inst.get("pending")
-                if fresh and inst.get("login") != "expired" or now - (inst.get("probed") or 0) < USAGE_STALE:
+                fresh = u and now - u.get("at", 0) < every and not inst.get("pending")
+                if fresh and inst.get("login") != "expired" or now - (inst.get("probed") or 0) < every:
                     continue
                 inst["probed"] = now
                 todo.append((n, dict(inst)))

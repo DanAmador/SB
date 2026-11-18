@@ -292,6 +292,41 @@ class StopsTest(PacingCase):
         self.assertEqual(self.inst("main")["costs"]["sonnet"], {"avg": 0.08, "n": 1})
 
 
+class IdleUsageTest(PacingCase):
+    """With nothing to start, the pool's accounts are still probed, seldom, so the board shows their use."""
+
+    def test_a_paused_queue_probes_each_pool_account_every_idle_interval(self):
+        self.probe_out = {"main": ev(0.30), "spare": ev(0.05)}
+        self.sup.tick()  # the queue starts paused, with nothing ticked
+        self.assertEqual(self.probes, ["main", "spare"])
+        self.assertEqual(self.inst("main")["usage"]["five_hour"], 0.30)
+        self.clock.t += sbhub.USAGE_STALE
+        self.sup.tick()
+        self.assertEqual(len(self.probes), 2)  # an idle reading lasts IDLE_USAGE, not USAGE_STALE
+        self.clock.t = START + sbhub.IDLE_USAGE
+        self.sup.tick()
+        self.assertEqual(self.probes[2:], ["main", "spare"])
+        self.assertEqual(self.launched, [])
+
+    def test_a_queued_line_probes_on_the_usual_interval_again(self):
+        self.sup.tick()
+        self.assertEqual(len(self.probes), 2)
+        self.mode = "hang"
+        self.resume()
+        self.clock.t += sbhub.USAGE_STALE
+        self.sup.tick()
+        self.assertEqual(self.probes[2:], ["main", "spare"])
+
+    def test_idle_probes_are_off_with_sb_hub_idle_usage_0(self):
+        with mock.patch.dict(os.environ, {"SB_HUB_IDLE_USAGE": "0"}):
+            sup = sbhub.Supervisor(self.hub, port=4321)
+        self.addCleanup(sup.stop)
+        self.assertFalse(sup.idle_usage)
+        self.sup.idle_usage = False
+        self.sup.tick()
+        self.assertEqual(self.probes, [])
+
+
 class ReadingTest(unittest.TestCase):
     def test_readings_and_what_the_agent_said(self):
         text = ("noise\n" + ev(0.3) + '{"type":"user","message":"a tool read: You have hit your session limit"}\n'
