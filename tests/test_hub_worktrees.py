@@ -191,7 +191,7 @@ class WorktreeTest(RunnerCase):
         sup = Supervisor(hub)
         sup.close_off = False
         self.addCleanup(sup.stop)
-        end = time.time() + 10
+        end = time.time() + 60  # as until(): 10 s ran out at load 30 (ticket 153's runs)
         def one():  # judged: the night ended and the item is on its record
             return next((i for i in hub.state()["queue"]["items"] if i.get("night")), None) or hub.night(hub.nights()["nights"][0]["id"])["night"]["items"][0]
         while time.time() < end and one()["state"] in ("running", "landed", "review"):

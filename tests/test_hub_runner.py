@@ -219,7 +219,7 @@ class RunnerCase(unittest.TestCase):
     def pids(self):
         """The hanging fake worker's pid and its child's, once it has written them."""
         f = Path(os.environ["FAKE_WORKER_PIDS"])
-        end = time.time() + 5
+        end = time.time() + 30  # 5 s ran out at load 35 (ticket 153's runs): a served hub starts its worker late
         while not (f.exists() and f.read_text().endswith("\n")) and time.time() < end:
             time.sleep(0.02)
         return tuple(map(int, f.read_text().split()))
@@ -1325,7 +1325,7 @@ class StopsTest(RunnerCase):
         self.assertTrue(alive(pid))
         def one():  # judged: the night ended and the item is on its record
             return next((i for i in hub.state()["queue"]["items"] if i.get("night")), None) or hub.night(hub.nights()["nights"][0]["id"])["night"]["items"][0]
-        end = time.time() + 10
+        end = time.time() + 60  # as until(): 10 s ran out at load 30 (ticket 153's runs)
         while time.time() < end and one()["state"] in ("running", "landed", "review"):
             sup.tick()
             time.sleep(0.05)

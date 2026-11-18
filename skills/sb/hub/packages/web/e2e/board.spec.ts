@@ -27,7 +27,8 @@ test("Run is the landing page: one row per worker run, the silent one amber, nev
   await expect(silent).toContainText("reading the usage file");
   const busy = runs.getByRole("listitem").filter({ hasText: "running the tests" });
   await expect(busy).toContainText("running the tests");
-  await expect(busy).toContainText("12 min");
+  // 12 min when the fixture hub starts; a loaded machine can take minutes to reach this test (13 and 20 min seen)
+  await expect(busy).toContainText(/(1[2-9]|[2-5]\d) min\b/);
   await expect(busy).toContainText("opus");
   await expect(busy).toContainText("try 3 of 5"); // its third try, after two failed ones
   await expect(busy.getByRole("link", { name: "Run the board against the real hub" })).toHaveAttribute("href", "obsidian://open?path=%2Fvault%2Fdemo%2Fboard%2Fissues%2F5.md");
@@ -164,6 +165,8 @@ test.describe("The run's graph", () => {
 
   for (const scheme of ["light", "dark"] as const) {
     test(`axe finds no serious or critical issue on the run's graph (${scheme}); screenshot`, async ({ page }) => {
+      // A whole-page axe scan ran past 30 s at load 42 (ticket 153's hub check); slow() gives it 90 s.
+      test.slow();
       const { default: AxeBuilder } = await import("@axe-core/playwright");
       await page.emulateMedia({ colorScheme: scheme });
       await page.goto("/next/");
@@ -419,8 +422,12 @@ test("the sidebar picks a map and every view narrows; the pick lives in the page
   await expect(page.getByRole("region", { name: "Done" })).toBeVisible();
 
   // keys: 1 is Runs; j then Enter opens a row's panel; Esc closes it; / focuses the search
+  // each key waits for the page to answer the one before: a loaded machine dropped the Enter on 2026-11-18
   await page.keyboard.press("1");
+  await expect(page.getByRole("tab", { name: /^Run\b/ })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("list", { name: "Running now" }).getByRole("listitem").first()).toBeVisible();
   await page.keyboard.press("j");
+  await expect(page.locator("main li:focus")).toHaveCount(1);
   await page.keyboard.press("Enter");
   await expect(page.getByRole("dialog")).toBeVisible();
   await page.keyboard.press("Escape");
@@ -620,6 +627,8 @@ test.describe("The live run and its history", () => {
 
   for (const scheme of ["light", "dark"] as const) {
     test(`axe finds no serious or critical issue on the head and an opened run (${scheme})`, async ({ page }) => {
+      // A whole-page axe scan ran past 30 s at load 42 (ticket 153's hub check); slow() gives it 90 s.
+      test.slow();
       const { default: AxeBuilder } = await import("@axe-core/playwright");
       await page.emulateMedia({ colorScheme: scheme });
       for (const url of ["/next/", "/next/?view=history&night=n-old"]) {
@@ -675,6 +684,8 @@ test("screenshots of Waits for you", async ({ page }) => {
 
 for (const [view, scheme] of [["run", "light"], ["run", "dark"], ["waits", "light"], ["waits", "dark"], ["history", "light"], ["history", "dark"]] as const) {
   test(`axe finds no serious or critical issue on ${view} (${scheme})`, async ({ page }) => {
+    // A whole-page axe scan ran past 30 s at load 42 (ticket 153's hub check); slow() gives it 90 s.
+    test.slow();
     const { default: AxeBuilder } = await import("@axe-core/playwright");
     await page.emulateMedia({ colorScheme: scheme });
     await page.goto(`/next/?view=${view}`);
@@ -981,6 +992,8 @@ test.describe("Map view", () => {
 
   for (const scheme of ["light", "dark"] as const) {
     test(`axe finds no serious or critical issue on a map (${scheme}); screenshot`, async ({ page }) => {
+      // A whole-page axe scan ran past 30 s at load 42 (ticket 153's hub check); slow() gives it 90 s.
+      test.slow();
       const { default: AxeBuilder } = await import("@axe-core/playwright");
       await page.emulateMedia({ colorScheme: scheme });
       await page.goto("/next/?project=demo&map=demo%2Fboard");
@@ -1170,6 +1183,8 @@ test.describe("Ticket table", () => {
 
   for (const [scheme, url] of [["light", "/next/?view=queue&project=demo"], ["dark", "/next/?project=demo&map=demo%2Fboard&mv=table"]] as const) {
     test(`axe finds no serious or critical issue on the table (${scheme}); screenshot`, async ({ page }) => {
+      // A whole-page axe scan ran past 30 s at load 42 (ticket 153's hub check); slow() gives it 90 s.
+      test.slow();
       const { default: AxeBuilder } = await import("@axe-core/playwright");
       await page.emulateMedia({ colorScheme: scheme });
       await page.goto(url);
@@ -1249,6 +1264,8 @@ test.describe("Run tab: why it waits, how many at once, which account and model"
 
   for (const [scheme, w] of [["light", 1440], ["dark", 375]] as const) {
     test(`axe is clean and a picture is taken (${scheme}, ${String(w)} px)`, async ({ page }) => {
+      // A whole-page axe scan ran past 30 s at load 42 (ticket 153's hub check); slow() gives it 90 s.
+      test.slow();
       const { default: AxeBuilder } = await import("@axe-core/playwright");
       await page.setViewportSize({ width: w, height: w === 375 ? 800 : 900 });
       await page.emulateMedia({ colorScheme: scheme });
