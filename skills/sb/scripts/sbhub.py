@@ -62,7 +62,7 @@ stage does, and only the ticket's own commits, each named on an `Undoes:` line.
 
 It paces each Claude account: workers print their account's 5-hour and weekly use (stream-json), a one-line
 Haiku probe reads an idle one, and an item starts only where its learned cost fits under GATE_5H (weekly under
-GATE_7D); one cut off by a limit or a logout goes back to the front for another account of the pool.
+GATE_7D, or GATE_7D_LAST in the week's last two days); one cut off by a limit or a logout goes back to the front for another account of the pool.
 """
 import argparse
 import ast
@@ -1619,7 +1619,9 @@ def ran_past(limit):
 
 USAGE_STALE = 600  # a reading older than this is refreshed by a probe; at most one probe per agent this often
 GATE_5H = 0.90  # nothing starts that would take an account's 5-hour window past this
-GATE_7D = 0.80  # nothing starts on an account whose week is used past this
+GATE_7D = 0.80  # nothing starts on an account whose week is used past this...
+GATE_7D_LAST = 0.98  # ...or past this in its week's last WEEK_LAST seconds: what is left would expire unused
+WEEK_LAST = 48 * 3600
 BRAKE_5H = 0.95  # a running worker whose account passes this is told, once, to wrap up
 MAX_PER_AGENT = 4  # workers at once on one account (one while it has no learned cost)
 TICKET_SECONDS = 4500  # about how long a ticket runs: a window resetting sooner refills before it needs it all
@@ -4784,7 +4786,8 @@ class Supervisor:
             return ((0, 0.0), 0.0, "") if n == 0 else (None, 0.0, "")
         week_resets = u.get("seven_day_resets")
         week = (u.get("seven_day") or 0.0) if not week_resets or week_resets > now else 0.0
-        if week >= GATE_7D:
+        gate = GATE_7D_LAST if week_resets and 0 < week_resets - now <= WEEK_LAST else GATE_7D
+        if week >= gate:
             return None, 0.0, "{} used {} of its week; resets {}".format(name, _pct(week), _hm(week_resets, "%a %H:%M"))
         cost, learned = _cost(inst, tier)
         if n >= (MAX_PER_AGENT if learned else 1):

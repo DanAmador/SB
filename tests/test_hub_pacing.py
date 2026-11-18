@@ -188,7 +188,15 @@ class FitTest(PacingCase):
         self.assertEqual(got, "spare")
 
     def test_an_account_past_a_gate_is_never_picked_for_its_early_reset(self):
+        got = self._first(ev(0.20, week_resets=R + 5 * 86400), ev(0.10, week=0.85, week_resets=R + 3 * 86400))
+        self.assertEqual(got, "main")
+
+    def test_in_its_weeks_last_two_days_an_account_runs_up_to_98_percent(self):
         got = self._first(ev(0.20, week_resets=R + 5 * 86400), ev(0.10, week=0.85, week_resets=R + 86400))
+        self.assertEqual(got, "spare")
+
+    def test_past_98_percent_even_the_last_two_days_hold(self):
+        got = self._first(ev(0.20, week_resets=R + 5 * 86400), ev(0.10, week=0.98, week_resets=R + 86400))
         self.assertEqual(got, "main")
 
     def test_an_items_own_account_wins_over_the_sooner_reset(self):
