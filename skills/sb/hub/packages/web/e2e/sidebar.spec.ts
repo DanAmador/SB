@@ -1,7 +1,5 @@
 import { expect, test } from "@playwright/test";
 
-const SHOT = "/Users/danamador/Documents/Second Brain/wayfinder/sb-workflow/runs/2026-11-16-checks-in-the-repo/114-sidebar-375.png";
-
 test("the sidebar lists every map in one list, running first, a stuck map with its reason", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 800 });
   await page.route("**/api/tickets", async (route) => {
@@ -18,5 +16,5 @@ test("the sidebar lists every map in one list, running first, a stuck map with i
   await expect(nav.getByText(/quiet/)).toHaveCount(0);
   const titles = await nav.getByRole("button", { name: /^(?!Collapse|Expand|Everything|Active)/ }).allInnerTexts();
   expect(titles.findIndex((t) => t.includes("The demo board") || t.includes("board"))).toBeLessThan(titles.findIndex((t) => t.includes("stuck")));
-  await nav.screenshot({ path: SHOT });
+  await nav.screenshot({ path: test.info().outputPath("sidebar-375.png") });
 });
