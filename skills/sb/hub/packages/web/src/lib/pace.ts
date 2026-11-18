@@ -72,7 +72,7 @@ export function accountPace(name: string, e: Installed, state: State): AccountPa
   const now = state.now;
   const mine = state.queue.items.filter((i) => i.state === "running" && i.runner === name);
   const base = { name, inPool: poolOf(state).includes(name), running: mine.length };
-  const u = e.kind === "claude" ? e.usage : undefined;
+  const u = e.kind === "agy" ? undefined : e.usage; // Claude streams it; Codex is read from its session files
   if (!u) return { ...base, five: null, week: null };
   const live = (u.five_hour_resets ?? 0) > now;
   const used = live ? u.five_hour : 0;

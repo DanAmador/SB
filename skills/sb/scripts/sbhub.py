@@ -1725,6 +1725,51 @@ def readings(text):
     return out
 
 
+CODEX_TAIL = 262144  # the end of a Codex session file searched for its newest rate limits
+CODEX_WINDOWS = {300: "five_hour", 10080: "seven_day"}  # a Codex rate limit's window_minutes: our window
+
+
+def codex_usage(home):
+    """A Codex account's newest usage, {five_hour, five_hour_resets, seven_day, seven_day_resets} as `readings`
+    gives it, or None. `codex exec --json` prints no rate limits; each session's file under
+    `<home>/sessions/YYYY/MM/DD/` (home: CODEX_HOME, default ~/.codex) records them in its `token_count` events.
+    Only the two newest days and each file's last CODEX_TAIL bytes are read: the folder grows without end."""
+    root = Path(home or Path.home() / ".codex") / "sessions"
+    days = sorted(root.glob("[0-9]*/[0-9]*/[0-9]*"), reverse=True)[:2]
+    try:
+        files = sorted((f for d in days for f in d.glob("rollout-*.jsonl")), key=lambda f: f.stat().st_mtime,
+                       reverse=True)
+    except OSError:
+        return None
+    for f in files[:3]:  # the newest may have just started, with no limits yet
+        try:
+            with open(f, "rb") as fh:
+                fh.seek(max(0, f.stat().st_size - CODEX_TAIL))
+                lines = fh.read().decode("utf-8", "replace").splitlines()
+        except OSError:
+            continue
+        for line in reversed(lines):
+            if '"rate_limits"' not in line:
+                continue
+            try:
+                d = json.loads(line)
+            except ValueError:
+                continue
+            payload = d.get("payload") if isinstance(d, dict) and isinstance(d.get("payload"), dict) else {}
+            rl = payload.get("rate_limits")
+            if not isinstance(rl, dict):
+                continue
+            u = {}
+            for w in (rl.get("primary"), rl.get("secondary")):
+                key = CODEX_WINDOWS.get(w.get("window_minutes")) if isinstance(w, dict) else None
+                if key and _num(w.get("used_percent")) is not None:
+                    u[key], u[key + "_resets"] = _num(w["used_percent"]) / 100, _num(w.get("resets_at"))
+            if "five_hour" in u:
+                return {"five_hour": u["five_hour"], "five_hour_resets": u.get("five_hour_resets"),
+                        "seven_day": u.get("seven_day"), "seven_day_resets": u.get("seven_day_resets")}
+    return None
+
+
 def _said(text):
     """What the agent itself printed: each JSON line's `error`, the `result` of one marked `is_error`, the message of
     a Codex `error` or `turn.failed` event, and every line that is not JSON (stderr, agy's output). Tool output inside
@@ -3565,6 +3610,7 @@ class Supervisor:
         self.runner.backed_out = self._backed_out
         self.probe = probe or probe_usage  # (agent entry, cwd) -> its output; tests hand in their own
         self.probe_async, self.probing = True, []  # probes run in their own thread (tests may run them inline)
+        self.codex_usage = os.environ.get("SB_HUB_CODEX_USAGE") != "0"  # read Codex accounts' session files
         self.close_off = True  # the daily morning close-off job (tests of other things turn it off)
         # item key -> {p, t (the ticket row it started from), agent, inst, base, log, start, pos (log read up to),
         # u0/u1 (its first and newest usage reading), alone (no other worker on its agent overlapped it), braked}
@@ -3639,6 +3685,7 @@ class Supervisor:
             self._unclean()
             self._reviews()  # and one a recheck asked for starts at once
             self._probe()
+            self._codex_usage()
             self._settle_night(False)  # a redo or retry the steps above queued for a stopping night never starts
             self._start()
         self._set_waits()
@@ -3793,7 +3840,7 @@ class Supervisor:
         for run in list(self.procs.values()):
             self._consume(run)
         with self.hub._lock:
-            usage = {n: e.get("usage") for n, e in self.hub._data["installed"].items()}
+            usage = {n: e.get("usage") for n, e in self.hub._data["installed"].items() if e.get("kind") == "claude"}
         for key, run in list(self.procs.items()):
             u = usage.get(run["agent"])
             if run.get("braked") or not u or (u.get("five_hour_resets") or 0) <= now or u["five_hour"] < BRAKE_5H:
@@ -3838,6 +3885,23 @@ class Supervisor:
         th = threading.Thread(target=self._probe_run, args=(todo,), daemon=True)
         self.probing = [x for x in self.probing if x.is_alive()] + [th]
         th.start()
+
+    def _codex_usage(self):
+        """Each installed Codex account's usage, read from its session files (codex_usage) at most once per
+        USAGE_STALE, whatever the queue holds: no model call. For the board only: a Codex account is not paced.
+        SB_HUB_CODEX_USAGE=0 turns it off."""
+        if not self.codex_usage:
+            return
+        now = self.hub.now()
+        with self.hub._lock:
+            todo = [(n, e.get("dir")) for n, e in self.hub._data["installed"].items()
+                    if e.get("kind") == "codex" and now - (e.get("probed") or 0) >= USAGE_STALE]
+            for n, _ in todo:
+                self.hub._data["installed"][n]["probed"] = now
+        for n, home in todo:
+            u = codex_usage(home)
+            if u:
+                self._usage(n, [(u, None)])
 
     def _probe_run(self, todo):
         for n, inst in todo:

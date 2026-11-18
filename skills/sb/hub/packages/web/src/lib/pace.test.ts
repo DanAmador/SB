@@ -80,11 +80,17 @@ describe("an account's five hours", () => {
     expect(p.five?.fits).toEqual({ sonnet: 0, opus: 0 });
     expect(p.five?.old).toBe(true);
   });
-  it("has no reading for an account never read, or one that is not Claude", () => {
+  it("has no reading for an account never read, or an agy one", () => {
     const s = state({ a: account(), g: account({ kind: "agy" }) });
     expect(accountPace("a", account(), s).five).toBeNull();
-    expect(accountPace("g", account({ kind: "agy" }), s).five).toBeNull();
+    expect(accountPace("g", account({ kind: "agy", usage: usage(0.3) }), s).five).toBeNull();
     expect(accountPace("g", account({ kind: "agy" }), s).inPool).toBe(false);
+  });
+  it("shows a Codex account's reading from its session files", () => {
+    const e = account({ kind: "codex", usage: usage(0.04, 0.21) });
+    const p = accountPace("c", e, state({ c: e }));
+    expect(p.five?.used).toBe(0.04);
+    expect(p.week).not.toBeNull();
   });
 });
 
