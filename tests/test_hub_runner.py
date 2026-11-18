@@ -1114,6 +1114,127 @@ class ReviewRetryTest(RunnerCase):
         self.assertNotIn(1, self.open_tickets())
 
 
+class PlayReviewTest(RunnerCase):
+    """In Play lines (ticket 148): a Done-when item starting `In Play` is left by the worker and played by the map's
+    review on main under the repo's Unity lock, which the hub takes for it and frees after; a lock busy past ten
+    minutes starts the review without it, the lines are `not played yet`, and a ticket whose only open items are those
+    resolves as landed, waiting for the owner's look, on the night's checklist note. The tickets are made through
+    sbmap, so the hub reads their Done when as sbmap really writes it."""
+    PLAY = "In Play: a dash then Rewind rolls the body back, the console clean."
+
+    def setUp(self):
+        super().setUp()
+        self.sb("set", "repo/one", "001", "done_when=1. It works.\\n2. " + self.PLAY, "--no-sync")
+        self.takes = []
+        real = self.hub.lock
+
+        def lock(key, by, **kw):
+            self.takes.append((key, by))
+            return real(key, by, **kw)
+        self.hub.lock = lock
+
+    def chat_holds_unity(self):
+        """A chat session (a listed agent, so the hub never lets its lock go as orphaned) holds the Editor."""
+        self.hub.report({"agent": "chat-unity", "role": "chat", "state": "working"})
+        self.assertTrue(self.hub.lock("unity:repoA", "chat-unity")["ok"])
+        self.takes.clear()
+
+    def test_the_worker_brief_lists_the_in_play_line_as_played_by_the_review(self):
+        self.assertEqual(self.open_tickets()[1]["done_when"], "1. It works.\n2. " + self.PLAY)  # what sbmap wrote
+        self.only(1)
+        self.until(lambda: self.launched)
+        brief = self.launched[0]["brief"]
+        self.assertIn(sbqueue.PLAY_BRIEF + "\n- " + self.PLAY + "\n", brief)
+        self.assertIn("played by the review, leave it", brief.lower())
+
+    def test_a_review_with_in_play_lines_takes_the_unity_lock_plays_them_and_frees_it(self):
+        self.verdicts = {"repo/one#1": "slow"}
+        os.environ["FAKE_REVIEW_SLEEP"] = "1"
+        self.addCleanup(os.environ.pop, "FAKE_REVIEW_SLEEP", None)
+        self.only(1)
+        self.until(lambda: "repo/one" in self.sup.reviews)
+        held = self.hub.state()["locks"].get("unity:repoA")
+        self.assertEqual((held or {}).get("by"), "sb-hub review repo/one")  # held while the review runs
+        brief = self.reviewed[0]["brief"]
+        self.assertIn("The hub took the repo's Unity lock `unity:repoA` for you", brief)
+        self.assertIn("### Its In Play lines\n\n- " + self.PLAY, brief)
+        item = self.items()["repo/one#1"]
+        self.assertIn("Its screenshots go in: " + str(Path(item["run"]) / "1-media"), brief)
+        self.until(lambda: self.state_of("repo/one#1") == "done")
+        self.assertNotIn("unity:repoA", self.hub.state()["locks"])  # freed once it ended
+        self.assertEqual(self.takes, [("unity:repoA", "sb-hub review repo/one")])
+        item = self.items()["repo/one#1"]
+        self.assertEqual((item["verdict"], item.get("look")), ("finished", None))  # played and met: nothing to look at
+        self.assertIn(self.PLAY + ": met: played on main", Path(item["review"]).read_text(encoding="utf-8"))
+
+    def test_a_review_without_in_play_lines_never_takes_the_unity_lock(self):
+        self.only(2)
+        self.until(lambda: self.state_of("repo/one#2") == "done")
+        self.assertEqual(len(self.reviewed), 1)
+        self.assertEqual(self.takes, [])
+        self.assertNotIn("Unity lock", self.reviewed[0]["brief"])
+        self.assertNotIn("In Play", self.reviewed[0]["brief"])
+        self.assertNotIn("Played by the review", self.launched[0]["brief"])
+
+    def test_a_lock_busy_over_ten_minutes_starts_the_review_without_it_and_the_ticket_waits_for_your_look(self):
+        self.chat_holds_unity()
+        self.only(1)
+        self.until(lambda: self.state_of("repo/one#1") == "landed")
+        for secs in (0, 60, sbhub.REVIEW_LOCK_WAIT - 120):  # busy, under ten minutes: the review waits
+            self.clock.t += secs
+            self.sup.tick()
+            self.hub.report({"agent": "chat-unity", "role": "chat", "state": "working"})
+        self.assertEqual((self.reviewed, self.state_of("repo/one#1")), ([], "landed"))
+        self.assertTrue(self.items()["repo/one#1"]["note"].startswith("waits for Unity to play its In Play lines"))
+        self.clock.t += 121  # past ten minutes since it first found the lock busy
+        self.until(lambda: self.state_of("repo/one#1") == "done")
+        brief = self.reviewed[0]["brief"]
+        self.assertIn("the repo's Unity lock `unity:repoA` has been held by chat-unity for over ten minutes", brief)
+        self.assertIn("`not played yet`, never `not met`", brief)
+        self.assertEqual(self.hub.state()["locks"]["unity:repoA"]["by"], "chat-unity")  # never taken from the chat
+        self.assertTrue(all(by == "sb-hub review repo/one" for _, by in self.takes))
+        item = self.items()["repo/one#1"]
+        review = Path(item["review"]).read_text(encoding="utf-8")
+        self.assertIn("- " + self.PLAY + ": not played yet", review)
+        self.assertNotIn("not met", review)
+        # landed, waits for your look: resolved, no redo, not failed, and on the night's one checklist
+        self.assertEqual([x["key"] for x in self.launched], ["repo/one#1"])
+        self.assertNotIn(1, self.open_tickets())
+        self.assertIn(sbhub.LOOK, item["note"])
+        note = Path(item["look"]["note"])
+        self.assertEqual(note, Path(item["run"]).parent / "{}-validate.md".format(Path(item["run"]).name[:10]))
+        self.assertEqual(item["look"]["lines"], ["- " + self.PLAY + ": not played yet: the Editor was not mine"])
+        text = note.read_text(encoding="utf-8")
+        self.assertIn("tags:\n  - wayfinder/run\n  - wayfinder/validate", text)
+        self.assertIn("> [!summary] In plain words", text)
+        done = next(self.vault.glob("wayfinder/repo/one/issues/done/001*.md"))
+        rel = str(done.relative_to(self.vault))[:-3]
+        self.assertIn("- [ ] **A**: a dash then Rewind rolls the body back, the console clean. [[{}|#1]]".format(rel),
+                      text)
+        self.assertTrue(done.is_file())  # the wikilink names the ticket's note where it now is
+        self.assertIn(sbhub.LOOK, done.read_text(encoding="utf-8"))
+        self.assertEqual(self.sup.streak, (None, 0))
+
+    def test_a_partly_verdict_with_a_code_item_not_met_still_gets_its_one_more_try(self):
+        self.chat_holds_unity()
+        self.verdicts = {"repo/one#1": "partly"}
+        self.only(1)
+        self.until(lambda: self.state_of("repo/one#1") == "landed")
+        self.sup.tick()
+        self.clock.t += sbhub.REVIEW_LOCK_WAIT + 1
+        self.hub.report({"agent": "chat-unity", "role": "chat", "state": "working"})
+        self.until(lambda: len(self.launched) == 2)
+        item = self.items()["repo/one#1"]
+        self.assertEqual(item["redo"]["findings"], ["- It works.: not met: the fake reviewer found no test for it"])
+        self.assertNotIn("look", item)
+        self.assertFalse(list(Path(item["run"]).parent.glob("*-validate.md")))
+
+    def test_a_restarted_hub_frees_a_review_lock_no_review_holds(self):
+        self.hub.lock("unity:repoA", "sb-hub review repo/one")  # left by a hub that stopped while its review ran
+        self.sup.review_now()
+        self.assertNotIn("unity:repoA", self.hub.state()["locks"])
+
+
 class NoCommandsTest(RunnerCase):
     """A ticket with a Done when and no check commands on any layer (ticket, map, repo .sb/checks) runs: the command
     step has nothing to run, and the Opus review (the fake reviewer's file, in review-brief.md's shape and read by

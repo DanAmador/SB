@@ -110,6 +110,18 @@ the vault. Only the running hub writes the queue (`$SB_HUB_HOME/state.json`); CL
   landed tickets, busy or not, and answers `{ok, started: [maps]}`; a map whose review runs starts nothing new.
   `/api/state`'s `review_next_at` is when the timer next looks (null: nothing waits). No review starts while the
   hub rebuilds its own code. A review running when the hub stops is started afresh, once, by the next hub.
+- **In Play lines**: a Done when item that starts `In Play` is checked in the Unity Editor. The worker's brief
+  lists it as "played by the review, leave it" and the worker is not judged on it. A map's review whose tickets
+  have such lines takes the repo's Unity lock (`unity:<repo>`, held by `sb-hub review <map>`) before it starts,
+  plays them on main and records what it saw (numbers, screenshots in `<run>/<num>-media/`); the hub frees the
+  lock when it ends, and a restarted hub frees one left over. A review without In Play lines never takes it. While
+  someone else holds the lock the review waits, up to 10 minutes; then it starts without it and marks those lines
+  `not played yet`, never `not met`. A ticket whose only open items are lines no one played (`not played yet`)
+  resolves as **landed, waits for your look**: no redo, no re-queue, `done` on the page with a `look` field (the
+  lines and the checklist note). Each such ticket goes on the night's one checklist note for its repo,
+  `wayfinder/<repo>/runs/<date>-validate.md` (one checkbox per ticket: what to do in Play and its link); the
+  morning note links it under **Play these**. A look that fails: the owner reopens the ticket. A ticket with any other item
+  `not met` gets its one more try as before.
 - **Jobs**: a one-off prompt for any agent, in a wayfinder project or any git checkout by path
   (`sbhub queue job …`, or the page's New job form). No claim, no verdict: exit 0 is done.
 

@@ -12,6 +12,7 @@ repo. You may read any file, run `git show`, `git log` and `git diff`, and run t
 see for yourself. The only files you write are the review files named below, one per ticket.
 
 {tickets}
+{play}
 
 ## What you write
 
@@ -37,4 +38,6 @@ Verdict: partly
 Verdict: not met
 
 finished: every item is met. partly: some are met, some not. not met: none is, or the change does something
-else. Say nothing along the way. Your last message, one line per ticket: its verdict and its review file's path.
+else.
+{play_verdict}
+Say nothing along the way. Your last message, one line per ticket: its verdict and its review file's path.

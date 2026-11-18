@@ -235,6 +235,51 @@ def move(order_keys, k, to_index, tickets):
     return rest
 
 
+# A Done-when item that starts "In Play" (`In Play: ...`, also `In Play, ...` as older tickets wrote it) is checked in
+# the Unity Editor: the worker leaves it, and the map's Opus review plays it on main under the repo's Unity lock
+PLAY = re.compile(r"^In Play\b\s*[:,]?\s*", re.I)
+NOT_PLAYED = "not played yet"  # the review's word for an In Play line it could not play: neither met nor not met
+_ITEM = re.compile(r"^\s*(?:[-*+]\s+(?:\[[ xX]\]\s+)?|\d+[.)]\s+)")
+
+
+def _numbered(text):
+    """One line written as `1. a 2. b 3. c`, cut at each next number in turn; any other line whole."""
+    if not re.match(r"\s*1[.)]\s", text):
+        return [text]
+    cuts, n = [0], 2
+    while True:
+        m = re.compile(r"(?<=\s){}[.)]\s".format(n)).search(text, cuts[-1] + 1)
+        if not m:
+            break
+        cuts.append(m.start())
+        n += 1
+    return [text[a:b].strip() for a, b in zip(cuts, cuts[1:] + [len(text)])]
+
+
+def done_items(done_when):
+    """A ticket's Done when as its items, list marks removed: one per `- `/`1. ` line (a line without a mark goes
+    on with the item before it), and `1. a 2. b` written on one line cut into its numbers."""
+    lines = []
+    for line in (done_when or "").splitlines():
+        if not line.strip():
+            continue
+        if _ITEM.match(line) or not lines:
+            lines.append(line.strip())
+        else:
+            lines[-1] += " " + line.strip()
+    return [_ITEM.sub("", i, count=1).strip() for line in lines for i in _numbered(line) if i.strip()]
+
+
+def play_lines(done_when):
+    """The Done-when items checked in Play (they start `In Play`), as written."""
+    return [i for i in done_items(done_when) if PLAY.match(i)]
+
+
+PLAY_BRIEF = ("Played by the review, leave it: the Opus review plays these on main, in the one Unity Editor, after your "
+              "work lands, and you are not judged on them. Do not try to play them, and do not hold back your commit "
+              "for them; build what they need, and say under `## Play checks` in your report how to see each one:")
+
+
 BRIEF_TEMPLATE = Path(__file__).resolve().parent.parent / "templates" / "session-brief.md"
 # the worker brief's checks line when no layer gives a command (the template says "These commands must all exit 0")
 NO_CHECKS_BRIEF = ("- none: this ticket has no check commands. After you finish, an Opus reviewer reads your change "
@@ -253,6 +298,8 @@ def brief(t, map_plain_words, run_folder, repo, branch):
         "out": t["out"] or "anything outside the ticket", "paths": ", ".join(t["paths"]),
         "done_when": t["done_when"], "checks": "\n".join(f"- {c}" for c in t["checks"]) or NO_CHECKS_BRIEF,
         "run_folder": str(run_folder),
+        "play": "\n".join([PLAY_BRIEF] + ["- " + p for p in play_lines(t["done_when"])])
+        if play_lines(t["done_when"]) else "",
     }
     return _fill(BRIEF_TEMPLATE, values)
 
@@ -280,11 +327,12 @@ def _fill(template, values):
 
 
 def review_section(ticket_text, repo, shas, diff, report_path, report_text, review_file, redo=None, second=None,
-                   diff_max=DIFF_MAX):
+                   diff_max=DIFF_MAX, play=(), media=None):
     """One ticket's part of the second pass's prompt (templates/review-ticket.md): the ticket as `sbmap show` prints
     it, the diff of its commits `shas` (oldest first; cut at `diff_max`, the review reads the rest itself), the
     worker's report and the file its review goes in. `redo`: the item's review-driven try (its first try's commit,
-    verdict and review), whose second try made `second` (None: no commit): both tries are judged together."""
+    verdict and review), whose second try made `second` (None: no commit): both tries are judged together. `play`:
+    its Done when's In Play lines, which the review plays on main; `media`: the folder their screenshots go in."""
     shas = [s for s in ([shas] if isinstance(shas, str) else shas or []) if s]
     if len(diff) > diff_max:
         diff = diff[:diff_max] + f"\n... cut at {diff_max} characters: read the rest with git show"
@@ -307,17 +355,53 @@ def review_section(ticket_text, repo, shas, diff, report_path, report_text, revi
         "diff_cmd": "`git -C {} show {}`".format(repo, " ".join(shas)) if shas else "",
         "diff": diff.strip() or "(no change)", "report_path": str(report_path),
         "report": report_text.strip() or "(the worker wrote no report)", "review_file": str(review_file),
+        "play": "### Its In Play lines\n\n{}\n\nIts screenshots go in: {}\n".format(
+            "\n".join("- " + p for p in play), media or "the ticket's media folder") if play else "",
     }
     return _fill(REVIEW_TICKET_TEMPLATE, values).rstrip("\n")
 
 
-def review_brief(sections, repo):
+PLAY_HELD = """## The In Play lines: you play them on main
+
+Some tickets list In Play lines. The hub took the repo's Unity lock `{lock}` for you: while you run, nobody else
+drives the one Unity Editor, which has the main folder ({repo}) open with every landed ticket's work in it. Never take
+or free that lock yourself; the hub frees it when you end. Follow the repo's AGENTS.md for the Editor: recompile and
+wait for it, read the console, then for each In Play line enter Play, do what it says, measure what it promises, and
+stop Play. Edit no file and commit nothing; stop Play before you end. In that line of the review, record what you saw:
+the numbers you measured, and the screenshots you saved in the ticket's media folder (named under it). A line you
+played and saw work is `met`; one you saw fail is `not met`, with what you saw. One you could not play (the Editor did
+not answer, the case cannot be reached) is `{not_played}`, with why."""
+
+PLAY_BUSY = """## The In Play lines: not played yet
+
+Some tickets list In Play lines, but {why}, so the Editor is not yours: do not touch it. Write each In Play line as
+`{not_played}`, never `not met`, and judge every other item as usual."""
+
+PLAY_VERDICT = ("A line `{}` counts neither for nor against the ticket: when every other item is met, the verdict is "
+                "finished, and the hub puts the ticket on the owner's list of checks to play.").format(NOT_PLAYED)
+
+
+def review_brief(sections, repo, unity=None):
     """The second pass's prompt for one map's run: templates/review-brief.md with each landed ticket's
-    `review_section` in it, one review file per ticket."""
+    `review_section` in it, one review file per ticket. `unity`: {lock, held, who} when a ticket has In Play lines:
+    `held`, the hub holds the repo's Unity lock for the review, which plays them; else `who` holds it, and the review
+    marks them not played yet (no `who`: it runs outside the hub's queue and holds no lock)."""
     sections = list(sections)
+    play = ""
+    if unity:
+        why = ("the repo's Unity lock `{}` has been held by {} for over ten minutes".format(unity.get("lock"),
+                                                                                          unity["who"])
+               if unity.get("who") else "this review runs outside the hub's queue, without the repo's Unity lock")
+        play = "\n" + (PLAY_HELD if unity.get("held") else PLAY_BUSY).format(
+            lock=unity.get("lock"), repo=repo, why=why, not_played=NOT_PLAYED)
     values = {"repo": str(repo), "count": str(len(sections)), "s": "" if len(sections) == 1 else "s",
-              "tickets": "\n\n".join(sections)}
+              "tickets": "\n\n".join(sections), "play": play, "play_verdict": PLAY_VERDICT if unity else ""}
     return _fill(REVIEW_TEMPLATE, values)
+
+
+def not_played(findings):
+    """The review's item lines it could not play (`not played yet`, or an older review's `not played`)."""
+    return [f for f in findings if re.search(r"\bnot played\b", f, re.I)]
 
 
 def review_verdict(text):

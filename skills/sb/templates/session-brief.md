@@ -17,6 +17,7 @@ Test in this checkout and with the editor or dev server already running for it: 
 To compare with a clean tree (before and after, say), never `git stash`, `checkout`, `restore`, `reset --hard`, `switch` or `rebase`: add a throwaway worktree (`git worktree add --detach /tmp/clean-tree HEAD`), run there, and `git worktree remove --force` it after.
 
 Done when: {done_when}
+{play}
 These commands must all exit 0 when you finish:
 {checks}
 

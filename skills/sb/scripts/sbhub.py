@@ -221,6 +221,8 @@ class Hub:
         for k, held in list(self._data["locks"].items()):
             if held.get("landing"):
                 continue  # the hub's own landing: it lets go when the landing ends, a restarted hub undoes it
+            if str(held.get("by") or "").startswith(REVIEW_BY):
+                continue  # the hub's own review that plays In Play lines: freed when it ends (Supervisor._play_free)
             holder = self._data["agents"].get(self._resolve(held["by"]))
             gone = holder is None and now - held["at"] > ORPHAN_LOCK_LIMIT
             silent = holder is not None and now - max(holder.get("at", now), held["at"]) > SILENT_LOCK_LIMIT
@@ -705,7 +707,7 @@ class Hub:
         if item is None or item["state"] == "queued":
             return item
         for f in ("retry", "digested", "runner", "pid", "pid_start", "result", "base_sha", "first_base", "resume", "stops",
-                  "log_start", "checked", "verdict", "review", "redo", "stop_asked", "fails"):
+                  "log_start", "checked", "verdict", "review", "redo", "stop_asked", "fails", "look"):
             item.pop(f, None)
         item.update(state="queued", note="", ended=None, tries=0, started=None, commit=None)
         return item
@@ -2237,6 +2239,58 @@ def unity_lock(repo):
     return "unity:" + Path(str(repo)).name
 
 
+# ---- the review plays the In Play lines: a map's second pass whose tickets have Done-when items starting `In Play`
+# holds the repo's Unity lock while it runs and plays them on main; a lock busy past REVIEW_LOCK_WAIT starts it
+# without, and it marks them not played yet. A ticket whose only open items are those lands as "waits for your look"
+REVIEW_BY = "sb-hub review "  # + the map: the holder of the Unity lock the review plays under
+REVIEW_LOCK_WAIT = 600  # how long a review with In Play lines waits for the repo's Unity lock before it starts without
+LOOK = "landed, waits for your look"
+
+
+def checklist_path(run_folder, now):
+    """The night's one note of checks to play for the run folder's repo: wayfinder/<repo>/runs/<date>-validate.md,
+    the date the run folder's (the night it began), else today's."""
+    folder = Path(run_folder)
+    m = re.match(r"\d{4}-\d{2}-\d{2}", folder.name)
+    day = m.group(0) if m else datetime.fromtimestamp(now).strftime("%Y-%m-%d")
+    return folder.parent / "{}-validate.md".format(day)
+
+
+def add_to_checklist(path, t, lines):
+    """Add one ticket to the night's checklist note (made on first use): a checkbox with its title, what to do in Play
+    in one line and a wikilink to the ticket. A ticket already on it is not added again. The note's path."""
+    path = Path(path)
+    vault = _vault()
+    f = Path(str(t.get("file") or ""))
+    if not f.is_file() and (f.parent / "done" / f.name).is_file():  # resolved: sbmap moved it under done/
+        f = f.parent / "done" / f.name
+    try:
+        rel = str(f.resolve().relative_to(vault.resolve()))
+    except (KeyError, ValueError, OSError):
+        rel = str(t.get("file") or "")
+    link = "[[{}|#{}]]".format(rel[:-3] if rel.endswith(".md") else rel, int(t["num"]))
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        text = ""
+    if link in text:
+        return str(path)
+    if not text:
+        repo, day = path.parent.parent.name, path.name[:10]
+        text = ("---\ntitle: {r} checks to play, {d}\ndate: {d}\ntags:\n  - wayfinder/run\n  - wayfinder/validate\n---"
+                "\n\n# {r} checks to play, {d}\n\n> [!summary] In plain words\n> One sitting in Play. Each line is "
+                "code already on `main` that nobody has looked at in Play yet. Tick it when it works; write a line "
+                "under it when it doesn't, and that ticket reopens. These tickets are out of the queue, so they no "
+                "longer block the night.\n\n## Landed: does it work in Play?\n\n").format(r=repo, d=day)
+    what = "; ".join(sbqueue.PLAY.sub("", re.sub(r"^-\s*", "", l)).strip() for l in lines) or "play it"
+    if not text.endswith("\n"):
+        text += "\n"
+    text += "- [ ] **{}**: {}. {}\n".format(t.get("title") or "", what.rstrip("."), link)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return str(path)
+
+
 # ---- the Unity stage: a Unity project's workers never drive the Editor; each landed ticket gets an integrator run
 # in the main folder, holding the repo's Unity lock until it ends, one ticket at a time (templates/integrate.md)
 INTEGRATE = Path(__file__).resolve().parents[1] / "templates" / "integrate.md"
@@ -3233,9 +3287,25 @@ class TicketRun:
         except OSError as e:
             print("sb hub queue: report for {}: {}".format(t["map"], e), file=sys.stderr, flush=True)
 
-    def resolve(self, item, run, sha, reason="", checks=(), review=None):
+    def resolve(self, item, run, sha, reason="", checks=(), review=None, look=None):
+        """Resolve the ticket with its commit. `look`: the review's item lines it could not play: it resolves as
+        landed, waiting for the owner's look, and goes on the night's checklist note (result field `look`)."""
         key, t = item["key"], run["t"]
         judged = dict(verdict="finished", review=review) if review else {}
+        note = checklist_path(run["folder"], self.hub.now()) if look and run.get("folder") else None
+
+        def looked(res):  # resolved: a ticket left to play goes on the night's checklist, and says so on its item
+            if not look:
+                return res
+            nonlocal note
+            try:
+                if note:
+                    add_to_checklist(note, t, sbqueue.play_lines(t.get("done_when")) or look)
+            except OSError as e:  # the ticket is resolved already: the note is lost, never the result
+                print("sb hub queue: checklist {}: {}".format(note, e), file=sys.stderr, flush=True)
+                note = None
+            return {**res, "note": "{}; {}{}".format(res["note"], LOOK, " on " + str(note) if note else ""),
+                    "look": {"lines": list(look), "note": str(note) if note else None}}
         found, now_t = self.row(key)
         if found and not _hub_holds(now_t):
             return self.result(item, "skipped", "passed its checks, but the ticket changed while it ran ({})".format(
@@ -3245,7 +3315,11 @@ class TicketRun:
         tail = "Model: {} on agent {} (try {}). Worker's report: {}/{}.md; its log: {}.".format(
             item.get("model"), run["agent"], (item.get("tries") or 0) + 1, Path(run["log"]).parent, int(t["num"]),
             run["log"])
-        if review:
+        if review and look:
+            tail += (" The Opus review met every item it could judge and could not play {} ({}): it is {}, on the "
+                     "night's checklist {}.").format("its In Play line" if len(look) == 1 else
+                                                     "{} In Play lines".format(len(look)), review, LOOK, note)
+        elif review:
             tail += " The Opus review judged it finished: {}.".format(review)
         nnn = "{:03d}".format(int(t["num"]))
         # the second pass's verdict as properties a board shows; none given: sbmap marks a task `skipped`
@@ -3256,9 +3330,9 @@ class TicketRun:
             if rc != 0:
                 return {**self.fail(item, run, "the report is written, but sbmap resolve failed: " + (err or out), None,
                                     checks), **judged}
-            return self.result(item, "done", "resolved: {}, findings in the report".format(
+            return looked(self.result(item, "done", "resolved: {}, findings in the report".format(
                 "no change needed" if reason.startswith("no change needed") else "research"), run, None, checks,
-                **judged)
+                **judged))
         ran = ("every check exited 0 ({n} of {n}): {}".format(listed, n=len(t["checks"])) if t["checks"] else
                "it has no check commands, so the Opus review of its Done when was its only check")
         answer = "Checked by the sb hub in code: commit {} carries `Ticket: {}/{:03d}` and {}. {}{} {}".format(
@@ -3271,7 +3345,7 @@ class TicketRun:
         if rc != 0:
             return {**self.fail(item, run, "checks passed, but sbmap resolve failed: " + (err or out), sha, checks),
                     **judged}
-        return self.result(item, "done", "resolved, commit " + sha[:9], run, sha, checks, **judged)
+        return looked(self.result(item, "done", "resolved, commit " + sha[:9], run, sha, checks, **judged))
 
     # ---- the second pass: an Opus session judges the landed work against the ticket's Done when ----
 
@@ -3292,12 +3366,14 @@ class TicketRun:
                 return n, dict(e)
         return "claude", {"kind": "claude", "dir": None, "model": None}
 
-    def review_start(self, entries):
+    def review_start(self, entries, unity=None):
         """Start ONE second pass on REVIEW_MODEL in the map's repo over `entries`, a list of (item, run, sha): each
         landed ticket. It is briefed from templates/review-brief.md with every ticket (`sbmap show`), its commits'
         diff and its worker's report, and writes <run>/<num>-review.md for each (any earlier one is removed first,
-        so an old verdict is never read). Returns {p, agent, inst, log, start, files (item key -> review file),
-        keys, limit}; OSError, ValueError or SubprocessError when it could not start."""
+        so an old verdict is never read). Each ticket's In Play lines are listed under it; `unity` ({lock, held, who},
+        see sbqueue.review_brief) says whether the hub holds the repo's Unity lock for the review to play them.
+        Returns {p, agent, inst, log, start, files (item key -> review file), keys, limit}; OSError, ValueError or
+        SubprocessError when it could not start."""
         item0, run0, _ = entries[0]
         t0 = run0["t"]
         if not run0.get("folder"):
@@ -3325,9 +3401,13 @@ class TicketRun:
             review = Path(self.review_file(run, t))
             review.unlink(missing_ok=True)
             files[item["key"]] = str(review)
-            sections.append(sbqueue.review_section(shown if rc == 0 else "", t["repo"], shas, diff, report,
-                                                   report_text, review, redo=redo or None, second=sha, diff_max=cap))
-        brief = sbqueue.review_brief(sections, t0["repo"])
+            sections.append(sbqueue.review_section(
+                shown if rc == 0 else "", t["repo"], shas, diff, report, report_text, review, redo=redo or None,
+                second=sha, diff_max=cap, play=sbqueue.play_lines(t.get("done_when")),
+                media=folder / "{}-media".format(int(t["num"]))))
+        if unity is None and any(sbqueue.play_lines(run["t"].get("done_when")) for _, run, _ in entries):
+            unity = {"lock": unity_lock(t0["repo"]), "held": False}  # outside the queue: no lock, nothing played
+        brief = sbqueue.review_brief(sections, t0["repo"], unity=unity)
         folder = Path(run0["folder"])
         log = str(folder / ("{}-review.log".format(int(t0["num"])) if len(entries) == 1 else "review.log"))
         try:
@@ -3363,13 +3443,17 @@ class TicketRun:
                 why = "it exited {} and {}".format(code, why[3:])
             return {**self.result(item, "recheck", "review could not run: " + why, run, sha, checks, review=path),
                     "checked": checked}
+        findings = sbqueue.review_findings(text)
+        look = sbqueue.not_played(findings)
+        not_met = [f for f in findings if re.search(r"\bnot met\b", f, re.I) and f not in look]
+        if look and not not_met:
+            # only In Play lines are left, which no one could play: it lands for the owner's one sitting, no redo
+            return self.resolve(item, run, sha, checked, checks, review=path, look=look)
         if verdict == "finished":
             return self.resolve(item, run, sha, checked, checks, review=path)
         # partly or not met: the first time, one more try with the findings (`redo`, once); after that try,
         # the ticket waits for the owner. Either way the findings go on the ticket and no commit is reverted.
         first = not item.get("redo") and (item.get("tries") or 0) + 1 < TRIES_MAX  # the redo is a try too
-        findings = sbqueue.review_findings(text)
-        not_met = [f for f in findings if re.search(r"\bnot met\b", f, re.I)]
         if first and path:  # the second try's review writes <num>-review.md afresh: the first one is kept beside it
             kept = Path(path).with_name("{}-review-1.md".format(int(t["num"])))
             try:
@@ -3433,6 +3517,7 @@ class Supervisor:
         self.review_lock = threading.Lock()  # the tick's reviews and POST /api/review/now never start one map twice
         hub.supervisor = self  # POST /api/review/now reaches the reviews through it
         self.streak = (None, 0)  # the failure class of the last failed items in a row, and how many
+        self.play_wait = {}  # map -> when its review with In Play lines first found the repo's Unity lock busy
         self.stopped = False
         self.unlanded = False  # the landings an earlier hub left half done are undone at the first tick
         self.note_path = None  # wayfinder/runs/hub-now.md: `serve` sets it; tests leave the vault alone
@@ -4007,6 +4092,8 @@ class Supervisor:
             fields.update(fails=res["fails"], tries=len(res["fails"]))
         if res.get("verdict") or res.get("review"):
             fields.update(verdict=res.get("verdict"), review=res.get("review"), checked=None)
+        if res.get("look"):  # landed, waits for the owner's look: its unplayed lines and the night's checklist note
+            fields["look"] = res["look"]
         self._end(key, state, note=res["note"], **fields)
         if state == "done":
             self.streak = (None, 0)
@@ -4399,10 +4486,12 @@ class Supervisor:
                     continue
                 _kill_group(rv["p"], grace=3 if over else 0)
                 del self.reviews[m]
+                self._play_free(rv)
                 self._consume(rv, final=True)  # its usage readings pace its account like a worker's
                 self._review_end(rv, over)
             except Exception as e:  # the commits and the claims stay: the review runs again later
                 self.reviews.pop(m, None)
+                self._play_free(rv)
                 for key in rv["keys"]:
                     with self.hub._lock:
                         item = next((dict(i) for i in self.hub._data["queue"]["items"]
@@ -4414,6 +4503,40 @@ class Supervisor:
                 self._start_reviews()
             except Exception as e:  # tried again at the next look
                 print("sb hub queue: reviews: {}: {}".format(type(e).__name__, e), file=sys.stderr, flush=True)
+
+    def _play_free(self, rv):
+        """Let go of the Unity lock a review held to play its In Play lines."""
+        unity = rv.get("unity") or {}
+        if unity.get("held"):
+            self.hub.unlock(unity["lock"], unity["by"])
+
+    def _play_lock(self, m, entries):
+        """The Unity lock for a map's review whose tickets have In Play lines: None when none has (no lock is taken);
+        {lock, by, held: True} once the hub holds it for the review; {lock, held: False, who} once it was busy for
+        REVIEW_LOCK_WAIT; False while it is busy and the review waits (tried again at the next look)."""
+        if not any(sbqueue.play_lines(run["t"].get("done_when")) for _, run, _ in entries):
+            self.play_wait.pop(m, None)
+            return None
+        repo = entries[0][1]["t"]["repo"]
+        key, by = unity_lock(repo), REVIEW_BY + m
+        got = self.hub.lock(key, by)
+        if got.get("ok"):
+            self.play_wait.pop(m, None)
+            drop_unsaved_scenes(repo)
+            return {"lock": key, "by": by, "held": True}
+        first = self.play_wait.setdefault(m, self.hub.now())
+        if self.hub.now() - first < REVIEW_LOCK_WAIT:
+            return False
+        self.play_wait.pop(m, None)
+        return {"lock": key, "held": False, "who": str(got.get("held_by") or "someone else")}
+
+    def _play_locks_left(self):
+        """Free the Unity locks of reviews that no longer run (a restarted hub, a review that could not start)."""
+        with self.hub._lock:
+            left = [(k, v["by"]) for k, v in self.hub._data["locks"].items()
+                    if str(v.get("by") or "").startswith(REVIEW_BY) and v["by"][len(REVIEW_BY):] not in self.reviews]
+        for k, by in left:
+            self.hub.unlock(k, by)
 
     @staticmethod
     def _review_failed(item, why):
@@ -4439,6 +4562,7 @@ class Supervisor:
             return self._start_reviews_locked(now)
 
     def _start_reviews_locked(self, now):
+        self._play_locks_left()
         with self.hub._lock:
             q = self.hub._data["queue"]
             covered = {k for rv in self.reviews.values() for k in rv["keys"]}
@@ -4473,9 +4597,17 @@ class Supervisor:
                 entries.append((item, self._review_run(item, row), item.get("commit")))
             if not entries:
                 continue
+            unity = self._play_lock(m, entries)
+            if unity is False:  # the Editor is busy: its review waits, up to REVIEW_LOCK_WAIT, to play them
+                for item, _, _ in entries:
+                    if not (item.get("note") or "").startswith("waits for Unity to play"):
+                        self._update(item["key"], note="waits for Unity to play its In Play lines; the review "
+                                                       "starts without them after {} minutes".format(REVIEW_LOCK_WAIT // 60))
+                continue
             try:
-                rv = self.runner.review_start(entries)
+                rv = self.runner.review_start(entries, **({"unity": unity} if unity else {}))
             except (OSError, ValueError, KeyError, subprocess.SubprocessError) as e:
+                self._play_free({"unity": unity})
                 repo = entries[0][1]["t"]["repo"]
                 if (isinstance(e, KeyError) and "cannot fill" in str(e) and self.runner.rebuild.mine(repo)
                         and self._restart_once(repo, str(e))):
@@ -4486,6 +4618,7 @@ class Supervisor:
                     self._apply(item, self._review_failed(item, "could not start it: {}".format(e)))
                 continue
             rv["at"] = self.hub.now()
+            rv["unity"] = unity
             self.reviews[m] = rv
             started.append(m)
             for item, _, _ in entries:

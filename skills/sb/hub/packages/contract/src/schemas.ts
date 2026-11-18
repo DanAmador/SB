@@ -221,6 +221,9 @@ const itemFields = {
   /** The one more try its first review asked for (partly or not met): set once, there is no other. Dropped when
    * the owner queues it again. */
   redo: Redo.optional(),
+  /** Done, landed and waiting for the owner's look: the review's item lines it could not play (In Play lines with
+   * the Unity lock busy, or an owner-only look), and the night's checklist note it was added to (null: none). */
+  look: z.strictObject({ lines: z.array(z.string()), note: z.string().nullable() }).optional(),
   /** The hub's own check that passed, kept while the review runs (or waits to run again); null after. */
   checked: z.string().nullable().optional(),
   /** Set each time the hub looks for work, on a queued item only. */

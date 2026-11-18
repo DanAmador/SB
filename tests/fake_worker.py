@@ -39,6 +39,9 @@ says what it does with each, a mode for all or a JSON object {"<num>": mode} (de
   crash    write nothing, exit 1
   slow     sleep FAKE_REVIEW_SLEEP seconds (default 2), then as finished
 
+A ticket whose section lists In Play lines (`### Its In Play lines`) gets one item line for each, after the others:
+`met: played on main` when the brief says the hub took the Unity lock for it, else `not played yet`.
+
 Every review it runs appends a line to FAKE_REVIEW_CALLS when that is set: each file's name and mode.
 
 Printed as `claude -p --output-format stream-json` does: the result is the last line. FAKE_WORKER_USAGE="0.30>0.45"
@@ -75,7 +78,18 @@ def result(obj):
     print(json.dumps(obj), flush=True)
 
 
-def reviewer(paths):
+def play_lines(brief, path):
+    """The In Play lines the brief lists in the section of the ticket whose review goes to `path`."""
+    parts = re.split(r"^Write your review to: (.+)$", brief, flags=re.M)
+    for i in range(1, len(parts), 2):
+        if parts[i].strip() == path:
+            sec = parts[i - 1].rpartition("## The ticket")[2]
+            m = re.search(r"^### Its In Play lines\n\n((?:- .+\n)+)", sec, re.M)
+            return [l[2:] for l in m.group(1).splitlines()] if m else []
+    return []
+
+
+def reviewer(paths, brief=""):
     """The fake second pass: one review file per path the brief names (one per landed ticket, `<num>-review.md`),
     each with FAKE_REVIEW's verdict: a mode for all of them, or a JSON object {"<num>": mode} (others finished)."""
     raw = os.environ.get("FAKE_REVIEW", "finished")
@@ -101,6 +115,9 @@ def reviewer(paths):
         lines = ["# Review", "", "- It works.: " + met]
         if mode == "partly":
             lines.append("- The commit names the ticket: met")
+        held = "The hub took the repo's Unity lock" in brief
+        lines += ["- {}: {}".format(l, "met: played on main, it worked" if held else
+                                    "not played yet: the Editor was not mine") for l in play_lines(brief, path)]
         if mode != "none":
             lines += ["", "Verdict: " + mode]
         with open(path, "w", encoding="utf-8") as f:
@@ -157,7 +174,7 @@ def main():
         return integrator(brief)
     review = re.findall(r"^Write your review to: (.+)$", brief, re.M)
     if review:
-        return reviewer([r.strip() for r in review])
+        return reviewer([r.strip() for r in review], brief)
     if os.environ.get("FAKE_WORKER_USAGE"):
         event(float(os.environ["FAKE_WORKER_USAGE"].split(">")[0]))
     if brief.startswith("# Mend "):

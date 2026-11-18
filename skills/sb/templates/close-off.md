@@ -12,7 +12,8 @@ The maps that had items tonight:
 
 Write `morning-note.md` in the folder named at the end of this prompt (the shared run folder `wayfinder/runs/{date}-close-off/`). Use plain words and short lines, one section per project:
 
-- **Test these:** first, the landed tickets the owner should try by hand, in the order to try them: each one's title, where to look and what to do to see it (from its report's last lines and `## Pictures`, in plain words, no class names), and what the worker could not verify. A ticket whose change is visual embeds its pictures here (`![[<run folder>/<number>-media/<file>]]`), and only those: a ticket with nothing on screen gets no picture. Group several tickets that are tested by one action (one match, one screen).
+- **Play these:** first of all, when any ticket item has a `look` (it landed and waits for the owner's look: its In Play lines nobody could play), a link to the night's checklist note it names (`look.note`, one link per note, as a wikilink without `.md`) and how many tickets wait on it. Those tickets are resolved: list them nowhere else, and never under Failed.
+- **Test these:** then, the landed tickets the owner should try by hand, in the order to try them: each one's title, where to look and what to do to see it (from its report's last lines and `## Pictures`, in plain words, no class names), and what the worker could not verify. A ticket whose change is visual embeds its pictures here (`![[<run folder>/<number>-media/<file>]]`), and only those: a ticket with nothing on screen gets no picture. Group several tickets that are tested by one action (one match, one screen).
 - **Landed:** each ticket's title, its commit (first 9 characters) and its checks (command and pass or fail).
 - **Failed:** each ticket's title and the reason in one line (from its note).
 - **Self-checks:** what each worker said it tested, or "none reported".

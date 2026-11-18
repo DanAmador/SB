@@ -44,6 +44,14 @@ later run alone. This replaces the wayfinder skill's *Chart the map*: load no ot
      - **A shared-word line** when the ticket changes a state or word other tickets use: "every open
        ticket of this map that uses `<word>` gets a comment on what changed".
      - A screenshot item says what the picture must show, not only that it exists.
+     - **Editor checks go under `In Play:`.** Anything checked by playing in the Unity Editor is its
+       own item starting `In Play:` ("3. In Play: a dash then Rewind rolls the body back; the console
+       is clean."), with what to do and the numbers to see. A worker never has the Editor: its brief
+       lists these as "played by the review, leave it", and it is not judged on them. The map's Opus
+       review plays them on main under the repo's Unity lock and records what it saw (numbers,
+       screenshots in the ticket's media folder). When the Editor stays busy, or no one could play
+       them, the ticket still lands as "waits for your look" and goes on the night's checklist of
+       checks to play, never re-queued for them. Keep everything a test can check out of `In Play:`.
    - **Who checks it** (`--check`): `tests` (the default) or `owner`. Anything only the owner can
      do (tap a link on the phone, judge a look, play it) is its own `--check owner` ticket: the
      hub never gives it to a worker and lists it under Waits for you.
@@ -55,8 +63,8 @@ later run alone. This replaces the wayfinder skill's *Chart the map*: load no ot
    title + why (`sbmap info <map>`), nothing else, and fix what fails before step 7:
    - [ ] The owner's words are quoted (`--said`) wherever they gave a reason.
    - [ ] Each why says the problem and what the owner will see, in plain words: no class names, internal codes or bare ticket numbers (a measurement with its unit is fine).
-   - [ ] Each Done-when is a numbered list a worker can check by running something; the looking is
-         a `--check owner` ticket of its own.
+   - [ ] Each Done-when is a numbered list a worker can check by running something; an Editor check
+         is its own `In Play:` item, and any other looking is a `--check owner` ticket of its own.
    - [ ] A ticket whose code reads another part's data has a real-data line.
    - [ ] No ticket's why is only "part of X".
    - [ ] At most 3 open questions remain (grilling tickets or Not yet specified), each with a ➡️ default.

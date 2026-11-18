@@ -62,6 +62,8 @@ export const RunTicketResult = z.strictObject({
   fails: z.array(Fail).optional(),
   /** unclean: the checkout's files with unsaved changes that its work waits for. */
   blocking: z.array(z.string()).optional(),
+  /** done, landed and waiting for the owner's look: the lines the review could not play and the night's checklist. */
+  look: z.strictObject({ lines: z.array(z.string()), note: z.string().nullable() }).optional(),
 });
 export type RunTicketResult = z.infer<typeof RunTicketResult>;
 

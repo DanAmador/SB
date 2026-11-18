@@ -15,6 +15,7 @@ Read the whole change with: {diff_cmd}
 {diff}
 ```
 
+{play}
 ### The worker's report ({report_path})
 
 {report}
