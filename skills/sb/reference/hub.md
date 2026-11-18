@@ -85,7 +85,11 @@ the vault. Only the running hub writes the queue (`$SB_HUB_HOME/state.json`); CL
   variable by naming it, one per line, in `.sb/env`.
 - **Pool and pacing**: the night's agents are a pool (`sbhub queue agents assembio personal`); a
   ticket's own `agent` override pins it. Each Claude worker streams its account's usage (5-hour and
-  weekly window, reset times); with nothing running the hub reads it with a one-line Haiku call. An
+  weekly window, reset times); with nothing running the hub reads it with a one-line Haiku call. A Codex
+  account's use is read every 10 minutes from its session files (`$CODEX_HOME/sessions`), for the board's
+  Usage panel only: Codex is not paced (`SB_HUB_CODEX_USAGE=0` turns the reads off). Each finished Codex
+  ticket's own session file gives its cost (the rise in 5-hour use), averaged per account apart from Claude's,
+  so the panel can say how many more Codex tickets fit; before the first it says there is no estimate yet. An
   item starts on the pool agent where it fits whose week resets soonest (then whose five hours reset
   soonest, then the most room), so what is about to expire is spent first: the account's use, plus what its
   running items still need, plus this item's cost (learned per account and tier from finished

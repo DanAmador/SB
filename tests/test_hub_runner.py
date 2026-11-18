@@ -406,6 +406,49 @@ class CodexTextTest(unittest.TestCase):
         self.assertEqual(sbhub._job_result(json.dumps({"msg": {"type": "agent_message", "message": "old"}})), "old")
 
 
+def codex_session(home, day, name, *limits, mtime=None):
+    """A Codex session file under home/sessions/<day>/ with one token_count event per (five, week) used percent."""
+    d = Path(home) / "sessions" / day
+    d.mkdir(parents=True, exist_ok=True)
+    f = d / "rollout-{}.jsonl".format(name)
+    lines = [json.dumps({"type": "session_meta", "payload": {"id": name}})]
+    for five, week in limits:
+        lines.append(json.dumps({"type": "event_msg", "payload": {"type": "token_count", "rate_limits": {
+            "primary": {"used_percent": five, "window_minutes": 300, "resets_at": START + 3600},
+            "secondary": {"used_percent": week, "window_minutes": 10080, "resets_at": START + 86400}}}}))
+    f.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    if mtime:
+        os.utime(f, (mtime, mtime))
+    return f
+
+
+class CodexUsageTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.home = Path(self._tmp.name)
+
+    def test_the_newest_sessions_last_limits_are_the_reading(self):
+        codex_session(self.home, "2026/11/12", "old", (90.0, 90.0), mtime=START - 86400)
+        codex_session(self.home, "2026/11/13", "a", (3.0, 20.0), (4.0, 21.0), mtime=START - 60)
+        codex_session(self.home, "2026/11/13", "b", mtime=START)  # just started: no limits yet
+        self.assertEqual(sbhub.codex_usage(self.home), {"five_hour": 0.04, "five_hour_resets": START + 3600,
+                                                        "seven_day": 0.21, "seven_day_resets": START + 86400})
+
+    def test_a_runs_cost_is_the_rise_in_the_session_its_thread_names(self):
+        codex_session(self.home, "2026/11/13", "2026-11-13T01-00-00-th1", (3.0, 20.0), (3.0, 20.0), (5.0, 20.0))
+        codex_session(self.home, "2026/11/13", "2026-11-13T01-05-00-th2", (40.0, 20.0), mtime=START + 600)
+        log = "argv: []\n" + json.dumps({"type": "thread.started", "thread_id": "th1"}) + "\n"
+        self.assertAlmostEqual(sbhub.codex_run_cost(self.home, log), 0.02)
+        self.assertIsNone(sbhub.codex_run_cost(self.home, "no thread here\n"))
+        self.assertIsNone(sbhub.codex_run_cost(self.home, json.dumps({"type": "thread.started", "thread_id": "gone"})))
+
+    def test_no_sessions_no_reading(self):
+        self.assertIsNone(sbhub.codex_usage(self.home))
+        codex_session(self.home, "2026/11/13", "a")
+        self.assertIsNone(sbhub.codex_usage(self.home))
+
+
 class CodexRunTest(RunnerCase):
     """A Codex account in the pool takes tickets as a Claude account does; its limit and logout take it out."""
 
@@ -415,6 +458,39 @@ class CodexRunTest(RunnerCase):
             self.hub._data["installed"] = {"codex": {"kind": "codex", "dir": str(self.root / ".codex"), "model": None,
                                                      "limited_until": None}}
             self.hub._data["queue"]["agent"] = "codex"
+
+    def test_a_codex_accounts_use_is_read_from_its_sessions_while_the_queue_is_paused(self):
+        codex_session(self.root / ".codex", "2026/11/13", "a", (4.0, 21.0))
+        self.sup.tick()
+        u = self.hub.state()["installed"]["codex"]["usage"]
+        self.assertEqual((u["five_hour"], u["seven_day"], u["at"]), (0.04, 0.21, START))
+        codex_session(self.root / ".codex", "2026/11/13", "a", (9.0, 22.0))
+        self.sup.tick()
+        self.assertEqual(self.hub.state()["installed"]["codex"]["usage"]["five_hour"], 0.04)  # once per USAGE_STALE
+        self.clock.t += sbhub.USAGE_STALE
+        self.sup.tick()
+        self.assertEqual(self.hub.state()["installed"]["codex"]["usage"]["five_hour"], 0.09)
+
+    def test_a_finished_codex_ticket_teaches_its_account_a_cost_of_its_own(self):
+        codex_session(self.root / ".codex", "2026/11/13", "2026-11-13T01-00-00-th1", (3.0, 20.0), (5.0, 20.0))
+        log = self.root / "w.log"
+        log.write_text("earlier try\n" + json.dumps({"type": "thread.started", "thread_id": "th1"}) + "\n")
+        inst = self.hub.state()["installed"]["codex"]
+        run = {"agent": "codex", "inst": inst, "log": str(log), "start": len("earlier try\n"), "alone": True}
+        self.sup._learn(run, None)
+        self.assertEqual(self.hub.state()["installed"]["codex"]["costs"], {"codex": {"avg": 0.02, "n": 1}})
+        self.sup._learn({**run, "alone": False}, None)  # overlapped by another worker: it says nothing
+        self.assertEqual(self.hub.state()["installed"]["codex"]["costs"]["codex"]["n"], 1)
+
+    def test_codex_usage_is_off_with_sb_hub_codex_usage_0(self):
+        codex_session(self.root / ".codex", "2026/11/13", "a", (4.0, 21.0))
+        with mock.patch.dict(os.environ, {"SB_HUB_CODEX_USAGE": "0"}):
+            sup = Supervisor(self.hub, port=4321)
+        self.addCleanup(sup.stop)
+        self.assertFalse(sup.codex_usage)
+        self.sup.codex_usage = False
+        self.sup.tick()
+        self.assertNotIn("usage", self.hub.state()["installed"]["codex"])
 
     def test_a_ticket_runs_on_codex_exec_under_its_account_and_resolves(self):
         self.only(1)

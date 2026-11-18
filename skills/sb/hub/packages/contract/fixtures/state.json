@@ -77,7 +77,8 @@
         "dir": "/fixture/home/.codex",
         "kind": "codex",
         "limited_until": null,
-        "model": null
+        "model": null,
+        "probed": 1794528000.0
       },
       "main": {
         "dir": "/fixture/.claude-main",

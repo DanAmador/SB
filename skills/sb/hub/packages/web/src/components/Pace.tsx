@@ -59,6 +59,16 @@ function poolWords(p: PoolPace): string {
   return `${line}; ${pct(p.free)} is free${until}. About ${pct(p.unused)} will go unused.`;
 }
 
+function fitsWords(fits: NonNullable<AccountPace["five"]>["fits"]): string {
+  if ("tickets" in fits) {
+    if (fits.tickets === null) return "No ticket estimate yet: it is learned from this account's first finished tickets.";
+    return fits.tickets === 0 ? "No room for another ticket before the reset." : `Room for about ${String(fits.tickets)} more tickets.`;
+  }
+  return fits.sonnet === 0
+    ? "No room for another ticket before the reset."
+    : `Room for about ${String(fits.sonnet)} more Sonnet tickets${fits.opus > 0 ? ` or ${String(fits.opus)} Opus` : ""}.`;
+}
+
 function Account({ a, now }: { a: AccountPace; now: number }): React.JSX.Element {
   const f = a.five;
   return (
@@ -85,9 +95,7 @@ function Account({ a, now }: { a: AccountPace; now: number }): React.JSX.Element
             {f.held >= 0.005 && <> · {pct(f.held)} held by running work</>} · {pct(f.free)} free · {f.resets !== null ? `resets ${hm(f.resets)}` : "a new five hours"}
           </p>
           <p className="text-xs text-muted-foreground">
-            {f.fits.sonnet === 0
-              ? "No room for another ticket before the reset."
-              : `Room for about ${String(f.fits.sonnet)} more Sonnet tickets${f.fits.opus > 0 ? ` or ${String(f.fits.opus)} Opus` : ""}.`}
+            {fitsWords(f.fits)}
           </p>
           {f.old && <p className="text-xs text-warn">Last read {hm(f.at)}: too old to go by, so only one worker starts here until a new reading.</p>}
           {a.week && <Week w={a.week} now={now} />}
