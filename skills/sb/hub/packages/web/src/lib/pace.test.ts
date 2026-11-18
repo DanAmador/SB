@@ -86,11 +86,21 @@ describe("an account's five hours", () => {
     expect(accountPace("g", account({ kind: "agy", usage: usage(0.3) }), s).five).toBeNull();
     expect(accountPace("g", account({ kind: "agy" }), s).inPool).toBe(false);
   });
-  it("shows a Codex account's reading from its session files", () => {
+  it("shows a Codex account's reading, with no ticket estimate until a Codex cost is learned", () => {
     const e = account({ kind: "codex", usage: usage(0.04, 0.21) });
     const p = accountPace("c", e, state({ c: e }));
     expect(p.five?.used).toBe(0.04);
+    expect(p.five?.fits).toEqual({ tickets: null });
     expect(p.week).not.toBeNull();
+    const learned = account({ kind: "codex", usage: usage(0.04, 0.21), costs: { codex: { avg: 0.02, n: 3 }, sonnet: { avg: 0.5, n: 1 } } });
+    expect(accountPace("c", learned, state({ c: learned })).five?.fits).toEqual({ tickets: 43 }); // (0.9 - 0.04) / 0.02
+  });
+  it("leaves a Codex account out of the pool's sums: it is not paced", () => {
+    const a = account({ usage: usage(0.3) });
+    const c = account({ kind: "codex", usage: usage(0.95) });
+    const p = poolPace(state({ a, c }, [], ["a", "c"]));
+    expect(p.inUse).toBe(1);
+    expect(p.top).toBe(0.3);
   });
 });
 

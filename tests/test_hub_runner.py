@@ -435,6 +435,14 @@ class CodexUsageTest(unittest.TestCase):
         self.assertEqual(sbhub.codex_usage(self.home), {"five_hour": 0.04, "five_hour_resets": START + 3600,
                                                         "seven_day": 0.21, "seven_day_resets": START + 86400})
 
+    def test_a_runs_cost_is_the_rise_in_the_session_its_thread_names(self):
+        codex_session(self.home, "2026/11/13", "2026-11-13T01-00-00-th1", (3.0, 20.0), (3.0, 20.0), (5.0, 20.0))
+        codex_session(self.home, "2026/11/13", "2026-11-13T01-05-00-th2", (40.0, 20.0), mtime=START + 600)
+        log = "argv: []\n" + json.dumps({"type": "thread.started", "thread_id": "th1"}) + "\n"
+        self.assertAlmostEqual(sbhub.codex_run_cost(self.home, log), 0.02)
+        self.assertIsNone(sbhub.codex_run_cost(self.home, "no thread here\n"))
+        self.assertIsNone(sbhub.codex_run_cost(self.home, json.dumps({"type": "thread.started", "thread_id": "gone"})))
+
     def test_no_sessions_no_reading(self):
         self.assertIsNone(sbhub.codex_usage(self.home))
         codex_session(self.home, "2026/11/13", "a")
@@ -462,6 +470,17 @@ class CodexRunTest(RunnerCase):
         self.clock.t += sbhub.USAGE_STALE
         self.sup.tick()
         self.assertEqual(self.hub.state()["installed"]["codex"]["usage"]["five_hour"], 0.09)
+
+    def test_a_finished_codex_ticket_teaches_its_account_a_cost_of_its_own(self):
+        codex_session(self.root / ".codex", "2026/11/13", "2026-11-13T01-00-00-th1", (3.0, 20.0), (5.0, 20.0))
+        log = self.root / "w.log"
+        log.write_text("earlier try\n" + json.dumps({"type": "thread.started", "thread_id": "th1"}) + "\n")
+        inst = self.hub.state()["installed"]["codex"]
+        run = {"agent": "codex", "inst": inst, "log": str(log), "start": len("earlier try\n"), "alone": True}
+        self.sup._learn(run, None)
+        self.assertEqual(self.hub.state()["installed"]["codex"]["costs"], {"codex": {"avg": 0.02, "n": 1}})
+        self.sup._learn({**run, "alone": False}, None)  # overlapped by another worker: it says nothing
+        self.assertEqual(self.hub.state()["installed"]["codex"]["costs"]["codex"]["n"], 1)
 
     def test_codex_usage_is_off_with_sb_hub_codex_usage_0(self):
         codex_session(self.root / ".codex", "2026/11/13", "a", (4.0, 21.0))
