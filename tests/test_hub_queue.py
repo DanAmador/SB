@@ -295,6 +295,11 @@ class MediaTest(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.home = Path(tmp.name)
+        # a run the queue never had is looked up in the vault: an empty one, not the real one's run folders
+        (self.home / "Vault").mkdir()
+        patcher = mock.patch.dict(os.environ, {"SB_VAULT": str(self.home / "Vault")})
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.h = Hub(self.home, run=lambda: json.dumps(TICKETS))
         self.h.tickets()
         self.h.queue_set(["repo/one#1", "repo/one#4"], self.h.state()["queue"]["version"])

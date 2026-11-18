@@ -137,6 +137,9 @@ def wait_for(fn, timeout=10):
     raise AssertionError("timed out")
 
 
+_OUTER_VAULT = os.environ.get("SB_VAULT")  # the vault of whoever runs the tests: never a HubCase's
+
+
 class HubCase(unittest.TestCase):
     """A running sbhub on a free port with a temp home; subclass it for tests.
     ts: True runs the TypeScript server; None follows SB_HUB_SERVER."""
@@ -146,6 +149,11 @@ class HubCase(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         # SB_HUB_QUEUE=0: the board only; the queue runner never starts a worker or scans ~/.claude* in a test
         self.env = {**os.environ, "SB_HUB_HOME": self._tmp.name, "SB_HUB_NOTIFY": "0", "SB_HUB_QUEUE": "0"}
+        # the vault a subclass set before this, else an empty one: the real one makes every lookup a run misses
+        # (a 404 picture) scan its run folders, seconds under a parallel test run
+        if os.environ.get("SB_VAULT") == _OUTER_VAULT:
+            (Path(self._tmp.name) / "Vault").mkdir()
+            self.env["SB_VAULT"] = str(Path(self._tmp.name) / "Vault")
         for k in ("SB_HUB_PORT", "SB_HUB_AGENT", "SB_HUB_PARENT"):  # a test run by a queued worker is not that worker
             self.env.pop(k, None)
         self.port = free_port()

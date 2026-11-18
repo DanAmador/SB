@@ -112,7 +112,8 @@ class UnityStageTest(RunnerCase):
         before = git(self.repo, "rev-parse", "HEAD")
         self.only(1)
         self.until(lambda: self.items()["repo/one#1"].get("integrate"))
-        landed = git(self.repo, "rev-parse", "HEAD")
+        # the landing is main's first commit after before: HEAD is already the integrator's fix on a busy machine
+        landed = git(self.repo, "rev-list", "--first-parent", "--reverse", before + "..HEAD").split()[0]
         chat = self.chat_commit()
         self.until(lambda: len(self.workers()) == 2)
         revert = self.back_out()
