@@ -20,6 +20,7 @@ and `auth` print Codex's JSON events instead):
            run only if the hook allows it, commit nothing, exit 1
   hang     start a child that sleeps, write both pids to FAKE_WORKER_PIDS, sleep past any limit
 
+`codex sandbox -- true` exits 0, or fails as bubblewrap does with FAKE_CODEX_SANDBOX=broken.
 A brief that opens `# Mend ` (templates/fix-build.md) makes it the fake build fixer, whatever the mode; FAKE_FIX says
 what it does: `commit` writes base/fix.txt and commits it, `slow` sleeps 3 seconds and commits nothing, anything else
 commits nothing. Each exits 0 with a one-line result.
@@ -165,6 +166,11 @@ def integrator(brief):
 
 def main():
     argv = sys.argv[1:]
+    if argv[:1] == ["sandbox"]:  # `codex sandbox -- true`: FAKE_CODEX_SANDBOX=broken fails as bubblewrap does
+        if os.environ.get("FAKE_CODEX_SANDBOX") == "broken":
+            print("bwrap: setting up uid map: Permission denied", file=sys.stderr)
+            return 1
+        return 0
     codex = argv[:1] == ["exec"]
     at = 0 if codex else argv.index("-p")
     brief = argv[at + 1]

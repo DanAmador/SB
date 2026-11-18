@@ -78,7 +78,9 @@
         "kind": "codex",
         "limited_until": null,
         "model": null,
-        "probed": 1794528000.0
+        "no_sandbox": null,
+        "probed": 1794528000.0,
+        "sandbox_tried": 1794528000.0
       },
       "main": {
         "dir": "/fixture/.claude-main",

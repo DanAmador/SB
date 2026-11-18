@@ -486,6 +486,37 @@ class CodexRunTest(RunnerCase):
         self.sup._learn({**run, "alone": False}, None)  # overlapped by another worker: it says nothing
         self.assertEqual(self.hub.state()["installed"]["codex"]["costs"]["codex"]["n"], 1)
 
+    def test_an_account_whose_sandbox_cannot_start_takes_nothing_asks_once_and_comes_back(self):
+        with mock.patch.dict(os.environ, {"FAKE_CODEX_SANDBOX": "broken"}):
+            self.only(1)
+            for _ in range(3):
+                self.sup.tick()
+        self.assertEqual(self.launched, [])  # no try spent on a sandbox that cannot run a command
+        self.assertIn("bwrap", self.hub.state()["installed"]["codex"]["no_sandbox"])
+        row = self.hub.state()["agents"]["sandbox:codex"]
+        self.assertEqual(row["state"], "needs you")
+        self.assertIn("AppArmor profile for /usr/bin/bwrap", row["note"])
+        self.assertIn("cannot start its Codex sandbox", self.items()["repo/one#1"]["note"])
+        self.clock.t += sbhub.CODEX_SANDBOX_CHECK  # fixed: the next try finds it working
+        self.until(lambda: self.state_of("repo/one#1") == "done")
+        self.assertIsNone(self.hub.state()["installed"]["codex"]["no_sandbox"])
+        self.assertNotIn("sandbox:codex", self.hub.state()["agents"])
+
+    def test_a_signed_out_codex_account_is_back_once_codex_login_rewrote_its_auth_json(self):
+        self.mode = "auth"
+        self.only(1)
+        self.until(lambda: self.hub.state()["installed"]["codex"].get("login") == "expired")
+        note = self.hub.state()["agents"]["sign-in:codex"]["note"]
+        self.assertIn("run `CODEX_HOME={} codex login`".format(self.root / ".codex"), note)
+        self.sup.tick()
+        self.assertEqual(self.hub.state()["installed"]["codex"]["login"], "expired")  # nothing changed yet
+        (self.root / ".codex").mkdir(exist_ok=True)
+        (self.root / ".codex" / "auth.json").write_text("{}")
+        self.mode = "commit"
+        self.until(lambda: self.state_of("repo/one#1") == "done")
+        self.assertIsNone(self.hub.state()["installed"]["codex"]["login"])
+        self.assertNotIn("sign-in:codex", self.hub.state()["agents"])
+
     def test_codex_usage_is_off_with_sb_hub_codex_usage_0(self):
         codex_session(self.root / ".codex", "2026/11/13", "a", (4.0, 21.0))
         with mock.patch.dict(os.environ, {"SB_HUB_CODEX_USAGE": "0"}):
@@ -2100,6 +2131,15 @@ class LaunchAndHookTest(RunnerCase):
         self.assertIn('"-m", "gpt-x", "--dangerously-bypass-approvals-and-sandbox"]', text)
         self.assertIn('"CODEX_HOME": "/cx"', text)
         self.assertIsNone(sbhub.resumable({"session": "s", "session_dir": "/d"}, {"kind": "codex"}, self.root))
+
+    def test_a_codex_brief_states_the_git_rule_without_a_hook_it_does_not_have(self):
+        with mock.patch.object(sbhub.subprocess, "Popen") as popen, mock.patch.object(sbhub, "_exe", return_value="codex"):
+            sbhub.launch({"kind": "codex", "dir": "/cx", "sandbox": "bypass"}, "b", str(self.root), None, {}, str(self.root / "l"))
+            sbhub.launch({"kind": "claude", "dir": "/cfg"}, "b", str(self.root), "sonnet", {}, str(self.root / "l"))
+        codex_brief = popen.call_args_list[0].args[0][2]
+        self.assertIn("these are not allowed, and neither are sbmap resolve", codex_brief)
+        self.assertNotIn("hook", codex_brief)
+        self.assertIn("a hook refuses them", popen.call_args_list[1].args[0][popen.call_args_list[1].args[0].index("-p") + 1])
 
     def test_launch_starts_agy_in_its_own_group_with_its_model(self):
         log = self.root / "agy.log"

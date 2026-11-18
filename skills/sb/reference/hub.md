@@ -85,11 +85,19 @@ the vault. Only the running hub writes the queue (`$SB_HUB_HOME/state.json`); CL
   variable by naming it, one per line, in `.sb/env`.
 - **Pool and pacing**: the night's agents are a pool (`sbhub queue agents assembio personal`); a
   ticket's own `agent` override pins it. Each Claude worker streams its account's usage (5-hour and
-  weekly window, reset times); with nothing running the hub reads it with a one-line Haiku call. A Codex
+  weekly window, reset times); with nothing running the hub reads it with a one-line Haiku call, every
+  10 minutes while items wait, else every 30 minutes for each pool account so the board's Usage panel has
+  a reading (`SB_HUB_IDLE_USAGE=0` in the hub's environment turns the idle reads off). A Codex
   account's use is read every 10 minutes from its session files (`$CODEX_HOME/sessions`), for the board's
   Usage panel only: Codex is not paced (`SB_HUB_CODEX_USAGE=0` turns the reads off). Each finished Codex
   ticket's own session file gives its cost (the rise in 5-hour use), averaged per account apart from Claude's,
-  so the panel can say how many more Codex tickets fit; before the first it says there is no estimate yet. An
+  so the panel can say how many more Codex tickets fit; before the first it says there is no estimate yet.
+  Every hour the hub tries each Codex account's sandbox (`codex sandbox -- true`, no model call); one that
+  cannot start takes nothing and Waits for you says so. On Linux the sandbox is bubblewrap, which Ubuntu
+  24.04 and later refuse user namespaces; allow them for it once, as root: `printf 'abi <abi/4.0>,\ninclude
+  <tunables/global>\nprofile bwrap /usr/bin/bwrap flags=(unconfined) {\n  userns,\n}\n' >
+  /etc/apparmor.d/bwrap && apparmor_parser -r /etc/apparmor.d/bwrap`. A signed-out Codex account is back once
+  `CODEX_HOME=<its folder> codex login` rewrote its `auth.json`. An
   item starts on the pool agent where it fits whose week resets soonest (then whose five hours reset
   soonest, then the most room), so what is about to expire is spent first: the account's use, plus what its
   running items still need, plus this item's cost (learned per account and tier from finished
