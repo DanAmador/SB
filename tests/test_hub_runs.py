@@ -93,46 +93,104 @@ class RunsTest(unittest.TestCase):
         self.assertEqual(r("no longer open: dropped: merged into 12", "skipped"), "its ticket was dropped while it waited: merged into 12")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class StoppingNightTest(unittest.TestCase):
-    """A stopping night ends once nothing of it runs (the shape is a copy of the real night-20261117-014410)."""
+    """A stopping night ends once nothing of it is at work. The record is a verbatim copy of night-20261117-014410
+    from ~/.sb-hub/state.json (fixtures/), put back in the shape it had while it stopped: items on the queue line,
+    seven tickets not reached, and #1048 at work. That night was not stuck: #1048 ran a try from 18:39, landed at
+    18:42, was reviewed at 18:55, its next try was dropped as the eighth not reached, and the night ended at 18:56."""
 
-    def night(self):
-        # shape as ~/.sb-hub/state.json holds the stuck night: items stay on the line while it stops
-        real = {"id": "night-20261117-014410", "name": "Night of 2026-11-17, 01:44", "started": 1794876250.78,
-                "by": None, "state": "stopping", "ended": None, "how": None,
-                "not_reached": [{"key": "sk4te/chase#1034", "title": "A held weapon has weight"}]}
-        done = {"key": "sk4te/party-playtest#1056", "kind": "ticket", "agent": None, "state": "done", "note": "resolved",
-                "commit": "48219f64", "tries": 1, "started": 1794880412.7, "ended": 1794883111.4, "night": real["id"],
-                "runner": "assembio", "map": "sk4te/party-playtest"}
-        return real, [done, {**done, "key": "sk4te/party-playtest#1046", "state": "landed", "ended": None},
-                      {**done, "key": "sk4te/party-playtest#1047", "state": "running", "ended": None}]
+    REAL = Path(__file__).resolve().parent / "fixtures" / "night-20261117-014410.json"
 
-    def hub(self, items, home):
+    def stuck(self):
+        """(the night as it stopped, its items with #1048 running, the real record) from the real record."""
+        real = json.loads(self.REAL.read_text(encoding="utf-8"))
+        items = json.loads(json.dumps(real["items"]))
+        night = {k: v for k, v in real.items() if k != "items"}
+        night.update(state="stopping", ended=None, how=None, not_reached=real["not_reached"][:7])
+        judged = next(i for i in items if i["key"] == "sk4te/party-playtest#1145")  # the same kind, judged the same way
+        last = {**json.loads(json.dumps(judged)), "key": "sk4te/party-playtest#1048", "state": "running",
+                "title": real["not_reached"][7]["title"], "ended": None, "verdict": None, "review": None}
+        return night, items + [last], real
+
+    def hub(self, night, items, home):
         import sbhub
-        real, _ = self.night()
-        q = {"version": 3, "seeded": True, "paused": False, "agent": None, "night": real["id"], "items": items}
-        (home / "state.json").write_text(json.dumps({"queue": q, "nights": [real]}))
+        q = {"version": 3, "seeded": True, "paused": False, "agent": None, "night": night["id"], "items": items}
+        (home / "state.json").write_text(json.dumps({"queue": q, "nights": [night]}))
         return sbhub.Hub(home, run=lambda: "[]")
+
+    def settle(self, h, state):
+        with h._lock:
+            next(i for i in h._data["queue"]["items"] if i["key"].endswith("#1048")).update(state=state)
+            h._night_settle()
+        return h._data["nights"][0]
 
     def test_it_ends_once_its_last_running_ticket_ends(self):
         with tempfile.TemporaryDirectory() as t:
-            _, items = self.night()
-            h = self.hub(items, Path(t))
-            self.assertEqual(h._data["nights"][0]["state"], "stopping")
-            with h._lock:
-                next(i for i in h._data["queue"]["items"] if i["state"] == "running").update(state="failed")
-                h._night_settle()
-            n = h._data["nights"][0]
+            night, items, real = self.stuck()
+            h = self.hub(night, items, Path(t))
+            self.assertEqual(h._data["nights"][0]["state"], "stopping")  # #1048 runs: the start leaves it open
+            for state in ("landed", "recheck", "review"):  # the hub still judges these while the night stops
+                self.assertEqual(self.settle(h, state)["state"], "stopping", state)
+            n = self.settle(h, "queued")  # the review asked one more try: it is not reached, and the night ends
             self.assertEqual((n["state"], n["how"], h._data["queue"]["night"]), ("ended", "stopped", None))
+            self.assertEqual(n["not_reached"], real["not_reached"])  # the same eight as the real record
+            self.assertEqual(sorted(i["key"] for i in n["items"]), sorted(i["key"] for i in real["items"]))
+            self.assertEqual(h._data["queue"]["items"], [])
+
+    def test_a_ticket_ended_by_its_review_ends_the_night(self):
+        with tempfile.TemporaryDirectory() as t:
+            night, items, _ = self.stuck()
+            h = self.hub(night, items, Path(t))
+            n = self.settle(h, "failed")
+            self.assertEqual((n["state"], n["how"]), ("ended", "stopped"))
+            self.assertIn("sk4te/party-playtest#1048", [i["key"] for i in n["items"]])
 
     def test_a_hub_started_with_a_stopping_night_and_nothing_running_ends_it(self):
         with tempfile.TemporaryDirectory() as t:
-            _, items = self.night()
-            h = self.hub(items[:2], Path(t))  # one done, one landed (waits for a review that will not start)
+            night, items, real = self.stuck()
+            h = self.hub(night, items[:-1], Path(t))  # every item ended while no hub watched
             n = h._data["nights"][0]
             self.assertEqual((n["state"], n["how"], h._data["queue"]["night"]), ("ended", "stopped", None))
+            self.assertEqual(len(n["items"]), len(real["items"]))
             self.assertEqual(json.loads((Path(t) / "state.json").read_text())["nights"][0]["state"], "ended")
+
+    def test_a_hub_started_with_a_stopping_night_and_a_landed_ticket_leaves_it_open(self):
+        with tempfile.TemporaryDirectory() as t:
+            night, items, _ = self.stuck()
+            items[-1]["state"] = "landed"  # its review is still to come
+            h = self.hub(night, items, Path(t))
+            self.assertEqual(h._data["nights"][0]["state"], "stopping")
+            self.assertIn("sk4te/party-playtest#1048", [i["key"] for i in h._data["queue"]["items"]])
+
+    def test_a_stopping_night_never_starts_the_next_try_its_review_asked(self):
+        import sbhub
+        with tempfile.TemporaryDirectory() as t:
+            night, items, _ = self.stuck()
+            items[-1]["state"] = "review"
+            h = self.hub(night, items, Path(t))
+            sup = sbhub.Supervisor(h, port=1)
+            sup.unlanded, sup.close_off = True, False
+            h.tickets = lambda *a, **k: []
+            for name in ("_watch", "_reap", "_final_review", "_close_off", "_held_builds", "_rechecks", "_unclean",
+                         "_probe", "_set_waits", "_digest", "_night_note"):
+                setattr(sup, name, lambda: None)
+            calls = []
+
+            def reviews():  # the tick's second look ends #1048's review with one more try (a redo, queued)
+                calls.append(1)
+                if len(calls) == 2:
+                    with h._lock:
+                        next(i for i in h._data["queue"]["items"] if i["key"].endswith("#1048")).update(state="queued")
+            sup._reviews = reviews
+            started = []
+            sup._start = lambda: started.extend(i["key"] for i in h._data["queue"]["items"] if i["state"] == "queued")
+            sup.tick()
+            self.assertEqual(len(calls), 2)
+            self.assertEqual(started, [])  # dropped as not reached before anything could start it
+            n = h._data["nights"][0]
+            self.assertEqual((n["state"], n["not_reached"][-1]["key"]), ("ended", "sk4te/party-playtest#1048"))
+
+
+if __name__ == "__main__":
+    unittest.main()

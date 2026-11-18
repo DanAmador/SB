@@ -1,0 +1,1994 @@
+{
+ "id": "night-20261117-014410",
+ "name": "Night of 2026-11-17, 01:44",
+ "started": 1794876250.7864928,
+ "by": null,
+ "state": "ended",
+ "ended": 1794938161.7510688,
+ "how": "stopped",
+ "not_reached": [
+  {
+   "key": "sk4te/chase#1034",
+   "title": "A held weapon has weight: a bat trails and settles when you turn, a gun follows your aim softly"
+  },
+  {
+   "key": "sk4te/chase#1023",
+   "title": "Bots hunt: chase the tired, rush an empty shooter, take the gun, and aim like a person"
+  },
+  {
+   "key": "sk4te/chase#1033",
+   "title": "Aim help grows the straighter you aim and the stiller you stand, and a reticle shows it"
+  },
+  {
+   "key": "sk4te/chase#1035",
+   "title": "Recoil is a real kick at the muzzle: the gun twists in the hand and the next shot starts off-line"
+  },
+  {
+   "key": "sk4te/playthrough-fixes#1239",
+   "title": "Holding jump sinks the body and letting go springs it up; a run starts with a lean"
+  },
+  {
+   "key": "sk4te/playthrough-fixes#1282",
+   "title": "Crossing bodies mix into a new colour, and each body has a two-colour prism rim: both rendered for the owner to pick"
+  },
+  {
+   "key": "sk4te/effect-control#1227",
+   "title": "The Lasso Pistol's rope is stiff: it holds its length instead of stretching"
+  },
+  {
+   "key": "sk4te/party-playtest#1048",
+   "title": "A card that cannot work where you put it is refused with a reason, and the ten worst dead pairs work"
+  }
+ ],
+ "items": [
+  {
+   "key": "sk4te/party-playtest#1046",
+   "kind": "ticket",
+   "agent": null,
+   "state": "failed",
+   "note": "judged partly by the Opus review after its second try: A Party market opened in Play deals a full shelf with no empty slot: not met. It was never run in Play. `PartyShelfDataTests` only checks the data, which passes: no null row, no duplicate, every combination asset listed, and 20 combinations against the ceil(12 × 0.33) = 4 needed. Whether the dealer actually fills all 12 slots, with the plain cards and with singles off, has not been seen in Play or in any test.",
+   "commit": "34bd688d02cce44c370bf5c129bc6d7607ece8b9",
+   "tries": 1,
+   "started": 1794881711.378709,
+   "ended": 1794883103.1779609,
+   "night": "night-20261117-014410",
+   "runner": "assembio",
+   "repo": "/Users/danamador/Documents/Coding/sk4te",
+   "map": "sk4te/party-playtest",
+   "title": "The Party shelf sells only the agreed combinations, and a repeat cannot be added by accident",
+   "model": "sonnet",
+   "tree": "/Users/danamador/.sb-hub/worktrees/sk4te-caa319/sk4te-party-playtest-1046",
+   "branch": "sb/sk4te-party-playtest-1046",
+   "paths": [
+    "Assets/Data/Items/Combos",
+    "Assets/Data/Match/Shops",
+    "Assets/Tests/EditMode"
+   ],
+   "base_sha": "d41d61395dcbadb9902ef1408a62d9efb7a39a6c",
+   "first_base": "d41d61395dcbadb9902ef1408a62d9efb7a39a6c",
+   "log": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1046.log",
+   "log_start": 97860,
+   "run": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest",
+   "pid": null,
+   "pid_start": null,
+   "session": "563e015a-cc8b-4f01-afd8-32aa544c986a",
+   "session_dir": "/Users/danamador/.claude-assembio",
+   "checks": [
+    {
+     "cmd": "python3 .sb/checks-compile.py",
+     "code": 0,
+     "secs": 5.1,
+     "tail": "compiled clean: {\"sampledUtc\": \"2026-11-17T02:22:30.80473Z\", \"ageMs\": 88, \"compilationFailed\": false, \"compiling\": false, \"consoleErrors\": 0, \"consoleWarnings\": 106, \"consoleLogs\": 79, \"seeded\": true}"
+    }
+   ],
+   "landed_at": 1794882153.984554,
+   "checked": null,
+   "rechecks": null,
+   "recheck_at": null,
+   "verdict": "partly",
+   "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1046-review.md",
+   "fails": [
+    {
+     "model": "sonnet",
+     "why": "judged partly by the Opus review; one more try with its findings: The check fails when a copy of an existing combination is added and passes when it is removed: not met. ComboRepeatTests passed 3/3 on a clone (the \"passes\" half), but nobody added a copy to see it fail.",
+     "commit": null
+    }
+   ],
+   "redo": {
+    "commit": null,
+    "verdict": "partly",
+    "findings": [
+     "- The check fails when a copy of an existing combination is added and passes when it is removed: not met. ComboRepeatTests passed 3/3 on a clone (the \"passes\" half), but nobody added a copy to see it fail.",
+     "- A Party market opened in Play deals a full shelf with no empty slot: not met. Not run."
+    ],
+    "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1046-review-1.md",
+    "base": "2910b6e2fa0c6fbb71e96562185af2048eaee206"
+   },
+   "media": [],
+   "digested": true
+  },
+  {
+   "key": "sk4te/party-playtest#1060",
+   "kind": "ticket",
+   "agent": null,
+   "state": "failed",
+   "note": "judged partly by the Opus review after its second try: Pile-up case 6, both curves flatten at their knob: not met. No new commit this pass and no run. I checked the real output: `Temp/pileup/` still holds only `result.json` and `progress.txt` from Nov 16 14:55, which is #1058's rewind probe and has no case 6. No run at the 3 m/s knob from `tools/pileup.cs` exists. The last case 6 run (knob 12) showed a peak and then 0.0, not a flat curve. The cap is in the code (`GravityBody.cs:499` takes `SelfLashMaxSpeed` for a self-lash and `:506` takes the caster's `ObjectLashMaxSpeed` for an object, both 20 in `PlayerTuning.cs:1584/1589`), but no measurement shows it flattening.",
+   "commit": null,
+   "tries": 1,
+   "started": 1794878843.3899179,
+   "ended": 1794880300.875678,
+   "night": "night-20261117-014410",
+   "runner": "assembio",
+   "repo": "/Users/danamador/Documents/Coding/sk4te",
+   "map": "sk4te/party-playtest",
+   "title": "A lash on yourself or on a crate reaches a top speed like a lash on someone else does",
+   "model": "sonnet",
+   "tree": "/Users/danamador/.sb-hub/worktrees/sk4te-caa319/sk4te-party-playtest-1060",
+   "branch": "sb/sk4te-party-playtest-1060",
+   "paths": [
+    "Assets/Scripts/PlayerCore/Locomotion/Gravity"
+   ],
+   "base_sha": "d41d61395dcbadb9902ef1408a62d9efb7a39a6c",
+   "first_base": "d41d61395dcbadb9902ef1408a62d9efb7a39a6c",
+   "log": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1060.log",
+   "log_start": 76911,
+   "run": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest",
+   "pid": null,
+   "pid_start": null,
+   "session": "f18a429c-8ed6-4387-a4ae-b1c3a7937015",
+   "session_dir": "/Users/danamador/.claude-assembio",
+   "checks": [],
+   "landed_at": 1794878897.785888,
+   "checked": null,
+   "rechecks": null,
+   "recheck_at": null,
+   "verdict": "partly",
+   "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1060-review.md",
+   "fails": [
+    {
+     "model": "sonnet",
+     "why": "judged partly by the Opus review; one more try with its findings: Pile-up case 6, both curves flatten at their knob: not met. Never run with the 3 m/s knob. Temp/pileup/result.json is the Nov 16 14:55 file of #1058's rewind probe and holds no case 6. The last case 6 run (knob 12) showed a peak follo",
+     "commit": null
+    }
+   ],
+   "redo": {
+    "commit": null,
+    "verdict": "partly",
+    "findings": [
+     "- Pile-up case 6, both curves flatten at their knob: not met. Never run with the 3 m/s knob. Temp/pileup/result.json is the Nov 16 14:55 file of #1058's rewind probe and holds no case 6. The last case 6 run (knob 12) showed a peak followed by 0.0, not a flat curve."
+    ],
+    "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1060-review-1.md",
+    "base": "2910b6e2fa0c6fbb71e96562185af2048eaee206"
+   },
+   "media": [],
+   "digested": true
+  },
+  {
+   "key": "sk4te/party-playtest#1056",
+   "kind": "ticket",
+   "agent": null,
+   "state": "done",
+   "note": "resolved, commit 48219f648",
+   "commit": "48219f64825d79235aa8dec4e2a05351f834f4fc",
+   "tries": 1,
+   "started": 1794880412.725227,
+   "ended": 1794883111.4165142,
+   "night": "night-20261117-014410",
+   "runner": "assembio",
+   "repo": "/Users/danamador/Documents/Coding/sk4te",
+   "map": "sk4te/party-playtest",
+   "title": "A frozen body is not a spring being wound: only blows are saved up, and ropes and pulls wait",
+   "model": "sonnet",
+   "tree": "/Users/danamador/.sb-hub/worktrees/sk4te-caa319/sk4te-party-playtest-1056",
+   "branch": "sb/sk4te-party-playtest-1056",
+   "paths": [
+    "Assets/Scripts/PlayerCore/Visual/Hitstop.cs"
+   ],
+   "base_sha": "d41d61395dcbadb9902ef1408a62d9efb7a39a6c",
+   "first_base": "d41d61395dcbadb9902ef1408a62d9efb7a39a6c",
+   "log": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1056.log",
+   "log_start": 136216,
+   "run": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest",
+   "pid": null,
+   "pid_start": null,
+   "session": "878f10d0-91ac-434e-ab44-ce78c8f02f49",
+   "session_dir": "/Users/danamador/.claude-assembio",
+   "checks": [
+    {
+     "cmd": "python3 .sb/checks-compile.py",
+     "code": 0,
+     "secs": 7.7,
+     "tail": "compiled clean: {\"sampledUtc\": \"2026-11-17T02:07:16.67061Z\", \"ageMs\": 52, \"compilationFailed\": false, \"compiling\": false, \"consoleErrors\": 0, \"consoleWarnings\": 0, \"consoleLogs\": 2, \"seeded\": true}"
+    }
+   ],
+   "landed_at": 1794881242.064022,
+   "checked": null,
+   "rechecks": null,
+   "recheck_at": null,
+   "verdict": "finished",
+   "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1056-review.md",
+   "fails": [
+    {
+     "model": "sonnet",
+     "why": "judged partly by the Opus review; one more try with its findings: Three Bat blows on a frozen body still land together on release: not met. Not run. No pile-up case uses a Bat, and HitstopTests checks Holds only on a body that isn't held.",
+     "commit": "2910b6e2fa0c6fbb71e96562185af2048eaee206"
+    }
+   ],
+   "redo": {
+    "commit": "2910b6e2fa0c6fbb71e96562185af2048eaee206",
+    "verdict": "partly",
+    "findings": [
+     "- Three Bat blows on a frozen body still land together on release: not met. Not run. No pile-up case uses a Bat, and HitstopTests checks Holds only on a body that isn't held."
+    ],
+    "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1056-review-1.md",
+    "base": "094c797386265bf643e64f330b4980e1847b02cb"
+   },
+   "media": [],
+   "digested": true
+  },
+  {
+   "key": "sk4te/party-playtest#1055",
+   "kind": "ticket",
+   "agent": null,
+   "state": "failed",
+   "note": "judged partly by the Opus review after its second try: A body given a broken velocity by a probe is back at a spawn the next step, and the match goes on: not met. SpeedCeilingTests.ABodyGivenABrokenNumberIsBackAtASpawnAndTheMatchGoesOn (commit 87e025198) compiles: the type and all four tests are in the live Editor's Sk4te.Tests.PlayMode assembly. No test result for it exists, though. The test also sets a NaN velocity (which Unity refuses, per the owner's 2026-11-15 note) and moves the body to 50× the stage limit in the same step. A pass would come from the finite ring-out, not the non-finite reset at StageBounds.cs:137-139/284. It waits three steps, not one, and it asserts \"inside the stage\", not \"at a spawn\".",
+   "commit": "6f8e4de8e6c66b6f5bd7c677c53733fc9307cd82",
+   "tries": 1,
+   "started": 1794884432.8234298,
+   "ended": 1794887494.348923,
+   "night": "night-20261117-014410",
+   "runner": "assembio",
+   "repo": "/Users/danamador/Documents/Coding/sk4te",
+   "map": "sk4te/party-playtest",
+   "title": "Nothing can go faster than a ceiling, and a broken number resets that one thing instead of spreading",
+   "model": "sonnet",
+   "tree": "/Users/danamador/.sb-hub/worktrees/sk4te-caa319/sk4te-party-playtest-1055",
+   "branch": "sb/sk4te-party-playtest-1055",
+   "paths": [
+    "Assets/Scripts/PlayerCore/Core/StageBounds.cs",
+    "Assets/Scripts/PlayerCore/Locomotion/Impulses.cs",
+    "Assets/Scripts/PlayerCore/Core/PlayerTuning.cs"
+   ],
+   "base_sha": "d41d61395dcbadb9902ef1408a62d9efb7a39a6c",
+   "first_base": "d41d61395dcbadb9902ef1408a62d9efb7a39a6c",
+   "log": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1055.log",
+   "log_start": 185473,
+   "run": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest",
+   "pid": null,
+   "pid_start": null,
+   "session": "869d6f7d-f2d0-4e13-b0c4-376bcd50e830",
+   "session_dir": "/Users/danamador/.claude-assembio",
+   "checks": [
+    {
+     "cmd": "python3 .sb/checks-compile.py",
+     "code": 0,
+     "secs": 5.0,
+     "tail": "compiled clean: {\"sampledUtc\": \"2026-11-17T03:22:07.336662Z\", \"ageMs\": 98, \"compilationFailed\": false, \"compiling\": false, \"consoleErrors\": 1, \"consoleWarnings\": 2, \"consoleLogs\": 2, \"seeded\": true}"
+    }
+   ],
+   "landed_at": 1794885729.8702788,
+   "checked": null,
+   "rechecks": null,
+   "recheck_at": null,
+   "verdict": "partly",
+   "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1055-review.md",
+   "fails": [
+    {
+     "model": "sonnet",
+     "why": "judged not met by the Opus review; one more try with its findings: Pile-up peak speeds all at or under the ceiling: not met. The pile-up was not re-run. Temp/pileup/result.json is still the Nov 16 14:55 run of #1058's rewind probe (cases A to D), not the pile-up script.",
+     "commit": null
+    }
+   ],
+   "redo": {
+    "commit": null,
+    "verdict": "not met",
+    "findings": [
+     "- Pile-up peak speeds all at or under the ceiling: not met. The pile-up was not re-run. Temp/pileup/result.json is still the Nov 16 14:55 run of #1058's rewind probe (cases A to D), not the pile-up script.",
+     "- A body given a broken velocity by a probe is back at a spawn the next step, and the match goes on: not met. Never probed. SpeedCeiling.IsFinite(Rigidbody) and the StageBounds reset exist in code, but the owner's 2026-11-15 note (Unity refuses the NaN assignment, so the reset never fires) is still unanswered and untested.",
+     "- A Home-Run launch still reaches its usual distance: not met. Not measured. Only the asset value was read (speedCeilingScale 8, so 960 m/s against a 450 m/s launch).",
+     "- Console clean but for the one reset line: not met. No reset has ever been triggered, so the line has never been seen.",
+     "- (Added 2026-11-15) An eval reads the spin cap of a player, a hand, a weapon and a bullet as the project default: not met. Checked against the real code: SpeedCeiling.Apply sets body.maxAngularVelocity = Spin, which is PlayerTuning.spinCeiling = 100 (or DefaultSpin = 100). ProjectSettings/DynamicsManager.asset m_DefaultMaxAngularSpeed is 50, so every body still gets 100.",
+     "- (Added 2026-11-15) A probe past the ceiling shows the clamp, and a body with a broken position resets to its spawn: not met. The clamp half is real data: #1058's case D, a 200 m/s launch, peaks at 120.0 on S and both hands. The reset half has never been run."
+    ],
+    "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1055-review-1.md",
+    "base": "094c797386265bf643e64f330b4980e1847b02cb"
+   },
+   "media": [],
+   "digested": true
+  },
+  {
+   "key": "sk4te/party-playtest#1176",
+   "kind": "ticket",
+   "agent": null,
+   "state": "failed",
+   "note": "judged partly by the Opus review after its second try: An eval or Play probe shows a body-worn 'When you take a hit, After 2 s, Swap' trading places with the attacker: not met. No probe or Play run was made in any pass. `BodyTriggerHeldWeaponTests.AfterAHitTaken_TheDelayHandsTheAttackerToWhatIsUnderIt` and `TriggerHandingTests` have never been run. Checked against the real code: `WireMemory.cs:53` keeps Reached across the cut, and `WireMemory.Restore` at `:73-74` writes it back into `Scratch.Hit`. So the path is there in the code, but nothing shows the swap.",
+   "commit": null,
+   "tries": 1,
+   "started": 1794878634.040101,
+   "ended": 1794880304.365483,
+   "night": "night-20261117-014410",
+   "runner": "assembio",
+   "repo": "/Users/danamador/Documents/Coding/sk4te",
+   "map": "sk4te/party-playtest",
+   "title": "Each trigger says once what it hands down, and a delay really remembers who was reached",
+   "model": "sonnet",
+   "tree": "/Users/danamador/.sb-hub/worktrees/sk4te-caa319/sk4te-party-playtest-1176",
+   "branch": "sb/sk4te-party-playtest-1176",
+   "paths": [
+    "Assets/Scripts/PlayerCore/Items"
+   ],
+   "base_sha": "d41d61395dcbadb9902ef1408a62d9efb7a39a6c",
+   "first_base": "d41d61395dcbadb9902ef1408a62d9efb7a39a6c",
+   "log": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1176.log",
+   "log_start": 260074,
+   "run": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest",
+   "pid": null,
+   "pid_start": null,
+   "session": "19d9b9a7-e915-4b6e-98da-87710a233f3c",
+   "session_dir": "/Users/danamador/.claude-assembio",
+   "checks": [],
+   "landed_at": 1794878719.995734,
+   "checked": null,
+   "rechecks": null,
+   "recheck_at": null,
+   "verdict": "partly",
+   "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1176-review.md",
+   "fails": [
+    {
+     "model": "sonnet",
+     "why": "judged partly by the Opus review; one more try with its findings: 28/28 weapons, 21/21 combinations, no differences beyond the 137 known: not met. I read the real comparison output in the live Editor's Temp/fit-compare.md (written 02:05 today, after the bullet-trigger message from 9003dfd0e had land",
+     "commit": null
+    }
+   ],
+   "redo": {
+    "commit": null,
+    "verdict": "partly",
+    "findings": [
+     "- 28/28 weapons, 21/21 combinations, no differences beyond the 137 known: not met. I read the real comparison output in the live Editor's Temp/fit-compare.md (written 02:05 today, after the bullet-trigger message from 9003dfd0e had landed). Section 1 reads \"28 of 28 pass\", and section 3 reads \"20 of 20 pass\". That is the shelf #1046 agreed on, so the combination bar holds. Section 2, though, reads \"4982 asked, 4831 agree, 151 differ\". That is 14 more than the 137 known, and the ticket names and explains none of the 14.",
+     "- An eval or Play probe shows a body-worn 'When you take a hit, After 2 s, Swap' trading places with the attacker: not met. No probe was run, in this pass or any earlier one. The code path holds up when read (WireMemory.Across keeps Reached, and WireMemory.cs:73-74 writes it back into the hit channel). BodyTriggerHeldWeaponTests has never been run. I did not probe it either, because the Editor is in someone's live Play session."
+    ],
+    "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1176-review-1.md",
+    "base": "094c797386265bf643e64f330b4980e1847b02cb"
+   },
+   "media": [],
+   "digested": true
+  },
+  {
+   "key": "sk4te/party-playtest#1178",
+   "kind": "ticket",
+   "agent": null,
+   "state": "done",
+   "note": "resolved, commit b0546df4b",
+   "commit": "b0546df4be57e31972924e892acb27ebda4a3062",
+   "tries": 2,
+   "started": 1794888021.0466409,
+   "ended": 1794889576.8136709,
+   "night": "night-20261117-014410",
+   "runner": "assembio",
+   "repo": "/Users/danamador/Documents/Coding/sk4te",
+   "map": "sk4te/party-playtest",
+   "title": "The checker answers every question the old rules answer: a bare part, a changed value, an author's asset, and where the fault is",
+   "model": "opus",
+   "tree": "/Users/danamador/.sb-hub/worktrees/sk4te-caa319/sk4te-party-playtest-1178",
+   "branch": "sb/sk4te-party-playtest-1178",
+   "paths": [
+    "Assets/Scripts/PlayerCore/Items"
+   ],
+   "base_sha": "d41d61395dcbadb9902ef1408a62d9efb7a39a6c",
+   "first_base": "d41d61395dcbadb9902ef1408a62d9efb7a39a6c",
+   "log": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1178.log",
+   "log_start": 247065,
+   "run": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest",
+   "pid": null,
+   "pid_start": null,
+   "session": "157bbc84-2865-4a39-8673-185ade92d0cf",
+   "session_dir": "/Users/danamador/.claude-assembio",
+   "checks": [
+    {
+     "cmd": "python3 .sb/checks-compile.py",
+     "code": 0,
+     "secs": 4.3,
+     "tail": "compiled clean: {\"sampledUtc\": \"2026-11-17T04:03:41.676516Z\", \"ageMs\": 148, \"compilationFailed\": false, \"compiling\": false, \"consoleErrors\": 1, \"consoleWarnings\": 144, \"consoleLogs\": 1, \"seeded\": true}"
+    }
+   ],
+   "recheck_at": null,
+   "checked": null,
+   "landed_at": 1794888224.130337,
+   "rechecks": null,
+   "verdict": "finished",
+   "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1178-review.md",
+   "fails": [
+    {
+     "model": "sonnet",
+     "why": "judged partly by the Opus review; one more try with its findings: The comparison reports the new questions with every difference listed and explained in the ticket's answer: not met. Checked against the real output (Temp/fit-compare.md, written 02:05:06 with this commit's \"on a bullet\" wording live)",
+     "commit": "9003dfd0e5d1be2c829eff00104f46dd2c18dd31"
+    },
+    {
+     "model": "sonnet",
+     "why": "no commit after d41d61395",
+     "commit": null
+    }
+   ],
+   "redo": {
+    "commit": "9003dfd0e5d1be2c829eff00104f46dd2c18dd31",
+    "verdict": "partly",
+    "findings": [
+     "- The comparison reports the new questions with every difference listed and explained in the ticket's answer: not met. Checked against the real output (Temp/fit-compare.md, written 02:05:06 with this commit's \"on a bullet\" wording live). It lists bare parts (10622 asked, 901 differ), rounds (1017 asked, 121 differ) and values (552 asked, 32 differ), all \"today takes it, the checker refuses\". The ticket's answer explains 834, 73 (after the fix) and about 30. Not explained there: Bounce, Haste, Part and Weightless (21 each on a bare part, 9 each at a round's top), and 13 triggers that one round takes today but the checker refuses (\"waits for a moment that never comes on a bullet\"). The 80 differences the other way round are gone, as the commit intends."
+    ],
+    "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1178-review-1.md",
+    "base": "094c797386265bf643e64f330b4980e1847b02cb"
+   },
+   "retry": "no commit after d41d61395\nIts work stays on branch sb/sk4te-party-playtest-1178 in /Users/danamador/.sb-hub/worktrees/sk4te-caa319/sk4te-party-playtest-1178.",
+   "media": [],
+   "digested": true
+  },
+  {
+   "key": "sk4te/party-playtest#1069",
+   "kind": "ticket",
+   "agent": null,
+   "state": "done",
+   "note": "resolved, commit c2dac8e99",
+   "commit": "c2dac8e9993a414b1a22ba66ad8bb60f4bcd7bea",
+   "tries": 1,
+   "started": 1794888266.0005498,
+   "ended": 1794891399.958385,
+   "night": "night-20261117-014410",
+   "runner": "assembio",
+   "repo": "/Users/danamador/Documents/Coding/sk4te",
+   "map": "sk4te/party-playtest",
+   "title": "Ready, pause and settings are the same buttons everywhere, and the screen names them",
+   "model": "sonnet",
+   "tree": "/Users/danamador/.sb-hub/worktrees/sk4te-caa319/sk4te-party-playtest-1069",
+   "branch": "sb/sk4te-party-playtest-1069",
+   "paths": [
+    "Assets/Scripts/PlayerCore/Board/BoardCursor.cs",
+    "Assets/Settings/Input"
+   ],
+   "base_sha": "b0543ccc9ba9e462e67053072f285cf50990e01b",
+   "first_base": "b0543ccc9ba9e462e67053072f285cf50990e01b",
+   "log": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1069.log",
+   "log_start": 157305,
+   "run": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest",
+   "pid": null,
+   "pid_start": null,
+   "session": "a6fae4a2-fb35-4bb1-b6cd-7a0719d59356",
+   "session_dir": "/Users/danamador/.claude-assembio",
+   "checks": [
+    {
+     "cmd": "python3 .sb/checks-compile.py",
+     "code": 0,
+     "secs": 8.7,
+     "tail": "compiled clean: {\"sampledUtc\": \"2026-11-17T04:27:21.092402Z\", \"ageMs\": 258, \"compilationFailed\": false, \"compiling\": false, \"consoleErrors\": 0, \"consoleWarnings\": 103, \"consoleLogs\": 19, \"seeded\": true}"
+    }
+   ],
+   "recheck_at": null,
+   "checked": null,
+   "landed_at": 1794889643.981764,
+   "rechecks": null,
+   "verdict": "finished",
+   "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1069-review.md",
+   "fails": [
+    {
+     "model": "sonnet",
+     "why": "judged partly by the Opus review; one more try with its findings: All four pressing the Ready button starts the match: not met. Readies 1 to 3 were seen counting on the press, one seat at a time, and `6-market-three-ready.png` shows \"3 of 4\" with the market clock at 0:08. After the fourth Ready the ",
+     "commit": "dfdddef0c47ed55b32ead03a1086c9ff63a61288"
+    }
+   ],
+   "redo": {
+    "commit": "dfdddef0c47ed55b32ead03a1086c9ff63a61288",
+    "verdict": "partly",
+    "findings": [
+     "- All four pressing the Ready button starts the match: not met. Readies 1 to 3 were seen counting on the press, one seat at a time, and `6-market-three-ready.png` shows \"3 of 4\" with the market clock at 0:08. After the fourth Ready the match was running, but the state was read 8 s later, so the clock may have started it. This is the integrator's own \"not proven\".",
+     "- Screenshots of the five screens each show their buttons: not met. There are shots of the Playground pause, the market (once before and once after the fix) and the in-match pause. There are none of the match settings drawer, the build menu or the end of a match. The market's prompts are text keycaps (\"R\", \"RT (R): ready / not ready\", \"Y looks inside\"), not the tutorial's button pictures. The plate's \"RT (R)\" is a fixed string, not each player's own pad."
+    ],
+    "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1069-review-1.md",
+    "base": "2910b6e2fa0c6fbb71e96562185af2048eaee206"
+   },
+   "media": [],
+   "digested": true
+  },
+  {
+   "key": "sk4te/party-playtest#1074",
+   "kind": "ticket",
+   "agent": null,
+   "state": "done",
+   "note": "resolved, commit eb152f9e9",
+   "commit": "eb152f9e92f3f4de62a38242dac6a9750ad4033c",
+   "tries": 2,
+   "started": 1794882158.564568,
+   "ended": 1794885334.195885,
+   "night": "night-20261117-014410",
+   "runner": "assembio",
+   "repo": "/Users/danamador/Documents/Coding/sk4te",
+   "map": "sk4te/party-playtest",
+   "title": "Battlefield is finished: fair spawn spots, one true edge, and the wings either orbit or are gone",
+   "model": "opus",
+   "tree": "/Users/danamador/.sb-hub/worktrees/sk4te-caa319/sk4te-party-playtest-1074",
+   "branch": "sb/sk4te-party-playtest-1074",
+   "paths": [
+    "Assets/Resources/Stages/Battlefield.asset",
+    "Assets/Scenes/Battlefield.unity",
+    "art/blender/stages"
+   ],
+   "base_sha": "8bce28662ef72af5134e13f2b31b6c87f5454b06",
+   "first_base": "d41d61395dcbadb9902ef1408a62d9efb7a39a6c",
+   "log": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1074.log",
+   "log_start": 195971,
+   "run": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest",
+   "pid": null,
+   "pid_start": null,
+   "session": "106e33d6-8b66-47bd-a1af-cd2c885c856c",
+   "session_dir": "/Users/danamador/.claude-assembio",
+   "checks": [
+    {
+     "cmd": "python3 .sb/checks-compile.py",
+     "code": 0,
+     "secs": 4.6,
+     "tail": "compiled clean: {\"sampledUtc\": \"2026-11-17T02:49:16.329528Z\", \"ageMs\": 187, \"compilationFailed\": false, \"compiling\": false, \"consoleErrors\": 0, \"consoleWarnings\": 102, \"consoleLogs\": 22, \"seeded\": true}"
+    }
+   ],
+   "landed_at": 1794883759.0936131,
+   "checked": null,
+   "rechecks": null,
+   "recheck_at": null,
+   "verdict": "finished",
+   "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1074-review.md",
+   "fails": [
+    {
+     "model": "sonnet",
+     "why": "judged partly by the Opus review; one more try with its findings: Four seats start and respawn on standable ground facing the centre: not met. Not probed live. SessionSeats.SlotPosition uses the radius that StageBounds.Refit measures on load, times spawnFraction 0.5, so where the seats land is still",
+     "commit": null
+    },
+    {
+     "model": "sonnet",
+     "why": "the integrator could not make it work in Unity; its landing was backed out.",
+     "commit": "b0543ccc9ba9e462e67053072f285cf50990e01b"
+    }
+   ],
+   "redo": {
+    "commit": null,
+    "verdict": "partly",
+    "findings": [
+     "- Four seats start and respawn on standable ground facing the centre: not met. Not probed live. SessionSeats.SlotPosition uses the radius that StageBounds.Refit measures on load, times spawnFraction 0.5, so where the seats land is still unmeasured.",
+     "- A full-strength finisher rings out at about 100 percent and not at 50, measured: not met. Not measured.",
+     "- A composited screenshot from the match camera shows no dead geometry: not met. None was taken, and the switched-off wings are still in the model."
+    ],
+    "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1074-review-1.md",
+    "base": "2910b6e2fa0c6fbb71e96562185af2048eaee206"
+   },
+   "retry": "the integrator could not make it work in Unity; its landing was backed out.\nThe integrator's report: /Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1074-integrate.md",
+   "refused": 1,
+   "refused_lines": [
+    "refused: Bash: `unity` is refused for a ticket worker"
+   ],
+   "media": [
+    "match-camera-integrate.png",
+    "match-camera.png"
+   ],
+   "digested": true
+  },
+  {
+   "key": "sk4te/party-playtest#1232",
+   "kind": "ticket",
+   "agent": null,
+   "state": "failed",
+   "note": "judged partly by the Opus review after its second try: The Chain Gang Rifle, and each other Party combination, in hand within three presses in the Playground: not met. Checked against the real code with a live eval of DispenserMenuProvider.PartyCombos() in the running Editor. It returns 20, matching the Party market, with \"Chain Gang Rifle|SniperRifle\" among them. The four new DispenserPageTests compile in the live Sk4te.Tests.EditMode assembly. They only check the list, the menu rows, that the hand-out does nothing outside Play, and that each weapon-bound combination's weapon is in some dispenser's list. HandOutCombo in Play, the step that puts the weapon on the pad with the combination installed, is not run by any test, and nothing was pressed on screen in any try. I could not press it either: the live Editor was in the Moon scene with no weapon dispenser, and I did not change another session's scene. Still untested: the 12 combinations with no weapon of their own, which try one weapon after another; a refused weapon being destroyed only after it was dispensed; and the pad cap pushing older items off.",
+   "commit": "6d8bd2149c624009a8ee540e242d642b36039be1",
+   "tries": 1,
+   "started": 1794885731.550664,
+   "ended": 1794887496.398498,
+   "night": "night-20261117-014410",
+   "runner": "assembio",
+   "repo": "/Users/danamador/Documents/Coding/sk4te",
+   "map": "sk4te/party-playtest",
+   "title": "Every Party combination can be tried in the Playground, the Chain Gang Rifle first",
+   "model": "sonnet",
+   "tree": "/Users/danamador/.sb-hub/worktrees/sk4te-caa319/sk4te-party-playtest-1232",
+   "branch": "sb/sk4te-party-playtest-1232",
+   "paths": [
+    "Assets/Scripts/PlayerCore/Board/",
+    "Assets/Scenes/Playground.unity"
+   ],
+   "base_sha": "43c687bd861cf7df6c723453518a2ca6d6cda6e5",
+   "first_base": "43c687bd861cf7df6c723453518a2ca6d6cda6e5",
+   "log": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1232.log",
+   "log_start": 122083,
+   "run": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest",
+   "pid": null,
+   "pid_start": null,
+   "session": "8d850514-273d-4857-bbcd-6c63672ab34b",
+   "session_dir": "/Users/danamador/.claude-assembio",
+   "checks": [
+    {
+     "cmd": "python3 .sb/checks-compile.py",
+     "code": 0,
+     "secs": 4.0,
+     "tail": "compiled clean: {\"sampledUtc\": \"2026-11-17T03:29:09.059844Z\", \"ageMs\": 245, \"compilationFailed\": false, \"compiling\": false, \"consoleErrors\": 0, \"consoleWarnings\": 105, \"consoleLogs\": 8, \"seeded\": true}"
+    }
+   ],
+   "landed_at": 1794886151.831637,
+   "checked": null,
+   "rechecks": null,
+   "recheck_at": null,
+   "verdict": "partly",
+   "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1232-review.md",
+   "fails": [
+    {
+     "model": "sonnet",
+     "why": "judged partly by the Opus review; one more try with its findings: Chain Gang Rifle and each other Party combination in hand within three presses, in the Playground: not met. The code path is there: `DispenserMenuProvider.Combinations` adds one row per `PartyCombos()` entry, and `HandOutCombo` dispen",
+     "commit": null
+    }
+   ],
+   "redo": {
+    "commit": null,
+    "verdict": "partly",
+    "findings": [
+     "- Chain Gang Rifle and each other Party combination in hand within three presses, in the Playground: not met. The code path is there: `DispenserMenuProvider.Combinations` adds one row per `PartyCombos()` entry, and `HandOutCombo` dispenses the weapon and installs the combination through `ComboInstall.OnHost`. I checked the real data it reads. `Party Market.asset` lists 20 combination GUIDs, and they are exactly the 20 assets in `Assets/Data/Items/Combos`, including Chain Gang Rifle. So the menu would list the agreed 20. But `HandOutCombo` returns null outside Play, no test in `Assets/Tests` calls `HandOutCombo` or `PartyCombos`, and nothing was pressed on screen in any of the three tries. The risks the earlier review named are still untested: combinations that fit any weapon or go into a round try weapons one by one, a refused weapon is destroyed after it was dispensed, and the pad cap can push older items off. This try made no commit and ran nothing."
+    ],
+    "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1232-review-1.md",
+    "base": "5daacae3adcf4a94e95d80b14b16245378bc7ffa"
+   },
+   "media": [],
+   "digested": true
+  },
+  {
+   "key": "job:64906abeb0e2:1",
+   "kind": "job",
+   "agent": null,
+   "model": "opus",
+   "project": "/Users/danamador/Documents/Coding/sk4te",
+   "repo": "/Users/danamador/Documents/Coding/sk4te",
+   "prompt": "# Mend sk4te's build\n\nYou are the sb hub's build fixer. You run alone, headless, in the main folder of sk4te (`/Users/danamador/Documents/Coding/sk4te`). Nobody is\nthere to answer questions while you run.\n\nsk4te's build is broken, and no single ticket is to blame: the hub backed out the landing it could pin, and\nthe errors are still there. Every ticket of sk4te waits until the build works again. Your one job is to make\nthis check pass on the main folder:\n\n    python3 .sb/checks-compile.py\n\nIt last failed on commit c12c087ba2a4, first seen after sk4te/party-playtest#1222, naming these files: Assets/Tests/EditMode/NextTimeTheyTests.cs, Assets/Scripts/PlayerCore/Items/Gates/NextTimeThey.cs\n\n```\nAssets/Tests/EditMode/NextTimeTheyTests.cs(234,60): error CS0117: 'Has' does not contain a definition for 'One'\nAssets/Scripts/PlayerCore/Items/Gates/NextTimeThey.cs(194,40): error CS1061: 'PlayerModules' does not contain a definition for 'Arm' and no accessible extension method 'Arm' accepting a first argument of type 'PlayerModules' could be found (are you missing a using directive or an assembly reference?)\nAssets/Scripts/PlayerCore/Items/Gates/NextTimeThey.cs(249,35): error CS1739: The best overload for 'RunDetached' does not have a parameter named 'from'\n```\n\n## How\n\n1. Read the errors and the files they name, then `git log -n 15 --stat` for what landed lately. Find the smallest\n   change that makes the build work: a missing `using` or import, a renamed member, a test that names something\n   that moved. Prefer fixing the file the error names over undoing someone's work.\n2. Before you run the check, take the lock `unity:sk4te` with `sb_lock`, and free it with `sb_unlock` as soon as the\n   check ends. The check may need the one Unity editor, and landings take the same lock.\n3. Run the check. When it passes, commit only the files you changed, by path, as one commit:\n   `git commit -m \"fix(build): <what was broken, in plain words>\" -- <paths>`. Never amend, revert, reset, stash or\n   push, and never change files the fix does not need.\n4. If you cannot make it pass in about 30 minutes, or the fix needs a decision (which of two tickets' behaviour\n   wins, or deleting someone's work), commit nothing and end. Say why in your last message: the hub asks the\n   owner for you.\n\n## Your last message\n\nOpen with one plain sentence the owner can read on a phone: what was broken and what you changed, or why you could\nnot mend it. Then the commit and the check's last lines.\n",
+   "hash": "64906abeb0e20be3a692bd819e7f9731bde229d6487a8faa9584e93caf2758a4",
+   "name": "fix-build-sk4te",
+   "title": "mend sk4te's build",
+   "state": "done",
+   "note": "done; result in /Users/danamador/Documents/Second Brain/wayfinder/runs/2026-11-17-fix-build-sk4te",
+   "commit": null,
+   "tries": 0,
+   "created": 1794884431.465743,
+   "started": 1794888000.384206,
+   "ended": 1794889584.63286,
+   "night": "night-20261117-014410",
+   "fix_build": "/Users/danamador/Documents/Coding/sk4te",
+   "runner": "assembio",
+   "log": "/Users/danamador/Documents/Second Brain/wayfinder/runs/2026-11-17-fix-build-sk4te/job.log",
+   "log_start": 0,
+   "run": "/Users/danamador/Documents/Second Brain/wayfinder/runs/2026-11-17-fix-build-sk4te",
+   "pid": null,
+   "pid_start": null,
+   "result": "/Users/danamador/Documents/Second Brain/wayfinder/runs/2026-11-17-fix-build-sk4te/result.md",
+   "media": []
+  },
+  {
+   "key": "sk4te/party-playtest#1075",
+   "kind": "ticket",
+   "agent": null,
+   "state": "failed",
+   "note": "judged partly by the Opus review after its second try: Rope, pull, Lash Up, Skyfall, Blast and Swap each filmed or screenshotted doing their card relative to the planet: not met. 1075-media is unchanged since the first try (all files from 04:44 to 04:58). It shows Yank, Swap, Blast and Lash Up working. card-Line.png shows no rope, because no joint formed. skyfall-radial.png is the confounded try, where Lash Up was still on the body. The second try only read the code. I checked the real code: Lash.cs:364 turns the lash radial only when the aim is exactly `Vector3.down`. That is plausible for Skyfall, but it has never been seen in Play.",
+   "commit": null,
+   "tries": 1,
+   "started": 1794889584.6517792,
+   "ended": 1794891401.7782521,
+   "night": "night-20261117-014410",
+   "runner": "assembio",
+   "repo": "/Users/danamador/Documents/Coding/sk4te",
+   "map": "sk4te/party-playtest",
+   "title": "The Moon is finished: every card means something under round gravity, and a launch comes back or rings out",
+   "model": "sonnet",
+   "tree": "/Users/danamador/.sb-hub/worktrees/sk4te-caa319/sk4te-party-playtest-1075",
+   "branch": "sb/sk4te-party-playtest-1075",
+   "paths": [
+    "Assets/Resources/Stages/Moon.asset",
+    "Assets/Scenes/Moon.unity",
+    "Assets/Scripts/PlayerCore/Locomotion/Gravity"
+   ],
+   "base_sha": "c2dac8e9993a414b1a22ba66ad8bb60f4bcd7bea",
+   "first_base": "c2dac8e9993a414b1a22ba66ad8bb60f4bcd7bea",
+   "log": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1075.log",
+   "log_start": 191654,
+   "run": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest",
+   "pid": null,
+   "pid_start": null,
+   "session": "b12afbf6-9c60-4620-949d-2e66f24c26af",
+   "session_dir": "/Users/danamador/.claude-assembio",
+   "checks": [],
+   "recheck_at": null,
+   "checked": null,
+   "landed_at": 1794889645.601619,
+   "rechecks": null,
+   "verdict": "partly",
+   "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1075-review.md",
+   "fails": [
+    {
+     "model": "sonnet",
+     "why": "judged partly by the Opus review; one more try with its findings: Rope, pull, Lash Up, Skyfall, Blast and Swap each filmed or screenshotted doing their card relative to the planet: not met. 1075-media holds real Play captures of Yank (pulled 5.3 m along the surface, still grounded), Swap (places tra",
+     "commit": "ddd199fcc61de62c9dcc00e71a4b231d9e9d3f96"
+    }
+   ],
+   "redo": {
+    "commit": "ddd199fcc61de62c9dcc00e71a4b231d9e9d3f96",
+    "verdict": "partly",
+    "findings": [
+     "- Rope, pull, Lash Up, Skyfall, Blast and Swap each filmed or screenshotted doing their card relative to the planet: not met. 1075-media holds real Play captures of Yank (pulled 5.3 m along the surface, still grounded), Swap (places traded, both grounded, v = 0), Blast (stayed grounded) and Lash Up (rose 7.3 m along its own up, while world Y moved 0.85 m). Rope (Line): no joint formed, and card-Line.png shows no rope. Skyfall: never isolated. The radial-down lashing was added to a body still under Lash Up, the two cancelled, and skyfall-radial.png is that confounded try. Skyfall on the planet's side has been read from source only, never seen in Play."
+    ],
+    "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1075-review-1.md",
+    "base": "54dc10e00e9be44f505ded3c211bf083cf12a84a"
+   },
+   "media": [
+    "bots-mid.png",
+    "card-Blast.png",
+    "card-Line.png",
+    "card-Swap.png",
+    "card-Yank.png",
+    "lashup-ring.png"
+   ],
+   "digested": true
+  },
+  {
+   "key": "sk4te/party-playtest#1062",
+   "kind": "ticket",
+   "agent": null,
+   "state": "skipped",
+   "note": "blocked: after Nothing can go faster than a ceiling, and a broken number resets that one thing instead of spreading",
+   "commit": "1f75bb3570b4caaff20d8cdb9103a5702e83ef54",
+   "tries": 1,
+   "started": null,
+   "ended": 1794890423.993046,
+   "night": "night-20261117-014410",
+   "runner": "assembio",
+   "repo": "/Users/danamador/Documents/Coding/sk4te",
+   "map": "sk4te/party-playtest",
+   "title": "Run the pile-up again after the fixes, then four bots with every combination for ten minutes",
+   "model": "sonnet",
+   "tree": "/Users/danamador/.sb-hub/worktrees/sk4te-caa319/sk4te-party-playtest-1062",
+   "branch": "sb/sk4te-party-playtest-1062",
+   "paths": [],
+   "base_sha": "9003dfd0e5d1be2c829eff00104f46dd2c18dd31",
+   "first_base": "9003dfd0e5d1be2c829eff00104f46dd2c18dd31",
+   "log": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1062.log",
+   "log_start": 0,
+   "run": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest",
+   "pid": null,
+   "pid_start": null,
+   "session": "aa578b78-3e23-4a77-9ef2-380e9b5ae066",
+   "session_dir": "/Users/danamador/.claude-assembio",
+   "refused": 2,
+   "refused_lines": [
+    "refused: Bash: `unity` is refused for a ticket worker",
+    "refused: Write: Writing /Users/danamador/Documents/Second Brain/wayfinder/sk4te/party-playtest/research/1062-pileup-after.md is refused: it "
+   ],
+   "spend": {
+    "run_minutes": 19.53786309957504,
+    "check_minutes": 0.0,
+    "tries": 2,
+    "model": "sonnet",
+    "account": "assembio",
+    "tokens_in": 72,
+    "tokens_out": 18137,
+    "cache_read": 1619274,
+    "cost_usd": 1.2186000000000001
+   },
+   "checks": [],
+   "recheck_at": null,
+   "checked": null,
+   "fails": [
+    {
+     "model": "sonnet",
+     "why": "the integrator could not make it work in Unity; its landing was backed out.",
+     "commit": "1f75bb3570b4caaff20d8cdb9103a5702e83ef54"
+    }
+   ],
+   "retry": "the integrator could not make it work in Unity; its landing was backed out.\nThe integrator's report: /Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1062-integrate.md",
+   "rechecks": null,
+   "digested": true
+  },
+  {
+   "key": "sk4te/party-playtest#1148",
+   "kind": "ticket",
+   "agent": null,
+   "state": "failed",
+   "note": "judged not met by the Opus review after its second try: One command runs every valid pair on fists, a Bat, a Pistol and a thrown Knife and finishes unattended: not met. Neither try played it. tools/pair-sweep and PairSweepCommand.cs (16effcbb9) exist, but no 1148-pair-results.json exists anywhere in the vault and video/experiments has no pair-sweep output.",
+   "commit": null,
+   "tries": 1,
+   "started": 1794891986.865234,
+   "ended": 1794892787.098602,
+   "night": "night-20261117-014410",
+   "runner": "assembio",
+   "repo": "/Users/danamador/Documents/Coding/sk4te",
+   "map": "sk4te/party-playtest",
+   "title": "Every pair the rules allow is tried by the game itself in the studio, and the result lands in the card bible",
+   "model": "sonnet",
+   "tree": "/Users/danamador/.sb-hub/worktrees/sk4te-caa319/sk4te-party-playtest-1148",
+   "branch": "sb/sk4te-party-playtest-1148",
+   "paths": [],
+   "base_sha": "d47c261a229af0626c2ddc3c35af322e389f5d22",
+   "first_base": "d47c261a229af0626c2ddc3c35af322e389f5d22",
+   "log": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1148.log",
+   "log_start": 81772,
+   "run": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest",
+   "pid": null,
+   "pid_start": null,
+   "session": "d722b87e-3aeb-4658-956a-a335eac98cdf",
+   "session_dir": "/Users/danamador/.claude-assembio",
+   "checks": [],
+   "landed_at": 1794892022.0010722,
+   "checked": null,
+   "rechecks": null,
+   "recheck_at": null,
+   "verdict": "not met",
+   "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1148-review.md",
+   "fails": [
+    {
+     "model": "sonnet",
+     "why": "judged not met by the Opus review; one more try with its findings: One command runs every valid pair on fists, a Bat, a Pistol and a thrown Knife and finishes unattended: not met. It was never run. No 1148-pair-results.json exists anywhere in the vault, and video/experiments has no pair-sweep output",
+     "commit": null
+    }
+   ],
+   "redo": {
+    "commit": null,
+    "verdict": "not met",
+    "findings": [
+     "- One command runs every valid pair on fists, a Bat, a Pistol and a thrown Knife and finishes unattended: not met. It was never run. No 1148-pair-results.json exists anywhere in the vault, and video/experiments has no pair-sweep output. Only the `tools/pair-sweep` wrapper exists.",
+     "- The bible's table shows a result in each allowed cell: not met. I checked the real file the bible writes, wiki/sk4te/items/card-bible/trigger-by-effect.md: ✅, ○ and 💥 appear only in its legend (lines 14 to 16), in no cell.",
+     "- Swap under When you take a hit, Slow on a thrown Knife and a blast under a top-level delay are reported dead: not met. Nothing was played.",
+     "- Re-running after a fix flips the cell: not met. It was never run.",
+     "- (From #1204) One command prints every studio-dead pair the checker allows, naming the part that returned without running: not met. Nothing was played to diff against."
+    ],
+    "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1148-review-1.md",
+    "base": "c68a92f15d55b5fa19d306c816ddabc2b5098214"
+   },
+   "media": [],
+   "digested": true
+  },
+  {
+   "key": "sk4te/party-playtest#1152",
+   "kind": "ticket",
+   "agent": null,
+   "state": "done",
+   "note": "resolved, commit 3866de59c",
+   "commit": "3866de59c3aaefaa27ec7e4827a6a5a2cc1beecc",
+   "tries": 1,
+   "started": 1794926352.429682,
+   "ended": 1794928067.0848918,
+   "night": "night-20261117-014410",
+   "runner": "assembio",
+   "repo": "/Users/danamador/Documents/Coding/sk4te",
+   "map": "sk4te/party-playtest",
+   "title": "The fourth seat's cursor starts parked at the screen's right edge and its first flick does nothing",
+   "model": "sonnet",
+   "tree": "/Users/danamador/.sb-hub/worktrees/sk4te-caa319/sk4te-party-playtest-1152",
+   "branch": "sb/sk4te-party-playtest-1152",
+   "paths": [],
+   "base_sha": "282e1f9d5467c3b50dec9b0bc9de07f1391825ba",
+   "first_base": "282e1f9d5467c3b50dec9b0bc9de07f1391825ba",
+   "log": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1152.log",
+   "log_start": 143107,
+   "run": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest",
+   "pid": null,
+   "pid_start": null,
+   "session": "780ea8b7-379a-42e3-bb48-64e85e2db12a",
+   "session_dir": "/Users/danamador/.claude-assembio",
+   "checks": [
+    {
+     "cmd": "python3 .sb/checks-compile.py",
+     "code": 0,
+     "secs": 6.7,
+     "tail": "compiled clean: {\"sampledUtc\": \"2026-11-17T14:46:32.189898Z\", \"ageMs\": 123, \"compilationFailed\": false, \"compiling\": false, \"consoleErrors\": 0, \"consoleWarnings\": 38, \"consoleLogs\": 0, \"seeded\": true}"
+    }
+   ],
+   "landed_at": 1794926795.660882,
+   "checked": null,
+   "rechecks": null,
+   "recheck_at": null,
+   "verdict": "finished",
+   "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1152-review.md",
+   "fails": [
+    {
+     "model": "sonnet",
+     "why": "judged not met by the Opus review; one more try with its findings: Each of four seats' cursors starts on a card: not met (never run). In HEAD, BoardHud.Tree calls SeedOnShopCard when a market cursor is not Steered and has no Hovered card. BoardCursor clears Hovered while it is not Steered, and its e",
+     "commit": null
+    }
+   ],
+   "redo": {
+    "commit": null,
+    "verdict": "not met",
+    "findings": [
+     "- Each of four seats' cursors starts on a card: not met (never run). In HEAD, BoardHud.Tree calls SeedOnShopCard when a market cursor is not Steered and has no Hovered card. BoardCursor clears Hovered while it is not Steered, and its enable path resets Steered to false. GlideTo sets Steered, so the seed runs once per untouched seat. That is the code's intent. Nobody has watched it in Play, and the worker's compile check returned no result (exit 75).",
+     "- The first flick moves it and the first A buys: not met. Never run, and no test covers it. StepOrigin returns the glide target, so a flick measures from the card. Whether A buys before the glide arrives is not shown; the worker also notes it may land a frame or two early."
+    ],
+    "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1152-review-1.md",
+    "base": "d47c261a229af0626c2ddc3c35af322e389f5d22"
+   },
+   "refused": 2,
+   "refused_lines": [
+    "refused: Write: Writing /Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-16-party-playtest/1221-review.md is refused: it",
+    "refused: Write: Writing /Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-16-party-playtest/1096-review.md is refused: it"
+   ],
+   "media": [],
+   "digested": true
+  },
+  {
+   "key": "sk4te/party-playtest#1150",
+   "kind": "ticket",
+   "agent": null,
+   "state": "failed",
+   "note": "judged not met by the Opus review after its second try: The same press opens the drawer over the market: not met. The commits that carry this ticket are 064d34b07 and 5d247ce57, both test-only. The hub's commit, aa1f333a5, is a tools/compile change that has nothing to do with this ticket. I checked the real code path. MainMenuBay.MatchSettings calls `resume()` first and only then `BoardHud.ApplyConfigControl(Toggle)`, so the drawer opens after the bay is down. From that point BoardView.SeatIsAbsent no longer has the `MainMenuScreen.Current` guard. It again depends on each body having its pad back. No test covers that, and nobody has played it. The new SeatIsAbsent test sets `MainMenuScreen.Current` by reflection with no bodies at all. It never presses the Match settings socket, so it does not cover the moment after the press when the market's ready/absent timer could still close the market. The worker says it was never compiled or run, and no hub check ran it. The cause also remains unreproduced live.",
+   "commit": "aa1f333a5b2c7fad810dadbc0bad4dd916c1489c",
+   "tries": 1,
+   "started": 1794933303.214962,
+   "ended": 1794934760.595042,
+   "night": "night-20261117-014410",
+   "runner": "assembio",
+   "repo": "/Users/danamador/Documents/Coding/sk4te",
+   "map": "sk4te/party-playtest",
+   "title": "Match settings in the market's menu starts the next match instead of opening its drawer",
+   "model": "sonnet",
+   "tree": "/Users/danamador/.sb-hub/worktrees/sk4te-caa319/sk4te-party-playtest-1150",
+   "branch": "sb/sk4te-party-playtest-1150",
+   "paths": [],
+   "base_sha": "bdb521443a40da2c6ae6cfe3334336e5b089f457",
+   "first_base": "bdb521443a40da2c6ae6cfe3334336e5b089f457",
+   "log": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1150.log",
+   "log_start": 104143,
+   "run": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest",
+   "pid": null,
+   "pid_start": null,
+   "session": "e9a3b72d-de64-432e-a796-bf78481857d8",
+   "session_dir": "/Users/danamador/.claude-assembio",
+   "checks": [
+    {
+     "cmd": "python3 .sb/checks-compile.py",
+     "code": 0,
+     "secs": 5.9,
+     "tail": "compiled clean: {\"sampledUtc\": \"2026-11-17T16:43:17.825962Z\", \"ageMs\": 178, \"compilationFailed\": false, \"compiling\": false, \"consoleErrors\": 0, \"consoleWarnings\": 103, \"consoleLogs\": 19, \"seeded\": true}"
+    }
+   ],
+   "landed_at": 1794933800.8159518,
+   "checked": null,
+   "rechecks": null,
+   "recheck_at": null,
+   "verdict": "not met",
+   "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1150-review.md",
+   "fails": [
+    {
+     "model": "sonnet",
+     "why": "judged not met by the Opus review; one more try with its findings: The same press opens the drawer over the market: not met (never run). In HEAD (dfdddef0c is an ancestor), BoardView.SeatIsAbsent returns false while MainMenuScreen.Current is set. The press in MainMenuBay.MatchSettings calls resume()",
+     "commit": null
+    }
+   ],
+   "redo": {
+    "commit": null,
+    "verdict": "not met",
+    "findings": [
+     "- The same press opens the drawer over the market: not met (never run). In HEAD (dfdddef0c is an ancestor), BoardView.SeatIsAbsent returns false while MainMenuScreen.Current is set. The press in MainMenuBay.MatchSettings calls resume() and then BoardHud.ApplyConfigControl(Toggle, director.Rules). Nobody has watched it in Play, and the ticket's own comment says the cause was never reproduced live. No test covers SeatIsAbsent or the MatchSettings press.",
+     "- Stocks, clock and stage change and the next match uses them: not met. Never run. The drawer writes director.Rules, but no play and no test shows the next match reading the changed values."
+    ],
+    "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1150-review-1.md",
+    "base": "71f4a9190a697f65d21f8cc509757f82ffea624a"
+   },
+   "refused": 1,
+   "refused_lines": [
+    "refused: Write: Writing /Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-16-party-playtest/1145-review.md is refused: it"
+   ],
+   "media": [],
+   "digested": true
+  },
+  {
+   "key": "sk4te/party-playtest#1147",
+   "kind": "ticket",
+   "agent": null,
+   "state": "failed",
+   "note": "judged partly by the Opus review after its second try: The owner has opened it and said it reads: not met. No record of the owner's answer exists. This needs you.",
+   "commit": "dab42da166bc8a0284610f6ba25591cadda0bbea",
+   "tries": 2,
+   "started": 1794933043.137702,
+   "ended": 1794934772.679728,
+   "night": "night-20261117-014410",
+   "runner": "assembio",
+   "repo": "/Users/danamador/Documents/Coding/sk4te",
+   "map": "sk4te/party-playtest",
+   "title": "The card bible: one page per card and one table of every trigger against every effect, written by the game and read in Obsidian",
+   "model": "opus",
+   "tree": "/Users/danamador/.sb-hub/worktrees/sk4te-caa319/sk4te-party-playtest-1147",
+   "branch": "sb/sk4te-party-playtest-1147",
+   "paths": [],
+   "base_sha": "3406f03167d06e5bee013c16431234de94ed67ed",
+   "first_base": "3406f03167d06e5bee013c16431234de94ed67ed",
+   "log": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1147.log",
+   "log_start": 218269,
+   "run": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest",
+   "pid": null,
+   "pid_start": null,
+   "session": "7d5eedb8-966a-481f-ba7b-8391135cdc10",
+   "session_dir": "/Users/danamador/.claude-assembio",
+   "refused": 1,
+   "refused_lines": [
+    "refused: Bash: `unity command sk4te_card_bible` is refused for a ticket worker"
+   ],
+   "checks": [
+    {
+     "cmd": "python3 .sb/checks-compile.py",
+     "code": 0,
+     "secs": 6.1,
+     "tail": "compiled clean: {\"sampledUtc\": \"2026-11-17T16:33:38.122096Z\", \"ageMs\": 7, \"compilationFailed\": false, \"compiling\": false, \"consoleErrors\": 0, \"consoleWarnings\": 67, \"consoleLogs\": 0, \"seeded\": true}"
+    }
+   ],
+   "recheck_at": null,
+   "checked": null,
+   "landed_at": 1794933220.955737,
+   "rechecks": null,
+   "verdict": "partly",
+   "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1147-review.md",
+   "fails": [
+    {
+     "model": "sonnet",
+     "why": "judged partly by the Opus review; one more try with its findings: The owner has opened it and said it reads: not met. This needs you.",
+     "commit": "71f4a9190a697f65d21f8cc509757f82ffea624a"
+    },
+    {
+     "model": "sonnet",
+     "why": "no commit after 3406f0316",
+     "commit": null
+    }
+   ],
+   "redo": {
+    "commit": "71f4a9190a697f65d21f8cc509757f82ffea624a",
+    "verdict": "partly",
+    "findings": [
+     "- The owner has opened it and said it reads: not met. This needs you."
+    ],
+    "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1147-review-1.md",
+    "base": "eb152f9e92f3f4de62a38242dac6a9750ad4033c"
+   },
+   "retry": "no commit after 3406f0316\nIts work stays on branch sb/sk4te-party-playtest-1147 in /Users/danamador/.sb-hub/worktrees/sk4te-caa319/sk4te-party-playtest-1147.",
+   "media": [],
+   "digested": true
+  },
+  {
+   "key": "sk4te/party-playtest#1156",
+   "kind": "ticket",
+   "agent": null,
+   "state": "done",
+   "note": "resolved, commit e20cb9c57",
+   "commit": "e20cb9c57f01891bafab9011364b4244e15547a3",
+   "tries": 1,
+   "started": 1794925202.248618,
+   "ended": 1794928071.239573,
+   "night": "night-20261117-014410",
+   "runner": "assembio",
+   "repo": "/Users/danamador/Documents/Coding/sk4te",
+   "map": "sk4te/party-playtest",
+   "title": "The market draws three things over one another: the stats radar, the match lines and the clock",
+   "model": "sonnet",
+   "tree": "/Users/danamador/.sb-hub/worktrees/sk4te-caa319/sk4te-party-playtest-1156",
+   "branch": "sb/sk4te-party-playtest-1156",
+   "paths": [],
+   "base_sha": "4050215657ab36e1e6fc43889b8680b542219972",
+   "first_base": "4050215657ab36e1e6fc43889b8680b542219972",
+   "log": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1156.log",
+   "log_start": 90841,
+   "run": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest",
+   "pid": null,
+   "pid_start": null,
+   "session": "cc8f56bf-e717-4680-9ba1-93acc904e35e",
+   "session_dir": "/Users/danamador/.claude-assembio",
+   "checks": [
+    {
+     "cmd": "python3 .sb/checks-compile.py",
+     "code": 0,
+     "secs": 6.7,
+     "tail": "compiled clean: {\"sampledUtc\": \"2026-11-17T14:39:05.778222Z\", \"ageMs\": 239, \"compilationFailed\": false, \"compiling\": false, \"consoleErrors\": 0, \"consoleWarnings\": 1, \"consoleLogs\": 7, \"seeded\": true}"
+    }
+   ],
+   "landed_at": 1794926348.587102,
+   "checked": null,
+   "rechecks": null,
+   "recheck_at": null,
+   "verdict": "finished",
+   "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1156-review.md",
+   "fails": [
+    {
+     "model": "sonnet",
+     "why": "judged not met by the Opus review; one more try with its findings: No text over other text or a card's price at 1280x720 and 1920x1080: not met. No new commit and no screenshot at either size, the same gap the 2026-11-16 review found. I checked the real code at HEAD: 115b24537 is an ancestor, and Bo",
+     "commit": null
+    }
+   ],
+   "redo": {
+    "commit": null,
+    "verdict": "not met",
+    "findings": [
+     "- No text over other text or a card's price at 1280x720 and 1920x1080: not met. No new commit and no screenshot at either size, the same gap the 2026-11-16 review found. I checked the real code at HEAD: 115b24537 is an ancestor, and BoardView.cs:339 places the clock at viewport (0.925, 0.935). The receipt line and the radar skip in a market are as the report says. Where these land against the cards and their prices was never rendered, and the report says so itself."
+    ],
+    "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1156-review-1.md",
+    "base": "88f5739a3fe8c752b7a34e69c3f89907a9c0ccaf"
+   },
+   "media": [],
+   "digested": true
+  },
+  {
+   "key": "sk4te/party-playtest#1157",
+   "kind": "ticket",
+   "agent": null,
+   "state": "done",
+   "note": "resolved, commit bbac87b4f",
+   "commit": "bbac87b4fd738ec57922bd395772b025878f2245",
+   "tries": 3,
+   "started": 1794906671.721577,
+   "ended": 1794912975.3525581,
+   "night": "night-20261117-014410",
+   "runner": "assembio",
+   "repo": "/Users/danamador/Documents/Coding/sk4te",
+   "map": "sk4te/party-playtest",
+   "title": "The market never says how to sell a card, and it takes more than five presses to reach the row",
+   "model": "opus",
+   "tree": "/Users/danamador/.sb-hub/worktrees/sk4te-caa319/sk4te-party-playtest-1157",
+   "branch": "sb/sk4te-party-playtest-1157",
+   "paths": [],
+   "base_sha": "f2025e3fa5c4fa5ca08ccb3ec863777e70322043",
+   "first_base": "e4b371f5cda651924d2cedea0a3434a7a5a5a78e",
+   "log": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1157.log",
+   "log_start": 955376,
+   "run": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest",
+   "pid": null,
+   "pid_start": null,
+   "session": "d2ff19cf-f14d-413f-8de1-d58243fe6099",
+   "session_dir": "/Users/danamador/.claude-assembio",
+   "checks": [
+    {
+     "cmd": "python3 .sb/checks-compile.py",
+     "code": 0,
+     "secs": 4.4,
+     "tail": "compiled clean: {\"sampledUtc\": \"2026-11-17T09:25:16.228512Z\", \"ageMs\": 181, \"compilationFailed\": false, \"compiling\": false, \"consoleErrors\": 0, \"consoleWarnings\": 0, \"consoleLogs\": 4, \"seeded\": true}"
+    }
+   ],
+   "landed_at": 1794907518.7743292,
+   "checked": null,
+   "rechecks": null,
+   "recheck_at": null,
+   "verdict": "finished",
+   "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1157-review.md",
+   "fails": [
+    {
+     "model": "sonnet",
+     "why": "judged partly by the Opus review; one more try with its findings: A first-time seat sells a card in 3 presses: not met. I checked the real input and press path. Ready really is its own button (PlayerControllerInput.inputactions: Fold = buttonNorth/F, Ready = rightTrigger/R; BoardCursor.cs:355), so t",
+     "commit": null
+    },
+    {
+     "model": "sonnet",
+     "why": "could not land: its commits conflict with d50853f9f on the checkout's branch in Assets/Scripts/PlayerCore/Board/BoardHud.Pad.cs",
+     "commit": null
+    },
+    {
+     "model": "opus",
+     "why": "could not land: its commits conflict with b76f04cef on the checkout's branch in Assets/Scripts/PlayerCore/Board/BoardHud.Pad.cs",
+     "commit": null
+    }
+   ],
+   "redo": {
+    "commit": null,
+    "verdict": "partly",
+    "findings": [
+     "- A first-time seat sells a card in 3 presses: not met. I checked the real input and press path. Ready really is its own button (PlayerControllerInput.inputactions: Fold = buttonNorth/F, Ready = rightTrigger/R; BoardCursor.cs:355), so that objection is gone. But BoardHud.Tree.cs:339 seeds every market ring onto a shop card (SeedOnShopCard, BoardHud.Pad.cs:124), the at-rest flick walk only reaches table cards, the deck and rival slots (TableSpots, BoardHud.Pad.cs:160; no own-slot spot unless slice is true), and the at-rest Y branch (BoardHud.Tree.cs:352-361) calls LookInside when the cursor hovers a shop card, before it ever reaches OpenGraph. So from rest, Y looks inside a shop card. Whether the graph, once open, has a placed card one step away was not checked either: nobody played it, and a refused (locked-in) sale still shows no words."
+    ],
+    "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1157-review-1.md",
+    "base": "72cf3da3f24e6a0cafcd30d5f09b62a7d6310021"
+   },
+   "retry": "could not land: its commits conflict with b76f04cef on the checkout's branch in Assets/Scripts/PlayerCore/Board/BoardHud.Pad.cs\nIts work stays on branch sb/sk4te-party-playtest-1157 in /Users/danamador/.sb-hub/worktrees/sk4te-caa319/sk4te-party-playtest-1157.",
+   "media": [],
+   "digested": true
+  },
+  {
+   "key": "sk4te/party-playtest#1179",
+   "kind": "ticket",
+   "agent": null,
+   "state": "skipped",
+   "note": "blocked: after The checker answers every question the old rules answer: a bare part, a changed value, an author's asset, and where the fault is",
+   "commit": null,
+   "tries": 0,
+   "started": null,
+   "ended": 1794877019.485149,
+   "night": "night-20261117-014410",
+   "title": "The market does not slow down when the new checker decides: it remembers its answers",
+   "digested": true
+  },
+  {
+   "key": "sk4te/party-playtest#1115",
+   "kind": "ticket",
+   "agent": null,
+   "state": "done",
+   "note": "resolved, commit 8c06919a3",
+   "commit": "8c06919a3aa529bae9ac6ce323f30bba0e95da99",
+   "tries": 0,
+   "started": 1794881246.100341,
+   "ended": 1794883117.885746,
+   "night": "night-20261117-014410",
+   "runner": "assembio",
+   "repo": "/Users/danamador/Documents/Coding/sk4te",
+   "map": "sk4te/party-playtest",
+   "title": "A weapon lying on the floor does nothing on its own",
+   "model": "sonnet",
+   "tree": "/Users/danamador/.sb-hub/worktrees/sk4te-caa319/sk4te-party-playtest-1115",
+   "branch": "sb/sk4te-party-playtest-1115",
+   "paths": [
+    "Assets/Scripts/PlayerCore/Items/Modules/GateNode.cs",
+    "Assets/Scripts/PlayerCore/Items/Item.cs"
+   ],
+   "base_sha": "b0543ccc9ba9e462e67053072f285cf50990e01b",
+   "first_base": "b0543ccc9ba9e462e67053072f285cf50990e01b",
+   "log": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1115.log",
+   "log_start": 0,
+   "run": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest",
+   "pid": null,
+   "pid_start": null,
+   "session": "c49361c1-d72c-4d26-aff3-e526d011485e",
+   "session_dir": "/Users/danamador/.claude-assembio",
+   "checks": [
+    {
+     "cmd": "python3 .sb/checks-compile.py",
+     "code": 0,
+     "secs": 5.8,
+     "tail": "compiled clean: {\"sampledUtc\": \"2026-11-17T02:14:13.668831Z\", \"ageMs\": 0, \"compilationFailed\": false, \"compiling\": false, \"consoleErrors\": 0, \"consoleWarnings\": 104, \"consoleLogs\": 4, \"seeded\": true}"
+    }
+   ],
+   "recheck_at": null,
+   "checked": null,
+   "landed_at": 1794881661.5021281,
+   "rechecks": null,
+   "verdict": "finished",
+   "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1115-review.md",
+   "media": [],
+   "digested": true
+  },
+  {
+   "key": "sk4te/party-playtest#1222",
+   "kind": "ticket",
+   "agent": null,
+   "state": "done",
+   "note": "resolved, commit fc70a09b0",
+   "commit": "fc70a09b099bb938a95d9de20009d6594bd497c4",
+   "tries": 0,
+   "started": 1794890515.3637109,
+   "ended": 1794891405.092499,
+   "night": "night-20261117-014410",
+   "runner": "assembio",
+   "repo": "/Users/danamador/Documents/Coding/sk4te",
+   "map": "sk4te/party-playtest",
+   "title": "Getting hit makes you let go of what you are holding down: a held lash, reeling in, the magnet",
+   "model": "sonnet",
+   "tree": "/Users/danamador/.sb-hub/worktrees/sk4te-caa319/sk4te-party-playtest-1222",
+   "branch": "sb/sk4te-party-playtest-1222",
+   "paths": [
+    "Assets/Scripts/PlayerCore/Items/Leaves/Unlash.cs",
+    "Assets/Scripts/PlayerCore/Items/Leaves/Wind.cs"
+   ],
+   "base_sha": "b0543ccc9ba9e462e67053072f285cf50990e01b",
+   "first_base": "b0543ccc9ba9e462e67053072f285cf50990e01b",
+   "log": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1222.log",
+   "log_start": 0,
+   "run": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest",
+   "pid": null,
+   "pid_start": null,
+   "session": "49e58d23-c561-4e72-b36d-a7f1dc08da59",
+   "session_dir": "/Users/danamador/.claude-assembio",
+   "checks": [
+    {
+     "cmd": "python3 .sb/checks-compile.py",
+     "code": 0,
+     "secs": 5.4,
+     "tail": "compiled clean: {\"sampledUtc\": \"2026-11-17T04:50:35.556982Z\", \"ageMs\": 143, \"compilationFailed\": false, \"compiling\": false, \"consoleErrors\": 0, \"consoleWarnings\": 102, \"consoleLogs\": 12, \"seeded\": true}"
+    }
+   ],
+   "recheck_at": null,
+   "checked": null,
+   "rechecks": null,
+   "held": null,
+   "landed_at": 1794891038.388944,
+   "verdict": "finished",
+   "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1222-review.md",
+   "media": [],
+   "digested": true
+  },
+  {
+   "key": "sk4te/party-playtest#1068",
+   "kind": "ticket",
+   "agent": null,
+   "state": "skipped",
+   "note": "no longer open: dropped: Dropped from the hub page: this should only be possible outside a proper match ( playground / party menu )",
+   "commit": null,
+   "tries": 0,
+   "started": null,
+   "ended": 1794880875.720701,
+   "night": "night-20261117-014410",
+   "title": "A friend can pick up a pad and join between matches, and a player can leave without a mouse",
+   "digested": true
+  },
+  {
+   "key": "sk4te/party-playtest#1242",
+   "kind": "ticket",
+   "agent": null,
+   "state": "failed",
+   "note": "could not start: could not make its worktree: fatal: 'sb/sk4te-party-playtest-1242' is already used by worktree at '/Users/danamador/.sb-hub/worktrees/sk4te-caa319/sk4te-party-playtest-1242'",
+   "commit": null,
+   "tries": 0,
+   "started": 1794881304.644042,
+   "ended": 1794881307.357975,
+   "night": "night-20261117-014410",
+   "runner": "assembio",
+   "repo": "/Users/danamador/Documents/Coding/sk4te",
+   "map": "sk4te/party-playtest",
+   "title": "A knocked-out player leaves nothing behind: their lashes stop, every rope they made is cut, and every hand on them lets go when they respawn",
+   "model": "sonnet",
+   "tree": "/Users/danamador/.sb-hub/worktrees/sk4te-caa319/sk4te-party-playtest-1242",
+   "branch": "sb/sk4te-party-playtest-1242",
+   "paths": [
+    "Assets/Scripts/PlayerCore/Locomotion/Gravity/GravityBody.cs",
+    "Assets/Scripts/PlayerCore/Carry/Chains.cs",
+    "Assets/Scripts/PlayerCore/Carry/Hands.cs",
+    "Assets/Scripts/PlayerCore/Carry/Grip.cs",
+    "Assets/Scripts/PlayerCore/Core/StageLifecycle.cs",
+    "docs/adr/"
+   ],
+   "pid": null,
+   "pid_start": null,
+   "media": [],
+   "digested": true
+  },
+  {
+   "key": "sk4te/party-playtest#1053",
+   "kind": "ticket",
+   "agent": null,
+   "state": "done",
+   "note": "resolved, commit 1de628b94",
+   "commit": "1de628b94310532ecb6dee0e83b2a1137861ccaf",
+   "tries": 1,
+   "started": 1794904258.600943,
+   "ended": 1794906787.3414972,
+   "night": "night-20261117-014410",
+   "runner": "assembio",
+   "repo": "/Users/danamador/Documents/Coding/sk4te",
+   "map": "sk4te/party-playtest",
+   "title": "Throwaway builds of the chosen new powers, each fired from a fist and a bullet, with a clip for each",
+   "model": "sonnet",
+   "tree": "/Users/danamador/.sb-hub/worktrees/sk4te-caa319/sk4te-party-playtest-1053",
+   "branch": "sb/sk4te-party-playtest-1053",
+   "paths": [],
+   "base_sha": "0a09f92a0ef34a8a80a9c37b6d75e8e5f6d0c300",
+   "first_base": "0a09f92a0ef34a8a80a9c37b6d75e8e5f6d0c300",
+   "log": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-16-party-playtest/1053.log",
+   "log_start": 1831323,
+   "run": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-16-party-playtest",
+   "pid": null,
+   "pid_start": null,
+   "checks": [
+    {
+     "cmd": "python3 .sb/checks-compile.py",
+     "code": 0,
+     "secs": 5.9,
+     "tail": "compiled clean: {\"sampledUtc\": \"2026-11-17T08:46:27.052848Z\", \"ageMs\": 181, \"compilationFailed\": false, \"compiling\": false, \"consoleErrors\": 0, \"consoleWarnings\": 0, \"consoleLogs\": 2, \"seeded\": true}"
+    }
+   ],
+   "landed_at": 1794905188.067231,
+   "checked": null,
+   "rechecks": null,
+   "recheck_at": null,
+   "verdict": "finished",
+   "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-16-party-playtest/1053-review.md",
+   "fails": [
+    {
+     "model": "sonnet",
+     "why": "judged partly by the Opus review; one more try with its findings: One clip or screenshot pair per power in the map's shots folder: not met. A clip and a contact sheet exist for each power (`haste-on-you.mp4`/`haste-at-other.png`, the same for Weightless and Bounce). They are real files, and I opened",
+     "commit": "e1ab8733bab1a56cff620ef9521b87e068b8ddd9"
+    }
+   ],
+   "redo": {
+    "commit": "e1ab8733bab1a56cff620ef9521b87e068b8ddd9",
+    "verdict": "partly",
+    "findings": [
+     "- One clip or screenshot pair per power in the map's shots folder: not met. A clip and a contact sheet exist for each power (`haste-on-you.mp4`/`haste-at-other.png`, the same for Weightless and Bounce). They are real files, and I opened `weightless-at-other.png`: it shows the two bodies and the pistol. But they are in `runs/2026-11-16-party-playtest/1053-media/`, and the map's `party-playtest/shots/` holds only `1079-contact-sheet.png`. The ticket also asks for each power fired from a fist, and there is no fist footage (the worker ruled the pair checker refuses moment gates on Fists). Haste's clip shows nothing you can see, so it does not show the power. I checked the real code for one case: Weightless's up and down full-strength lashings sum to zero in `Lashing.Compose`, with authority clamped to 1, so gravity really does go to exactly zero on a self-lash."
+    ],
+    "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-16-party-playtest/1053-review-1.md",
+    "base": "ee717962c5563986c859d7628d293ad9a48e079a"
+   },
+   "session": "452f598c-7a31-4681-8ea5-bc7c930e1cb7",
+   "session_dir": "/Users/danamador/.claude-assembio",
+   "media": [
+    "bounce-at-other.png",
+    "bounce-on-you.mp4",
+    "haste-at-other.png",
+    "haste-on-you.mp4",
+    "weightless-at-other.png",
+    "weightless-on-you.mp4"
+   ],
+   "digested": true
+  },
+  {
+   "key": "sk4te/party-playtest#1122",
+   "kind": "ticket",
+   "agent": null,
+   "state": "failed",
+   "note": "judged partly by the Opus review after its second try: (Owner's 2026-11-12 addition) Graph view shows the card as one node under its trigger, with its boosts and price readable, proven by a screenshot: not met. No screenshot exists. The integrator found that `sk4te_ui_shot` cannot place a card under a hold trigger.",
+   "commit": "1de628b94310532ecb6dee0e83b2a1137861ccaf",
+   "tries": 1,
+   "started": 1794905189.023975,
+   "ended": 1794906789.110806,
+   "night": "night-20261117-014410",
+   "runner": "assembio",
+   "repo": "/Users/danamador/Documents/Coding/sk4te",
+   "map": "sk4te/party-playtest",
+   "title": "Burn is a card: a status effect you hold, bought and placed like Slow or Surge",
+   "model": "sonnet",
+   "tree": "/Users/danamador/.sb-hub/worktrees/sk4te-caa319/sk4te-party-playtest-1122",
+   "branch": "sb/sk4te-party-playtest-1122",
+   "paths": [
+    "Assets/Scripts/PlayerCore/Vitals/Burn.cs",
+    "Assets/Scripts/PlayerCore/Items/Leaves/PlayerModifyWhile.cs",
+    "Assets/Scripts/PlayerCore/Core/Verbs.cs"
+   ],
+   "base_sha": "a38f14cdbba08ae32bd93577f078eed1c67dd7f8",
+   "first_base": "a38f14cdbba08ae32bd93577f078eed1c67dd7f8",
+   "log": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-16-party-playtest/1122.log",
+   "log_start": 2726062,
+   "run": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-16-party-playtest",
+   "pid": null,
+   "pid_start": null,
+   "checks": [
+    {
+     "cmd": "python3 .sb/checks-compile.py",
+     "code": 0,
+     "secs": 3.9,
+     "tail": "compiled clean: {\"sampledUtc\": \"2026-11-17T09:02:08.970548Z\", \"ageMs\": 76, \"compilationFailed\": false, \"compiling\": false, \"consoleErrors\": 1, \"consoleWarnings\": 104, \"consoleLogs\": 4, \"seeded\": true}"
+    }
+   ],
+   "checked": null,
+   "rechecks": null,
+   "recheck_at": null,
+   "verdict": "partly",
+   "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-16-party-playtest/1122-review.md",
+   "fails": [
+    {
+     "model": "sonnet",
+     "why": "judged partly by the Opus review; one more try with its findings: In Play, with no card, holding does nothing: not met. Not played. From the code, PlayerCore no longer ticks a burn, and Vitals/Burn.cs is reduced to the Flame flag.",
+     "commit": "b63253d988513523b0b1e248a2c2a6681bfd0872"
+    }
+   ],
+   "redo": {
+    "commit": "b63253d988513523b0b1e248a2c2a6681bfd0872",
+    "verdict": "partly",
+    "findings": [
+     "- In Play, with no card, holding does nothing: not met. Not played. From the code, PlayerCore no longer ticks a burn, and Vitals/Burn.cs is reduced to the Flame flag.",
+     "- With the card under While you hold, the legs, guard and strike boosts apply and energy drains at the old rate: not met. Not played. The card's own numbers are legs 1.3, strike 1.3, guard 0.7, rate 20, times the legs' feat price, and nobody compared that against the old tuning-driven rate. BurnTellTests.TheSteam_FollowsWhatTheBurnBills fails on a clone of HEAD (\"the taller, heavier body burns faster: Expected greater than 22 But was 20\"). It passes on d492a83c7, so the new billing no longer scales with the body the way the steam test expects.",
+     "- A knockdown puts it out: not met. Not played, and no test covers it.",
+     "- (2026-11-12 comment) A graph screenshot shows the card as one node with its three boosts and price readable: not met. None taken."
+    ],
+    "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-16-party-playtest/1122-review-1.md",
+    "base": "6ad410c567aac520d00e98423665a0f2602d53ff"
+   },
+   "session": "63e24bdc-15d9-489f-86da-e7986692da6d",
+   "session_dir": "/Users/danamador/.claude-assembio",
+   "landed_at": 1794906129.85894,
+   "media": [
+    "burn-card.png"
+   ],
+   "digested": true
+  },
+  {
+   "key": "sk4te/party-playtest#1221",
+   "kind": "ticket",
+   "agent": null,
+   "state": "done",
+   "note": "resolved, commit 3866de59c",
+   "commit": "3866de59c3aaefaa27ec7e4827a6a5a2cc1beecc",
+   "tries": 3,
+   "started": null,
+   "ended": 1794928815.9301481,
+   "night": "night-20261117-014410",
+   "runner": "assembio",
+   "repo": "/Users/danamador/Documents/Coding/sk4te",
+   "map": "sk4te/party-playtest",
+   "title": "A dash breaks a rope tied to you, a lash on you and the magnet's pull",
+   "model": "opus",
+   "tree": "/Users/danamador/.sb-hub/worktrees/sk4te-caa319/sk4te-party-playtest-1221",
+   "branch": "sb/sk4te-party-playtest-1221",
+   "paths": [
+    "Assets/Scripts/PlayerCore/Locomotion/",
+    "Assets/Scripts/PlayerCore/Carry/Chains.cs",
+    "Assets/Scripts/PlayerCore/Locomotion/Gravity/GravityBody.cs"
+   ],
+   "base_sha": "696fe16d38abf1275a86ab9f011082138b36a9cb",
+   "first_base": "bbe23836b206cf4e0c4a6048251571ceab468999",
+   "log": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-16-party-playtest/1221.log",
+   "log_start": 1573919,
+   "run": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-16-party-playtest",
+   "pid": null,
+   "pid_start": null,
+   "checks": [
+    {
+     "cmd": "python3 .sb/checks-compile.py",
+     "code": 0,
+     "secs": 5.3,
+     "tail": "compiled clean: {\"sampledUtc\": \"2026-11-17T14:53:16.779851Z\", \"ageMs\": 189, \"compilationFailed\": false, \"compiling\": false, \"consoleErrors\": 0, \"consoleWarnings\": 103, \"consoleLogs\": 2, \"seeded\": true}"
+    }
+   ],
+   "checked": null,
+   "rechecks": 0,
+   "recheck_at": null,
+   "verdict": "finished",
+   "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-16-party-playtest/1221-review.md",
+   "fails": [
+    {
+     "model": "sonnet",
+     "why": "judged not met by the Opus review; one more try with its findings: A bot tied by a rope, lashed, or pulled by the magnet is free after one dash, measured in Play: not met. Not measured. DashBreaksPullsTests.ADash_CutsTheRopeAndForeignLashes_AndKeepsOwnLashes passes on a clone of HEAD (I ran it). It ",
+     "commit": "74814a8f392d3189f774ee122ec39092875c1ff1"
+    },
+    {
+     "model": "sonnet",
+     "why": "after landing, check failed: python3 .sb/checks-compile.py",
+     "commit": "a5e66a35fb981640909c13d713901758e08df1ce"
+    },
+    {
+     "model": "opus",
+     "why": "after landing, check failed: python3 .sb/checks-compile.py",
+     "commit": "64a8a311c6b08fb94366ec05d4244b61584bf8c0"
+    }
+   ],
+   "redo": {
+    "commit": "74814a8f392d3189f774ee122ec39092875c1ff1",
+    "verdict": "not met",
+    "findings": [
+     "- A bot tied by a rope, lashed, or pulled by the magnet is free after one dash, measured in Play: not met. Not measured. DashBreaksPullsTests.ADash_CutsTheRopeAndForeignLashes_AndKeepsOwnLashes passes on a clone of HEAD (I ran it). It uses the real Player.prefab, Chains and GravityBody, and calls BreakFree directly, not through a dash. No caller of Dash.BreakFree exists besides Dash.Begin, and Magnet.cs has no dash check, so a magnet pull survives a dash.",
+     "- A slowed or frozen body is not freed: not met. Not measured. In the code, BreakFree touches only lashings and chains, never the body clock, so Slow and Stasis should stay."
+    ],
+    "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-16-party-playtest/1221-review-1.md",
+    "base": "88c7f990cb1242adfdb03ccf2b89215203c69658"
+   },
+   "session": "0b734967-e5e1-477b-a507-b70d49f5e092",
+   "session_dir": "/Users/danamador/.claude-assembio",
+   "retry": "after landing, check failed: python3 .sb/checks-compile.py\ncompile errors:\nAssets/Tests/PlayMode/HeldCostsEnergyTests.cs(49,92): error CS0117: 'Lash' does not contain a definition for 'HitHeldSeconds'\nAssets/Tests/PlayMode/HeldCostsEnergyTests.cs(49,92): error CS0117: 'Lash' does not contain a definition for 'HitHeldSeconds'\nAssets/Tests/PlayMode/HeldCostsEnergyTests.cs(49,92): error CS0117: 'Lash' does not contain a definition for 'HitHeldSeconds'\nAssets/Tests/PlayMode/HeldCostsEnergyTests.cs(49,92): error CS0117: 'Lash' does not contain a definition for 'HitHeldSeconds'\nAssets/Tests/PlayMode/HeldCostsEnergyTests.cs(49,92): error CS0117: 'Lash' does not contain a definition for 'HitHeldSeconds'\nAssets/Tests/EditMode/DashBreaksPullsTests.cs(69,45): error CS0012: The type 'MagicTimeUser' is defined in an assembly that is not referenced. You must add a reference to assembly 'MagicPigGames.MagicTime, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null'.\nAssets/Tests/EditMode/DashBreaksPullsTests.cs(70,37): error CS0012: The type 'MagicTimeUser' is defined in an assembly that is not referenced. You must add a reference to assembly 'MagicPigGames.MagicTime, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null'.\nAssets/Tests/EditMode/DashBreaksPullsTests.cs(71,37): error CS0012: The type 'MagicTimeUser' is defined in an assembly that is not referenced. You must add a reference to assembly 'MagicPigGames.MagicTime, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null'.\nAssets/Tests/EditMode/DashBreaksPullsTests.cs(72,38): error CS0012: The type 'MagicTimeUser' is defined in an assembly that is not referenced. You must add a reference to assembly 'MagicPigGames.MagicTime, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null'.\nAssets/Tests/EditMode/DashBreaksPullsTests.cs(72,38): error CS1061: 'BodyClock' does not contain a definition for 'TimeScale' and no accessible extension method 'TimeScale' accepting a first argument of type 'BodyClock' could be found (are you missing a using directive or an assembly reference?)\nIt landed on sk4te as 64a8a311c; the hub backed it out.\nIts work stays on branch sb/sk4te-party-playtest-1221 in /Users/danamador/.sb-hub/worktrees/sk4te-caa319/sk4te-party-playtest-1221.",
+   "landed_at": 1794927197.956664,
+   "media": [
+    "frozen-after-dash.png"
+   ],
+   "digested": true
+  },
+  {
+   "key": "sk4te/party-playtest#1096",
+   "kind": "ticket",
+   "agent": null,
+   "state": "failed",
+   "note": "judged partly by the Opus review after its second try: Knife lying against a body fires once: not met. On a box it fired once (tick 9080, nothing through 9654), and once more while riding a box on ice (one Lash at 10532). I checked this against the real data. `Player.prefab` carries two `CapsuleCollider`s with `m_IsTrigger: 0` on one rigidbody. `ThrownItem.OnCollisionExit` (line 155) calls `Separated(collision.rigidbody)` for each collider pair, and `Separated` (AttackRun.cs:56–62) drops the body unless the exit falls on the hit's own tick. So a knife resting across both capsules that slips off one of them clears the body while it still touches the other, and fires again. No test or play run covers a player body.",
+   "commit": "3866de59c3aaefaa27ec7e4827a6a5a2cc1beecc",
+   "tries": 1,
+   "started": null,
+   "ended": 1794928823.871778,
+   "night": "night-20261117-014410",
+   "runner": "assembio",
+   "repo": "/Users/danamador/Documents/Coding/sk4te",
+   "map": "sk4te/party-playtest",
+   "title": "'Hits' fires on every hit: again after a bounce, and on walls for the effects that make sense there",
+   "model": "sonnet",
+   "tree": "/Users/danamador/.sb-hub/worktrees/sk4te-caa319/sk4te-party-playtest-1096",
+   "branch": "sb/sk4te-party-playtest-1096",
+   "paths": [],
+   "base_sha": "498524c8b545051c214c52b4c31e4b7420ac5a4c",
+   "first_base": null,
+   "log": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-16-party-playtest/1096.log",
+   "log_start": 0,
+   "run": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-16-party-playtest",
+   "pid": null,
+   "pid_start": null,
+   "checks": [
+    {
+     "cmd": "python3 .sb/checks-compile.py",
+     "code": 0,
+     "secs": 4.6,
+     "tail": "compiled clean: {\"sampledUtc\": \"2026-11-17T15:01:04.610899Z\", \"ageMs\": 245, \"compilationFailed\": false, \"compiling\": false, \"consoleErrors\": 0, \"consoleWarnings\": 103, \"consoleLogs\": 8, \"seeded\": true}"
+    }
+   ],
+   "checked": null,
+   "rechecks": 0,
+   "recheck_at": null,
+   "verdict": "partly",
+   "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-16-party-playtest/1096-review.md",
+   "fails": [
+    {
+     "model": "sonnet",
+     "why": "judged partly by the Opus review; one more try with its findings: A bouncing round with Lash hits the same body twice on two passes and pushes it twice: not met. Not played. Projectile.OnCollisionExit now calls `fired?.Separated(collision.rigidbody)`, and AttackRun.Separated drops the body from the ",
+     "commit": "39e6cc0695845c4c953d1e7b0a337f6e3349bdfc"
+    }
+   ],
+   "redo": {
+    "commit": "39e6cc0695845c4c953d1e7b0a337f6e3349bdfc",
+    "verdict": "partly",
+    "findings": [
+     "- A bouncing round with Lash hits the same body twice on two passes and pushes it twice: not met. Not played. Projectile.OnCollisionExit now calls `fired?.Separated(collision.rigidbody)`, and AttackRun.Separated drops the body from the once-list unless the leave falls on the hit's own SimClock tick.",
+     "- A Knife lying against a body fires once: not met. Not played. The only guard is the same-step one, so a resting contact that reports exit and enter on different steps would fire again. Unity's exit callbacks on a resting contact were not measured. OnHitSlotTests.AThrow_RunsItsSlotAgain_AfterItLeavesTheBody_ButNotWhileItRests passes on a clone of HEAD, but it calls Separated by hand.",
+     "- The Yo-yo's return hit fires: not met. A search of Assets/Data and Assets/Scripts finds no Yo-yo, so this case cannot be tried as written.",
+     "- No effect fires more than once per step from one contact: not met. Not measured."
+    ],
+    "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-16-party-playtest/1096-review-1.md",
+    "base": "498524c8b545051c214c52b4c31e4b7420ac5a4c"
+   },
+   "media": [],
+   "digested": true,
+   "landed_at": 1794927665.76955
+  },
+  {
+   "key": "sk4te/party-playtest#1087",
+   "kind": "ticket",
+   "agent": null,
+   "state": "failed",
+   "note": "judged partly by the Opus review after its second try: Each fires its three test effects once per moment, never in a loop: not met. Blast and Slow are met. I checked the real raise sites against today's play log, which drove `Dash.Begin`, `Impact.Deliver` and `Knockdown.Knock` on the Fists and on a Bat. The log shows one blast per moment (`'blasts': 1`), a slowed body after Strike (`targetSlow 0.589`) and after Down (`wielderSlow 0.489`), and no new blasts while the body stood up. A second `Knock` while down raised 0 dispatches (`secondKnockWhileDown: 0`). This matches the code: `Knockdown.Knock` raises `Downed` after its `if (down) return;` guard, `Dash` raises once at its first step, and `Impact` guards `Struck` with the `raisingStruck` set. Rope is not met. It made one rope only under Strike on the Bat. Under Dash and Down it is refused on every host (`W✗39`: nothing above it reaches anyone). On the Fists it made no rope under any moment, the existing take-a-hit included. The checker refuses every moment on host Body (`B✗`), so \"on the body\" was stood in for by the Fists. A rope under dash and under fall has never fired.",
+   "commit": "3866de59c3aaefaa27ec7e4827a6a5a2cc1beecc",
+   "tries": 1,
+   "started": 1794927667.7167768,
+   "ended": 1794930575.2072089,
+   "night": "night-20261117-014410",
+   "runner": "assembio",
+   "repo": "/Users/danamador/Documents/Coding/sk4te",
+   "map": "sk4te/party-playtest",
+   "title": "The chosen new triggers are cards on the shelf, each tried with a blast, a rope and a time card",
+   "model": "sonnet",
+   "tree": "/Users/danamador/.sb-hub/worktrees/sk4te-caa319/sk4te-party-playtest-1087",
+   "branch": "sb/sk4te-party-playtest-1087",
+   "paths": [
+    "Assets/Scripts/PlayerCore/Items/Gates",
+    "Assets/Data/Items/Cards"
+   ],
+   "base_sha": "a38f14cdbba08ae32bd93577f078eed1c67dd7f8",
+   "first_base": "a38f14cdbba08ae32bd93577f078eed1c67dd7f8",
+   "log": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-16-party-playtest/1087.log",
+   "log_start": 605149,
+   "run": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-16-party-playtest",
+   "pid": null,
+   "pid_start": null,
+   "checks": [
+    {
+     "cmd": "python3 .sb/checks-compile.py",
+     "code": 0,
+     "secs": 7.5,
+     "tail": "compiled clean: {\"sampledUtc\": \"2026-11-17T15:23:18.165865Z\", \"ageMs\": 239, \"compilationFailed\": false, \"compiling\": false, \"consoleErrors\": 0, \"consoleWarnings\": 103, \"consoleLogs\": 4, \"seeded\": true}"
+    }
+   ],
+   "checked": null,
+   "rechecks": null,
+   "recheck_at": null,
+   "verdict": "partly",
+   "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-16-party-playtest/1087-review.md",
+   "fails": [
+    {
+     "model": "sonnet",
+     "why": "judged partly by the Opus review; one more try with its findings: Each fires its three test effects once per moment, never in a loop: not met. Nothing was fired. In the real code, the raise sites are Dash.cs (start of a dash), Knockdown.Knock and Impact.cs (a blow that got through). No test drives a",
+     "commit": "fa4767c9b63e8527cdb0701d4535665f63d5326c"
+    }
+   ],
+   "redo": {
+    "commit": "fa4767c9b63e8527cdb0701d4535665f63d5326c",
+    "verdict": "partly",
+    "findings": [
+     "- Each fires its three test effects once per moment, never in a loop: not met. Nothing was fired. In the real code, the raise sites are Dash.cs (start of a dash), Knockdown.Knock and Impact.cs (a blow that got through). No test drives any of them.",
+     "- The table has their rows: not met. The bible's trigger-by-effect.md was last written at 11:36, before this commit, and the worker did not run sk4te_card_bible."
+    ],
+    "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-16-party-playtest/1087-review-1.md",
+    "base": "1a328e77067ec53fe62c15c5886b3f7d7029bc4a"
+   },
+   "session": "80a72374-feb0-43f6-836a-8dbfaab39c42",
+   "session_dir": "/Users/danamador/.claude-assembio",
+   "landed_at": 1794928999.308009,
+   "media": [
+    "card-sheet-moments.png",
+    "dash-blast.png",
+    "ddown-blast.png",
+    "strike-shackle.png"
+   ],
+   "digested": true
+  },
+  {
+   "key": "sk4te/party-playtest#1080",
+   "kind": "ticket",
+   "agent": null,
+   "state": "failed",
+   "note": "the Unity pass: the integrator could not make it work in Unity; its fixes were backed out.\nThe integrator's report: /Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1080-integrate.md",
+   "commit": "3866de59c3aaefaa27ec7e4827a6a5a2cc1beecc",
+   "tries": 1,
+   "started": 1794929002.1205351,
+   "ended": 1794929567.678035,
+   "night": "night-20261117-014410",
+   "runner": "assembio",
+   "repo": "/Users/danamador/Documents/Coding/sk4te",
+   "map": "sk4te/party-playtest",
+   "title": "The ten things on screen a newcomer would trip over are fixed",
+   "model": "sonnet",
+   "tree": "/Users/danamador/.sb-hub/worktrees/sk4te-caa319/sk4te-party-playtest-1080",
+   "branch": "sb/sk4te-party-playtest-1080",
+   "paths": [],
+   "base_sha": "1a4bda1b178f00f382100ec828d1479250742f2b",
+   "first_base": null,
+   "log": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-16-party-playtest/1080.log",
+   "log_start": 0,
+   "run": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-16-party-playtest",
+   "pid": null,
+   "pid_start": null,
+   "checks": [],
+   "checked": null,
+   "rechecks": null,
+   "recheck_at": null,
+   "verdict": "partly",
+   "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-16-party-playtest/1080-review-1.md",
+   "fails": [
+    {
+     "model": "sonnet",
+     "why": "judged partly by the Opus review; one more try with its findings: Before and after shots for each of the ten on the ticket: not met. Only two before shots exist (before-main-menu.png, before-board-hud.png), no after shots, and five fixes, not ten.",
+     "commit": "498524c8b545051c214c52b4c31e4b7420ac5a4c"
+    }
+   ],
+   "redo": {
+    "commit": "498524c8b545051c214c52b4c31e4b7420ac5a4c",
+    "verdict": "partly",
+    "findings": [
+     "- Before and after shots for each of the ten on the ticket: not met. Only two before shots exist (before-main-menu.png, before-board-hud.png), no after shots, and five fixes, not ten.",
+     "- The offscreen warnings for those panels are gone: not met. sk4te_ui_shot was not re-run after the change.",
+     "- Nothing else on the panel moved: not met. Not checked. The Quit fix changes SocketBandInset from 340 to 420, which moves every socket in the bay. The worker's arithmetic puts Quit's bottom at 870 against the readout at 922, but nothing was rendered."
+    ],
+    "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-16-party-playtest/1080-review-1.md",
+    "base": "1a4bda1b178f00f382100ec828d1479250742f2b"
+   },
+   "media": [
+    "before-board-hud.png",
+    "before-main-menu.png"
+   ],
+   "digested": true
+  },
+  {
+   "key": "sk4te/party-playtest#1064",
+   "kind": "ticket",
+   "agent": null,
+   "state": "failed",
+   "note": "the Unity pass: the integrator could not make it work in Unity; its fixes were backed out.\nThe integrator's report: /Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-17-party-playtest/1064-integrate.md",
+   "commit": "0b5c768b0a2a23c6180f4b849c7f95346890f315",
+   "tries": 1,
+   "started": 1794929575.125202,
+   "ended": 1794930499.549129,
+   "night": "night-20261117-014410",
+   "runner": "assembio",
+   "repo": "/Users/danamador/Documents/Coding/sk4te",
+   "map": "sk4te/party-playtest",
+   "title": "Magnet is a card: hold to pull what you aim at, turn it over to push, on fists, a weapon or a bullet",
+   "model": "sonnet",
+   "tree": "/Users/danamador/.sb-hub/worktrees/sk4te-caa319/sk4te-party-playtest-1064",
+   "branch": "sb/sk4te-party-playtest-1064",
+   "paths": [],
+   "base_sha": "e1ab8733bab1a56cff620ef9521b87e068b8ddd9",
+   "first_base": "e1ab8733bab1a56cff620ef9521b87e068b8ddd9",
+   "log": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-16-party-playtest/1064.log",
+   "log_start": 1167712,
+   "run": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-16-party-playtest",
+   "pid": null,
+   "pid_start": null,
+   "checks": [],
+   "checked": null,
+   "rechecks": null,
+   "recheck_at": null,
+   "verdict": "partly",
+   "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-16-party-playtest/1064-review.md",
+   "fails": [
+    {
+     "model": "sonnet",
+     "why": "judged partly by the Opus review; one more try with its findings: In Play: holding the second button with Magnet on fists drags a loose Bat and tugs a held Pistol, the flipped card shoves them, and on a Pistol bullet it pulls what is near where it lands: not met. Not played. From the real data, the ",
+     "commit": "a952d9110ac919eeba127e89c407da6cd09a8081"
+    }
+   ],
+   "redo": {
+    "commit": "a952d9110ac919eeba127e89c407da6cd09a8081",
+    "verdict": "partly",
+    "findings": [
+     "- In Play: holding the second button with Magnet on fists drags a loose Bat and tugs a held Pistol, the flipped card shoves them, and on a Pistol bullet it pulls what is near where it lands: not met. Not played. From the real data, the Bat and Pistol prefabs carry Bendable, so they are targets for Magnet.Hold. The burst on a hit (Magnet.Burst) uses ctx.Impact.Point.",
+     "- The pile-up script's magnet case stays under the ceiling: not met. Not run (the worker says so).",
+     "- sk4te_card_sheet shows both faces: not met. I rendered the sheet from the live Editor: \"Pull\" in the shop band and \"Push\" in the turned-over band, with different pictures. But the Push face's text reads \"pull metal and weapons toward you, within 20 m, while held\", the module sentence, not the asset's descriptionFlipped. The back face says the opposite of what it does. MagnetCardTests (3) pass on a clone of HEAD, but they check the faces differ, not this text.",
+     "- (From the 2026-11-12 comment) Graph screenshots of Pull on fists and Push on a bullet, each reading as a sentence: not met. None taken."
+    ],
+    "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-16-party-playtest/1064-review-1.md",
+    "base": "b4f61d92c5d68dc05aa3d2c45900c77b36d093ff"
+   },
+   "session": "ffc1badb-e3fc-47f4-990f-d5fdbfc6ec68",
+   "session_dir": "/Users/danamador/.claude-assembio",
+   "landed_at": 1794842989.415723,
+   "media": [],
+   "digested": true
+  },
+  {
+   "key": "sk4te/party-playtest#1219",
+   "kind": "ticket",
+   "agent": null,
+   "state": "failed",
+   "note": "judged partly by the Opus review after its second try: Yank, Lash Away and Lash Up pressed with nobody near move nobody, measured in Play: not met. Nothing was measured in Play on either try, and `CastLashOwnerTests` (the press-with-nobody cases) has never been run. Real-data check: Yank.asset, LashAway.asset and LashUp.asset are `on: 2` (Role.Reached). At HEAD, `LashNode.Run`'s else-branch (Lash.cs:261-269) passes `Roles.Body(lands, ctx)` straight to `Apply`, and `Apply` returns false on a null body (Lash.cs:329), so by the code those cards lash nobody when nothing is reached. The tests build those fields by hand and press without a Hand, so the grip-candidate path that `Roles.Body` takes in Play is not covered. The second try (a9bbe1ecf) only changed comments.",
+   "commit": "a9bbe1ecf138216b4eeb59a34ead3d80c95e45b9",
+   "tries": 1,
+   "started": 1794930506.2136042,
+   "ended": 1794932717.397822,
+   "night": "night-20261117-014410",
+   "runner": "assembio",
+   "repo": "/Users/danamador/Documents/Coding/sk4te",
+   "map": "sk4te/party-playtest",
+   "title": "A lash with nobody in reach does nothing, and Skyfall says 'on you' on its face",
+   "model": "sonnet",
+   "tree": "/Users/danamador/.sb-hub/worktrees/sk4te-caa319/sk4te-party-playtest-1219",
+   "branch": "sb/sk4te-party-playtest-1219",
+   "paths": [
+    "Assets/Scripts/PlayerCore/Items/Leaves/Lash.cs"
+   ],
+   "base_sha": "b537f07f0cf0a045b1893d4ac8f0f682ac82d90d",
+   "first_base": "b537f07f0cf0a045b1893d4ac8f0f682ac82d90d",
+   "log": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-16-party-playtest/1219.log",
+   "log_start": 134623,
+   "run": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-16-party-playtest",
+   "pid": null,
+   "pid_start": null,
+   "checks": [
+    {
+     "cmd": "python3 .sb/checks-compile.py",
+     "code": 0,
+     "secs": 7.0,
+     "tail": "compiled clean: {\"sampledUtc\": \"2026-11-17T15:59:04.515752Z\", \"ageMs\": 237, \"compilationFailed\": false, \"compiling\": false, \"consoleErrors\": 0, \"consoleWarnings\": 2, \"consoleLogs\": 14, \"seeded\": true}"
+    }
+   ],
+   "checked": null,
+   "rechecks": null,
+   "recheck_at": null,
+   "verdict": "partly",
+   "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-16-party-playtest/1219-review.md",
+   "fails": [
+    {
+     "model": "sonnet",
+     "why": "judged partly by the Opus review; one more try with its findings: Yank, Lash Away and Lash Up under a press with nobody near move nobody, measured in Play: not met. Not measured. In the real code, Lash's node now passes `Roles.Body(lands, ctx)` straight to Apply with no wielder fallback. The real ca",
+     "commit": "f9d9f89e8b08db66506d2c6ca6da01bbb613542c"
+    }
+   ],
+   "redo": {
+    "commit": "f9d9f89e8b08db66506d2c6ca6da01bbb613542c",
+    "verdict": "partly",
+    "findings": [
+     "- Yank, Lash Away and Lash Up under a press with nobody near move nobody, measured in Play: not met. Not measured. In the real code, Lash's node now passes `Roles.Body(lands, ctx)` straight to Apply with no wielder fallback. The real cards are authored `on: 2` (LashUp.asset, Yank.asset), not on the wielder. LashLeafTests (9) and LashingTests (36) pass on a clone of HEAD, but none of them presses a lash with nobody in reach."
+    ],
+    "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-16-party-playtest/1219-review-1.md",
+    "base": "e043785ab6e388ff031be326ae63070f47a74e04"
+   },
+   "session": "83b298b7-f4c2-413a-9ff2-53435599c1de",
+   "session_dir": "/Users/danamador/.claude-assembio",
+   "landed_at": 1794931145.6504042,
+   "media": [],
+   "digested": true
+  },
+  {
+   "key": "sk4te/party-playtest#1243",
+   "kind": "ticket",
+   "agent": null,
+   "state": "failed",
+   "note": "judged partly by the Opus review after its second try: A 20 s rope whose owner is frozen for 1 s still ends 20 s after it was made: not met. It was never measured, and `RealSecondsPlayTests` was never run. Real-code check: at HEAD, PlayerCore.cs:2119 calls `chains.Age(Time.fixedDeltaTime)` on every step Hitstop holds the body, and line 2171 runs `chains.Tick(dt)` with the same fixed step on the steps it does run, so by the code the countdown follows real time. A rope kept by a gun that has left the hand is still not covered (the worker says so).",
+   "commit": "a9bbe1ecf138216b4eeb59a34ead3d80c95e45b9",
+   "tries": 1,
+   "started": 1794931149.783943,
+   "ended": 1794932721.674669,
+   "night": "night-20261117-014410",
+   "runner": "assembio",
+   "repo": "/Users/danamador/Documents/Coding/sk4te",
+   "map": "sk4te/party-playtest",
+   "title": "Every rope, lash, slow and freeze counts real seconds, and hitting a body again restarts them",
+   "model": "sonnet",
+   "tree": "/Users/danamador/.sb-hub/worktrees/sk4te-caa319/sk4te-party-playtest-1243",
+   "branch": "sb/sk4te-party-playtest-1243",
+   "paths": [
+    "Assets/Scripts/PlayerCore/Core/BodyClock.cs",
+    "Assets/Scripts/PlayerCore/Carry/Chain.cs",
+    "Assets/Scripts/PlayerCore/Core/PlayerCore.cs",
+    "Assets/Scripts/PlayerCore/Locomotion/Gravity/GravityBody.cs"
+   ],
+   "base_sha": "b0167e3837cc2948ab6ec80b46c623dac4586b70",
+   "first_base": "b0167e3837cc2948ab6ec80b46c623dac4586b70",
+   "log": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-16-party-playtest/1243.log",
+   "log_start": 226300,
+   "run": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-16-party-playtest",
+   "pid": null,
+   "pid_start": null,
+   "checks": [
+    {
+     "cmd": "python3 .sb/checks-compile.py",
+     "code": 0,
+     "secs": 4.9,
+     "tail": "compiled clean: {\"sampledUtc\": \"2026-11-17T16:09:20.391696Z\", \"ageMs\": 297, \"compilationFailed\": false, \"compiling\": false, \"consoleErrors\": 0, \"consoleWarnings\": 103, \"consoleLogs\": 17, \"seeded\": true}"
+    }
+   ],
+   "checked": null,
+   "rechecks": null,
+   "recheck_at": null,
+   "verdict": "partly",
+   "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-16-party-playtest/1243-review.md",
+   "fails": [
+    {
+     "model": "sonnet",
+     "why": "judged partly by the Opus review; one more try with its findings: A 20 s rope whose owner is frozen for 1 s still ends 20 s after it was made: not met. Not measured. In the real code, PlayerCore.FixedUpdate now calls `chains.Age(Time.fixedDeltaTime)` on every step Hitstop holds the body, and Chain.A",
+     "commit": "88c7f990cb1242adfdb03ccf2b89215203c69658"
+    }
+   ],
+   "redo": {
+    "commit": "88c7f990cb1242adfdb03ccf2b89215203c69658",
+    "verdict": "partly",
+    "findings": [
+     "- A 20 s rope whose owner is frozen for 1 s still ends 20 s after it was made: not met. Not measured. In the real code, PlayerCore.FixedUpdate now calls `chains.Age(Time.fixedDeltaTime)` on every step Hitstop holds the body, and Chain.Age only counts down. A rope kept by a gun that left the hand is not covered (the worker says so).",
+     "- A lash on a slowed body ends on its card's seconds: not met. Not measured. GravityField.Step now ages a sleeping body's lashings (`body.Age`), and GravityBody.Pull ages them every step.",
+     "- A freeze still stops the rope's pull while it lasts: not met. Not measured. Age takes no pull, and the held step returns before anything else.",
+     "- A repeat Slow hit at 1.5 s of 2 s keeps the body slowed until 3.5 s, and lash and rope still restart: not met. Not measured. BodyClock.Apply now resets EndsAt to SimClock.Seconds + seconds for a live entry with the same source, which would give 3.5 s."
+    ],
+    "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-16-party-playtest/1243-review-1.md",
+    "base": "df7f8b4fffc3e57dace290157219f2ba27d7fe40"
+   },
+   "session": "d083fd83-9eeb-4e6a-9179-f853e787ab1c",
+   "session_dir": "/Users/danamador/.claude-assembio",
+   "landed_at": 1794931761.621189,
+   "media": [],
+   "digested": true
+  },
+  {
+   "key": "sk4te/party-playtest#1145",
+   "kind": "ticket",
+   "agent": null,
+   "state": "failed",
+   "note": "judged partly by the Opus review after its second try: Blast card, Grenade, Fishing Rod, Lasso Pistol, Meteor behave as before in Play: not met. None of the three commits (e80aa2d1e, 0a09f92a0, 38376d7ce) was played; the report says so. Fishing Rod and Meteor no longer exist (#1046). The behaviour has also changed on purpose: `Explode` no longer reads a `BlastSize` off its host, so a Blast card on the Grenade or the upside-down bullet is 4 m / 136. That was the worker's ruling, not the owner's. 38376d7ce only stops `Explode.Show` from spawning its picture outside Play, which fixes the EditMode error; it says nothing about Play.",
+   "commit": "38376d7ce4108535233ac30c110f2085c34bedf0",
+   "tries": 1,
+   "started": null,
+   "ended": 1794935459.664866,
+   "night": "night-20261117-014410",
+   "runner": "assembio",
+   "repo": "/Users/danamador/Documents/Coding/sk4te",
+   "map": "sk4te/party-playtest",
+   "title": "The remaining merges: one Blast with its size and picture, one End for ropes and lashes, the reel inside Rope, steering inside Lash",
+   "model": "sonnet",
+   "tree": "/Users/danamador/.sb-hub/worktrees/sk4te-caa319/sk4te-party-playtest-1145",
+   "branch": "sb/sk4te-party-playtest-1145",
+   "paths": [],
+   "base_sha": "9d6021def037d1c28cb852af14c87daa7d2664ac",
+   "first_base": "9d6021def037d1c28cb852af14c87daa7d2664ac",
+   "log": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-16-party-playtest/1145.log",
+   "log_start": 422527,
+   "run": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-16-party-playtest",
+   "pid": null,
+   "pid_start": null,
+   "checks": [
+    {
+     "cmd": "python3 .sb/checks-compile.py",
+     "code": 0,
+     "secs": 6.4,
+     "tail": "compiled clean: {\"sampledUtc\": \"2026-11-17T16:30:36.72273Z\", \"ageMs\": 277, \"compilationFailed\": false, \"compiling\": false, \"consoleErrors\": 0, \"consoleWarnings\": 11, \"consoleLogs\": 0, \"seeded\": true}"
+    }
+   ],
+   "checked": null,
+   "rechecks": 0,
+   "recheck_at": null,
+   "verdict": "partly",
+   "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-16-party-playtest/1145-review.md",
+   "fails": [
+    {
+     "model": "sonnet",
+     "why": "judged partly by the Opus review; one more try with its findings: In Play the Blast card, the Grenade, Fishing Rod, Lasso Pistol and Meteor behave as before: not met. Nothing was played. Fishing Rod and Meteor no longer exist (#1046 deleted them). I ran CastLashOwnerTests on a clone of HEAD: Unlashi",
+     "commit": "e80aa2d1eaccf001e86ba312ca7a18c0e8fe784b"
+    }
+   ],
+   "redo": {
+    "commit": "e80aa2d1eaccf001e86ba312ca7a18c0e8fe784b",
+    "verdict": "partly",
+    "findings": [
+     "- In Play the Blast card, the Grenade, Fishing Rod, Lasso Pistol and Meteor behave as before: not met. Nothing was played. Fishing Rod and Meteor no longer exist (#1046 deleted them). I ran CastLashOwnerTests on a clone of HEAD: Unlashing_DropsTheHeldLashingBesideIt_AndOnlyThat fails (\"Expected: Ran But was: DidNotRun\"). The same test passes on d492a83c7, before tonight, so the End merge (which rewrote that test) is the likely cause.",
+     "- A grep finds one kind each for blast, end, rope and lash: not met. Only End is single: no Cut or Unlash class remains, and no asset names one. Items/Leaves still holds Blast.cs, BlastSize.cs, Explode.cs and PlayEffect.cs (blast), Grab.cs and Wind.cs (rope), and Lash.cs and LashAim.cs (lash)."
+    ],
+    "review": "/Users/danamador/Documents/Second Brain/wayfinder/sk4te/runs/2026-11-16-party-playtest/1145-review-1.md",
+    "base": "e5b670cd8650b0baf8b4009132daec7519784dcb"
+   },
+   "session": "148a9365-aa1d-49ed-81dc-1f78cc7d67f8",
+   "session_dir": "/Users/danamador/.claude-assembio",
+   "landed_at": 1794933037.8989398,
+   "media": [],
+   "digested": true
+  }
+ ]
+}

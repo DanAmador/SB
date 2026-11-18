@@ -893,12 +893,10 @@ class Hub:
                 mine.remove(i)
                 changed = True
             q["maps"] = [m for m in q.get("maps") or [] if any(sbqueue.map_of(i["key"]) == m for i in q["items"])]
-        # A stopping night waits only for work in flight: an item that landed, rechecks or waits on a clean
-        # checkout cannot be started or judged while the night stops, so it must not hold the night open
-        # (night-20261117-014410 stayed 'stopping' 17 hours on such items).
-        open_states = ("running", "review") if stopping else None
-        if not ending or any((i["state"] in open_states) if stopping else (i["state"] not in self.NIGHT_ENDED)
-                             for i in mine) or not (stopping or mine):
+        # A stopping night waits for its work in flight, landed and in review included: the hub judges those
+        # while it stops (night-20261117-014410's #1048 landed at 18:42, was reviewed at 18:55 and the night
+        # ended at 18:56); a ticket ended before its review would never be reviewed.
+        if not ending or any(i["state"] not in self.NIGHT_ENDED for i in mine) or not (stopping or mine):
             return changed
         how = "stopped" if stopping else "stop_time" if night.get("stop_time") else "finished"
         night.pop("stop_time", None)
@@ -3500,6 +3498,7 @@ class Supervisor:
             self._unclean()
             self._reviews()  # and one a recheck asked for starts at once
             self._probe()
+            self._settle_night(False)  # a redo or retry the steps above queued for a stopping night never starts
             self._start()
         self._set_waits()
         self._digest()
