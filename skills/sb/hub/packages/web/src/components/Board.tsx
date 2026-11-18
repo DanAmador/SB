@@ -6,7 +6,7 @@ import type { RouteBody, State } from "@sb-hub/contract";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { sidebarTree } from "@/lib/sidebar.ts";
-import { itemInScope, plural, projOf, queueView, scopeWaits, splitAgents, ticketIndex, waitsFor, withBlockers } from "@/lib/board.ts";
+import { itemInScope, itemProject, plural, projOf, queueView, scopeWaits, splitAgents, ticketIndex, waitsFor, withBlockers } from "@/lib/board.ts";
 import { liveItems } from "@/lib/night.ts";
 import { READONLY } from "@/lib/api.ts";
 import { useHubState, useTickets, useWrites, type Outcome } from "@/lib/hub.ts";
@@ -14,14 +14,13 @@ import { setLink, useLink, VIEWS, type View } from "@/lib/link.ts";
 import { say, useNotices } from "@/lib/notice.ts";
 import { cn } from "@/lib/utils";
 import { CommandMenu, JobDialog, MessageDialog, type Dialogs } from "./CommandMenu.tsx";
+import { tally } from "./bits.tsx";
 import { BoardContext, type BoardData } from "./context.tsx";
 import { Breadcrumb, MenuButton, SidebarColumn, SidebarSheet } from "./Sidebar.tsx";
 import { HistoryView } from "./HistoryView.tsx";
-import { MapView } from "./MapView.tsx";
 import { SessionSheet } from "./SessionPanel.tsx";
 import { RunHead } from "./RunHead.tsx";
 import { RunView } from "./RunView.tsx";
-import { NightGraph } from "./NightGraph.tsx";
 import { DetailSheet } from "./TicketSheet.tsx";
 import { Toolbar } from "./Toolbar.tsx";
 import { WaitsView } from "./WaitsView.tsx";
@@ -77,6 +76,8 @@ function Loaded({ state, tickets, down, lastOk }: { state: State; tickets: Board
   const tree = sidebarTree(state, tickets, scope);
   const waits = scopeWaits(allWaits, scope, state);
   const alerts = waits.count;
+  // the projects with something waiting, counted before the page is narrowed, for Waits' project chips
+  const waitProjects = tally([...allWaits.failed, ...allWaits.done].map((i) => itemProject(i, ix.byKey.get(i.key))).concat(allWaits.tickets.map((t) => projOf(t.map))));
   const counts: Readonly<Record<View, number>> = {
     run: liveItems(state.queue, state).filter((i) => i.state === "running" && itemInScope(scope, i)).length,
     waits: alerts,
@@ -145,10 +146,13 @@ function Loaded({ state, tickets, down, lastOk }: { state: State; tickets: Board
       } else if (typing || ev.metaKey || ev.ctrlKey || ev.altKey || document.querySelector("[role=dialog]")) {
         return;
       } else if (ev.key === "/") {
-        const find = document.querySelector<HTMLInputElement>("input[data-find]");
-        if (find) {
-          ev.preventDefault();
-          find.focus();
+        // the search sits in Run's Queue tab: with none on the page, open that tab first
+        ev.preventDefault();
+        const focus = (): void => { document.querySelector<HTMLInputElement>("input[data-find]")?.focus(); };
+        if (document.querySelector("input[data-find]")) focus();
+        else {
+          setLink({ view: "run", rt: "queue" });
+          setTimeout(focus, 50);
         }
       } else if (ev.key >= "1" && ev.key <= "3") {
         const view = VIEWS[Number(ev.key) - 1];
@@ -179,7 +183,7 @@ function Loaded({ state, tickets, down, lastOk }: { state: State; tickets: Board
         className="min-h-dvh"
       >
         <header className="sticky top-0 z-30 border-b bg-background/85 backdrop-blur supports-[backdrop-filter]:bg-background/70">
-          <div className="mx-auto flex max-w-[1600px] flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2.5 sm:px-6">
+          <div className="flex w-full flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2.5 sm:px-6">
             <div className="flex items-center gap-2">
               <MenuButton onClick={() => { setMenu(true); }} />
               <span className="text-sm font-semibold tracking-tight">sb hub</span>
@@ -217,7 +221,7 @@ function Loaded({ state, tickets, down, lastOk }: { state: State; tickets: Board
             </div>
           </div>
         </header>
-        <div className="mx-auto flex max-w-[1600px]">
+        <div className="flex w-full">
         <SidebarColumn tree={tree} scope={scope} />
         <main className={cn("flex min-w-0 flex-1 flex-col gap-6 px-4 py-5 sm:px-6", down && "opacity-60")}>
           <Breadcrumb scope={scope} />
@@ -230,11 +234,10 @@ function Loaded({ state, tickets, down, lastOk }: { state: State; tickets: Board
           )}
           <TabsContent value="run" className="flex flex-col gap-6 outline-none">
             <RunHead />
-            {scope.map !== "" ? <MapView map={scope.map} /> : <NightGraph />}
             <RunView />
           </TabsContent>
           <TabsContent value="waits" className="outline-none">
-            <WaitsView w={waits} />
+            <WaitsView w={waits} projects={waitProjects} />
           </TabsContent>
           <TabsContent value="history" className="outline-none">
             <HistoryView />
@@ -265,7 +268,7 @@ function Offline({ first, lastOk }: { first?: boolean; lastOk?: number }): React
 
 function BoardSkeleton(): React.JSX.Element {
   return (
-    <div className="mx-auto flex max-w-[1600px] flex-col gap-6 px-6 py-4" aria-busy="true" aria-label="Loading the board">
+    <div className="flex w-full flex-col gap-6 px-6 py-4" aria-busy="true" aria-label="Loading the board">
       <div className="flex items-center gap-4">
         <Skeleton className="h-5 w-16" />
         <Skeleton className="h-9 w-64" />

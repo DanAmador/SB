@@ -1,6 +1,6 @@
 /**
  * The head of the live run, above its graph: its name (click to rename), when it started and who started it, one
- * line of counts and Stop run, which asks once. While the run stops it says so and names what still runs. With no
+ * line of counts, the at-once-and-accounts settings, and Stop run, which asks once. While the run stops it says so and names what still runs. With no
  * run live it says so, shows the last run as one line with a link to it, and the page below offers a map to queue.
  */
 import { IconCheck, IconPencil, IconPlayerStop, IconX } from "@tabler/icons-react";
@@ -15,6 +15,7 @@ import { useNights } from "@/lib/hub.ts";
 import { setLink } from "@/lib/link.ts";
 import { nightWords } from "@/lib/history.ts";
 import { headLine, liveItems, liveRecord, stateWords, stopAsk, stoppingWords } from "@/lib/night.ts";
+import { LimitsButton } from "./RunControls.tsx";
 import { useBoard } from "./context.tsx";
 
 const when = (sec: number): string => {
@@ -104,6 +105,7 @@ function Live({ rec }: { rec: Night | null }): React.JSX.Element {
             <Button type="button" size="icon-sm" variant="ghost" aria-label="Cancel renaming" onClick={() => { setNaming(null); }}><IconX aria-hidden /></Button>
           </form>
         )}
+        <LimitsButton />
         {stopping ? (
           <Badge tone="warn">stopping</Badge>
         ) : (

@@ -1,9 +1,9 @@
 /**
- * Run, the landing view: the night map by map. On top one line of counts and when the queue stops, then who is on a
- * ticket now, then a block per map (a checklist of its tickets in run order), then the maps that can be queued and
- * the search that finds one ticket to queue.
+ * Run, the landing view, in four tabs under the run's head: Flow (the run's graph, or the picked map's), Now (who is
+ * on a ticket and the other chats), Maps (one line of counts, then a block per map, a checklist of its tickets in run
+ * order) and Queue (the maps that can be queued and the search that finds one ticket to queue).
  */
-import { IconAlertTriangle, IconArrowBackUp, IconBan, IconChevronDown, IconChevronRight, IconChevronUp, IconCircleCheck, IconCircleDashed, IconClock, IconGitCommit, IconGripVertical, IconHourglass, IconLoader2, IconMail, IconMessages, IconPlus, IconRobot, IconX, IconZzz } from "@tabler/icons-react";
+import { IconAlertTriangle, IconMap, IconTopologyStar3, IconArrowBackUp, IconBan, IconChevronDown, IconChevronRight, IconChevronUp, IconCircleCheck, IconCircleDashed, IconClock, IconGitCommit, IconGripVertical, IconHourglass, IconLoader2, IconMail, IconMessages, IconPlus, IconRobot, IconX, IconZzz } from "@tabler/icons-react";
 import { useState } from "react";
 import type * as React from "react";
 import type { QueueItem } from "@sb-hub/contract";
@@ -12,11 +12,14 @@ import { Button } from "@/components/ui/button";
 import { ago, blockerTitles, sessionOf, brokenBuilds, dur, endsAt, firstLine, hm, itemTitle, mapTitle, plainReason, plural, projOf, runRows, tryOf, showOf, type RunRow, type RunTone, itemInScope, ticketInScope } from "@/lib/board.ts";
 import { healthOf, liveState, MARK_WORDS, nightBlocks, nightLine, pairNight, type MapPair, type Mark, type NightBlock, type NightRow, type Pairing } from "@/lib/night.ts";
 import { helperCards, sessionCards, type SessionCard } from "@/lib/sessions.ts";
-import { setLink, useLink } from "@/lib/link.ts";
+import { RUN_TABS, setLink, useLink } from "@/lib/link.ts";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
-import { Empty, FileLinks, MapName, SectionTitle, TicketTitle, ToneIcon } from "./bits.tsx";
-import { Limits, ReviewNow, RowMenu, TickBar, TickBox, WaitReason } from "./RunControls.tsx";
-import { TicketTable } from "./TicketTable.tsx";
+import { Empty, FileLinks, Fold, MapName, SectionTitle, TicketTitle, ToneIcon } from "./bits.tsx";
+import { ReviewNow, RowMenu, TickBar, TickBox, WaitReason } from "./RunControls.tsx";
+import { MapView } from "./MapView.tsx";
+import { NightGraph } from "./NightGraph.tsx";
+import { TickedBar, TicketTable } from "./TicketTable.tsx";
 import { useBoard } from "./context.tsx";
 
 const DOT: Readonly<Record<RunTone, [string, string]>> = {
@@ -36,46 +39,152 @@ export function RunView(): React.JSX.Element {
   const night = nightBlocks(liveState(state), ix, scope, true);
   const pairing = pairNight(state, night, sessionCards(state, ix, agents), helperCards(state, ix, agents));
   const stop = night.line.stopAt ?? endsAt(state, ix);
-  // no run is live: the head says so; here are only the maps to queue and the search
-  if (state.queue.night === null) {
-    return (
-      <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
-        <h2 className="sr-only">Run</h2>
-        <QueueAMap />
-        {!(scope.map !== "" && link.mv === "table") && <TicketTable />}
-      </div>
-    );
-  }
+  const live = state.queue.night !== null;
+  const running = liveState(state).queue.items.filter((i) => i.state === "running" && itemInScope(scope, i)).length;
+  const table = !(scope.map !== "" && link.mv === "table");
+  const narrow = "mx-auto flex w-full max-w-4xl flex-col gap-6";
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
+    <Tabs
+      value={link.rt}
+      onValueChange={(v) => {
+        const rt = RUN_TABS.find((x) => x === v);
+        if (rt) setLink({ rt });
+      }}
+      className="flex flex-col gap-4"
+    >
       <h2 className="sr-only">Run</h2>
-      <p data-testid="night-line" className="flex flex-wrap items-center gap-x-2 text-sm">
-        <span className="font-medium">{nightLine(night)}</span>
-        {stop > state.now && (
-          <span className="inline-flex items-center gap-1 text-muted-foreground">
-            <IconClock className="size-3.5" aria-hidden />
-            {night.line.stopAt !== null ? `the queue stops at ${hm(stop)}` : `the queue ends about ${hm(stop)}`}
-          </span>
-        )}
-        {state.queue.paused && <Badge tone="warn">paused</Badge>}
-      </p>
       {brokenBuilds(state.queue.builds, (k) => ix.byKey.get(k)?.title ?? k).map((line) => (
         <p key={line} role="alert" data-testid="build-broken" className="flex items-center gap-2 rounded-xl bg-destructive-soft px-3 py-2 text-sm text-destructive">
           <IconAlertTriangle className="size-4 shrink-0" aria-hidden />
           {line}
         </p>
       ))}
-      <Limits />
-      <RunningNow />
+      <TabsList aria-label="Run" className="w-full max-w-full justify-start overflow-x-auto sm:w-auto sm:self-start">
+        <TabsTrigger value="flow">
+          <IconTopologyStar3 aria-hidden className="size-4" />
+          Flow
+        </TabsTrigger>
+        <TabsTrigger value="now">
+          <IconLoader2 aria-hidden className="size-4" />
+          Now
+          {running > 0 && <span className="text-xs text-muted-foreground tabular-nums">{running}</span>}
+        </TabsTrigger>
+        <TabsTrigger value="maps">
+          <IconMap aria-hidden className="size-4" />
+          Maps
+          {night.blocks.length > 0 && <span className="text-xs text-muted-foreground tabular-nums">{night.blocks.length}</span>}
+        </TabsTrigger>
+        <TabsTrigger value="queue">
+          <IconPlus aria-hidden className="size-4" />
+          Queue
+        </TabsTrigger>
+      </TabsList>
+      <TabsContent value="flow" className="flex flex-col gap-4 outline-none">
+        {scope.map !== "" ? <MapView map={scope.map} /> : <NightGraph />}
+        {scope.map !== "" && link.mv !== "table" && <TickedBar />}
+      </TabsContent>
+      <TabsContent value="now" className={cn(narrow, "outline-none")}>
+        <RunningNow />
+        <OtherChats pairing={pairing} />
+      </TabsContent>
+      <TabsContent value="maps" className={cn(narrow, "outline-none")}>
+        {live ? (
+          <>
+            <p data-testid="night-line" className="flex flex-wrap items-center gap-x-2 text-sm">
+              <span className="font-medium">{nightLine(night)}</span>
+              {stop > state.now && (
+                <span className="inline-flex items-center gap-1 text-muted-foreground">
+                  <IconClock className="size-3.5" aria-hidden />
+                  {night.line.stopAt !== null ? `the queue stops at ${hm(stop)}` : `the queue ends about ${hm(stop)}`}
+                </span>
+              )}
+              {state.queue.paused && <Badge tone="warn">paused</Badge>}
+            </p>
+            <MapBlocks night={night} pairing={pairing} />
+            <ReviewNow />
+            <TickBar items={state.queue.items} />
+          </>
+        ) : (
+          <Empty>No run is live: queue a map or a ticket and a run starts by itself.</Empty>
+        )}
+      </TabsContent>
+      <TabsContent value="queue" className={cn(narrow, "outline-none")}>
+        <QueueAMap />
+        {table && <TicketTable />}
+      </TabsContent>
+    </Tabs>
+  );
+}
+
+/** A map with nothing running, checking or still to come: only finished or stopped tickets. */
+const idle = (b: NightBlock): boolean => b.counts.running + b.counts.next + b.counts.checking + b.counts.recheck + b.counts.unclean === 0;
+
+/**
+ * The night map by map, a fold per project when there are several (open while it has work left). Inside, the maps
+ * with work come first; the finished ones fold away under one line.
+ */
+function MapBlocks({ night, pairing }: { night: ReturnType<typeof nightBlocks>; pairing: Pairing }): React.JSX.Element {
+  if (night.blocks.length === 0) {
+    return (
       <section aria-label="The night, map by map" data-testid="blocks" className="flex flex-col gap-3">
-        {night.blocks.length === 0 ? <Empty>Nothing is running, queued or ended today.</Empty> : night.blocks.map((b) => <Block key={b.map || "jobs"} b={b} queued={night.queuedMaps} pair={pairing.maps.get(b.map)} />)}
+        <Empty>Nothing is running, queued or ended today.</Empty>
       </section>
-      <ReviewNow />
-      <TickBar items={state.queue.items} />
-      <OtherChats pairing={pairing} />
-      <QueueAMap />
-      {!(scope.map !== "" && link.mv === "table") && <TicketTable />}
-    </div>
+    );
+  }
+  const projects = new Map<string, NightBlock[]>();
+  for (const b of night.blocks) {
+    const p = b.project || "Jobs";
+    projects.set(p, [...(projects.get(p) ?? []), b]);
+  }
+  const blocks = (bs: readonly NightBlock[]): React.JSX.Element => {
+    const busy = bs.filter((b) => !idle(b));
+    const done = bs.filter(idle);
+    return (
+      <div className="flex flex-col gap-3">
+        {busy.map((b) => (
+          <Block key={b.map || "jobs"} b={b} queued={night.queuedMaps} pair={pairing.maps.get(b.map)} />
+        ))}
+        {done.length > 0 && (
+          <Fold
+            defaultOpen={busy.length === 0 && projects.size === 1}
+            summary={<span className="text-muted-foreground">{`Finished, nothing left to run (${String(done.length)})`}</span>}
+          >
+            <div className="mt-2 flex flex-col gap-3">
+              {done.map((b) => (
+                <Block key={b.map || "jobs"} b={b} queued={night.queuedMaps} pair={pairing.maps.get(b.map)} />
+              ))}
+            </div>
+          </Fold>
+        )}
+      </div>
+    );
+  };
+  return (
+    <section aria-label="The night, map by map" data-testid="blocks" className="flex flex-col gap-3">
+      {projects.size === 1
+        ? blocks(night.blocks)
+        : [...projects].map(([p, bs]) => {
+            const left = bs.filter((b) => !idle(b)).length;
+            const running = bs.reduce((n, b) => n + b.counts.running, 0);
+            const next = bs.reduce((n, b) => n + b.counts.next, 0);
+            return (
+              <Fold
+                key={p}
+                defaultOpen={left > 0}
+                summary={
+                  <span className="flex min-w-0 items-baseline gap-2">
+                    <span className="font-semibold">{p}</span>
+                    <span className="truncate text-xs text-muted-foreground">
+                      {[plural(bs.length, "map"), running > 0 ? `${String(running)} running` : "", next > 0 ? `${String(next)} next` : "", left === 0 ? "all finished" : ""].filter(Boolean).join(" · ")}
+                    </span>
+                  </span>
+                }
+              >
+                <div className="mt-2 pl-5">{blocks(bs)}</div>
+              </Fold>
+            );
+          })}
+    </section>
   );
 }
 

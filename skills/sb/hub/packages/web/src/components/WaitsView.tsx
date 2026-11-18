@@ -1,6 +1,6 @@
 /**
- * Waits for you: questions first, then failed runs (reason, checks, pictures, Run again), then done runs (checks,
- * pictures, Looks good), then tickets that wait for a decision, then accounts and widgets in trouble.
+ * Waits for you: questions first, then landed, failed and done runs (a few lines each, a fold per project when there
+ * are several), then tickets that wait for a decision, then accounts and widgets in trouble.
  */
 import { IconAlertTriangle, IconBan, IconCheck, IconChecks, IconCircleCheck, IconExternalLink, IconGitCommit, IconLock, IconRefresh, IconX } from "@tabler/icons-react";
 import { useState } from "react";
@@ -15,18 +15,20 @@ import { setLink } from "@/lib/link.ts";
 import { say } from "@/lib/notice.ts";
 import { Markdown } from "./Markdown.tsx";
 import { QuestionCard } from "./QuestionCard.tsx";
-import { Checks, Empty, FileLinks, Fold, MapName, Pictures, SectionTitle, TicketTitle, ToneIcon } from "./bits.tsx";
+import { Checks, Empty, FileLinks, Fold, MapName, Pictures, ProjectChips, SectionTitle, TicketTitle, ToneIcon } from "./bits.tsx";
 import { useBoard } from "./context.tsx";
 
-export function WaitsView({ w }: { w: Waits }): React.JSX.Element {
+export function WaitsView({ w, projects }: { w: Waits; projects: readonly [string, number][] }): React.JSX.Element {
   const { writes, down } = useBoard();
   const runs = [...w.failed, ...w.done];
   const nothing = w.questions.length + runs.length + w.tickets.length + w.signedOut.length + w.badWidgets.length === 0;
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-8">
-      {nothing && <Empty>Nothing waits for you.</Empty>}
-      {runs.length > 0 && (
-        <div className="flex justify-end">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="min-w-0 flex-1">
+          <ProjectChips counts={projects} label="Projects with something waiting" />
+        </div>
+        {runs.length > 0 && (
           <Button
             variant="outline"
             size="xs"
@@ -39,8 +41,9 @@ export function WaitsView({ w }: { w: Waits }): React.JSX.Element {
             <IconChecks aria-hidden />
             Mark all seen
           </Button>
-        </div>
-      )}
+        )}
+      </div>
+      {nothing && <Empty>Nothing waits for you.</Empty>}
       {w.questions.length > 0 && (
         <Part id="questions" title="Questions">
           <div className="grid gap-3 md:grid-cols-2">
@@ -54,12 +57,19 @@ export function WaitsView({ w }: { w: Waits }): React.JSX.Element {
       <Ended title="Failed" id="failed" runs={w.failed.filter((i) => !landedShort(i))} />
       <Ended title="Done" id="done" runs={w.done} />
       {w.tickets.length > 0 && (
-        <Part id="decide" title="Tickets that need a decision">
-          <ul className="flex flex-col divide-y rounded-xl border bg-card">
-            {w.tickets.map((t) => (
-              <DecideLine key={tkey(t)} t={t} />
+        <Part id="decide" title="Tickets that need a decision" aside={<span className="text-xs text-muted-foreground">{String(w.tickets.length)}</span>}>
+          <p className="text-xs text-muted-foreground">Design questions no worker can settle. They wait days, not minutes, so the tab does not count them.</p>
+          <div className="flex flex-col divide-y rounded-xl border bg-card">
+            {groupBy(w.tickets, (t) => projOf(t.map)).map(([p, ts]) => (
+              <Fold key={p} className="px-4 py-1" summary={<><span className="font-medium">{p}</span><span className="text-muted-foreground">{String(ts.length)}</span></>}>
+                <ul className="flex flex-col divide-y pb-1">
+                  {ts.map((t) => (
+                    <DecideLine key={tkey(t)} t={t} />
+                  ))}
+                </ul>
+              </Fold>
             ))}
-          </ul>
+          </div>
         </Part>
       )}
       {w.signedOut.length + w.badWidgets.length > 0 && (
@@ -104,22 +114,76 @@ const ENDED = {
   skipped: [IconBan, "skipped", "warn"],
 } as const;
 
-/** Failed or Done: the runs not yet looked at. */
+/** A section folds its projects shut once it holds more runs than this. */
+const OPEN_UP_TO = 4;
+
+/**
+ * Landed, Failed or Done: the runs not yet looked at, a row each. With more than one project they sit in a fold per
+ * project, the busiest first; the folds start shut once the section is long. Mark seen moves the section to History.
+ */
 function Ended({ title, id, runs }: { title: string; id: string; runs: readonly QueueItem[] }): React.JSX.Element | null {
+  const { ix, writes, down } = useBoard();
   if (runs.length === 0) return null;
+  // a job names its folder as typed, a ticket its project in lower case: one group for both
+  const groups = groupBy(runs, (i) => itemProject(i, ix.byKey.get(i.key)).toLowerCase());
+  const list = (rs: readonly QueueItem[], project: boolean, className?: string): React.JSX.Element => (
+    <ul className={cn("flex flex-col divide-y", className)}>
+      {rs.map((i) => (
+        <RunLine key={seenKey(i)} i={i} project={project} />
+      ))}
+    </ul>
+  );
   return (
-    <Part id={id} title={title}>
-      <ul className="flex flex-col divide-y rounded-xl border bg-card">
-        {runs.map((i) => (
-          <RunLine key={seenKey(i)} i={i} />
-        ))}
-      </ul>
+    <Part
+      id={id}
+      title={title}
+      aside={
+        <>
+          <span className="text-xs text-muted-foreground tabular-nums">{String(runs.length)}</span>
+          <Button
+            variant="ghost"
+            size="xs"
+            disabled={down}
+            title={`Moves these ${String(runs.length)} runs to History; nothing in the queue or the vault changes`}
+            aria-label={`Mark seen: the ${title} runs`}
+            onClick={() => {
+              void writes.seen(runs.map(seenKey)).then(say);
+            }}
+          >
+            <IconChecks aria-hidden />
+            Mark seen
+          </Button>
+        </>
+      }
+    >
+      <div className="flex flex-col divide-y rounded-xl border bg-card">
+        {groups.length === 1
+          ? list(runs, true)
+          : groups.map(([p, rs]) => (
+              <Fold
+                key={p}
+                className="px-4 py-1"
+                defaultOpen={runs.length <= OPEN_UP_TO}
+                summary={
+                  <>
+                    <span className="font-medium">{p}</span>
+                    <span className="text-muted-foreground tabular-nums">{String(rs.length)}</span>
+                  </>
+                }
+              >
+                {list(rs, false, "-mx-4 border-t")}
+              </Fold>
+            ))}
+      </div>
     </Part>
   );
 }
 
-/** An ended run: its reason in plain words, its checks and pictures, and what to do about it. */
-function RunLine({ i }: { i: QueueItem }): React.JSX.Element {
+/**
+ * An ended run in a few lines: its title and age; its project, commit and reason on one line (the full reason folds
+ * open under it); its checks as one line; its buttons, with its pictures as one link.
+ */
+function RunLine({ i, project }: { i: QueueItem; project: boolean }): React.JSX.Element {
   const { state, ix, enqueue, down, busy, writes } = useBoard();
   const st = i.state === "done" || i.state === "skipped" ? i.state : landedShort(i) ? "landed" : "failed";
   const [Ic, word, tone] = ENDED[st];
@@ -127,37 +191,60 @@ function RunLine({ i }: { i: QueueItem }): React.JSX.Element {
   const title = itemTitle(i, t);
   const done = i.state === "done";
   const again = canTickAgain(i, ix);
+  const reason = done ? "" : plainReason(i);
+  const reasonCls = cn("min-w-0 truncate", i.state === "skipped" || st === "landed" ? "text-warn" : "text-destructive");
+  const meta = (
+    <span className="shrink-0 text-muted-foreground">
+      {project && itemProject(i, t)}
+      {i.commit !== null && (
+        <>
+          {project && " · "}
+          <IconGitCommit className="inline size-3.5 align-[-2px]" aria-hidden /> <code className="font-mono">{i.commit.slice(0, 9)}</code>
+        </>
+      )}
+    </span>
+  );
+  const hasMeta = project || i.commit !== null;
   return (
-    <li className="flex gap-3 px-4 py-3">
+    <li className="flex gap-3 px-4 py-2.5">
       <div className="pt-0.5">
         <ToneIcon icon={Ic} tone={tone} label={word} />
       </div>
-      <div className="flex min-w-0 flex-1 flex-col gap-2">
-        <div className="flex items-start gap-2">
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-1">
-              <TicketTitle itemKey={i.key} links={i.links} className="line-clamp-2">
-                {title}
-              </TicketTitle>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {itemProject(i, t)}
-              {i.commit !== null && (
-                <>
-                  {" · "}
-                  <IconGitCommit className="inline size-3.5 align-[-2px]" aria-hidden /> <code className="font-mono">{i.commit.slice(0, 9)}</code>
-                </>
-              )}
-            </p>
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <div className="flex items-baseline gap-2">
+          <div className="flex min-w-0 flex-1 items-center gap-1">
+            <TicketTitle itemKey={i.key} links={i.links} className="truncate">
+              {title}
+            </TicketTitle>
           </div>
           <span className="shrink-0 text-xs text-muted-foreground" title={`${word} at ${hm(i.ended ?? 0)}`}>
             {ago(state.now, i.ended)}
           </span>
         </div>
-        {!done && <p className={cn("text-sm", i.state === "skipped" || st === "landed" ? "text-warn" : "text-destructive")}>{plainReason(i)}</p>}
+        {reason !== "" && i.note.trim() !== "" ? (
+          <Fold
+            className="text-xs [&>summary]:min-h-5"
+            summary={
+              <span className="flex min-w-0 items-baseline gap-1.5" title={reason}>
+                {hasMeta && meta}
+                {hasMeta && <span className="text-muted-foreground">·</span>}
+                <span className={reasonCls}>{reason}</span>
+              </span>
+            }
+          >
+            <pre className="mt-1 max-h-60 overflow-auto rounded-md bg-muted p-2 font-mono text-[11px] whitespace-pre-wrap">{i.note}</pre>
+          </Fold>
+        ) : (
+          (hasMeta || reason !== "") && (
+            <p className="flex min-w-0 items-baseline gap-1.5 text-xs" title={reason || undefined}>
+              {hasMeta && meta}
+              {hasMeta && reason !== "" && <span className="text-muted-foreground">·</span>}
+              {reason !== "" && <span className={reasonCls}>{reason}</span>}
+            </p>
+          )
+        )}
         <Checks checks={i.checks ?? []} />
-        <Pictures item={i} />
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-1.5">
           <Button
             size="xs"
             variant="outline"
@@ -239,13 +326,9 @@ function RunLine({ i }: { i: QueueItem }): React.JSX.Element {
               Set aside
             </Button>
           )}
+          <Pictures item={i} compact />
           <FileLinks item={i} />
         </div>
-        {!done && i.note.trim() !== "" && (
-          <Fold summary={<span className="text-xs text-muted-foreground">The full reason</span>}>
-            <pre className="mt-1 max-h-60 overflow-auto rounded-md bg-muted p-2 font-mono text-[11px] whitespace-pre-wrap">{i.note}</pre>
-          </Fold>
-        )}
       </div>
     </li>
   );
@@ -253,6 +336,13 @@ function RunLine({ i }: { i: QueueItem }): React.JSX.Element {
 
 /** A failed run whose commit waits in its kept worktree (the hub checks the worktree is there): it could not land, or a check broke. */
 const landAgain = (i: QueueItem): boolean => i.kind === "ticket" && i.state === "failed" && !landedShort(i) && Boolean(i.tree) && Boolean(i.commit);
+
+/** Rows per group, the group with the most first. */
+function groupBy<T>(rows: readonly T[], keyOf: (r: T) => string): [string, T[]][] {
+  const by = new Map<string, T[]>();
+  for (const r of rows) by.set(keyOf(r), [...(by.get(keyOf(r)) ?? []), r]);
+  return [...by].sort(([a, x], [b, y]) => y.length - x.length || a.localeCompare(b));
+}
 
 /** One decision ticket: its question, its options as buttons (the recommended one filled), and a line for the owner's own answer. */
 function DecideLine({ t }: { t: TicketRow }): React.JSX.Element {
@@ -269,7 +359,7 @@ function DecideLine({ t }: { t: TicketRow }): React.JSX.Element {
     if (out.ok) setOwn("");
   };
   return (
-    <li className="flex flex-col gap-2 px-4 py-2.5">
+    <li className="flex flex-col gap-2 py-2.5 pl-5">
       <div className="min-w-0">
         <div className="flex items-center gap-1">
           <TicketTitle itemKey={tkey(t)} links={t.links} className="truncate">
@@ -277,7 +367,6 @@ function DecideLine({ t }: { t: TicketRow }): React.JSX.Element {
           </TicketTitle>
         </div>
         <p className="truncate text-xs text-muted-foreground">
-          {`${projOf(t.map)} · `}
           <MapName links={t.links} name={t.map.split("/").pop() ?? ""} title={mapTitle(t)} />
           {` · ${t.type}`}
         </p>

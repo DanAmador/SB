@@ -4,7 +4,8 @@ import { EVERYTHING } from "./board.ts";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { State, TicketRow } from "@sb-hub/contract";
-import { atOnceOf, clock, countsLine, DONE_ID, focusOf, infoOf, nightGraph, type NightInput, type TicketInfo } from "./nightGraph.ts";
+import { NODE_H, NODE_W } from "./map.ts";
+import { atOnceOf, clock, countsLine, DONE_ID, focusOf, GAP, HEAD, infoOf, nightGraph, ROW_H, type NightInput, type TicketInfo } from "./nightGraph.ts";
 
 const links = (report: string | null) => ({ ticket: null, map: null, board: null, report, log: null });
 const it_ = (key: string, state: QueueItem["state"], more: Record<string, unknown> = {}): QueueItem =>
@@ -35,6 +36,11 @@ const items = (): QueueItem[] => [
   it_("beta/two#2", "failed", { links: links("obsidian://report-2") }),
   job(),
 ];
+// 21:00 local on a night, and an hour
+const T = new Date(2026, 10, 14, 21, 0, 0).getTime() / 1000;
+const H = 3600;
+/** The graph's height of an hour: a row per half hour. */
+const HR = 2 * ROW_H;
 const run = (more: Partial<NightInput> = {}) => nightGraph({ items: items(), maps: ["alpha/one", "beta/two"], info: info(), scope: EVERYTHING, ...more });
 
 describe("nightGraph", () => {
@@ -67,36 +73,80 @@ describe("nightGraph", () => {
     expect(s.counts).toMatchObject({ stopped: 1, checking: 2 });
   });
 
-  it("puts a column per project and rows by start order, what ran above now, what runs on it, what is queued below", () => {
-    const x = run({ items: [
-      it_("alpha/one#1", "done", { started: 1000, ended: 1500 }),
-      it_("beta/two#2", "failed", { started: 1100, ended: 1200 }),
-      it_("beta/two#3", "done", { started: 1300, ended: 1400 }),
-      it_("alpha/one#2", "running", { started: 1600 }),
+  it("puts a column per project and each box at its start time, a row per half hour; what runs at its start, what is queued below now", () => {
+    const x = run({ now: T + 3.5 * H, items: [
+      it_("alpha/one#1", "done", { started: T, ended: T + H / 2 }),
+      it_("beta/two#2", "failed", { started: T + H / 4, ended: T + H / 2 }),
+      it_("beta/two#3", "done", { started: T + 2 * H, ended: T + 2.5 * H }),
+      it_("alpha/one#2", "running", { started: T + 3 * H }),
       it_("alpha/one#3", "queued"),
     ] });
     expect(x.columns.map((c) => c.project)).toEqual(["alpha", "beta"]);
-    const at = (k: string) => [box(k, x)?.row, box(k, x)?.phase];
-    // alpha#1 and beta#2 started first and share a row; beta#3 is beta's next, so a row of its own
-    expect(at("alpha/one#1")).toEqual([0, "ran"]);
-    expect(at("beta/two#2")).toEqual([0, "ran"]);
-    expect(at("beta/two#3")).toEqual([1, "ran"]);
-    expect(at("alpha/one#2")).toEqual([2, "now"]);
-    expect(at("alpha/one#3")).toEqual([3, "next"]);
-    expect(x.rows.map((r) => r.clock.replace(/\d\d:\d\d/, "hh:mm"))).toEqual(["hh:mm", "hh:mm", "now hh:mm", "≈hh:mm"]);
-    expect(x.rows[0]?.clock).toBe(clock(1000));
-    expect(x.nowY).toBeLessThan(box("alpha/one#2", x)?.y ?? 0);
-    expect(x.nowY).toBeGreaterThan(box("beta/two#3", x)?.y ?? 0);
+    const at = (k: string) => [box(k, x)?.y, box(k, x)?.phase];
+    expect(at("alpha/one#1")).toEqual([HEAD, "ran"]);
+    expect(at("beta/two#2")).toEqual([HEAD + HR / 4, "ran"]);
+    expect(at("beta/two#3")).toEqual([HEAD + 2 * HR, "ran"]);
+    expect(at("alpha/one#2")).toEqual([HEAD + 3 * HR, "now"]);
+    expect(x.nowY).toBe(HEAD + 3.5 * HR);
+    // a box is as tall as its run took, at least a box: #1's half hour is one row; #2 runs up to now
+    expect(box("alpha/one#1", x)?.h).toBe(HR / 2);
+    expect(box("beta/two#2", x)?.h).toBe(NODE_H);
+    expect(box("alpha/one#2", x)?.h).toBe(HR / 2);
+    expect(box("alpha/one#1", x)?.foot).toBe("Done · 30 min");
+    // the queued one starts below the now line and below the running box it would follow
+    expect(box("alpha/one#3", x)).toMatchObject({ phase: "next", y: HEAD + 3.5 * HR + ROW_H / 2, h: NODE_H });
+    // the clock: the first start, every half hour, now, and about when the queued row starts (#2's start and the
+    // night's usual half-hour run); each text on its time's line
+    expect(x.rows.map((r) => r.clock)).toEqual(["21:00", "21:30", "22:00", "22:30", "23:00", "23:30", "00:00", "now 00:30", `≈${clock(T + 3 * H + H / 2)}`]);
+    expect(x.rows.map((r) => r.phase)).toEqual(["ran", "ran", "ran", "ran", "ran", "ran", "ran", "now", "next"]);
+    expect((x.rows[1]?.y ?? 0) + NODE_H / 2).toBe(HEAD + ROW_H);
+    expect((x.rows[7]?.y ?? 0) + NODE_H / 2).toBe(x.nowY);
+    expect(new Set(x.rows.map((r) => r.row)).size).toBe(x.rows.length);
     // every box the same column x in its project; time runs down
     expect(box("alpha/one#1", x)?.x).toBe(box("alpha/one#3", x)?.x);
-    expect((box("alpha/one#3", x)?.y ?? 0) > (box("alpha/one#2", x)?.y ?? 0)).toBe(true);
+    expect(x.boxes.map((b) => b.lane)).toEqual([0, 0, 0, 0, 0]);
   });
 
-  it("puts two projects that run at once on the same row", () => {
-    const x = run({ items: [it_("alpha/one#2", "running", { started: 10 }), it_("beta/two#1", "running", { started: 500 })] });
-    expect(box("alpha/one#2", x)?.row).toBe(box("beta/two#1", x)?.row);
+  it("puts two projects that run at once side by side at about the same height", () => {
+    const x = run({ now: 600, items: [it_("alpha/one#2", "running", { started: 10 }), it_("beta/two#1", "running", { started: 500 })] });
+    expect(Math.abs((box("alpha/one#2", x)?.y ?? 0) - (box("beta/two#1", x)?.y ?? 0))).toBeLessThan(ROW_H / 2);
     expect(box("alpha/one#2", x)?.phase).toBe("now");
     expect(box("alpha/one#2", x)?.x).not.toBe(box("beta/two#1", x)?.x);
+  });
+
+  it("puts two tickets of one project whose runs overlapped at about the same height in two lanes; one after both goes back to the first", () => {
+    const x = run({ atOnce: new Map([["alpha", 2]]), items: [
+      it_("alpha/one#1", "done", { started: T, ended: T + H }),
+      it_("alpha/one#2", "done", { started: T + 0.2 * H, ended: T + 0.8 * H }),
+      it_("alpha/one#3", "done", { started: T + 1.5 * H, ended: T + 1.7 * H }),
+    ] });
+    const [a, b, c] = ["alpha/one#1", "alpha/one#2", "alpha/one#3"].map((k) => box(k, x));
+    expect(Math.abs((a?.y ?? 0) - (b?.y ?? 0))).toBeLessThanOrEqual(HR / 4);
+    expect([a?.lane, b?.lane, c?.lane]).toEqual([0, 1, 0]);
+    expect(b?.x).toBe((a?.x ?? 0) + NODE_W + GAP);
+    expect(x.columns[0]?.w).toBe(2 * NODE_W + GAP);
+    // a ticket whose run outlasts its box keeps its lane taken: #2 started under #1's run, though below its box
+    const long = run({ items: [it_("alpha/one#1", "done", { started: T, ended: T + 4 * H }), it_("alpha/one#2", "done", { started: T + 2 * H, ended: T + 3 * H })] });
+    expect(box("alpha/one#2", long)).toMatchObject({ lane: 1, y: HEAD + 2 * HR, h: HR });
+    // nothing runs and nothing ends: the night is over, no now line
+    expect(x.nowY).toBeNull();
+    expect(x.rows.map((r) => r.clock)).toEqual(["21:00", "21:30", "22:00", "22:30"]);
+  });
+
+  it("puts a ticket 3 hours later 6 rows lower, but draws a stretch over 2 hours with nothing in it one row tall", () => {
+    const near = run({ items: [it_("alpha/one#1", "done", { started: T, ended: T + 2 * H }), it_("alpha/one#2", "done", { started: T + 3 * H, ended: T + 4 * H })] });
+    expect((box("alpha/one#2", near)?.y ?? 0) - (box("alpha/one#1", near)?.y ?? 0)).toBe(3 * HR);
+    // #1 ends at 21:30 and #2 starts at 03:00: the 5.5 empty hours take one row, and the clock skips them
+    const far = run({ items: [it_("alpha/one#1", "done", { started: T, ended: T + H / 2 }), it_("alpha/one#2", "done", { started: T + 6 * H, ended: T + 7 * H })] });
+    expect((box("alpha/one#2", far)?.y ?? 0) - (box("alpha/one#1", far)?.y ?? 0)).toBe(2 * ROW_H);
+    expect(far.boxes.map((b) => b.lane)).toEqual([0, 0]);
+    expect(far.rows.map((r) => r.clock)).toEqual(["21:00", "21:30", "03:00", "03:30", "04:00"]);
+    // another project busy in that stretch keeps it full height
+    const busy = run({ items: [...far.boxes.map((b) => b.item), it_("beta/two#2", "done", { started: T + 2 * H, ended: T + 5 * H })] });
+    expect((box("alpha/one#2", busy)?.y ?? 0) - (box("alpha/one#1", busy)?.y ?? 0)).toBe(6 * HR);
+    // hiding that project's map leaves the stretch empty again
+    const hid = run({ items: busy.boxes.map((b) => b.item), hidden: new Set(["beta/two"]) });
+    expect((box("alpha/one#2", hid)?.y ?? 0) - (box("alpha/one#1", hid)?.y ?? 0)).toBe(2 * ROW_H);
   });
 
   it("predicts one ticket per project per row, side by side up to what the project runs at once, after what each comes after", () => {
@@ -109,7 +159,7 @@ describe("nightGraph", () => {
     expect(row("beta/two#1")).toBe(2);
     expect(one.boxes.every((b) => b.phase === "next")).toBe(true);
     // nothing ended yet: every row to come still has a rough time, 1.5 h apart, not 'next' and 'then'
-    expect(one.rows.map((r) => r.clock.replace(/\d\d:\d\d/, "hh:mm"))).toEqual(["≈hh:mm", "≈hh:mm", "≈hh:mm"]);
+    expect(one.rows.map((r) => r.clock.replace(/\d\d:\d\d/, "hh:mm"))).toEqual(["now hh:mm", "≈hh:mm", "≈hh:mm", "≈hh:mm"]);
     // alpha runs two at once: #2 and #3 (both after #1) share a row, side by side
     const two = run({ items, atOnce: new Map([["alpha", 2]]) });
     expect([row("alpha/one#1", two), row("alpha/one#2", two), row("alpha/one#3", two)]).toEqual([0, 1, 1]);
@@ -140,7 +190,10 @@ describe("nightGraph", () => {
     expect(h.columns.map((c) => c.project)).toEqual(["alpha"]);
     expect(h.frames.find((f) => f.map === "beta/two")).toMatchObject({ hidden: true });
     expect(h.done).toMatchObject({ total: 4 });
-    expect(new Set(h.boxes.map((b) => b.row)).size).toBe(h.rows.length);
+    // beta#1's queued row held only it: the rows to come close up, a clock each
+    const next = [...new Set(h.boxes.filter((b) => b.phase === "next").map((b) => b.y))].sort((a, b) => a - b);
+    expect(next).toEqual([next[0], (next[0] ?? 0) + ROW_H]);
+    expect(h.rows.filter((r) => r.phase === "next")).toHaveLength(next.length);
   });
 
   it("counts for the run, leaving out zeros, and narrows to a project", () => {
@@ -153,25 +206,43 @@ describe("nightGraph", () => {
     expect(run({ scope: { project: "beta", map: "" } }).frames.map((f) => f.title)).toEqual(["Map two"]);
   });
 
-  it("updates live: a ticket queued late takes its predicted row, one that starts moves to now, the others stay", () => {
-    const base = [it_("alpha/one#1", "done", { started: 100, ended: 200 }), it_("alpha/one#2", "running", { started: 300 }), it_("alpha/one#3", "queued")];
-    const a = run({ items: base });
+  it("updates live: a ticket queued late takes its predicted row, one that starts sits at its start, the others stay", () => {
+    const base = [it_("alpha/one#1", "done", { started: T, ended: T + H / 2 }), it_("alpha/one#2", "running", { started: T + H }), it_("alpha/one#3", "queued")];
+    const a = run({ items: base, now: T + 1.5 * H });
     const where = (x: typeof a) => new Map(x.boxes.map((b) => [b.id, [b.x, b.y]] as const));
     // another project queues a ticket: it lands in the first row to come; nothing else moves
-    const b = run({ items: [...base, it_("beta/two#2", "queued")], prev: a.memo });
+    const b = run({ items: [...base, it_("beta/two#2", "queued")], now: T + 1.5 * H, prev: a.memo });
     expect(box("beta/two#2", b)?.row).toBe(box("alpha/one#3", b)?.row);
     for (const [id, p] of where(a)) expect(where(b).get(id)).toEqual(p);
-    // #2 ends and #3 starts: #3 moves onto the now row, #1 and #2 stay above it, the columns keep their x
-    const c = run({ items: [base[0], { ...base[1], state: "done", ended: 400 }, { ...base[2], state: "running", started: 450 }, it_("beta/two#2", "queued")] as QueueItem[], prev: b.memo });
-    expect(box("alpha/one#3", c)?.phase).toBe("now");
+    // #2 ends and #3 starts: #3 moves to its start, under the now line's old place; #1 and #2 stay, the columns keep their x
+    const c = run({ items: [base[0], { ...base[1], state: "done", ended: T + 2 * H }, { ...base[2], state: "running", started: T + 2.5 * H }, it_("beta/two#2", "queued")] as QueueItem[], now: T + 2.6 * H, prev: b.memo });
+    expect(box("alpha/one#3", c)).toMatchObject({ phase: "now", y: HEAD + 2.5 * HR, lane: 0 });
     expect(box("alpha/one#1", c)?.y).toBe(box("alpha/one#1", a)?.y);
     expect(box("alpha/one#2", c)?.y).toBe(box("alpha/one#2", a)?.y);
     expect(c.columns.map((x) => x.x)).toEqual(b.columns.map((x) => x.x));
   });
 
-  it("centres on what runs now, else on what is queued", () => {
+  it("does not move a box when a newer one arrives, nor when an older one shows up late (it keeps its lane)", () => {
+    const at = { atOnce: new Map([["alpha", 3]]) };
+    const a = run({ ...at, now: T + 1.2 * H, items: [it_("alpha/one#1", "done", { started: T, ended: T + H }), it_("alpha/one#2", "running", { started: T + 0.5 * H })] });
+    const where = (x: typeof a) => new Map(x.boxes.map((b) => [b.id, [b.x, b.y, b.lane]] as const));
+    expect(where(a).get("alpha/one#2")?.[2]).toBe(1);
+    // a newer one starts in another project and a newer one in alpha: the old boxes stay
+    const b = run({ ...at, now: T + 1.3 * H, prev: a.memo, items: [...a.boxes.map((x) => x.item), it_("alpha/one#3", "running", { started: T + 0.9 * H }), it_("beta/two#2", "running", { started: T + 1.1 * H })] });
+    for (const [id, p] of where(a)) expect(where(b).get(id)).toEqual(p);
+    // a ticket that started before #2 shows up only now (a chat's): #2 keeps lane 1, the late one takes the next free
+    const late = [...b.boxes.map((x) => x.item), it_("alpha/one#9", "done", { started: T + 0.1 * H, ended: T + 0.3 * H })];
+    const c = run({ ...at, now: T + 1.3 * H, prev: b.memo, items: late });
+    for (const [id, p] of where(b)) expect(where(c).get(id)).toEqual(p);
+    expect(box("alpha/one#9", c)?.lane).toBe(2);
+    // without the memo it would have pushed #2 over
+    expect(box("alpha/one#2", run({ ...at, now: T + 1.3 * H, items: late }))?.lane).toBe(2);
+  });
+
+  it("centres on the now line, under what runs now, else under what is queued", () => {
     const b = box("alpha/one#2");
-    expect(focusOf(g)).toEqual({ x: (b?.x ?? 0) + 110, y: (b?.y ?? 0) + 34 });
+    expect(g.nowY).not.toBeNull();
+    expect(focusOf(g)).toEqual({ x: (b?.x ?? 0) + 110, y: g.nowY });
     expect(focusOf(run({ items: [it_("alpha/one#1", "done")] }))).toBeNull();
   });
 

@@ -43,6 +43,12 @@ const COLUMNS: readonly [Sort, string][] = [["title", "Title"], ["map", "Map"], 
 const stateWords = (r: Pick<TableRow, "state" | "place">): string => (r.state === "queued" && r.place !== null ? `queued, number ${String(r.place)}` : r.state);
 
 /** The rows this page is about: the picked map's route (the open tickets of the map if it cannot be read), else the open tickets of the project or of everything. */
+/** The bar for what is ticked, on its own: the map graph's box-select ticks rows while the table sits in another tab. */
+export function TickedBar(): React.JSX.Element | null {
+  const all = useRows();
+  return all === null ? null : <SelectionBar rows={all} />;
+}
+
 function useRows(): TableRow[] | null {
   const { tickets, ix, state, scope } = useBoard();
   const q = useMapRoute(scope.map);

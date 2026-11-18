@@ -2,7 +2,7 @@
  * What the Run tab lets you set: how many tickets each repo runs at once, which accounts are in tonight's pool, the
  * account and model of a waiting ticket (one, or every ticked one), and the words for why a ticket waits.
  */
-import { IconCheck, IconChecklist, IconChevronDown, IconMinus, IconPlus, IconRobot, IconX } from "@tabler/icons-react";
+import { IconAdjustmentsHorizontal, IconCheck, IconChecklist, IconChevronDown, IconMinus, IconPlus, IconRobot, IconX } from "@tabler/icons-react";
 import { useState, useSyncExternalStore } from "react";
 import type * as React from "react";
 import type { QueueItem } from "@sb-hub/contract";
@@ -176,6 +176,32 @@ export function TickBar({ items }: { items: readonly QueueItem[] }): React.JSX.E
 }
 
 // ---- how many run at once, and who is in the pool ----
+
+/** The run head's settings button: how many at once and which accounts, in a popover; a dot when an account runs low. */
+export function LimitsButton(): React.JSX.Element | null {
+  const { state } = useBoard();
+  const repos = repoLines(state.queue);
+  const accounts = accountLines(state);
+  if (repos.length === 0 && accounts.length === 0) return null;
+  const inPool = accounts.filter((a) => a.inPool);
+  const low = inPool.some((a) => (a.five ?? 0) >= 85 || (a.week ?? 0) >= 85);
+  const atOnce = repos.reduce((n, r) => n + r.atOnce, 0);
+  const words = [repos.length > 0 ? `${String(atOnce)} at once` : "", accounts.length > 0 ? `${String(inPool.length)} of ${plural(accounts.length, "account")}` : ""].filter(Boolean).join(" · ");
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button variant="outline" size="sm" aria-label={`At once and accounts: ${words}${low ? " · an account runs low" : ""}`} title="How many tickets run at once, and on which accounts">
+          <IconAdjustmentsHorizontal aria-hidden />
+          <span className="tabular-nums">{words}</span>
+          {low && <span className="size-2 rounded-full bg-warn" aria-hidden />}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="max-h-[min(70dvh,36rem)] w-[min(42rem,calc(100vw-1rem))] overflow-y-auto p-2">
+        <Limits />
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 export function Limits(): React.JSX.Element | null {
   const { state, queueWrite, down, busy } = useBoard();

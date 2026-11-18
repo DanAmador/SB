@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { addLinks } from "@sb-hub/contract";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { setLink } from "@/lib/link.ts";
 import { Board } from "./Board.tsx";
 
 const NEXT = 1794528060 + 600;
@@ -34,6 +35,8 @@ const app = (landed: number, posts: string[] = []): void => {
     }
     return Promise.resolve(input.startsWith("/api/state") ? json(stateWith(landed)) : json({ ok: false }, 404));
   }));
+  // the button sits in Run's Maps tab
+  setLink({ rt: "maps" });
   render(<QueryClientProvider client={new QueryClient()}><Board /></QueryClientProvider>);
 };
 
