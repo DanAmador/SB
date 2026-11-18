@@ -117,6 +117,12 @@ export const Installed = z.strictObject({
   pending: z.strictObject({ tier: z.string(), u0: UsageReading }).optional(),
   probed: Seconds.optional(),
   login: z.literal("expired").nullable().optional(),
+  /** A Codex account signed out: its auth.json's mtime then; a change means `codex login` ran. */
+  login_seen: Seconds.nullable().optional(),
+  /** A Codex account whose sandbox does not start (`codex sandbox -- true`): why; null once it does. */
+  no_sandbox: z.string().nullable().optional(),
+  /** When the hub last tried that sandbox. */
+  sandbox_tried: Seconds.optional(),
 });
 export type Installed = z.infer<typeof Installed>;
 
