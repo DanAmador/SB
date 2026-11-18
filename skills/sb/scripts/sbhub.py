@@ -1595,21 +1595,21 @@ LOG_TAIL = 65536  # the end of a worker's log that is searched for a limit messa
 LIMIT_PATTERNS = ("usage limit reached", "hit your session limit", "hit your weekly limit", "spend limit",
                   "hit your usage limit")  # the last is Codex's
 RESET = re.compile(r"\b(?:resets|try again)\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*([ap]m)?", re.I)
-RESET_IN = re.compile(r"\btry again in\s+((?:\d+\s*(?:days?|hours?|minutes?|mins?)[\s,and]*)+)", re.I)  # Codex
-RESET_UNITS = {"d": 86400, "h": 3600, "m": 60}
+RESET_ON = re.compile(r"\btry again at\s+([a-z]{3} \d{1,2})(?:st|nd|rd|th)?,\s+(\d{4} \d{1,2}:\d{2} [ap]m)", re.I)  # Codex, a later day
 
 
 def limited_until(text, now):
     """When an agent whose output is `text` may run again: None when it hit no limit; the next time the
-    message's reset clock time (`resets 4:40am`, `resets 23:10`, Codex's `try again at 9:31 PM`) comes round; now
-    plus the wait it names (Codex's `try again in 2 days 3 hours 5 minutes`); else an hour from now."""
+    message's reset clock time (`resets 4:40am`, `resets 23:10`, Codex's `try again at 9:31 PM`) comes round; the
+    date and time Codex names for a later day (`try again at Nov 21st, 2026 3:04 AM`); else an hour from now."""
     if not any(p in text.lower() for p in LIMIT_PATTERNS):
         return None
-    m = RESET_IN.search(text)
+    m = RESET_ON.search(text)
     if m:
-        wait = sum(int(n) * RESET_UNITS[u[0].lower()] for n, u in re.findall(r"(\d+)\s*([a-z]+)", m.group(1), re.I))
-        if wait:
-            return now + wait
+        try:
+            return datetime.strptime(m.group(1) + " " + m.group(2), "%b %d %Y %I:%M %p").timestamp()
+        except ValueError:
+            pass
     for m in RESET.finditer(text):
         hour, minute, half = int(m.group(1)), int(m.group(2) or 0), (m.group(3) or "").lower()
         if not (m.group(2) or half) or half and not 1 <= hour <= 12:
@@ -1937,7 +1937,8 @@ def launch(agent, brief, repo, model, env, log, resume=None):
     elif agent.get("kind") == "codex":
         if agent.get("dir"):
             full["CODEX_HOME"] = agent["dir"]
-        cmd = [_exe("codex", full), "exec", brief, "--json", "-C", str(repo), "--skip-git-repo-check"] + (
+        cmd = [_exe("codex", full), "exec", brief, "--json", "-C", str(repo), "--skip-git-repo-check",
+               "-c", 'approval_policy="never"'] + (
             ["-m", model] if model else []) + _codex_sandbox(agent.get("sandbox") or "workspace-write", repo, env)
     else:
         if agent.get("dir"):
@@ -1972,8 +1973,7 @@ def _codex_sandbox(mode, repo, env):
     except (OSError, subprocess.SubprocessError):
         git = ""
     roots = [r for r in (git, env.get("SB_HUB_RUN")) if r]
-    return ["-s", mode, "-c", "sandbox_workspace_write.network_access=true",
-            "-c", "sandbox_workspace_write.writable_roots=" + json.dumps(roots)]
+    return ["-s", mode, "-c", "sandbox_workspace_write.network_access=true"] + [a for r in roots for a in ("--add-dir", r)]
 
 
 SESSION_DAY = 86400  # a session older than this is not resumed: the try starts afresh, told the old log

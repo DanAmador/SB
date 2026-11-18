@@ -23,6 +23,7 @@ from helpers import SBMAP, SCRIPT, free_port  # noqa: E402
 import sbhub  # noqa: E402
 import sbqueue  # noqa: E402
 from sbhub import Hub, Supervisor  # noqa: E402
+from fake_worker import CODEX_LIMIT  # noqa: E402
 
 FAKE = Path(__file__).resolve().parent / "fake_worker.py"
 START = datetime(2026, 11, 13, 1, 0).timestamp()  # 01:00 local: the limit's 4:40am is later the same night
@@ -380,12 +381,15 @@ class LimitTextTest(unittest.TestCase):
 
 
 class CodexTextTest(unittest.TestCase):
-    def test_codex_names_its_wait_or_its_clock_time(self):
-        self.assertEqual(sbhub.limited_until("You've hit your usage limit. Upgrade to Pro or try again in 1 day "
-                                             "2 hours 5 minutes.", START), START + 86400 + 7200 + 300)
+    def test_codex_names_its_clock_time_or_its_date(self):
+        self.assertEqual(sbhub.limited_until(CODEX_LIMIT, START), datetime(2026, 11, 15, 3, 4).timestamp())
+        self.assertEqual(sbhub.limited_until("You've hit your usage limit for gpt-x. Switch to another model now, or "
+                                             "try again at Nov 21st, 2026 9:31 PM.", START),
+                         datetime(2026, 11, 21, 21, 31).timestamp())
+        self.assertEqual(sbhub.limited_until("You've hit your usage limit. Try again later.", START), START + 3600)
         self.assertEqual(sbhub.limited_until("You've hit your usage limit. Try again at 9:31 PM.", START),
                          datetime(2026, 11, 13, 21, 31).timestamp())
-        self.assertIsNone(sbhub.limited_until("try again in 5 minutes", START))  # no limit named: no stop
+        self.assertIsNone(sbhub.limited_until("try again at Nov 15th, 2026 3:04 AM", START))  # no limit named: no stop
 
     def test_codex_errors_are_what_it_said_and_tool_output_is_not(self):
         log = "\n".join(json.dumps(e) for e in (
@@ -497,20 +501,21 @@ class CodexRunTest(RunnerCase):
         self.until(lambda: self.state_of("repo/one#1") == "done")
         item, log = self.items()["repo/one#1"], self.launched[0]["log"]
         argv = self.printed(log, 1)[0]
-        self.assertEqual(argv[:4], ["--json", "-C", str(self.repos["repo/one"]), "--skip-git-repo-check"])
+        self.assertEqual(argv[:6], ["--json", "-C", str(self.repos["repo/one"]), "--skip-git-repo-check", "-c",
+                                    'approval_policy="never"'])
         self.assertNotIn("-m", argv)  # no model named: the account's own default, never sonnet
         self.assertEqual(argv[argv.index("-s") + 1], "workspace-write")
-        roots = json.loads(next(a for a in argv if a.startswith("sandbox_workspace_write.writable_roots=")).split("=", 1)[1])
+        roots = [b for a, b in zip(argv, argv[1:]) if a == "--add-dir"]
         self.assertIn(str(self.repos["repo/one"] / ".git"), roots)
         self.assertIsNone(item.get("session"))
         self.assertEqual(json.loads(self.printed(log, 1, "env")[0])["CODEX_HOME"], str(self.root / ".codex"))
         self.assertEqual(self.open_tickets(), {2: self.open_tickets()[2]})
 
-    def test_a_codex_usage_limit_takes_the_account_out_until_the_wait_it_names(self):
+    def test_a_codex_usage_limit_takes_the_account_out_until_the_time_it_names(self):
         self.mode = "limit"
         self.only(1)
         self.until(lambda: self.hub.state()["installed"]["codex"]["limited_until"])
-        self.assertEqual(self.hub.state()["installed"]["codex"]["limited_until"], START + 86400 + 7200 + 300)
+        self.assertEqual(self.hub.state()["installed"]["codex"]["limited_until"], datetime(2026, 11, 15, 3, 4).timestamp())
         self.assertEqual(self.state_of("repo/one#1"), "queued")
         self.assertEqual(self.open_tickets()[1]["status"], "open")
 

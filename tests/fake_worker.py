@@ -60,7 +60,8 @@ import time
 
 LIMIT = "You've hit your session limit · resets 4:40am (Europe/Madrid)"
 AUTH = "Failed to authenticate: OAuth session expired and could not be refreshed"
-CODEX_LIMIT = "You've hit your usage limit. Upgrade to Pro or try again in 1 day 2 hours 5 minutes."
+CODEX_LIMIT = ("You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit "
+               "https://chatgpt.com/codex/settings/usage to purchase more credits or try again at Nov 15th, 2026 3:04 AM.")
 CODEX_AUTH = ("Your access token could not be refreshed because your refresh token has expired. "
               "Please log out and sign in again.")
 
