@@ -18,6 +18,7 @@ import { tally } from "./bits.tsx";
 import { BoardContext, type BoardData } from "./context.tsx";
 import { Breadcrumb, MenuButton, SidebarColumn, SidebarSheet } from "./Sidebar.tsx";
 import { HistoryView } from "./HistoryView.tsx";
+import { NowPanel } from "./NowPanel.tsx";
 import { SessionSheet } from "./SessionPanel.tsx";
 import { RunHead } from "./RunHead.tsx";
 import { RunView } from "./RunView.tsx";
@@ -226,6 +227,7 @@ function Loaded({ state, tickets, down, lastOk }: { state: State; tickets: Board
         <main className={cn("flex min-w-0 flex-1 flex-col gap-6 px-4 py-5 sm:px-6", down && "opacity-60")}>
           <Breadcrumb scope={scope} />
           {down && <Offline lastOk={lastOk} />}
+          <NowPanel at="top" />
           {state.queue_lock?.mine === false && (
             <div role="alert" className="flex items-center gap-2 rounded-lg border border-warn/40 bg-warn-soft px-3 py-2 text-sm text-warn">
               <IconAlertTriangle className="size-4 shrink-0" aria-hidden />
@@ -243,6 +245,7 @@ function Loaded({ state, tickets, down, lastOk }: { state: State; tickets: Board
             <HistoryView />
           </TabsContent>
         </main>
+        <NowPanel at="side" />
         </div>
       </Tabs>
       <SidebarSheet tree={tree} scope={scope} open={menu} onOpenChange={setMenu} />

@@ -15,6 +15,7 @@ import { agentOf, hm, itemTitle } from "@/lib/board.ts";
 import { useNights } from "@/lib/hub.ts";
 import { setLink } from "@/lib/link.ts";
 import { nightWords } from "@/lib/history.ts";
+import { nowNext } from "@/lib/now.ts";
 import { headLine, liveItems, liveRecord, stateWords, stopAsk, stoppingWords } from "@/lib/night.ts";
 import { LimitsButton } from "./RunControls.tsx";
 import { useBoard } from "./context.tsx";
@@ -37,8 +38,11 @@ export function RunHead(): React.JSX.Element | null {
 }
 
 function NoRun({ last }: { last: Night | null }): React.JSX.Element {
-  const { state, writes, down, busy } = useBoard();
+  const { state, ix, writes, down, busy } = useBoard();
   const waiting = state.queue.items.filter((i) => i.state === "queued" && !i.night && !(i.kind === "job" && (i.close_off === true || i.hub === true))).length;
+  // what runs or waits outside any run, a close-off job say, which the count above leaves out: it still runs
+  const n = nowNext(state.queue.items);
+  const outside = [...n.running, ...n.queued.filter((i) => i.kind === "job" && (i.close_off === true || i.hub === true))];
   return (
     <section aria-label="The live run" data-testid="run-head" data-live="false" className="flex flex-col gap-1 rounded-xl border bg-card px-4 py-3">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -56,6 +60,11 @@ function NoRun({ last }: { last: Night | null }): React.JSX.Element {
       <p className="text-sm text-muted-foreground" data-testid="waits-start">
         {waiting === 0 ? "Queue a map or a ticket, then press Start." : `${String(waiting)} queued, waiting for Start. Nothing runs until you press it.`}
       </p>
+      {outside.length > 0 && (
+        <p data-testid="outside-run" className="text-sm">
+          {`Also in the queue: ${outside.map((i) => itemTitle(i, ix.byKey.get(i.key))).join(", ")}.`}
+        </p>
+      )}
       {last !== null && (
         <p data-testid="last-run" className="flex flex-wrap items-baseline gap-x-2 text-sm">
           <span className="text-muted-foreground">Last run:</span>
