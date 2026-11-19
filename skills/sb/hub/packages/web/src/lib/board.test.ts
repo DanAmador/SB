@@ -157,7 +157,12 @@ describe("waits for you", () => {
   });
 
   it("counts open questions, runs to assess and trouble; not answered questions, not design tickets, not your sessions", () => {
-    expect(waitsFor(s, tickets, ix, new Set()).count).toBe(2 + 1 + 2 + 1 + 1);
+    expect(waitsFor(s, tickets, ix, new Set()).count).toBe(2 + 1 + 1 + 1);
+  });
+
+  it("caps a long landed reason", () => {
+    const long = `judged partly by the review: ${"x".repeat(1200)}`;
+    expect(plainReason({ note: long, state: "failed", landed_at: 1, verdict: "partly" }).length).toBeLessThanOrEqual(200);
   });
 
   it("lists a ticket the review judged short twice; its one more try, still queued, is not waiting on you", () => {
@@ -455,14 +460,14 @@ describe("the sidebar's scope", () => {
   });
 
   it("narrows Waits for you, its count too; signed-out accounts show only unscoped", () => {
-    expect(waits.count).toBe(4);
+    expect(waits.count).toBe(3);
     const sb = scopeWaits(waits, { project: "sb", map: "" }, s);
     expect(sb.questions.map(([id]) => id)).toEqual(["a"]);
     expect(sb.failed.map((i) => i.key)).toEqual(["sb/two#3"]);
     expect(sb.done.map((i) => i.key)).toEqual(["sb/one#4"]);
-    expect(sb.count).toBe(3);
+    expect(sb.count).toBe(2);
     const one = scopeWaits(waits, { project: "sb", map: "sb/one" }, s);
-    expect(one.count).toBe(2);
+    expect(one.count).toBe(1);
     expect(scopeWaits(waits, { project: "sk4te", map: "" }, s).questions.map(([id]) => id)).toEqual(["b"]);
   });
 });

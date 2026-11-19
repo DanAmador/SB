@@ -192,7 +192,7 @@ function RunLine({ i, project }: { i: QueueItem; project: boolean }): React.JSX.
   const done = i.state === "done";
   const again = canTickAgain(i, ix);
   const reason = done ? "" : plainReason(i);
-  const reasonCls = cn("min-w-0 truncate", i.state === "skipped" || st === "landed" ? "text-warn" : "text-destructive");
+  const reasonCls = cn("min-w-0 truncate break-words", i.state === "skipped" || st === "landed" ? "text-warn" : "text-destructive");
   const meta = (
     <span className="shrink-0 text-muted-foreground">
       {project && itemProject(i, t)}

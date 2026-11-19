@@ -43,8 +43,8 @@ test("Run is the landing page: one row per worker run, the silent one amber, nev
   await expect(busy.getByRole("link", { name: "Log" })).toHaveAttribute("href", /^obsidian:\/\/open\?path=%2Fvault%2Fruns%2F2026-11-13-board%2F5\.log$/);
   // your chat session is not a run
   await expect(page.getByRole("list", { name: "Running now" }).getByText("Charting the board")).toHaveCount(0);
-  // the Waits for you count is the page's alarm: a question, a failed run, a done run
-  await expect(page.getByRole("tab", { name: /Waits for you/ })).toContainText("4");
+  // the Waits for you count is the page's alarm: a question, a failed run, an account
+  await expect(page.getByRole("tab", { name: /Waits for you/ })).toContainText("3");
   // a row opens the ticket's panel, with Message and Stop
   await busy.getByRole("button", { name: "Show details" }).click();
   const sheet = page.getByRole("dialog");
@@ -783,6 +783,16 @@ test("screenshots of Waits for you", async ({ page }) => {
   await expect(page.getByRole("region", { name: "Failed" })).toHaveCount(0);
   await page.waitForTimeout(300);
   await page.screenshot({ path: to("waits-after.png") });
+});
+
+test("Waits for you at 375 px: nothing scrolls sideways; screenshot", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 800 });
+  await page.goto("/next/?view=waits");
+  await expect(page.getByRole("button", { name: "Mark all seen" })).toBeVisible();
+  await page.waitForTimeout(300);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  const dir = process.env.SB_SHOTS;
+  if (dir !== undefined) await page.screenshot({ path: `${dir}/waits-375.png`, fullPage: true });
 });
 
 for (const [view, scheme] of [["run", "light"], ["run", "dark"], ["waits", "light"], ["waits", "dark"], ["history", "light"], ["history", "dark"]] as const) {

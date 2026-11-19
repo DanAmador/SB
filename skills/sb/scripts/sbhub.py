@@ -3075,6 +3075,14 @@ def _hub_holds(t):
     return bool(t) and t["status"] == "claimed" and str(t.get("claimed_by") or "").startswith("hub ")
 
 
+def _ticket_now(t):
+    """Where a ticket stands now, in words: `claimed by <who>` only when someone does hold it."""
+    who = str(t.get("claimed_by") or "").strip()
+    if t.get("status") == "claimed":
+        return "claimed by " + who if who else "claimed by someone else"
+    return "now {}".format(t.get("status") or "changed")
+
+
 def _fail_class(reason):
     """`no commit`, or the failing check command: three in a row of one class pause the queue."""
     first = reason.splitlines()[0] if reason else ""
@@ -3916,7 +3924,7 @@ class TicketRun:
         found, now_t = self.row(key)
         if found and not _hub_holds(now_t):
             return self.result(item, "skipped", "passed its checks, but the ticket changed while it ran ({})".format(
-                "no longer open" if now_t is None else "claimed by " + str(now_t.get("claimed_by"))), run, sha, checks,
+                "no longer open" if now_t is None else _ticket_now(now_t)), run, sha, checks,
                 **judged)
         listed = "; ".join("`{}`".format(c) for c in t["checks"])
         tail = "Model: {} on agent {} (try {}). Worker's report: {}/{}.md; its log: {}.".format(

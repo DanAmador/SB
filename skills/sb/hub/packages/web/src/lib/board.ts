@@ -596,7 +596,7 @@ export interface Waits {
   readonly signedOut: readonly string[];
   readonly badWidgets: readonly { project: string; panel: string; label: string; value: string }[];
   /**
-   * The tab's count, the page's only alarm: open questions, runs to assess, accounts signed out and failing
+   * The tab's count, the page's only alarm: open questions, failed runs, accounts signed out and failing
    * widgets. Design tickets are listed but not counted: there are dozens and they wait days, not minutes.
    */
   readonly count: number;
@@ -635,7 +635,7 @@ export function waitsFor(state: State, tickets: readonly TicketRow[] | null, ix:
     tickets: waiting,
     signedOut,
     badWidgets,
-    count: open + failed.length + done.length + signedOut.length + badWidgets.length,
+    count: open + failed.length + signedOut.length + badWidgets.length,
   };
 }
 
@@ -645,11 +645,14 @@ export function tryOf(i: Pick<QueueItem, "tries" | "state">): string {
   return i.tries > 0 && (i.state === "queued" || i.state === "running") ? `try ${String(i.tries + 1)} of ${String(TRIES_MAX)}` : "";
 }
 
+const REASON_MAX = 200;
+
 export function plainReason(i: Pick<QueueItem, "note" | "state"> & Partial<Pick<QueueItem, "landed_at" | "verdict">>): string {
   const first = firstLine(i.note);
   if (landedShort(i)) {
     const unmet = /^judged [^:]+: (.+)$/.exec(first)?.[1];
-    return `its work landed; the review found it ${i.verdict === "not met" ? "not done" : "partly done"}${unmet ? `: ${unmet}` : ""}`;
+    const text = `its work landed; the review found it ${i.verdict === "not met" ? "not done" : "partly done"}${unmet ? `: ${unmet}` : ""}`;
+    return text.length > REASON_MAX ? `${text.slice(0, REASON_MAX - 1).trimEnd()}…` : text;
   }
   if (!first) return i.state === "skipped" ? "skipped, no reason recorded" : "no reason recorded";
   if (first.startsWith("no commit after ")) return "ended without a commit";
@@ -764,5 +767,5 @@ export function scopeWaits(w: Waits, s: Scope, state: Pick<State, "agents" | "al
   const tickets = w.tickets.filter((t) => ticketInScope(s, t));
   const badWidgets = w.badWidgets.filter((b) => s.map === "" && (s.project === "" || folder(b.project) === s.project));
   const open = questions.filter(([, q]) => q.answer === null).length;
-  return { questions, failed, done, tickets, signedOut: [], badWidgets, count: open + failed.length + done.length + badWidgets.length };
+  return { questions, failed, done, tickets, signedOut: [], badWidgets, count: open + failed.length + badWidgets.length };
 }

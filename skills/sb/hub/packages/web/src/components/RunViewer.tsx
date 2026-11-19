@@ -76,7 +76,7 @@ export function RunViewer({ run }: { run: Run }): React.JSX.Element {
         ))}
       </dl>
       <div className="flex flex-wrap gap-2">
-        <Button size="sm" variant="brand" disabled={down || !again} title={again ? "Queue this ticket again" : "Its ticket is not open any more"} onClick={() => { void enqueue(run.key); }}>
+        <Button size="sm" variant={shown.outcome === "done" ? "outline" : "brand"} disabled={down || !again} title={again ? "Queue this ticket again" : "Its ticket is not open any more"} onClick={() => { void enqueue(run.key); }}>
           <IconPlayerPlay aria-hidden />
           Run again
         </Button>
