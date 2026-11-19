@@ -141,6 +141,21 @@ export function infoOf(routes: readonly (MapRoute | undefined)[], rows: readonly
   return { tickets, maps };
 }
 
+/**
+ * A run as it ran (ticket 169): each ticket that kept its title, map title and 'after' arrows when it started tells
+ * them itself, over what the maps say today; a ticket that kept nothing (a run from before) keeps today's.
+ */
+export function frozenInfo(items: readonly QueueItem[], base: { tickets: ReadonlyMap<string, TicketInfo>; maps: ReadonlyMap<string, string> }): { tickets: Map<string, TicketInfo>; maps: Map<string, string> } {
+  const tickets = new Map(base.tickets);
+  const maps = new Map(base.maps);
+  for (const i of items) {
+    if (i.kind !== "ticket") continue;
+    if (i.after !== undefined) tickets.set(i.key, { title: i.title ?? tickets.get(i.key)?.title ?? i.key, after: i.after });
+    if (i.map_title !== undefined && i.map_title !== "") maps.set(itemMapKey(i), i.map_title);
+  }
+  return { tickets, maps };
+}
+
 /** One ticket of the run as the list and the graph tell it. */
 export interface NightCard {
   id: string;

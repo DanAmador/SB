@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { State, TicketRow } from "@sb-hub/contract";
 import { NODE_H, NODE_W } from "./map.ts";
-import { atOnceOf, clock, countsLine, DONE_ID, focusOf, GAP, infoOf, LANE_H, LEFT, nightGraph, SLOT_W, type NightInput, type TicketInfo } from "./nightGraph.ts";
+import { atOnceOf, clock, countsLine, DONE_ID, focusOf, frozenInfo, GAP, infoOf, LANE_H, LEFT, nightGraph, SLOT_W, type NightInput, type TicketInfo } from "./nightGraph.ts";
 
 const links = (report: string | null) => ({ ticket: null, map: null, board: null, report, log: null });
 const it_ = (key: string, state: QueueItem["state"], more: Record<string, unknown> = {}): QueueItem =>
@@ -239,6 +239,24 @@ describe("nightGraph", () => {
     expect(box("alpha/one#9", c)?.lane).toBe(2);
     // without the memo it would have pushed #2 over
     expect(box("alpha/one#2", run({ ...at, now: T + 1.3 * H, items: late }))?.lane).toBe(2);
+  });
+
+  it("draws an ended run as it ran: a ticket's kept arrows and map title win over what the maps say today", () => {
+    // today alpha/one#2 no longer comes after #1 and the map was renamed; the run kept both as they were
+    const today = { maps: new Map([["alpha/one", "Renamed"]]), tickets: new Map([["alpha/one#2", { title: "Second, renamed", after: [] }]]) };
+    const kept = [
+      it_("alpha/one#1", "done", { started: T, ended: T + H, title: "First", after: [], map_title: "Map one" }),
+      it_("alpha/one#2", "done", { started: T + H, ended: T + 2 * H, title: "Second", after: ["alpha/one#1"], map_title: "Map one" }),
+    ];
+    const f = frozenInfo(kept, today);
+    expect(f.tickets.get("alpha/one#2")).toEqual({ title: "Second", after: ["alpha/one#1"] });
+    expect(f.maps.get("alpha/one")).toBe("Map one");
+    const x = nightGraph({ items: kept, maps: ["alpha/one"], info: f, scope: EVERYTHING, now: T + 2 * H });
+    expect(x.edges.filter((e) => e.to !== DONE_ID).map((e) => e.id)).toEqual(["alpha/one#1>alpha/one#2"]);
+    expect(x.frames[0]?.title).toBe("Map one");
+    // a ticket that kept nothing (a run from before) keeps today's
+    const old = frozenInfo([it_("alpha/one#2", "done")], today);
+    expect(old.tickets.get("alpha/one#2")).toEqual({ title: "Second, renamed", after: [] });
   });
 
   it("centres on the now line, beside what runs now, else beside what is queued", () => {

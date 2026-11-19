@@ -125,7 +125,7 @@ function NightDetail({ night }: { night: Night }): React.JSX.Element {
           </Button>
         )}
       </div>
-      {detail.data !== undefined && <NightGraph items={all} title="The run's graph" />}
+      {detail.data !== undefined && <NightGraph items={all} title="The run's graph" {...(night.state === "ended" && { frozen: night })} />}
       {unreached.length > 0 && (
         <section aria-label="Not reached" data-testid="not-reached" className="flex flex-col gap-2">
           <div className="flex flex-wrap items-center gap-2">

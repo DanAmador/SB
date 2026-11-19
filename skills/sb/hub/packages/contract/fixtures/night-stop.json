@@ -15,6 +15,9 @@
       "ended": 1794528060.0,
       "how": "stopped",
       "id": "night-fixture",
+      "maps": [
+        "repo/one"
+      ],
       "name": "Night of 2026-11-13, 01:01",
       "not_reached": [
         {
@@ -34,6 +37,13 @@
           "title": "audit"
         }
       ],
+      "repos": {
+        "/fixture/repo": {
+          "at_once": 2,
+          "running": 0,
+          "side_by_side": 3
+        }
+      },
       "started": 1794528060.0,
       "state": "ended"
     },

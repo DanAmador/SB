@@ -831,6 +831,7 @@ class Hub:
         if items is None:
             items = [i for i in self._data["queue"]["items"] if i.get("night") == night["id"]]
         out = {k: night[k] for k in ("id", "name", "started", "by", "state", "ended", "how", "not_reached")}
+        out.update({k: night[k] for k in ("maps", "repos") if k in night})  # an ended run's frozen graph
         out["drain"] = bool(night.get("drain", True))  # a night saved before Start drained by itself
         out["counts"] = self._night_counts(items, night["not_reached"])
         if with_items:
@@ -925,7 +926,11 @@ class Hub:
             return changed  # a run you started stays open, drained or not, until you stop it
         how = "stopped" if stopping else "stop_time" if night.get("stop_time") else "finished"
         night.pop("stop_time", None)
-        night.update(state="ended", ended=self.now(), how=how, items=mine)
+        # what the graph drew it with, kept so History draws the run as it ended (ticket 169)
+        mine_maps = {sbqueue.map_of(i["key"]) for i in mine if i.get("kind") == "ticket"}
+        order = [m for m in q.get("maps") or [] if m in mine_maps]
+        night.update(state="ended", ended=self.now(), how=how, items=mine,
+                     maps=order + sorted(mine_maps - set(order)), repos=json.loads(json.dumps(q.get("repos") or {})))
         q["items"] = [i for i in q["items"] if i not in mine]
         q["night"] = None
         q["version"] += 1
@@ -2730,6 +2735,18 @@ def _plain_words(t):
         body = ""
     m = re.search(r"^## In plain words\s*\n(.*?)(?=^## |\Z)", body, re.M | re.S)
     return (m.group(1).strip() if m else "") or t.get("map_title") or t["map"]
+
+
+def frozen_of(t):
+    """What a started ticket keeps of its row so History can draw it as it ran (ticket 169): its map's title and
+    the tickets it comes after, as map#num (a number is of its own map; another map's is 'project/map#num')."""
+    after = []
+    for b in t.get("blocked_by") or []:
+        if isinstance(b, int):
+            after.append("{}#{}".format(t["map"], b))
+        elif isinstance(b, str) and re.fullmatch(r"[^#\s]+/[^#\s]+#\d+", b):
+            after.append(b)
+    return {"map_title": t.get("map_title") or "", "after": after}
 
 
 def _hub_holds(t):
@@ -5203,7 +5220,7 @@ class Supervisor:
                     tree, branch, paths = None, None, None
                 item.update(state="running", runner=name, repo=t["repo"], map=t["map"], title=t["title"],
                             model=model, started=now, ended=None, note="starting", tree=tree, branch=branch,
-                            paths=paths)
+                            paths=paths, **frozen_of(t))
                 take(name, need)
                 busy.setdefault(t["repo"], []).append(paths if tree else None)
                 picks.append((dict(item), t, name, dict(inst)))

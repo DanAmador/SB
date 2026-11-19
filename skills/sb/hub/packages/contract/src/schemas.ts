@@ -256,6 +256,9 @@ export const TicketItem = z.strictObject({
   ...itemFields,
   kind: z.literal("ticket"),
   map: z.string().optional(),
+  /** Kept when it starts, so History draws it as it ran: its map's title and what it comes after (map#num). */
+  map_title: z.string().optional(),
+  after: z.array(z.string()).optional(),
   model: z.string().nullable().optional(),
   /** The ticket's own worktree and branch when its repo runs tickets side by side (`git config sb.parallel`). */
   tree: z.string().nullable().optional(),
@@ -390,6 +393,9 @@ export const Night = z.strictObject({
   not_reached: z.array(z.strictObject({ key: z.string(), title: z.string() })),
   /** True: it ends by itself once its work is judged (sb tonight). False: it stays open until it is stopped. */
   drain: z.boolean(),
+  /** Kept when it ended, so History draws it as it was: its maps in the queue's order and each repo's limits. */
+  maps: z.array(z.string()).optional(),
+  repos: z.record(z.string(), RepoLoad).optional(),
   counts: NightCounts,
 });
 export type Night = z.infer<typeof Night>;

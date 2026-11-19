@@ -10,12 +10,12 @@ import { Background, Controls, Handle, MarkerType, MiniMap, Panel, Position, Rea
 import "@xyflow/react/dist/style.css";
 import { useEffect, useMemo, useState } from "react";
 import type * as React from "react";
-import type { MapTicket, QueueItem } from "@sb-hub/contract";
+import type { MapTicket, Night, QueueItem } from "@sb-hub/contract";
 import { useMapRoutes } from "@/lib/hub.ts";
 import { setLink } from "@/lib/link.ts";
 import { liveItems } from "@/lib/night.ts";
 import { NODE_H, NODE_W, type MapNode } from "@/lib/map.ts";
-import { atOnceOf, CLOCK_H, DONE_ID, focusOf, infoOf, LEFT, nightGraph, type NightBox, type NightDone, type NightFrame, type NightMemo } from "@/lib/nightGraph.ts";
+import { atOnceOf, CLOCK_H, DONE_ID, focusOf, frozenInfo, infoOf, LEFT, nightGraph, type NightBox, type NightDone, type NightFrame, type NightMemo } from "@/lib/nightGraph.ts";
 import { cn } from "@/lib/utils";
 import { itemProject } from "@/lib/board.ts";
 import { ProjectChips, ScrollRow, tally } from "./bits.tsx";
@@ -219,19 +219,28 @@ const FRAME_PAD = 12;
 /** A clock label's width, centred on its time. */
 const TICK_W = 88;
 
-/** The live run's graph, or the graph of the run it is given (History's). Either narrows to the sidebar's pick. */
-export function NightGraph({ items: given, title }: { items?: readonly QueueItem[]; title?: string }): React.JSX.Element | null {
+/**
+ * The live run's graph, or the graph of the run it is given (History's). An ended run is `frozen`: it draws from what
+ * it kept (its maps' order, its repos' limits, its end time and each ticket's arrows), never from today's queue.
+ * Either narrows to the sidebar's pick.
+ */
+export function NightGraph({ items: given, title, frozen }: { items?: readonly QueueItem[]; title?: string; frozen?: Pick<Night, "maps" | "repos" | "ended"> }): React.JSX.Element | null {
   const { state, tickets, scope, ix } = useBoard();
   const wide = useWide();
   const live = liveItems(state.queue, state);
   const items = given ?? live;
-  const maps = useMemo(() => [...new Set([...(state.queue.maps ?? []), ...items.filter((i) => i.kind === "ticket").map((i) => i.key.replace(/#\d+$/, ""))])], [state.queue.maps, items]);
-  const routes = useMapRoutes(maps);
+  const order = frozen === undefined ? state.queue.maps : frozen.maps;
+  const maps = useMemo(() => [...new Set([...(order ?? []), ...items.filter((i) => i.kind === "ticket").map((i) => i.key.replace(/#\d+$/, ""))])], [order, items]);
+  // a frozen run reads today's map routes only for the tickets that kept nothing (runs from before ticket 169)
+  const needRoutes = frozen === undefined || items.some((i) => i.kind === "ticket" && i.after === undefined);
+  const routes = useMapRoutes(needRoutes ? maps : []);
   const data = routes.map((r) => r.data);
-  const info = useMemo(() => infoOf(data, tickets ?? []), [data, tickets]);
-  const atOnce = useMemo(() => atOnceOf(state.queue.repos), [state.queue.repos]);
-  // the clock of the rows to come moves once a minute
-  const minute = Math.floor(useNow() / 60) * 60;
+  const info = useMemo(() => (frozen === undefined ? infoOf(data, tickets ?? []) : frozenInfo(items, infoOf(data, tickets ?? []))), [frozen, items, data, tickets]);
+  const repos = frozen === undefined ? state.queue.repos : frozen.repos;
+  const atOnce = useMemo(() => atOnceOf(repos), [repos]);
+  // the clock of the steps to come moves once a minute; an ended run's stands at its end
+  const ticking = Math.floor(useNow() / 60) * 60;
+  const minute = frozen?.ended ?? ticking;
   const [hidden, setHidden] = useState<ReadonlySet<string>>(() => new Set());
   const hide = (map: string): void => {
     setHidden((h) => {
@@ -243,8 +252,8 @@ export function NightGraph({ items: given, title }: { items?: readonly QueueItem
   // the bands keep their order and height, so an update moves nothing that stays
   const [memo] = useState(() => new Map<"v", NightMemo>());
   const g = useMemo(
-    () => nightGraph({ items, maps: state.queue.maps ?? [], info, scope, hidden, atOnce, now: minute, prev: memo.get("v") }),
-    [items, state.queue.maps, info, scope, hidden, atOnce, minute, memo],
+    () => nightGraph({ items, maps: order ?? [], info, scope, hidden, atOnce, now: minute, prev: memo.get("v") }),
+    [items, order, info, scope, hidden, atOnce, minute, memo],
   );
   useEffect(() => {
     memo.set("v", g.memo);

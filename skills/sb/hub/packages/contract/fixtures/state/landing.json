@@ -45,6 +45,7 @@
   },
   "items": [
    {
+    "after": [],
     "agent": null,
     "base_sha": "0000000000000000000000000000000000000000",
     "branch": "sb/repo-one-001",
@@ -56,6 +57,7 @@
     "log": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one/1.log",
     "log_start": 0,
     "map": "repo/one",
+    "map_title": "repo/one",
     "model": "sonnet",
     "night": "night-20261113-010000",
     "note": "running on main (sonnet)",

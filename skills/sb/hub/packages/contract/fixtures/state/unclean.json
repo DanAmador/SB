@@ -27,6 +27,7 @@
   "bases": {},
   "items": [
    {
+    "after": [],
     "agent": null,
     "base_sha": "0000000000000000000000000000000000000000",
     "blocking": [
@@ -50,6 +51,7 @@
     "log": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one/1.log",
     "log_start": 0,
     "map": "repo/one",
+    "map_title": "repo/one",
     "model": "sonnet",
     "night": "night-20261113-010000",
     "note": "landed on its branch sb/repo-one-001, waiting for a clean checkout: unsaved changes to one/done.txt",

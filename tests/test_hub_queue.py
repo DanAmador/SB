@@ -1010,6 +1010,21 @@ class NightTest(unittest.TestCase):
         self.assertEqual({i["night"] for i in self.q()["items"]}, {nid})
         self.assertEqual(len(self.h.nights()["nights"]), 1)
 
+    def test_an_ended_run_keeps_its_maps_order_and_limits_and_a_started_ticket_its_arrows(self):
+        self.set(1, 4)
+        nid = self.h.night_start(drain=True)["night"]["id"]
+        with self.h._lock:
+            self.h._data["queue"]["repos"] = {"/r": {"at_once": 2}}
+        self.judge("repo/one#1")
+        self.judge("repo/one#4")
+        n = self.h.night(nid)["night"]
+        self.assertEqual((n["state"], n["maps"], n["repos"]), ("ended", ["repo/one"], {"/r": {"at_once": 2}}))
+        with self.h._lock:
+            self.h._data["queue"]["repos"] = {"/r": {"at_once": 5}}  # today's limits change: the run's do not
+        self.assertEqual(self.h.night(nid)["night"]["repos"], {"/r": {"at_once": 2}})
+        self.assertEqual(sbhub.frozen_of({"map": "p/m", "map_title": "M", "blocked_by": [3, "p/other#12", "loose"]}),
+                         {"map_title": "M", "after": ["p/m#3", "p/other#12"]})
+
     def test_what_waits_for_start_never_starts_and_says_so(self):
         self.set(1)
         with self.h._lock:

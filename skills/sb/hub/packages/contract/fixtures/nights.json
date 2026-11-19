@@ -36,8 +36,12 @@
         "ended": 1794528000.0,
         "how": "finished",
         "id": "night-20261113-010000",
+        "maps": [
+          "repo/one"
+        ],
         "name": "Night of 2026-11-13, 01:00",
         "not_reached": [],
+        "repos": {},
         "started": 1794528000.0,
         "state": "ended"
       }
