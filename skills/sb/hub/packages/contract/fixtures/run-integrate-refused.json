@@ -1,0 +1,14 @@
+{
+  "body": {
+    "error": "action must be land or back",
+    "ok": false
+  },
+  "contentType": "application/json",
+  "request": {
+    "action": "merge",
+    "agent": "sess-1",
+    "key": "repo/one#2"
+  },
+  "route": "POST /api/run/integrate",
+  "status": 400
+}

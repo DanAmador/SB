@@ -365,6 +365,19 @@ def build_server():
             return "not joined: {}".format(out.get("error") if isinstance(out, dict) else out)
         return "joined run {} as {}".format(out["joined"]["night"], out["joined"]["role"])
 
+    @mcp.tool(description="Land a finished ticket the hub handed to this chat after you reviewed its branch "
+                          "(action 'land'), or send it back to be built again (action 'back', with a note the worker "
+                          "is told). Run `sbhub.py watch --chat <agent>` in the background to be woken when one is handed.")
+    def sb_integrate(agent: str, key: str, action: str = "land", note: str = "") -> str:
+        code, out = hub("/api/run/integrate", {"agent": agent, "key": key, "action": action,
+                                               **({"note": note} if note else {})})
+        if code == 0:
+            return HUB_DOWN
+        if code != 200:
+            return "not done: {}".format(out.get("error") if isinstance(out, dict) else out)
+        return "{}: {}; the hub does it now, and the board says how it went".format(
+            key, "landing" if action == "land" else "sent back")
+
     @mcp.tool(description="Leave the run joined with sb_join: the board stops showing this chat.")
     def sb_leave(agent: str) -> str:
         code, out = hub("/api/run/leave", {"agent": agent})

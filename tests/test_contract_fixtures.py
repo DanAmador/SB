@@ -397,6 +397,15 @@ class ContractFixturesTest(unittest.TestCase):
         joined = r("run_join", {"agent": "sess-1", "role": "integrator"})  # a chat joins the live run (ticket 170)
         self.assertEqual(joined["joined"]["role"], "integrator")
         self.record("run-join-refused", "/api/run/join", {"agent": "sess-1", "role": "watcher"}, 400)
+        with self.hub._lock:  # a finished ticket handed to the joined chat (ticket 172; the run itself: test_hub_integrator)
+            handed = {**sbhub.Hub._item("repo/one#2"), "night": self.hub._data["queue"]["night"], "state": "handed",
+                      "by": "sess-1", "handed": {"to": "sess-1", "at": self.clock.t}}
+            self.hub._data["queue"]["items"].append(handed)
+        asked = r("run_integrate", {"agent": "sess-1", "key": handed["key"], "action": "back", "note": "name it better"})
+        self.assertEqual(next(i for i in asked["queue"]["items"] if i["key"] == handed["key"])["integrate_ask"]["action"], "back")
+        self.record("run-integrate-refused", "/api/run/integrate", {"agent": "sess-1", "key": handed["key"], "action": "merge"}, 400)
+        with self.hub._lock:
+            self.hub._data["queue"]["items"] = [i for i in self.hub._data["queue"]["items"] if i["key"] != handed["key"]]
         r("run_leave", {"agent": "sess-1"})  # leaving twice is refused: test_hub
         r("unsend", {"id": pending})
         r("unlock", {"key": "port:5173", "by": "sess-1"})

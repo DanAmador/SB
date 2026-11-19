@@ -1,0 +1,64 @@
+{
+  "body": {
+    "ok": true,
+    "queue": {
+      "agent": "main",
+      "agents": [
+        "main",
+        "spare"
+      ],
+      "bases": {},
+      "final_review": true,
+      "items": [
+        {
+          "agent": null,
+          "by": "sess-1",
+          "commit": null,
+          "ended": null,
+          "handed": {
+            "at": 1794528060.0,
+            "to": "sess-1"
+          },
+          "integrate_ask": {
+            "action": "back",
+            "at": 1794528060.0,
+            "by": "sess-1",
+            "note": "name it better"
+          },
+          "key": "repo/one#2",
+          "kind": "ticket",
+          "night": "night-fixture-2",
+          "note": "sess-1 asked to send it back: name it better",
+          "started": null,
+          "state": "handed",
+          "tries": 0
+        }
+      ],
+      "maps": [
+        "repo/one"
+      ],
+      "night": "night-fixture-2",
+      "paused": false,
+      "repos": {
+        "/fixture/repo": {
+          "at_once": 2,
+          "running": 0,
+          "side_by_side": 3
+        }
+      },
+      "runs": {},
+      "seeded": true,
+      "stop_at": 1794549600.0,
+      "version": 37
+    }
+  },
+  "contentType": "application/json",
+  "request": {
+    "action": "back",
+    "agent": "sess-1",
+    "key": "repo/one#2",
+    "note": "name it better"
+  },
+  "route": "POST /api/run/integrate",
+  "status": 200
+}

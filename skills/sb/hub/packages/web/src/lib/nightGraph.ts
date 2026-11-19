@@ -77,7 +77,8 @@ function countOf(i: QueueItem): keyof Counts {
     case "landed":
     case "review":
     case "recheck":
-    case "unclean": return "checking";
+    case "unclean":
+    case "handed": return "checking";
   }
 }
 export const tally = (items: readonly QueueItem[]): Counts => {
@@ -94,6 +95,7 @@ const STATE_WORDS: Readonly<Record<QueueItem["state"], string>> = {
   review: "In its second pass",
   recheck: "Checks waiting to run",
   unclean: "Waits for a clean checkout",
+  handed: "To integrate",
   done: "Done",
   failed: "Fell short",
   skipped: "Stopped",
@@ -366,7 +368,7 @@ export function took(secs: number): string {
 /** A box's second line: where it is, and for a finished run how long it took. */
 function footOf(i: QueueItem, p: number | null): string {
   if (p !== null) return `${STATE_WORDS[i.state]} ${String(p)}`;
-  const words = i.runner === CHAT_RUNNER ? (i.state === "running" ? "In a chat" : i.state === "done" ? "Done in a chat" : "A chat stopped, still open") : landedShort(i) ? "Landed, needs your look" : STATE_WORDS[i.state];
+  const words = i.runner === CHAT_RUNNER ? (i.state === "running" ? "In a chat" : i.state === "done" ? "Done in a chat" : "A chat stopped, still open") : landedShort(i) ? "Landed, needs your look" : i.kind === "ticket" && i.handed ? `To integrate · ${i.handed.to}` : STATE_WORDS[i.state];
   return i.started != null && i.ended != null && i.ended > i.started ? `${words} · ${took(i.ended - i.started)}` : words;
 }
 

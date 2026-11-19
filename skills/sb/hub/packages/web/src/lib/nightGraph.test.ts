@@ -73,6 +73,12 @@ describe("nightGraph", () => {
     expect(s.counts).toMatchObject({ stopped: 1, checking: 2 });
   });
 
+  it("names the chat a finished ticket waits for", () => {
+    const s = run({ items: [it_("alpha/one#1", "handed", { handed: { to: "main-chat", at: 0 } })] });
+    expect(box("alpha/one#1", s)?.foot).toBe("To integrate · main-chat");
+    expect(s.counts).toMatchObject({ checking: 1 });
+  });
+
   it("puts a band per project and each box at its start time, a step per half hour left to right; what runs at its start, what is queued right of now", () => {
     const x = run({ now: T + 3.5 * H, items: [
       it_("alpha/one#1", "done", { started: T, ended: T + H / 2 }),

@@ -117,7 +117,7 @@ export function RunView(): React.JSX.Element {
 }
 
 /** A map with nothing running, checking or still to come: only finished or stopped tickets. */
-const idle = (b: NightBlock): boolean => b.counts.running + b.counts.next + b.counts.checking + b.counts.recheck + b.counts.unclean === 0;
+const idle = (b: NightBlock): boolean => b.counts.running + b.counts.next + b.counts.checking + b.counts.recheck + b.counts.unclean + b.counts.handed === 0;
 
 /**
  * The night map by map, a fold per project when there are several (open while it has work left). Inside, the maps
@@ -293,6 +293,7 @@ const MARKS: Readonly<Record<Mark, [typeof IconCircleCheck, "ok" | "bad" | "warn
   stopped: [IconBan, "warn"],
   recheck: [IconBan, "warn"],
   unclean: [IconHourglass, "warn"],
+  handed: [IconGitCommit, "brand"],
 };
 
 function Block({ b, queued, pair }: { b: NightBlock; queued: readonly string[]; pair: MapPair | undefined }): React.JSX.Element {

@@ -172,6 +172,14 @@ class HookCommandTest(HubCase):
         self.assertNotIn("joined", self.get("/api/state")["agents"]["main-chat"])
         self.assertEqual(self.hub("night", "join", "--agent", "x", "--role", "boss").returncode, 2)  # argparse refuses
 
+    def test_watch_wakes_a_joined_chat_only_and_integrate_refuses_what_waits_for_nobody(self):
+        self.assertEqual(self.hub("watch", "--chat", "stranger", "--timeout", "1").returncode, 3)
+        r = self.hub("watch", "--chat", "abcdef123", "--timeout", "0.5", "--every", "0.2")
+        self.assertEqual((r.returncode, r.stdout), (1, ""))  # nothing handed to it before the timeout
+        r = self.hub("integrate", "p/m#1", "land", "--agent", "abcdef123")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("not waiting for an integrator", r.stderr)
+
     def test_hook_never_fails(self):
         for stdin, port in (("{bad json", self.port), ("", self.port), ("[1]", self.port),
                             ('{"hook_event_name":"Stop"}', self.port),

@@ -31,7 +31,7 @@ describe("nightBlocks", () => {
   it("counts each block and says it in one line", () => {
     expect(night.blocks.map((b) => b.line)).toEqual(["2 next · 1 fell short", "1 done · 1 running · 1 next"]);
     expect(nightLine(night)).toBe("1 running · 3 next · 1 done · 1 fell short");
-    expect(countsLine({ done: 3, landed: 0, running: 1, checking: 0, recheck: 0, unclean: 0, next: 4, short: 1, stopped: 0 })).toBe("3 done · 1 running · 4 next · 1 fell short");
+    expect(countsLine({ done: 3, landed: 0, running: 1, checking: 0, recheck: 0, unclean: 0, handed: 0, next: 4, short: 1, stopped: 0 })).toBe("3 done · 1 running · 4 next · 1 fell short");
   });
   it("lists a block's rows in run order with the right marks, and the place in the whole line", () => {
     const a = night.blocks[1];

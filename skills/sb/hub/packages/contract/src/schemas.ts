@@ -128,8 +128,10 @@ export type Installed = z.infer<typeof Installed>;
  * against its Done when (a queue saved by an older hub may hold items here with no pass running: they are judged).
  * unclean: its checks passed but its work could not land because the checkout holds unsaved changes to its files
  * (`blocking`): it waits on its branch and lands once they are saved or cleared, rebased when the checkout moved.
+ * handed: its checks passed and it waits, rebased on its branch, for the joined chat it was handed to (`handed.to`),
+ * which reviews it and lands it or sends it back (ticket 172).
  */
-export const ItemState = z.enum(["queued", "running", "landed", "review", "recheck", "unclean", "done", "failed", "skipped"]);
+export const ItemState = z.enum(["queued", "running", "landed", "review", "recheck", "unclean", "handed", "done", "failed", "skipped"]);
 export type ItemState = z.infer<typeof ItemState>;
 
 /** The Opus second pass's judgement of a ticket against its Done when: only finished resolves it. */
@@ -281,6 +283,12 @@ export const TicketItem = z.strictObject({
   integrate: z.record(z.string(), z.unknown()).optional(),
   /** Queued for a Unity pass: its work is already in the main folder, so no worker runs; the integrator plays it. */
   integrate_only: z.boolean().optional(),
+  /** The chat that queued it: its finished work goes to that chat while it is joined to the run (ticket 172). */
+  by: z.string().optional(),
+  /** While `handed`: the chat it waits for, and since when. */
+  handed: z.strictObject({ to: z.string(), at: Seconds }).optional(),
+  /** That chat asked to land it or send it back; the hub does it at its next tick. */
+  integrate_ask: z.strictObject({ action: z.enum(["land", "back"]), by: z.string(), note: z.string(), at: Seconds }).optional(),
 });
 export type TicketItem = z.infer<typeof TicketItem>;
 
@@ -417,6 +425,7 @@ export const NightStopBody = z.strictObject({ mode: z.literal("after") });
 export const RunJoinBody = z.strictObject({ agent: z.string(), role: JoinRole });
 export const RunJoinAnswer = z.strictObject({ ok: z.literal(true), agent: z.string(), joined: Joined });
 export const RunLeaveBody = z.strictObject({ agent: z.string() });
+export const RunIntegrateBody = z.strictObject({ agent: z.string(), key: z.string(), action: z.enum(["land", "back"]), note: z.string().optional() });
 
 // ---- providers: the hub's own panel is strict, a project's script may add anything ----
 

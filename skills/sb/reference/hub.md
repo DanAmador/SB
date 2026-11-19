@@ -258,6 +258,27 @@ aliases the session to `X`, like `report`. Any number of chats may join, in eith
 role. A joined row carries `joined: {night, role, at}`. `sb_leave` / `sbhub night leave --agent X` leaves, and a run
 that ends unjoins its chats. Joining needs a live run (400 otherwise). Only a joined chat keeps `chat_runs`.
 
+### A finished ticket goes to its chat
+
+A queue item records the chat that queued it (`by`, from `sb_queue` `agent` or `--by`). When a worktree ticket's
+checks pass and a chat is joined, the hub does not land it: it rebases it onto the checkout's newest commit, runs its
+checks there in its worktree and hands it over (state `handed`, `handed: {to, at}`, "To integrate · chat" on the
+graph). It goes to the chat that queued it while that chat is joined (either role), else to the joined integrator
+with the fewest tickets waiting (the earliest to join first); with no chat joined the hub lands it and its map's Opus
+review judges it, as before. A handed ticket keeps its map current, so the map's review and the run's end wait for it.
+
+The chat runs `sbhub watch --chat <id>` in the background: it exits 0 with each ticket handed to that chat, its
+commit, branch and worktree and the two commands below, which wakes the chat; 3 when the chat has joined no live
+run. The chat reviews the branch, then `sb_integrate(agent, key, action)` / `POST /api/run/integrate` /
+`sbhub integrate <key> land|back --agent <id> [--note N]`:
+
+- `land`: the hub lands it at its next tick under the repo's landing lock (`land:<repo folder>`; a chat that lands
+  by hand takes it with `sb_lock` first, and the hub waits for it), then resolves the ticket as the chat's review: no
+  Opus review follows. One that cannot land yet goes back to the chat; a failed landing is a try, as for a worker.
+- `back` (a note is required): it is queued again at the front as its next try, the worker told the note.
+
+A chat that leaves hands its waiting tickets to the next integrator, or, with none, to the hub, which lands them.
+
 ## Report, ask, lock
 
 The hub is optional, and a run reads the same without it: with the hub down, `report` does
