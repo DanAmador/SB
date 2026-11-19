@@ -59,7 +59,8 @@ export function splitAgents(state: Pick<State, "agents">): Agents {
     if (p !== null) kids.set(p, [...(kids.get(p) ?? []), a].sort(byRank));
   }
   return {
-    sessions: all.filter((a) => !isQueueWorker(a) && parentOf(a) === null).sort(byRank),
+    // only chats that joined the run show (ticket 170): one that never joined is not the board's business
+    sessions: all.filter((a) => !isQueueWorker(a) && parentOf(a) === null && a.joined !== undefined).sort(byRank),
     workers: all.filter(isQueueWorker),
     kids,
   };

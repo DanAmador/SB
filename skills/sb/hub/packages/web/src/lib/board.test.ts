@@ -35,7 +35,7 @@ import { readLink, writeLink } from "./link.ts";
 const NOW = 1_800_000_000;
 const NO_LINKS = { ticket: null, map: null, board: null, report: null, log: null };
 
-const agent = (id: string, more: Partial<AgentRow> = {}): AgentRow => ({ agent: id, at: NOW - 10, state: "working", ...more });
+const agent = (id: string, more: Partial<AgentRow> = {}): AgentRow => ({ agent: id, at: NOW - 10, state: "working", joined: { night: "n1", role: "integrator" as const, at: NOW - 60 }, ...more });
 const question = (more: Partial<Question> = {}): Question => ({
   agent: "s1",
   q: "Which?",
@@ -111,6 +111,11 @@ describe("your sessions", () => {
     expect(a.sessions.map((x) => x.agent)).toEqual(["s2", "s1", "lost"]);
     expect(a.workers.map((x) => x.agent)).toEqual(["q1"]);
     expect(a.kids.get("s1")?.map((x) => x.agent)).toEqual(["h1"]);
+  });
+
+  it("leave out a chat that never joined the run", () => {
+    const s = state({ agents: { s1: agent("s1"), stranger: agent("stranger", { joined: undefined }) } });
+    expect(splitAgents(s).sessions.map((x) => x.agent)).toEqual(["s1"]);
   });
 });
 

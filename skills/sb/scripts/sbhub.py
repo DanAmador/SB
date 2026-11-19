@@ -97,6 +97,8 @@ import sbruns
 # A chat's ticket counts as worked on while it reports one of these and was heard from within CHAT_IDLE seconds;
 # every stretch of work is kept in chat_runs for CHAT_RUNS_KEPT seconds, so a run's history shows it after it ends.
 CHAT_WORKING = ("working", "waiting", "needs you", "blocked")
+# what a chat joins the live run as (ticket 170): an integrator reviews and lands, an implementer builds tickets
+JOIN_ROLES = ("integrator", "implementer")
 CHAT_IDLE = 1800
 CHAT_RUNS_KEPT = 7 * 86400
 AGENT_FIELDS = ("name", "title", "asked", "project", "role", "parent", "ticket", "map", "state", "note", "done", "total")
@@ -339,6 +341,14 @@ class Hub:
                 self._remove(agent)
                 self._save()
                 return {"ok": True, "needs_you": False, "agent": agent}
+            if d.get("via") == "hook" and not self._listens(agent, d):
+                # a chat that never joined the run: its hook events are not the board's business (ticket 170)
+                row = self._data["agents"].get(agent)
+                if row is not None and "at" not in row:
+                    del self._data["agents"][agent]  # an empty row its alias made
+                if isinstance(alias, str) and alias and alias != sid:
+                    self._save()  # the alias stays: the chat may be about to join under that name
+                return {"ok": True, "needs_you": False, "agent": agent, "ignored": True}
             new = agent not in self._data["agents"]
             a = self._data["agents"].setdefault(agent, {})
             before = a.get("state")
@@ -395,11 +405,55 @@ class Hub:
                 out["ref"] = a.get("ref")  # null: the ticket named no open ticket the hub knows
             return out
 
+    def _listens(self, agent, d):
+        """(the lock is held) Whether the hub keeps a hook event (ticket 170): a queue worker's, a chat's that joined
+        the live run, or a helper's of either."""
+        agents, keys = self._data["agents"], {i["key"] for i in self._data["queue"]["items"]}
+
+        def kept(who):
+            a = agents.get(who) or {}
+            return who in keys or bool(a.get("joined")) or a.get("parent") == "queue"
+        if d.get("parent") == "queue" or kept(agent):
+            return True
+        boss = self._resolve(d["parent"]) if d.get("parent") else (agents.get(agent) or {}).get("parent")
+        return bool(boss) and kept(boss)
+
+    def join(self, agent, role):
+        """A chat joins the live run as an integrator or an implementer: from now on the board shows it and the hub
+        keeps its hook events. Any number may join, in either role; joining again changes the role."""
+        if role not in JOIN_ROLES:
+            raise ValueError("role must be one of: " + ", ".join(JOIN_ROLES))
+        agent = str(agent or "").strip()
+        if not agent:
+            raise ValueError("say which chat joins (agent)")
+        with self._lock:
+            night = self._night_live()
+            if night is None or night["state"] != "live":
+                raise ValueError("no run is live: press Start first")
+            agent = self._resolve(agent)
+            now = self.now()
+            a = self._data["agents"].setdefault(agent, {})
+            a.setdefault("at", now)
+            a.setdefault("state", "working")
+            a["joined"] = {"night": night["id"], "role": role, "at": now}
+            self._save()
+            return {"ok": True, "agent": agent, "joined": dict(a["joined"])}
+
+    def leave(self, agent):
+        """A chat leaves the run: the board stops showing it and the hub drops its hook events again."""
+        with self._lock:
+            a = self._data["agents"].get(self._resolve(str(agent or "")))
+            if a is None or not a.pop("joined", None):
+                raise ValueError("that chat has not joined the run")
+            self._save()
+            return {"ok": True}
+
     def _chat_run(self, agent, a):
-        """Keep the stretch of work a chat (not a queue worker) does on its matched ticket: one row from its first
-        report on it to its last, in the run that was live when it started. A gap over CHAT_IDLE starts a new row."""
+        """Keep the stretch of work a joined chat (not a queue worker) does on its matched ticket: one row from its
+        first report on it to its last, in the run that was live when it started. A gap over CHAT_IDLE starts a new
+        row. A chat that never joined leaves none (ticket 170)."""
         ref, now = a.get("ref"), self.now()
-        if not ref or a.get("parent") == "queue" or a.get("state") not in CHAT_WORKING:
+        if not ref or a.get("parent") == "queue" or a.get("state") not in CHAT_WORKING or not a.get("joined"):
             return
         runs = self._data.setdefault("chat_runs", [])
         run = next((r for r in reversed(runs) if r["agent"] == agent and r["key"] == ref), None)
@@ -931,6 +985,9 @@ class Hub:
         order = [m for m in q.get("maps") or [] if m in mine_maps]
         night.update(state="ended", ended=self.now(), how=how, items=mine,
                      maps=order + sorted(mine_maps - set(order)), repos=json.loads(json.dumps(q.get("repos") or {})))
+        for a in self._data["agents"].values():  # the run ended: its chats are joined to nothing
+            if (a.get("joined") or {}).get("night") == night["id"]:
+                del a["joined"]
         q["items"] = [i for i in q["items"] if i not in mine]
         q["night"] = None
         q["version"] += 1
@@ -5819,6 +5876,10 @@ def make_handler(hub):
                     out = hub.night_stop(d["mode"])
                 elif path == "/api/night/rename":
                     out = hub.night_rename(d["name"])
+                elif path == "/api/run/join":
+                    out = hub.join(d["agent"], d["role"])
+                elif path == "/api/run/leave":
+                    out = hub.leave(d["agent"])
                 elif path == "/api/run/seen":
                     out = hub.run_seen(d["key"])
                 elif path == "/api/agents/dismiss":
@@ -5969,7 +6030,7 @@ def cmd_ask(a):
 
 
 def reported_agent(command):
-    """X in a shell command that runs `sbhub.py report --agent X`, else None."""
+    """X in a shell command that runs `sbhub.py report --agent X` or `sbhub.py night join --agent X`, else None."""
     if not isinstance(command, str) or not command:
         return None
     try:
@@ -5977,7 +6038,7 @@ def reported_agent(command):
     except (ValueError, AttributeError):
         return None
     for i, w in enumerate(words):
-        if w.endswith("sbhub.py") and words[i + 1:i + 2] == ["report"]:
+        if w.endswith("sbhub.py") and (words[i + 1:i + 2] == ["report"] or words[i + 1:i + 3] == ["night", "join"]):
             for j, a in enumerate(words[i + 2:], i + 2):
                 if a == "--agent" and j + 1 < len(words):
                     return words[j + 1] or None
@@ -6028,8 +6089,8 @@ def claimed_ticket(command, vault=None):
 
 
 def _mcp_alias(tname, tin):
-    """Agent name when an MCP sb_report call reports an orchestrator (not a worker)."""
-    if not (tname == "sb_report" or (tname.startswith("mcp__") and tname.endswith("__sb_report"))):
+    """Agent name when an MCP sb_report (or sb_join) call reports an orchestrator (not a worker)."""
+    if not any(tname == t or (tname.startswith("mcp__") and tname.endswith("__" + t)) for t in ("sb_report", "sb_join")):
         return None
     if not isinstance(tin, dict) or tin.get("parent") or tin.get("role") == "worker":
         return None
@@ -6174,7 +6235,7 @@ def cmd_hook(port, event=None):
             if title:
                 r["title"] = title
         if r:
-            call(port, "/api/report", r)
+            call(port, "/api/report", {**r, "via": "hook"})  # the hub keeps it only from a worker or a joined chat
         who = e.get("agent_id") or queued or e.get("session_id") if isinstance(e, dict) and not event else None
         if isinstance(who, str) and who and e.get("hook_event_name") in DELIVERS:
             code, got = call(port, "/api/take", {"agent": who, "how": e["hook_event_name"]}, timeout=1)
@@ -6286,7 +6347,24 @@ def cmd_queue(a):
 
 
 def cmd_night(a):
-    """sbhub night start [--name N] [--by SESSION] | stop [--mode after] | show"""
+    """sbhub night start [--name N] [--by SESSION] | stop [--mode after] | show
+    | join --agent X --role integrator|implementer | leave --agent X"""
+    if a.action in ("join", "leave"):
+        agent = a.agent or os.environ.get("SB_HUB_AGENT")
+        if not agent:
+            print("sbhub: say which chat with --agent", file=sys.stderr)
+            return 1
+        body = {"agent": agent, "role": a.role} if a.action == "join" else {"agent": agent}
+        code, out = call(a.port, "/api/run/" + a.action, body)
+        if code == 0:
+            print("sbhub: not running", file=sys.stderr)
+            return 2
+        if code != 200:
+            print("sbhub: {}".format(out.get("error") if isinstance(out, dict) else out), file=sys.stderr)
+            return 1
+        print("{} joined the run as {}".format(out["agent"], out["joined"]["role"]) if a.action == "join"
+              else "{} left the run".format(agent))
+        return 0
     if a.action == "start":
         code, out = call(a.port, "/api/night/start", {"name": a.name, "by": a.by or os.environ.get("SB_HUB_AGENT"),
                                                     "drain": bool(a.drain)})
@@ -6302,7 +6380,7 @@ def cmd_night(a):
                     c["skipped"], c["queued"], c["running"], c["not_reached"]))
             return 0
     else:
-        print("usage: night start|stop|show", file=sys.stderr)
+        print("usage: night start|stop|show|join|leave", file=sys.stderr)
         return 1
     if code == 0:
         print("sbhub: not running", file=sys.stderr)
@@ -6555,7 +6633,8 @@ def main(argv=None):
         ("--project", {}), ("--agent", {}), ("--model", {}), ("--name", {}), ("--prompt", {}),
         ("--prompt-file", {}), ("--at", {}), ("--by", {}))
     add("night", ("action", {"nargs": "?", "default": "show"}), ("--name", {}), ("--by", {}),
-        ("--mode", {"default": "after"}), ("--drain", {"action": "store_true"}))
+        ("--mode", {"default": "after"}), ("--drain", {"action": "store_true"}), ("--agent", {}),
+        ("--role", {"default": "integrator", "choices": JOIN_ROLES}))
     add("agents", ("--scan", {"action": "store_true"}))
     add("review-now")
     add("trust", ("project", {}))

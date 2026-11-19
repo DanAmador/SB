@@ -1,0 +1,18 @@
+{
+  "body": {
+    "agent": "sess-1",
+    "joined": {
+      "at": 1794528060.0,
+      "night": "night-fixture-2",
+      "role": "integrator"
+    },
+    "ok": true
+  },
+  "contentType": "application/json",
+  "request": {
+    "agent": "sess-1",
+    "role": "integrator"
+  },
+  "route": "POST /api/run/join",
+  "status": 200
+}

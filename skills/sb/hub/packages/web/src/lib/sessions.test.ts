@@ -60,7 +60,7 @@ describe("a worker whose run ended, or that went silent", () => {
     const state = { agents, queue: { items, agent: null }, now } as unknown as State;
     return sessionCards(state, ticketIndex([], state), splitAgents(state));
   };
-  const chat = row("chat-1", { role: undefined, parent: undefined });
+  const chat = row("chat-1", { role: undefined, parent: undefined, joined: { night: "n1", role: "integrator" as const, at: NOW - 60 } });
   // a worker the queue knows nothing of: its item was cleared, or its chat is gone
   const helper = (more: Partial<AgentRow> = {}): AgentRow => row("helper-1", { parent: "queue", ...more });
   const live = (c: ReturnType<typeof cards>): string[] => c.filter((x) => !x.idle).map((x) => x.id);

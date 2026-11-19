@@ -721,7 +721,7 @@ for (const [view, scheme] of [["run", "light"], ["run", "dark"], ["waits", "ligh
 }
 
 test.describe("Run tab: who is on each ticket", () => {
-  test("the head names the session in charge, a row with a worker opens its panel, Helpers and Other chats", async ({ page }) => {
+  test("the head names the session in charge, a row with a worker opens its panel, Helpers and joined chats only", async ({ page }) => {
     const errors: string[] = [];
     page.on("pageerror", (e) => errors.push(String(e)));
     await page.goto("/next/?rt=maps");
@@ -751,6 +751,8 @@ test.describe("Run tab: who is on each ticket", () => {
     const other = page.getByTestId("other-chats");
     await expect(other).toContainText("1 live");
     await expect(other).toContainText("Reading the old notes");
+    await expect(other).toContainText("implementer");
+    await expect(page.getByText("A chat that never joined")).toHaveCount(0);
     await expect(other).toContainText("Helpers (1)");
     // the tab counts running workers
     await expect(page.getByRole("tab", { name: /^Run/ })).toContainText("3");

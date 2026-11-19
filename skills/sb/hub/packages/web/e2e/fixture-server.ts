@@ -223,8 +223,10 @@ const detailOf = (key: string): unknown => {
 function state(): State {
   return State.parse({
     agents: {
-      "s-1": { agent: "s-1", title: "Charting the board", project: "/demo", state: "your turn", asked: "chart it", at: now() - 30, map: "demo/board" },
-      "s-2": { agent: "s-2", title: "Reading the old notes", project: "/other", state: "your turn", at: now() - 90 },
+      "s-1": { agent: "s-1", title: "Charting the board", project: "/demo", state: "your turn", asked: "chart it", at: now() - 30, map: "demo/board", joined: { night: "n-live", role: "integrator", at: start - 3000 } },
+      "s-2": { agent: "s-2", title: "Reading the old notes", project: "/other", state: "your turn", at: now() - 90, joined: { night: "n-live", role: "implementer", at: start - 2000 } },
+      // a chat that never joined the run: the board shows nothing of it (ticket 170)
+      "s-9": { agent: "s-9", title: "A chat that never joined", project: "/other", state: "working", at: now() - 20 },
       "h-1": { agent: "h-1", name: "scout", title: "Scout the tests", role: "worker", parent: "s-1", project: "/demo", state: "working", note: "reading specs", at: now() - 40 },
       "h-2": { agent: "h-2", name: "notes", title: "Skim the notes", role: "worker", parent: "s-2", project: "/other", state: "working", at: now() - 60 },
       "demo/board#5": { agent: "demo/board#5", role: "worker", parent: "queue", project: "/demo", state: "working", note: "running the tests", at: now() - 20 },

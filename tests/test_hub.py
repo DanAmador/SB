@@ -53,6 +53,7 @@ class HubTest(unittest.TestCase):
         h = self.h
         h._tcache = (self.t, [{"map": "sk4te/party-playtest", "num": 1055, "title": "Hit feels right"}])
         h._data["queue"]["night"] = "n1"
+        h._data["agents"]["c"] = {"joined": {"night": "n1", "role": "integrator", "at": self.t}}
         h.report({"agent": "c", "state": "working", "ticket": "party-playtest 1055", "map": "sk4te/party-playtest"})
         self.t += 600
         h.report({"agent": "c", "state": "working", "note": "Bash"})  # a hook's report extends it
@@ -67,6 +68,7 @@ class HubTest(unittest.TestCase):
     def test_a_chats_stretch_is_closed_when_its_ticket_is_resolved(self):
         h = self.h
         h._tcache = (self.t, [{"map": "p/m", "num": 3, "title": "T"}])
+        h._data["agents"]["c"] = {"joined": {"night": "n1", "role": "integrator", "at": self.t}}
         h.report({"agent": "c", "state": "working", "ticket": "p/m#3"})
         h._tcache = (self.t, [])  # sbmap resolve: the ticket left the open list
         self.t += 60
@@ -80,6 +82,49 @@ class HubTest(unittest.TestCase):
         h._tcache = (self.t, [{"map": "p/m", "num": 3, "title": "T"}])
         h.report({"agent": "p/m#3", "role": "worker", "parent": "queue", "state": "working", "ticket": "p/m#3"})
         self.assertNotIn("chat_runs", h.state())
+
+    def test_a_chat_that_never_joined_keeps_no_chat_run(self):
+        h = self.h
+        h._tcache = (self.t, [{"map": "p/m", "num": 3, "title": "T"}])
+        h.report({"agent": "c", "state": "working", "ticket": "p/m#3"})
+        self.assertNotIn("chat_runs", h.state())
+
+    def test_a_chat_joins_only_a_live_run_in_a_known_role(self):
+        h = self.h
+        with self.assertRaises(ValueError):
+            h.join("c", "integrator")  # no run is live
+        night = h.night_start()["night"]["id"]
+        with self.assertRaises(ValueError):
+            h.join("c", "watcher")
+        self.assertEqual(h.join("c", "implementer")["joined"], {"night": night, "role": "implementer", "at": 1000.0})
+        self.assertEqual(h.join("c", "integrator")["joined"]["role"], "integrator")  # joining again changes the role
+        h.leave("c")
+        self.assertNotIn("joined", h.state()["agents"]["c"])
+        with self.assertRaises(ValueError):
+            h.leave("c")
+
+    def test_the_hub_keeps_hook_events_only_from_joined_chats_workers_and_their_helpers(self):
+        h = self.h
+        hook = lambda agent, **d: h.report({"agent": agent, "state": "working", "note": "Bash", "via": "hook", **d})
+        self.assertTrue(hook("stranger").get("ignored"))
+        self.assertNotIn("stranger", h.state()["agents"])
+        h.report({"agent": "told", "state": "working"})  # a report the chat sent itself is kept
+        self.assertIn("told", h.state()["agents"])
+        h.night_start()
+        h.join("c", "integrator")
+        self.assertNotIn("ignored", hook("c"))
+        self.assertNotIn("ignored", hook("helper", parent="c"))  # a subagent of a joined chat
+        self.assertNotIn("ignored", hook("p/m#3", parent="queue"))  # a queue worker
+        self.assertTrue(hook("s-2", alias="later").get("ignored"))  # aliased, but "later" has not joined
+        self.assertEqual(h.state()["aliases"]["s-2"], "later")
+        self.assertNotIn("later", h.state()["agents"])
+
+    def test_a_run_that_ends_unjoins_its_chats(self):
+        h = self.h
+        h.night_start()
+        h.join("c", "integrator")
+        h.night_stop("after")
+        self.assertNotIn("joined", h.state()["agents"]["c"])
 
     def test_a_report_before_the_tickets_are_read_has_no_ref(self):
         out = self.h.report({"agent": "a", "state": "working", "ticket": "525"})

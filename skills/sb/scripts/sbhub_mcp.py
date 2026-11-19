@@ -354,6 +354,24 @@ def build_server():
                     "as '<project>/<map>#<number>', e.g. 'sk4te/party-playtest#1060'").format(ticket)
         return "reported" + (" as " + out["ref"] if out.get("ref") else "")
 
+    @mcp.tool(description="Join the live run as 'integrator' (reviews and lands finished tickets) or 'implementer' "
+                          "(builds tickets itself). Only joined chats show on the board; the hub drops hook events "
+                          "from chats that never joined. Any number of chats may join; joining again changes the role.")
+    def sb_join(agent: str, role: str = "integrator") -> str:
+        code, out = hub("/api/run/join", {"agent": agent, "role": role})
+        if code == 0:
+            return HUB_DOWN
+        if code != 200:
+            return "not joined: {}".format(out.get("error") if isinstance(out, dict) else out)
+        return "joined run {} as {}".format(out["joined"]["night"], out["joined"]["role"])
+
+    @mcp.tool(description="Leave the run joined with sb_join: the board stops showing this chat.")
+    def sb_leave(agent: str) -> str:
+        code, out = hub("/api/run/leave", {"agent": agent})
+        if code == 0:
+            return HUB_DOWN
+        return "left the run" if code == 200 else "not left: {}".format(out.get("error") if isinstance(out, dict) else out)
+
     @mcp.tool(description="Take a lock on a shared resource only one agent may use at a time. Returns 'ok' or "
                           "'held by <agent>': do work that needs no lock, then try again.")
     def sb_lock(key: str, by: str) -> str:

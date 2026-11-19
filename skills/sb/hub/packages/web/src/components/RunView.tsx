@@ -558,10 +558,10 @@ function OtherChats({ pairing }: { pairing: Pairing }): React.JSX.Element | null
   const awake = pairing.chats.filter((c) => c.chat.quiet < QUIET_CHAT);
   const quiet = pairing.chats.filter((c) => c.chat.quiet >= QUIET_CHAT);
   return (
-    <section aria-label="Other chats" data-testid="other-chats" className="rounded-xl border bg-card">
+    <section aria-label="Joined chats" data-testid="other-chats" className="rounded-xl border bg-card">
       <header className="flex items-center gap-2 px-3 py-2">
         <IconMessages className="size-4 text-muted-foreground" aria-hidden />
-        <h3 className="font-medium">Other chats</h3>
+        <h3 className="font-medium">Joined chats</h3>
         <span className="text-xs text-muted-foreground">{`${String(pairing.liveChats)} live`}</span>
       </header>
       {awake.length > 0 && <ChatList list={awake} />}
@@ -582,7 +582,7 @@ function ChatList({ list }: { list: Pairing["chats"] }): React.JSX.Element {
         <li key={chat.id} className="px-3 py-2 text-sm">
           <SessionButton c={chat} label="Open the chat: " className="gap-2">
             <span className="truncate font-medium">{chat.title}</span>
-            <span className="shrink-0 text-xs text-muted-foreground">{`${chat.project !== "" ? `${chat.project} · ` : ""}${chat.agent.state ?? "working"}${chat.silent ? ` · silent ${dur(chat.quiet)}` : ""}`}</span>
+            <span className="shrink-0 text-xs text-muted-foreground">{`${chat.agent.joined?.role ?? "chat"} · ${chat.project !== "" ? `${chat.project} · ` : ""}${chat.agent.state ?? "working"}${chat.silent ? ` · silent ${dur(chat.quiet)}` : ""}`}</span>
           </SessionButton>
           {helpers.length > 0 && (
             <details className="mt-1">

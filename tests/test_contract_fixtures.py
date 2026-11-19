@@ -394,6 +394,10 @@ class ContractFixturesTest(unittest.TestCase):
         self.record("night-start", "/api/night/start", {"name": "Second night", "by": "sess-1"})
         renamed = self.record("night-rename", "/api/night/rename", {"name": "Late shift"})["night"]
         self.assertEqual(renamed["name"], "Late shift")
+        joined = r("run_join", {"agent": "sess-1", "role": "integrator"})  # a chat joins the live run (ticket 170)
+        self.assertEqual(joined["joined"]["role"], "integrator")
+        self.record("run-join-refused", "/api/run/join", {"agent": "sess-1", "role": "watcher"}, 400)
+        r("run_leave", {"agent": "sess-1"})  # leaving twice is refused: test_hub
         r("unsend", {"id": pending})
         r("unlock", {"key": "port:5173", "by": "sess-1"})
         r("run_seen", {"key": "repo/one#1@1000"})

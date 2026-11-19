@@ -185,10 +185,12 @@ only the writes that change display state: dismiss, clear quiet sessions. Every 
 
 A night is one sb tonight: `id`, `name` (default `Night of 2026-11-14, 22:45`), `started`, `by`, `state` (`live`,
 `stopping`, `ended`), `ended`, `how` (`finished`, `stopped`, `stop_time`), `counts` and, after a stop, `not_reached`.
-Every queue item carries its night's `night` id; at most one night is live. Queuing a ticket, a map or a job with
-none live starts one by itself, and everything queued while it is live joins it. `POST /api/night/start {name?, by?}`
-(`sbhub night start [--name]`) opens one; a second start is refused (400). When the night's last item has ended and
-been judged it ends as `finished`; its items leave the live line for the night's own record (outcome, commit, report,
+Every queue item carries its night's `night` id; at most one night is live. Queueing only fills the queue: with no
+night live an item waits for Start (waits kind `start`), and nothing runs until the owner presses **Start run** on the
+board or a chat runs `POST /api/night/start {name?, by?, drain?}` (`sbhub night start [--name] [--drain]`), which
+opens a night and takes in everything waiting; everything queued while it is live joins it. A second start is refused
+(400). A night started from the board or a chat ends only on Stop. A `--drain` night (what `tonight` starts) also
+ends by itself: when its last item has ended and been judged it ends as `finished`; its items leave the live line for the night's own record (outcome, commit, report,
 review links), so nothing is cleared by hand. `POST /api/night/stop {mode: "after"}` (`sbhub night stop`) starts
 nothing new, lets what runs finish and be judged, then ends the night as `stopped`; the tickets it never reached
 leave the line, stay open and not queued, and are listed on the night as `not_reached` (queuing while it stops is
@@ -244,6 +246,17 @@ When the `sbhub` MCP server is connected (`./install.sh --hub`):
   subagent or unattended run, pass `block_seconds=600` (or use `sbhub.py ask`).
 - **`sb_report`**, **`sb_lock`**, **`sb_unlock`**: same semantics as the CLI below; calling
   `sb_report` as an orchestrator aliases the session just like `sbhub.py report`.
+- **`sb_join`**, **`sb_leave`**: join the live run as `integrator` or `implementer`, or leave it
+  (see *Joining a run*).
+
+## Joining a run
+
+The board shows a chat only once it joins the live run; the hub drops hook events from chats that never joined
+(queue workers, and the helpers of a joined chat or worker, are always kept). `sb_join(agent, role)`,
+`POST /api/run/join {agent, role}` or `sbhub night join --agent X --role integrator|implementer` joins; the call also
+aliases the session to `X`, like `report`. Any number of chats may join, in either role; joining again changes the
+role. A joined row carries `joined: {night, role, at}`. `sb_leave` / `sbhub night leave --agent X` leaves, and a run
+that ends unjoins its chats. Joining needs a live run (400 otherwise). Only a joined chat keeps `chat_runs`.
 
 ## Report, ask, lock
 

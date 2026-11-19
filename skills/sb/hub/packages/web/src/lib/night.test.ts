@@ -50,7 +50,7 @@ describe("nightBlocks", () => {
 });
 
 describe("pairNight: who is on each ticket", () => {
-  const agent = (id: string, more: Record<string, unknown>): [string, unknown] => [id, { agent: id, project: "/w/p", state: "working", at: NOW - 30, ...more }];
+  const agent = (id: string, more: Record<string, unknown>): [string, unknown] => [id, { agent: id, project: "/w/p", state: "working", at: NOW - 30, joined: { night: "n1", role: "integrator" as const, at: NOW - 60 }, ...more }];
   const items = [
     item("p/a#1", "running", { started: NOW - 600, runner: "main" }),
     item("p/a#2", "running", { started: NOW - 1200, runner: "main" }),
@@ -116,7 +116,7 @@ describe("the live run", () => {
     expect(liveState(s("n2")).queue.items).toHaveLength(6);
   });
   it("counts the tickets the owner's chats work on in the live run, and keeps the ones they ended", () => {
-    const chat = (id: string, ref: string, more: Partial<AgentRow> = {}): AgentRow => ({ agent: id, ref, state: "working", at: NOW - 60, ...more });
+    const chat = (id: string, ref: string, more: Partial<AgentRow> = {}): AgentRow => ({ agent: id, ref, state: "working", at: NOW - 60, joined: { night: "n1", role: "integrator" as const, at: NOW - 60 }, ...more });
     const stretch = (agent: string, key: string, more: Partial<ChatRun> = {}): ChatRun => ({ key, agent, night: "n2", started: NOW - 600, last: NOW - 60, ...more });
     const agents = {
       c1: chat("c1", "q/b#9"), // a ticket the queue does not hold

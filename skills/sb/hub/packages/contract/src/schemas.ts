@@ -20,6 +20,10 @@ export const Count = z.union([z.number(), z.string()]);
 export const AgentState = z.enum(["idle", "working", "waiting", "your turn", "needs you", "blocked", "done"]);
 export type AgentState = z.infer<typeof AgentState>;
 
+/** A chat joins the live run (ticket 170) as one of these. */
+export const JoinRole = z.enum(["integrator", "implementer"]);
+export const Joined = z.strictObject({ night: z.string(), role: JoinRole, at: Seconds });
+
 export const AgentRow = z.strictObject({
   agent: z.string(),
   name: z.string().optional(),
@@ -44,6 +48,8 @@ export const AgentRow = z.strictObject({
   spawns: z.array(z.string()).optional(),
   /** The Claude session id a hub worker first reported from; a helper under the same name has another. */
   session: z.string().optional(),
+  /** A chat that joined the live run (ticket 170), and as what: only joined chats show on the board. */
+  joined: Joined.optional(),
 });
 export type AgentRow = z.infer<typeof AgentRow>;
 
@@ -406,6 +412,11 @@ export const NightAnswer = z.strictObject({ ok: z.literal(true), night: Night })
 export const NightStartBody = z.strictObject({ name: z.string().nullable().optional(), by: z.string().nullable().optional(), drain: z.boolean().optional() });
 export const NightRenameBody = z.strictObject({ name: z.string() });
 export const NightStopBody = z.strictObject({ mode: z.literal("after") });
+
+/** A chat joins the live run (ticket 170): only joined chats show on the board, and the hub keeps only their hooks. */
+export const RunJoinBody = z.strictObject({ agent: z.string(), role: JoinRole });
+export const RunJoinAnswer = z.strictObject({ ok: z.literal(true), agent: z.string(), joined: Joined });
+export const RunLeaveBody = z.strictObject({ agent: z.string() });
 
 // ---- providers: the hub's own panel is strict, a project's script may add anything ----
 

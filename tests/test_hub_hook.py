@@ -147,6 +147,31 @@ class AntigravityEventReportTest(unittest.TestCase):
 
 
 class HookCommandTest(HubCase):
+    def setUp(self):
+        super().setUp()
+        self.assertEqual(self.hub("night", "start").returncode, 0)
+        for chat in ("abcdef123", "c1234567-89ab"):  # only a joined chat's hooks reach the board (ticket 170)
+            r = self.hub("night", "join", "--agent", chat, "--role", "integrator")
+            self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_a_chat_that_never_joined_leaves_no_trace(self):
+        self.hub("hook", stdin=json.dumps({**ev("PreToolUse", tool_name="Grep", tool_input={}), "session_id": "stranger"}))
+        self.assertNotIn("stranger", self.get("/api/state")["agents"])
+
+    def test_a_chat_joins_through_the_command_its_own_hook_sees(self):
+        cmd = "python3 skills/sb/scripts/sbhub.py night join --agent main-chat --role implementer"
+        stranger = {**ev("PreToolUse", tool_name="Bash", tool_input={"command": cmd}), "session_id": "s-new"}
+        self.hub("hook", stdin=json.dumps(stranger))  # the hook names the alias before the join runs
+        self.assertNotIn("main-chat", self.get("/api/state")["agents"])
+        self.assertEqual(self.hub("night", "join", "--agent", "main-chat", "--role", "implementer").returncode, 0)
+        self.hub("hook", stdin=json.dumps({**ev("PreToolUse", tool_name="Grep", tool_input={"pattern": "x"}),
+                                           "session_id": "s-new"}))
+        a = self.get("/api/state")["agents"]["main-chat"]
+        self.assertEqual((a["joined"]["role"], a["note"]), ("implementer", "Grep: x"))
+        self.assertEqual(self.hub("night", "leave", "--agent", "main-chat").returncode, 0)
+        self.assertNotIn("joined", self.get("/api/state")["agents"]["main-chat"])
+        self.assertEqual(self.hub("night", "join", "--agent", "x", "--role", "boss").returncode, 2)  # argparse refuses
+
     def test_hook_never_fails(self):
         for stdin, port in (("{bad json", self.port), ("", self.port), ("[1]", self.port),
                             ('{"hook_event_name":"Stop"}', self.port),
