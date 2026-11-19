@@ -4,7 +4,8 @@ The owner is about to leave the machine. Make the frontier runnable, queue it on
 **one** "go" while the owner is here, and leave: the hub runs the queue unattended
 ([hub.md](../reference/hub.md), *Tonight's queue*). No orchestrator session stays up. Default
 window: 8 h. Default maps: this repo's open maps, in the order `sbmap maps` lists; several repos
-queue into the same hub.
+queue into the same hub. When the owner stays and lands the work with this chat, use
+[run](run.md) instead: it starts a run that ends only on Stop and joins this chat as its integrator.
 
 Two phases: **propose** (the owner is present; one round of questions) and **queue** (nothing
 waits on them). The hub runs the night as a background service (`scripts/sbhub_service.sh

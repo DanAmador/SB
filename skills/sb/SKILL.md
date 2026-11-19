@@ -2,7 +2,7 @@
 name: sb
 description: "Second-brain workflow: the owner's maps, tickets, night runs and wiki in the Obsidian vault. /sb <anything>: free text is the default, a verb is a shortcut; no argument shows the board."
 disable-model-invocation: true
-argument-hint: "[what you want, in your own words] or [chart|tonight|morning|resume|explain|close|learn|ask|handoff|capture|land]"
+argument-hint: "[what you want, in your own words] or [chart|run|tonight|morning|resume|explain|close|learn|ask|handoff|capture|land]"
 ---
 
 # sb: the vault is the hub
@@ -34,6 +34,7 @@ card-grammar") and run it. Two intents run in the order given.
 | "where are we", "what's open", "what were agents doing", *(nothing)* | board: `sbmap info --repo <repo path>`, any checkpoint; name the verb that fits |
 | "chart / draft / plan / let's think about X", a brain-dump | [chart](verbs/chart.md) |
 | "add these as todos", playtest notes, "I noticed…" | [capture](verbs/capture.md) |
+| "run it", "start a run", "let's work through the queue together", "I'll stay" | [run](verbs/run.md) |
 | "tonight", "overnight", "enqueue", "I'm going to bed" | [tonight](verbs/tonight.md) |
 | "what happened", "I'm back", "what do I test" | [morning](verbs/morning.md) |
 | "continue", "tokens are back", "reorient me", a dead session | [resume](verbs/resume.md) |
