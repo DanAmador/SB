@@ -135,7 +135,7 @@ class FitTest(PacingCase):
         self.mode = "hang"
         self.tick_all()
         first = list(self.items())[0]
-        self.modes = {first: "commit"}
+        self.modes = {first: "slow"}  # commits, then 2 s before its result: still running at the check below
         self.hub.queue_pause(False)
         self.sup.tick()
         self.sup.tick()

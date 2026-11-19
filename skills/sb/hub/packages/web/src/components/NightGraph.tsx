@@ -332,7 +332,7 @@ export function NightGraph({ items: given, title }: { items?: readonly QueueItem
               ariaLabel="Overview of the run"
               className="!bg-card"
               maskColor="color-mix(in oklab, var(--background) 70%, transparent)"
-              nodeColor={(n) => (n.type === "box" ? String((n.data as { hue?: string }).hue ?? "var(--muted-foreground)") : n.type === "head" ? "var(--muted)" : "transparent")}
+              nodeColor={(n) => (n.type === "box" ? ((n.data as { hue?: string }).hue ?? "var(--muted-foreground)") : n.type === "head" ? "var(--muted)" : "transparent")}
               nodeStrokeWidth={0}
             />
           </ReactFlow>
