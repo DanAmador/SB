@@ -1,10 +1,11 @@
 /** The one toolbar: pause, tonight's accounts and the stop time, then the command menu and the theme. */
-import { IconCommand, IconMoon, IconRobot, IconSearch, IconSun, IconClock } from "@tabler/icons-react";
+import { IconCommand, IconMoon, IconRobot, IconSearch, IconSettings, IconSun, IconClock } from "@tabler/icons-react";
 import type * as React from "react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { accountState, endsAt, hm, nextClock, poolOf, usageOf } from "@/lib/board.ts";
 import { say } from "@/lib/notice.ts";
+import { setGraphLayout, useGraphLayout, type GraphLayout } from "@/lib/layout.ts";
 import { setTheme, useTheme } from "@/lib/theme.ts";
 import { cn } from "@/lib/utils";
 import { RunIcon } from "./bits.tsx";
@@ -40,6 +41,7 @@ export function Toolbar({ onCommand, view }: { onCommand: () => void; view: stri
       <Button variant="ghost" size="icon-sm" onClick={onCommand} aria-label="Commands" className="sm:hidden">
         <IconSearch aria-hidden />
       </Button>
+      <Settings />
       <ThemeToggle />
     </div>
   );
@@ -169,6 +171,48 @@ function StopTime(): React.JSX.Element {
             Final review after the last ticket
           </label>
           {end > 0 && <p className="text-xs text-muted-foreground">At about 1.5 h a ticket, the queue ends about {hm(end)}.</p>}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+const LAYOUTS: readonly [GraphLayout, string, string][] = [
+  ["vertical", "Vertical", "Time runs down; a ticket's box is as tall as its run took."],
+  ["horizontal", "Horizontal", "Time runs across; a ticket's box is as wide as its run took."],
+];
+
+/** The board's settings, for this browser: how the run's graph and a map's graph are laid out. */
+function Settings(): React.JSX.Element {
+  const layout = useGraphLayout();
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button variant="ghost" size="icon-sm" aria-label="Settings" title="Settings">
+          <IconSettings aria-hidden />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-72">
+        <div role="radiogroup" aria-label="Graph layout" className="flex flex-col gap-1.5">
+          <p className="text-sm font-semibold">Graph layout</p>
+          {LAYOUTS.map(([value, label, hint]) => (
+            <button
+              key={value}
+              type="button"
+              role="radio"
+              aria-checked={layout === value}
+              onClick={() => {
+                setGraphLayout(value);
+              }}
+              className={cn(
+                "flex flex-col items-start gap-0.5 rounded-md border px-2.5 py-1.5 text-left text-sm focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+                layout === value ? "border-brand bg-brand/10" : "hover:bg-muted",
+              )}
+            >
+              <span className="font-medium">{label}</span>
+              <span className="text-xs text-muted-foreground">{hint}</span>
+            </button>
+          ))}
         </div>
       </PopoverContent>
     </Popover>

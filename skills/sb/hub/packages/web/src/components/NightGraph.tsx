@@ -1,21 +1,23 @@
 /**
- * The run's graph, what Everything (or a project) shows where a map's own graph would: a timeline running left to
- * right, a band per project, oldest at the left; the now line; the steps still to come drawn dashed; one Done box.
- * The live run and History both draw it.
+ * The run's graph, what Everything (or a project) shows where a map's own graph would: a timeline, a column per
+ * project and a row per step, oldest at the top; the now line; the rows still to come drawn dashed; one Done box.
+ * With the Horizontal graph layout setting it runs across instead: a band per project, oldest at the left.
  * Map chips above it show or hide each map. Below 768 px it is a list grouped by map. It reads the queue the page
  * already polls, so a box changes in place when its ticket does.
  */
 import { IconArrowUpRight, IconFlag, IconFocus2, IconTopologyStar3 } from "@tabler/icons-react";
 import { Background, Controls, Handle, MarkerType, MiniMap, Panel, Position, ReactFlow, useReactFlow, type Edge, type Node, type NodeProps, type ReactFlowInstance } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type * as React from "react";
 import type { MapTicket, Night, QueueItem } from "@sb-hub/contract";
 import { useMapRoutes } from "@/lib/hub.ts";
 import { setLink } from "@/lib/link.ts";
 import { liveItems } from "@/lib/night.ts";
 import { NODE_H, NODE_W, type MapNode } from "@/lib/map.ts";
-import { atOnceOf, CLOCK_H, DONE_ID, focusOf, frozenInfo, infoOf, LEFT, nightGraph, type NightBox, type NightDone, type NightFrame, type NightMemo } from "@/lib/nightGraph.ts";
+import { atOnceOf, CLOCK_W, DONE_ID, focusOf, frozenInfo, HEAD, infoOf, nightGraph, spanOf, type NightBox, type NightDone, type NightFrame, type NightMemo } from "@/lib/nightGraph.ts";
+import * as A from "@/lib/nightGraphAcross.ts";
+import { useGraphLayout } from "@/lib/layout.ts";
 import { cn } from "@/lib/utils";
 import { itemProject } from "@/lib/board.ts";
 import { ProjectChips, ScrollRow, tally } from "./bits.tsx";
@@ -24,24 +26,26 @@ import { useNow } from "./QuestionCard.tsx";
 import { useBoard } from "./context.tsx";
 
 /** The queue item as the map graph's node: the same box, drawn by the same code. */
-function nodeOf(b: NightBox): MapNode {
+function nodeOf(b: NightBox | A.NightBox, w: number, h: number): MapNode {
   const item = b.item;
   const num = Number(/#(\d+)$/.exec(b.id)?.[1] ?? 0);
   const ticket: MapTicket = {
     num, title: b.title, type: item.kind === "job" ? "other" : "task", status: "open", state: "ready", why: "", priority: null, tier: "", place: b.place,
     last_run: null, blocked_by: [], file: "", links: item.links,
   };
-  return { id: b.id, ticket, title: b.title, state: b.state, other: b.map, x: 0, y: 0, w: b.w, h: NODE_H };
+  return { id: b.id, ticket, title: b.title, state: b.state, other: b.map, x: 0, y: 0, w, h };
 }
 
 interface TextData extends Record<string, unknown> {
   text: string;
   now?: boolean;
+  /** Horizontal layout: the time sits in the strip along the top, centred on its line. */
+  across?: boolean;
 }
-/** A time in the strip along the top, centred on its line. */
+/** A row's clock time, at its left (or, horizontal, a step's time along the top). */
 function Clock({ data }: NodeProps<Node<TextData>>): React.JSX.Element {
   return (
-    <div className={cn("flex size-full items-center justify-center text-xs whitespace-nowrap tabular-nums", data.now === true ? "font-semibold text-brand" : "text-muted-foreground")}>{data.text}</div>
+    <div className={cn("flex size-full items-center text-xs whitespace-nowrap tabular-nums", data.across === true && "justify-center", data.now === true ? "font-semibold text-brand" : "text-muted-foreground")}>{data.text}</div>
   );
 }
 interface FrameData extends Record<string, unknown> {
@@ -49,8 +53,8 @@ interface FrameData extends Record<string, unknown> {
   ids: string[];
 }
 /**
- * A project's band as one framed group behind its boxes: its name and box count on top, and a button that fits the
- * view to just that band. The frame lets clicks through to the boxes; only its label takes them.
+ * A project's column as one framed group behind its boxes: its name and box count on top, and a button that fits the
+ * view to just that column. The frame lets clicks through to the boxes; only its label takes them.
  */
 function Head({ data }: NodeProps<Node<FrameData>>): React.JSX.Element {
   const rf = useReactFlow();
@@ -72,22 +76,23 @@ function Head({ data }: NodeProps<Node<FrameData>>): React.JSX.Element {
     </div>
   );
 }
-/** The now line, down through every band. */
-function Now(): React.JSX.Element {
+/** The now line, across every column (or, horizontal, down through every band). */
+function Now({ data }: NodeProps<Node<{ across?: boolean }>>): React.JSX.Element {
   return (
     <div className="relative size-full" aria-hidden>
-      <div className="absolute inset-y-0 left-1/2 border-l-2 border-brand" />
+      <div className={data.across === true ? "absolute inset-y-0 left-1/2 border-l-2 border-brand" : "absolute inset-x-0 top-1/2 border-t-2 border-brand"} />
     </div>
   );
 }
 interface DoneData extends Record<string, unknown> {
   d: NightDone;
+  across?: boolean;
 }
 /** Where every project's last ticket points: finished out of the night's total. */
 function Done({ data }: NodeProps<Node<DoneData>>): React.JSX.Element {
   return (
     <>
-      <Handle type="target" position={Position.Left} isConnectable={false} className="!pointer-events-none !opacity-0" />
+      <Handle type="target" position={data.across === true ? Position.Left : Position.Top} isConnectable={false} className="!pointer-events-none !opacity-0" />
       <div data-testid="night-done" className="flex size-full flex-col justify-center gap-0.5 rounded-lg border-2 border-foreground bg-card px-3 text-sm">
         <span className="flex items-center gap-1.5 font-semibold">
           <IconFlag className="size-4" aria-hidden />
@@ -161,7 +166,7 @@ function Chips({ frames, hide, fit }: { frames: readonly NightFrame[]; hide: (ma
 }
 
 /** The map chips inside the graph: a project's name fits the view to that project's boxes. */
-function FlowChips({ frames, hide, boxes }: { frames: readonly NightFrame[]; hide: (map: string) => void; boxes: readonly NightBox[] }): React.JSX.Element {
+function FlowChips({ frames, hide, boxes }: { frames: readonly NightFrame[]; hide: (map: string) => void; boxes: readonly Pick<NightBox, "id" | "map">[] }): React.JSX.Element {
   const rf = useReactFlow();
   const fit = (project: string): void => {
     const ids = boxes.filter((b) => b.map.split("/")[0] === project).map((b) => ({ id: b.id }));
@@ -216,7 +221,7 @@ function List({ frames }: { frames: readonly NightFrame[] }): React.JSX.Element 
 const ARROW = { type: MarkerType.ArrowClosed, width: 16, height: 16 } as const;
 /** The room a project's frame leaves around its boxes. */
 const FRAME_PAD = 12;
-/** A clock label's width, centred on its time. */
+/** Horizontal: a clock label's width, centred on its time. */
 const TICK_W = 88;
 
 /**
@@ -242,6 +247,7 @@ export function NightGraph({ items: given, title, frozen }: { items?: readonly Q
   const ticking = Math.floor(useNow() / 60) * 60;
   const minute = frozen?.ended ?? ticking;
   const [hidden, setHidden] = useState<ReadonlySet<string>>(() => new Set());
+  const frame = useRef<HTMLDivElement>(null);
   const hide = (map: string): void => {
     setHidden((h) => {
       const n = new Set(h);
@@ -249,14 +255,15 @@ export function NightGraph({ items: given, title, frozen }: { items?: readonly Q
       return n;
     });
   };
-  // the bands keep their order and height, so an update moves nothing that stays
-  const [memo] = useState(() => new Map<"v", NightMemo>());
-  const g = useMemo(
-    () => nightGraph({ items, maps: order ?? [], info, scope, hidden, atOnce, now: minute, prev: memo.get("v") }),
-    [items, order, info, scope, hidden, atOnce, minute, memo],
-  );
+  // the columns (bands) keep their order and size, so an update moves nothing that stays
+  const across = useGraphLayout() === "horizontal";
+  const [memo] = useState(() => new Map<"v" | "h", NightMemo | A.NightMemo>());
+  const g = useMemo(() => {
+    const input = { items, maps: order ?? [], info, scope, hidden, atOnce, now: minute };
+    return across ? { across: true as const, ...A.nightGraph({ ...input, prev: memo.get("h") }) } : { across: false as const, ...nightGraph({ ...input, prev: memo.get("v") }) };
+  }, [across, items, order, info, scope, hidden, atOnce, minute, memo]);
   useEffect(() => {
-    memo.set("v", g.memo);
+    memo.set(g.across ? "h" : "v", g.memo);
   }, [g, memo]);
   // a box flashes when its state changes after the graph has shown
   const [settled, setSettled] = useState(false);
@@ -276,21 +283,36 @@ export function NightGraph({ items: given, title, frozen }: { items?: readonly Q
   const chips = <ProjectChips counts={projects} label="Projects in the run" />;
   if (g.frames.length === 0) return scope.project !== "" && projects.length > 0 ? chips : null;
   const fixed = { draggable: false, connectable: false, selectable: false, focusable: false } as const;
-  const nodes: Node[] = [
+  const boxNode = (b: NightBox | A.NightBox, w: number, h: number): Node<Data> => ({
+    id: b.id, type: "box", position: { x: b.x, y: b.y }, width: w, height: h, draggable: false, connectable: false, focusable: false, style: { pointerEvents: "all" },
+    data: { n: nodeOf(b, w, h), map: b.map, ...(b.place === null && { foot: b.foot }), key: b.id, report: b.report, flash: changed.has(b.id), hue: b.hue, dashed: b.phase === "next" },
+  });
+  const doneNode = (d: NightDone): Node => ({ id: DONE_ID, type: "done", position: { x: d.x, y: d.y }, width: NODE_W, height: NODE_H, data: { d, across: g.across }, ...fixed });
+  const nodes: Node[] = g.across ? [
     ...g.bands.map((c): Node => {
       const its = g.boxes.filter((b) => b.project === c.project);
       return {
-        id: `head:${c.project}`, type: "head", position: { x: LEFT - FRAME_PAD, y: c.y }, width: g.right - LEFT + 2 * FRAME_PAD, height: c.h,
+        id: `head:${c.project}`, type: "head", position: { x: A.LEFT - FRAME_PAD, y: c.y }, width: g.right - A.LEFT + 2 * FRAME_PAD, height: c.h,
         data: { text: c.project, ids: its.map((b) => b.id) }, zIndex: -1, style: { pointerEvents: "none" }, ...fixed,
       };
     }),
-    ...g.ticks.map((r): Node => ({ id: `clock:${String(r.tick)}`, type: "clock", position: { x: r.x - TICK_W / 2, y: 0 }, width: TICK_W, height: CLOCK_H - 8, data: { text: r.clock, now: r.phase === "now" }, ...fixed })),
-    ...(g.nowX !== null ? [{ id: "now", type: "now", position: { x: g.nowX - 6, y: CLOCK_H - 8 }, width: 12, height: g.bottom - CLOCK_H + 8, data: {}, zIndex: -1, ...fixed } satisfies Node] : []),
-    ...g.boxes.map((b): Node<Data> => ({
-      id: b.id, type: "box", position: { x: b.x, y: b.y }, width: b.w, height: NODE_H, draggable: false, connectable: false, focusable: false, style: { pointerEvents: "all" },
-      data: { n: nodeOf(b), map: b.map, ...(b.place === null && { foot: b.foot }), key: b.id, report: b.report, flash: changed.has(b.id), hue: b.hue, dashed: b.phase === "next" },
-    })),
-    ...(g.done !== null ? [{ id: DONE_ID, type: "done", position: { x: g.done.x, y: g.done.y }, width: NODE_W, height: NODE_H, data: { d: g.done }, ...fixed } satisfies Node] : []),
+    ...g.ticks.map((r): Node => ({ id: `clock:${String(r.tick)}`, type: "clock", position: { x: r.x - TICK_W / 2, y: 0 }, width: TICK_W, height: A.CLOCK_H - 8, data: { text: r.clock, now: r.phase === "now", across: true }, ...fixed })),
+    ...(g.nowX !== null ? [{ id: "now", type: "now", position: { x: g.nowX - 6, y: A.CLOCK_H - 8 }, width: 12, height: g.bottom - A.CLOCK_H + 8, data: { across: true }, zIndex: -1, ...fixed } satisfies Node] : []),
+    ...g.boxes.map((b) => boxNode(b, b.w, NODE_H)),
+    ...(g.done !== null ? [doneNode(g.done)] : []),
+  ] : [
+    ...g.columns.map((c): Node => {
+      const its = g.boxes.filter((b) => b.project === c.project);
+      const bottom = Math.max(HEAD, ...its.map((b) => b.y + b.h)) + FRAME_PAD;
+      return {
+        id: `head:${c.project}`, type: "head", position: { x: c.x - FRAME_PAD, y: 0 }, width: c.w + 2 * FRAME_PAD, height: bottom,
+        data: { text: c.project, ids: its.map((b) => b.id) }, zIndex: -1, style: { pointerEvents: "none" }, ...fixed,
+      };
+    }),
+    ...g.rows.map((r): Node => ({ id: `clock:${String(r.row)}`, type: "clock", position: { x: 0, y: r.y }, width: CLOCK_W - 12, height: NODE_H, data: { text: r.clock, now: r.phase === "now" }, ...fixed })),
+    ...(g.nowY !== null ? [{ id: "now", type: "now", position: { x: 0, y: g.nowY - 6 }, width: Math.max(CLOCK_W + NODE_W, spanOf(g)), height: 12, data: {}, zIndex: -1, ...fixed } satisfies Node] : []),
+    ...g.boxes.map((b) => boxNode(b, NODE_W, b.h)),
+    ...(g.done !== null ? [doneNode(g.done)] : []),
   ];
   const edges: Edge[] = g.edges.map((e) => ({
     id: e.id, source: e.from, target: e.to, focusable: false, markerEnd: ARROW,
@@ -298,13 +320,24 @@ export function NightGraph({ items: given, title, frozen }: { items?: readonly Q
       ? { stroke: "var(--border)", strokeWidth: 1.5 }
       : { stroke: "var(--muted-foreground)", strokeWidth: 1.5, ...(e.across ? { strokeDasharray: "5 4" } : {}) },
   }));
+  // opens on the now line: vertical, zoomed so every column fits across the page (never larger than life, never
+  // unreadable); horizontal, beside what runs now, the timeline scrolling sideways
   const centre = (rf: ReactFlowInstance): void => {
+    if (g.across) {
+      const now = A.focusOf(g);
+      if (now === null) void rf.fitView();
+      else void rf.setCenter(now.x, now.y, { zoom: 0.85 });
+      return;
+    }
     const at = focusOf(g);
     if (at === null) {
       void rf.fitView();
       return;
     }
-    void rf.setCenter(at.x, at.y, { zoom: 0.85 });
+    const span = spanOf(g);
+    const room = frame.current?.clientWidth ?? 0;
+    const zoom = room > 0 && span > 0 ? Math.min(1, Math.max(0.35, (room - 32) / span)) : 0.85;
+    void rf.setCenter(span > 0 ? span / 2 : at.x, at.y, { zoom });
   };
   return (
     <section aria-label="The run" className="flex flex-col gap-2">
@@ -314,9 +347,10 @@ export function NightGraph({ items: given, title, frozen }: { items?: readonly Q
         <span className="text-xs font-normal text-muted-foreground" data-testid="run-counts">{g.line}</span>
       </h2>
       {wide ? (
-        <div data-testid="night-graph" className="flex h-[calc(100dvh-17rem)] min-h-96 w-full flex-col overflow-hidden rounded-lg border bg-card">
+        <div ref={frame} data-testid="night-graph" className="flex h-[calc(100dvh-17rem)] min-h-96 w-full flex-col overflow-hidden rounded-lg border bg-card">
           <div className="min-h-0 flex-1">
           <ReactFlow
+            key={across ? "horizontal" : "vertical"}
             nodes={nodes}
             edges={edges}
             nodeTypes={nodeTypes}

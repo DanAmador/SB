@@ -13,6 +13,7 @@ import { useMapRoute } from "@/lib/hub.ts";
 import { setLink, useLink } from "@/lib/link.ts";
 import { dimmed, layoutMap, reachKeys, MAP_STATES, MAP_STATE_WORDS, minutesOf, pickedState, stateCounts, type MapNode, type MapState } from "@/lib/map.ts";
 import { cn } from "@/lib/utils";
+import { useGraphLayout } from "@/lib/layout.ts";
 import { useBoard } from "./context.tsx";
 import { clearSelection, selected, tick, useSelection } from "@/lib/select.ts";
 import { MapHead } from "./MapHead.tsx";
@@ -96,6 +97,7 @@ export interface Data extends Record<string, unknown> {
 
 export function Box({ data }: NodeProps<Node<Data>>): React.JSX.Element {
   const { n, map } = data;
+  const across = useGraphLayout() === "horizontal";
   const mins = data.mins ?? null;
   const dim = data.dim === true;
   const ticked = data.ticked === true;
@@ -112,7 +114,7 @@ export function Box({ data }: NodeProps<Node<Data>>): React.JSX.Element {
   };
   return (
     <>
-      <Handle type="target" position={Position.Left} isConnectable={false} className="!pointer-events-none !opacity-0" />
+      <Handle type="target" position={across ? Position.Left : Position.Top} isConnectable={false} className="!pointer-events-none !opacity-0" />
       <button
         type="button"
         onClick={open}
@@ -149,7 +151,7 @@ export function Box({ data }: NodeProps<Node<Data>>): React.JSX.Element {
           Report
         </a>
       )}
-      <Handle type="source" position={Position.Right} isConnectable={false} className="!pointer-events-none !opacity-0" />
+      <Handle type="source" position={across ? Position.Right : Position.Bottom} isConnectable={false} className="!pointer-events-none !opacity-0" />
     </>
   );
 }
@@ -259,6 +261,7 @@ export function MapView({ map }: { map: string }): React.JSX.Element {
   const table = link.mv === "table";
   const pick = pickedState(link.ms);
   const wide = useWide();
+  const across = useGraphLayout() === "horizontal";
   const { state } = useBoard();
   const keys = useSelection();
   const boxing = useRef(false);
@@ -282,7 +285,7 @@ export function MapView({ map }: { map: string }): React.JSX.Element {
       <Skeleton className="h-64 w-full" aria-label="Loading the map" />
     );
   }
-  const layout = layoutMap(route);
+  const layout = layoutMap(route, across);
   const own = new Map(layout.nodes.filter((n) => n.ticket !== null).map((n) => [n.ticket?.num ?? 0, n]));
   const counts = stateCounts(layout.nodes);
   const minsOf = (n: MapNode): number | null => {
@@ -318,6 +321,7 @@ export function MapView({ map }: { map: string }): React.JSX.Element {
       ) : wide ? (
         <div ref={box} data-testid="map-graph" className="relative h-[calc(100dvh-8rem)] min-h-96 w-full rounded-lg border bg-card [&_.react-flow__nodesselection]:hidden">
           <ReactFlow
+            key={across ? "horizontal" : "vertical"}
             nodes={nodes}
             edges={edges}
             nodeTypes={nodeTypes}

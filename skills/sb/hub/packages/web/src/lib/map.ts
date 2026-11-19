@@ -75,7 +75,7 @@ export interface MapLayout {
 }
 
 /** Nodes at their top-left corner, in layers from the first tickets down; one arrow per "after". */
-export function layoutMap(route: Pick<MapRoute, "map" | "checks" | "tickets">): MapLayout {
+export function layoutMap(route: Pick<MapRoute, "map" | "checks" | "tickets">, across = false): MapLayout {
   const own = new Set(route.tickets.map((t) => t.num));
   const hasChecks = route.checks.length > 0;
   const nodes = new Map<string, MapNode>();
@@ -93,8 +93,8 @@ export function layoutMap(route: Pick<MapRoute, "map" | "checks" | "tickets">): 
     }
   }
   const g = new dagre.graphlib.Graph();
-  // left to right, as the run's graph runs (ticket 168): what comes after sits to the right
-  g.setGraph({ rankdir: "LR", nodesep: 24, ranksep: 64, marginx: 16, marginy: 16 });
+  // vertical: what comes after sits below; horizontal (the graph layout setting): to the right
+  g.setGraph({ rankdir: across ? "LR" : "TB", nodesep: 24, ranksep: across ? 64 : 48, marginx: 16, marginy: 16 });
   g.setDefaultEdgeLabel(() => ({}));
   for (const n of nodes.values()) g.setNode(n.id, { width: n.w, height: n.h });
   for (const e of edges) g.setEdge(e.from, e.to);

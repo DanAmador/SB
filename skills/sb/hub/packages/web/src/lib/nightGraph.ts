@@ -1,40 +1,33 @@
 /**
- * The run's graph as a timeline that runs left to right (ticket 168): a band per project, stacked down, and SLOT_W
- * of width per half hour (SLOT), so a long run grows sideways and the canvas scrolls. What ran and what runs sits at
- * the time it started, measured from the night's first start, and is as wide as its run took (at least a box's
- * width); boxes of a project whose runs or boxes would overlap go one under the other, each in the first lane free
- * (in start order), and keep that lane as the run goes on. A stretch over LONG_EMPTY with nothing shown running is
- * drawn one slot wide. Right of the now line what is queued sits in the steps the hub would start it in (its queue
- * order, the 'after' arrows, its maps one at a time per project, one ticket per project at a time unless the
- * project runs more at once). Every 'after' is an arrow, also across projects, and each project's last ticket points
- * at one Done box. The live run, a map's run and History all draw with this one layout. Pure: no React, no DOM.
+ * The run's graph as a timeline: a column per project, time running down, one row (ROW_H) per half hour (SLOT). What
+ * ran and what runs sits at the time it started, measured from the night's first start, and is as tall as its run
+ * took (at least a box's height); boxes of a project whose runs or boxes would overlap go side by side, each in the
+ * first lane free (in start order), and keep that lane as the run goes on. A stretch over LONG_EMPTY with nothing
+ * shown running is drawn one slot tall. Below the now line what is
+ * queued sits in the rows the hub would start it in (its queue order, the 'after' arrows, its maps one at a time per
+ * project, one ticket per project at a time unless the project runs more at once). Every 'after' is an arrow, also
+ * across projects, and each project's last ticket points at one Done box. Pure: no React, no DOM.
  */
 import type { MapRoute, Queue, QueueItem, TicketRow } from "@sb-hub/contract";
 import { CHAT_RUNNER, ESTIMATE, folder, itemInScope, landedShort, itemMapKey, itemTitle, mapTitle, projOf, type Scope } from "./board.ts";
 import { mapState, NODE_H, NODE_W, type MapState } from "./map.ts";
 
-/** Between steps, and between lanes of a band. */
+/** Between rows, and between boxes side by side in a column. */
 export const GAP = 24;
-/** Between project bands. */
-export const BAND_GAP = 32;
-/** The clock strip along the top. */
-export const CLOCK_H = 32;
-/** A band's own head: the project's name above its boxes. */
-export const BAND_HEAD = 40;
-/** The room under a band's last lane. */
-export const BAND_FOOT = 12;
-/** Where the night's first start sits. */
-export const LEFT = 24;
-/** A step, and the width of a slot of the night. */
-export const SLOT_W = NODE_W + GAP;
-/** A lane of a band. */
-export const LANE_H = NODE_H + GAP;
-/** The time one step stands for, in seconds: half an hour. */
+/** Between project columns. */
+export const COL_GAP = 56;
+/** The clock column at the left. */
+export const CLOCK_W = 76;
+/** The project names above the columns. */
+export const HEAD = 40;
+/** A row, and a slot of the night. */
+export const ROW_H = NODE_H + GAP;
+/** The time one row stands for, in seconds: half an hour. */
 export const SLOT = 1800;
-/** An empty stretch longer than this (seconds; nothing shown runs or starts in it) is drawn one slot wide. */
+/** An empty stretch longer than this (seconds; nothing shown runs or starts in it) is drawn one slot tall. */
 export const LONG_EMPTY = 2 * 3600;
 /** Clock labels closer than this (px) drop the less telling one. */
-const LABEL_APART = 72;
+const LABEL_APART = 28;
 export const JOBS = "Jobs";
 /** A map's colour inside its project: the first map takes the first. */
 export const HUES = ["#2563eb", "#d97706", "#0d9488", "#c026d3", "#65a30d", "#dc2626"] as const;
@@ -112,7 +105,7 @@ export function boxState(i: QueueItem, place: number | null): MapState {
     default: return mapState({ state: "claimed", status: "claimed", place: null }, true);
   }
 }
-const outcomeOf = (i: QueueItem): Outcome | null => (i.state === "done" ? "done" : i.state === "failed" ? (landedShort(i) ? "landed" : "fell short") : i.state === "skipped" ? "stopped" : null);
+export const outcomeOf = (i: QueueItem): Outcome | null => (i.state === "done" ? "done" : i.state === "failed" ? (landedShort(i) ? "landed" : "fell short") : i.state === "skipped" ? "stopped" : null);
 
 /** What the run knows of a ticket besides its queue item: its title and the tickets it comes after (as map#num). */
 export interface TicketInfo {
@@ -177,17 +170,17 @@ export interface NightCard {
   /** Its map's colour. */
   hue: string;
 }
-/** Where a ticket sits: left of the now line, on it, or right of it (where the hub would start it). */
+/** Where a ticket sits: above the now line, on it, or below it (where the hub would start it). */
 export type Phase = "ran" | "now" | "next";
 export interface NightBox extends NightCard {
   phase: Phase;
-  /** Its rank from the left among the graph's distinct box starts: a later step is further right. */
-  step: number;
+  /** Its rank from the top among the graph's distinct box heights: a later row is lower. */
+  row: number;
   lane: number;
   x: number;
   y: number;
-  /** Its width: as long as its run took on the timeline, at least NODE_W; NODE_W for a queued one. */
-  w: number;
+  /** Its height: as long as its run took on the timeline, at least NODE_H; NODE_H for a queued one. */
+  h: number;
 }
 /** One map of the run: its chip above the graph and its group in the phone's list. */
 export interface NightFrame {
@@ -201,18 +194,16 @@ export interface NightFrame {
   hidden: boolean;
   boxes: NightCard[];
 }
-/** A project's band: from its head's top, as tall as its head and lanes. */
-export interface NightBand {
+export interface NightColumn {
   project: string;
-  y: number;
-  h: number;
-  lanes: number;
-}
-/** One clock label in the strip along the top, centred on its time's line at x. */
-export interface NightTick {
-  tick: number;
   x: number;
-  /** The night's first start, a half hour, a start after a long empty stretch, 'now hh:mm', or '≈hh:mm' for a queued step. */
+  w: number;
+}
+/** One clock label: its text is centred on the time's line, so the node's y is the line less half a box. */
+export interface NightRow {
+  row: number;
+  y: number;
+  /** The night's first start, an hour, a start after a long empty stretch, 'now hh:mm', or '≈hh:mm' for a queued row. */
   clock: string;
   phase: Phase;
 }
@@ -231,7 +222,7 @@ export interface NightDone {
   total: number;
   line: string;
 }
-/** What the next build keeps so nothing moves: the bands' order, how many lanes each got, each started box's lane. */
+/** What the next build keeps so nothing moves: the columns' order, how many boxes wide each got, each started box's lane. */
 export interface NightMemo {
   cols: readonly string[];
   lanes: ReadonlyMap<string, number>;
@@ -241,15 +232,11 @@ export interface NightMemo {
 export interface NightGraph {
   frames: NightFrame[];
   boxes: NightBox[];
-  bands: NightBand[];
-  ticks: NightTick[];
+  columns: NightColumn[];
+  rows: NightRow[];
   edges: NightEdge[];
   /** Where the now line runs (at the current time); null when nothing runs or waits. */
-  nowX: number | null;
-  /** Right of the last box: how wide the graph is. */
-  right: number;
-  /** Under the last band: how tall the graph is. */
-  bottom: number;
+  nowY: number | null;
   done: NightDone | null;
   counts: Counts;
   line: string;
@@ -267,7 +254,7 @@ export interface NightInput {
   hidden?: ReadonlySet<string> | undefined;
   /** Project -> how many of its tickets run at once (the queue's repos); 1 when absent. */
   atOnce?: ReadonlyMap<string, number> | undefined;
-  /** Seconds, for the clock of the steps still to come. */
+  /** Seconds, for the clock of the rows still to come. */
   now?: number | undefined;
   prev?: NightMemo | undefined;
 }
@@ -283,7 +270,7 @@ export const clock = (sec: number): string => {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
 export const projectOf = (i: QueueItem): string => (i.kind === "job" ? folder(i.project) : projOf(itemMapKey(i)));
-/** The steps to come by the hub's rules: queued step (0 first) and lane in its band per queued key. */
+/** The rows to come by the hub's rules: queued row (0 first) and lane in its column per queued key. */
 function queueRows(all: readonly QueueItem[], maps: readonly string[], after: (k: string) => string[], atOnce: ReadonlyMap<string, number> | undefined) {
   const row = new Map<string, number>();
   const lane = new Map<string, number>();
@@ -327,26 +314,26 @@ interface Span {
   to: number;
 }
 /**
- * Time -> x: SLOT_W per SLOT from t0, except that each stretch over LONG_EMPTY that no span covers is drawn one slot
- * wide (so a box that ended just before it never pushes the next one into another lane). Returns the stretches too.
+ * Time -> y: ROW_H per SLOT from t0, except that each stretch over LONG_EMPTY that no span covers is drawn one slot
+ * tall (so a box that ended just before it never pushes the next one sideways). Returns the stretches too.
  */
-function timeline(spans: readonly Span[], t0: number): { xAt: (t: number) => number; breaks: Span[] } {
+function timeline(spans: readonly Span[], t0: number): { yAt: (t: number) => number; breaks: Span[] } {
   const breaks: Span[] = [];
   let end = -Infinity;
   for (const s of [...spans].sort((a, b) => a.from - b.from)) {
     if (end > -Infinity && s.from - end > LONG_EMPTY) breaks.push({ from: end, to: s.from });
     end = Math.max(end, s.to);
   }
-  const xAt = (t: number): number => {
+  const yAt = (t: number): number => {
     let v = t - t0;
     for (const g of breaks) {
       const len = g.to - g.from;
       if (t >= g.to) v -= len - SLOT;
       else if (t > g.from) v -= (t - g.from) * (1 - SLOT / len);
     }
-    return LEFT + (SLOT_W * v) / SLOT;
+    return HEAD + (ROW_H * v) / SLOT;
   };
-  return { xAt, breaks };
+  return { yAt, breaks };
 }
 
 /** The local half hours (:00 and :30) after `from` up to `to`, as seconds. */
@@ -366,7 +353,7 @@ export function took(secs: number): string {
 }
 
 /** A box's second line: where it is, and for a finished run how long it took. */
-function footOf(i: QueueItem, p: number | null): string {
+export function footOf(i: QueueItem, p: number | null): string {
   if (p !== null) return `${STATE_WORDS[i.state]} ${String(p)}`;
   const words = i.runner === CHAT_RUNNER ? (i.state === "running" ? "In a chat" : i.state === "done" ? "Done in a chat" : "A chat stopped, still open") : landedShort(i) ? "Landed, needs your look" : i.kind === "ticket" && i.handed ? `To integrate · ${i.handed.to}` : STATE_WORDS[i.state];
   return i.started != null && i.ended != null && i.ended > i.started ? `${words} · ${took(i.ended - i.started)}` : words;
@@ -442,78 +429,78 @@ export function nightGraph(input: NightInput): NightGraph {
     return { from, to: i.state === "running" ? nowT : Math.max(from, i.ended ?? from) };
   };
   const spans = new Map(started.map((i) => [i.key, spanOf(i)]));
-  const { xAt, breaks } = timeline([...spans.values(), ...(live ? [{ from: nowT, to: nowT }] : [])], t0);
+  const { yAt, breaks } = timeline([...spans.values(), ...(live ? [{ from: nowT, to: nowT }] : [])], t0);
 
   // a lane per box, in start order: the one it had if still free, else the first free one; the boxes that had a lane
   // go first, so one that shows up late with an earlier start never pushes them over. A box holds its lane from its
-  // left to its right or its run's end, whichever is further, plus a gap.
+  // top down to its bottom or its run's end, whichever is lower, plus a gap.
   const prevSlots = input.prev?.slots ?? new Map<string, number>();
   const slots = new Map(prevSlots);
-  const where = new Map<string, { x: number; lane: number; w: number }>();
+  const where = new Map<string, { y: number; lane: number; h: number }>();
   const taken = new Map<string, Span[][]>();
-  let furthest = -Infinity;
+  let lowest = -Infinity;
   const byStart = [...started].sort((a, b) => (spans.get(a.key)?.from ?? 0) - (spans.get(b.key)?.from ?? 0));
   for (const i of [...byStart.filter((o) => prevSlots.has(o.key)), ...byStart.filter((o) => !prevSlots.has(o.key))]) {
     const s = spans.get(i.key) ?? { from: t0, to: t0 };
-    const left = xAt(s.from);
-    const right = Math.max(left + NODE_W, xAt(s.to));
-    const band = taken.get(projectOf(i)) ?? [];
-    taken.set(projectOf(i), band);
-    const fits = (l: number): boolean => (band[l] ?? []).every((o) => left >= o.to + GAP - 0.5 || right + GAP <= o.from + 0.5);
+    const top = yAt(s.from);
+    const bottom = Math.max(top + NODE_H, yAt(s.to));
+    const col = taken.get(projectOf(i)) ?? [];
+    taken.set(projectOf(i), col);
+    const fits = (l: number): boolean => (col[l] ?? []).every((o) => top >= o.to + GAP - 0.5 || bottom + GAP <= o.from + 0.5);
     let l = prevSlots.get(i.key);
     if (l === undefined || !fits(l)) {
       l = 0;
       while (!fits(l)) l += 1;
     }
-    (band[l] ??= []).push({ from: left, to: right });
-    where.set(i.key, { x: left, lane: l, w: right - left });
+    (col[l] ??= []).push({ from: top, to: bottom });
+    where.set(i.key, { y: top, lane: l, h: bottom - top });
     slots.set(i.key, l);
-    furthest = Math.max(furthest, right);
+    lowest = Math.max(lowest, bottom);
   }
-  const nowX = live ? xAt(nowT) : null;
+  const nowY = live ? yAt(nowT) : null;
 
-  // what is queued: right of the now line, a step at a time; a step nothing shown sits in drops out
-  const qSteps = [...new Set(shown.filter((i) => phaseOf(i) === "next").map((i) => plan.row.get(i.key) ?? 0))].sort((a, b) => a - b);
-  const qLeft = nowX === null ? LEFT : Math.max(nowX + SLOT_W / 2, furthest + GAP);
-  const qX = (o: number): number => qLeft + Math.max(0, qSteps.indexOf(o)) * SLOT_W;
-  for (const i of shown) if (phaseOf(i) === "next") where.set(i.key, { x: qX(plan.row.get(i.key) ?? 0), lane: plan.lane.get(i.key) ?? 0, w: NODE_W });
+  // what is queued: below the now line, a row at a time; a row nothing shown sits in drops out
+  const qRows = [...new Set(shown.filter((i) => phaseOf(i) === "next").map((i) => plan.row.get(i.key) ?? 0))].sort((a, b) => a - b);
+  const qTop = nowY === null ? 0 : Math.max(nowY + ROW_H / 2, lowest + GAP);
+  const qY = (o: number): number => qTop + Math.max(0, qRows.indexOf(o)) * ROW_H;
+  for (const i of shown) if (phaseOf(i) === "next") where.set(i.key, { y: qY(plan.row.get(i.key) ?? 0), lane: plan.lane.get(i.key) ?? 0, h: NODE_H });
 
   const lanes = new Map(input.prev?.lanes ?? []);
   for (const i of shown) lanes.set(projectOf(i), Math.max(lanes.get(projectOf(i)) ?? 1, (where.get(i.key)?.lane ?? 0) + 1));
-  const bands: NightBand[] = [];
-  let y = CLOCK_H;
+  const columns: NightColumn[] = [];
+  let x = CLOCK_W;
   for (const p of projects) {
     const n = lanes.get(p) ?? 1;
-    const h = BAND_HEAD + n * NODE_H + (n - 1) * GAP + BAND_FOOT;
-    bands.push({ project: p, y, h, lanes: n });
-    y += h + BAND_GAP;
+    const w = n * NODE_W + (n - 1) * GAP;
+    columns.push({ project: p, x, w });
+    x += w + COL_GAP;
   }
-  const bandOf = new Map(bands.map((b) => [b.project, b]));
-  const levels = [...new Set([...where.values()].map((w) => w.x))].sort((a, b) => a - b);
+  const colOf = new Map(columns.map((c) => [c.project, c]));
+  const levels = [...new Set([...where.values()].map((w) => w.y))].sort((a, b) => a - b);
   const boxes: NightBox[] = shown.map((i) => {
-    const { x, lane: l, w } = where.get(i.key) ?? { x: LEFT, lane: 0, w: NODE_W };
-    return { ...cardOf(i), phase: phaseOf(i), step: levels.indexOf(x), lane: l, x, y: (bandOf.get(projectOf(i))?.y ?? CLOCK_H) + BAND_HEAD + l * LANE_H, w };
+    const { y, lane: l, h } = where.get(i.key) ?? { y: HEAD, lane: 0, h: NODE_H };
+    return { ...cardOf(i), phase: phaseOf(i), row: levels.indexOf(y), lane: l, x: (colOf.get(projectOf(i))?.x ?? CLOCK_W) + l * (NODE_W + GAP), y, h };
   });
 
   // the clock: 'now', the night's first start and each start after a long empty stretch, every half hour between, and
-  // about when each queued step would start, from the night's usual run; a label too close to a more telling one drops
+  // about when each queued row would start, from the night's usual run; a label too close to a more telling one drops
   const runs = all.filter((i) => i.started != null && i.ended != null && i.state !== "skipped").map((i) => (i.ended ?? 0) - (i.started ?? 0)).sort((a, b) => a - b);
   // no ticket ended yet: the same rough 1.5 h a ticket the toolbar's end time counts with
   const usual = runs[Math.floor(runs.length / 2)] ?? ESTIMATE;
   const running = all.filter((i) => i.state === "running");
   const nextAt = Math.max(t, ...running.map((i) => (i.started ?? t) + usual));
   const labels: { at: number; clock: string; phase: Phase }[] = [];
-  if (nowX !== null) labels.push({ at: nowX, clock: `now ${clock(t)}`, phase: "now" });
+  if (nowY !== null) labels.push({ at: nowY, clock: `now ${clock(t)}`, phase: "now" });
   if (started.length > 0) {
-    labels.push({ at: xAt(t0), clock: clock(t0), phase: "ran" });
-    for (const g of breaks) labels.push({ at: xAt(g.to), clock: clock(g.to), phase: "ran" });
+    labels.push({ at: yAt(t0), clock: clock(t0), phase: "ran" });
+    for (const g of breaks) labels.push({ at: yAt(g.to), clock: clock(g.to), phase: "ran" });
     const end = Math.max(live ? nowT : t0, ...[...spans.values()].map((s) => s.to));
-    for (const h of slotsBetween(t0, end)) if (!breaks.some((g) => h > g.from && h < g.to)) labels.push({ at: xAt(h), clock: clock(h), phase: "ran" });
+    for (const h of slotsBetween(t0, end)) if (!breaks.some((g) => h > g.from && h < g.to)) labels.push({ at: yAt(h), clock: clock(h), phase: "ran" });
   }
-  for (const [n, o] of qSteps.entries()) labels.push({ at: qLeft + n * SLOT_W, clock: `≈${clock(nextAt + o * usual)}`, phase: "next" });
+  for (const [n, o] of qRows.entries()) labels.push({ at: qTop + n * ROW_H, clock: `≈${clock(nextAt + o * usual)}`, phase: "next" });
   const kept: typeof labels = [];
   for (const l of labels) if (kept.every((k) => Math.abs(k.at - l.at) >= LABEL_APART)) kept.push(l);
-  const ticks: NightTick[] = kept.sort((a, b) => a.at - b.at).map((l, n) => ({ tick: n, x: l.at, clock: l.clock, phase: l.phase }));
+  const rows: NightRow[] = kept.sort((a, b) => a.at - b.at).map((l, n) => ({ row: n, y: l.at - NODE_H / 2, clock: l.clock, phase: l.phase }));
 
   const shownKeys = new Set(shown.map((i) => i.key));
   const edges: NightEdge[] = [];
@@ -524,29 +511,33 @@ export function nightGraph(input: NightInput): NightGraph {
       edges.push({ id: `${a}>${i.key}`, from: a, to: i.key, across: projectOf(from) !== projectOf(i) });
     }
   }
-  const bottom = y - BAND_GAP;
-  let right = Math.max(LEFT + NODE_W, ...boxes.map((b) => b.x + b.w), nowX ?? 0);
   let done: NightDone | null = null;
   if (boxes.length > 0) {
-    for (const b of bands) {
-      const last = boxes.filter((x) => x.project === b.project).sort((p, q) => q.x + q.w - (p.x + p.w) || q.lane - p.lane)[0];
+    for (const c of columns) {
+      const last = boxes.filter((b) => b.project === c.project).sort((a, b) => b.y - a.y || b.lane - a.lane)[0];
       if (last !== undefined) edges.push({ id: `${last.id}>${DONE_ID}`, from: last.id, to: DONE_ID, across: false });
     }
     const finished = boxes.filter((b) => b.outcome !== null).length;
-    done = { x: right + 2 * GAP, y: CLOCK_H + Math.max(0, (bottom - CLOCK_H - NODE_H) / 2), finished, total: boxes.length, line: `${String(finished)} of ${String(boxes.length)} finished` };
-    right = done.x + NODE_W;
+    const right = x - COL_GAP;
+    const bottom = Math.max(...boxes.map((b) => b.y + b.h));
+    done = { x: CLOCK_W + Math.max(0, (right - CLOCK_W - NODE_W) / 2), y: bottom + 2 * GAP, finished, total: boxes.length, line: `${String(finished)} of ${String(boxes.length)} finished` };
   }
 
   const counts = tally(scoped);
-  return { frames, boxes, bands, ticks, edges, nowX, right, bottom, done, counts, line: countsLine(counts), memo: { cols: [...new Set([...prevCols, ...projects])], lanes, slots } };
+  return { frames, boxes, columns, rows, edges, nowY, done, counts, line: countsLine(counts), memo: { cols: [...new Set([...prevCols, ...projects])], lanes, slots } };
 }
 
-/** The point to centre on: the now line, beside the tickets that run (else the ones queued); null when nothing does. */
-export function focusOf(g: Pick<NightGraph, "boxes"> & Partial<Pick<NightGraph, "nowX">>): { x: number; y: number } | null {
+/** The point to centre on: the now line, under the tickets that run (else the ones queued); null when nothing does. */
+/** How wide the whole graph is, its clock included: the view opens zoomed so all of it fits across. */
+export function spanOf(g: Pick<NightGraph, "columns">): number {
+  return Math.max(0, ...g.columns.map((c) => c.x + c.w));
+}
+
+export function focusOf(g: Pick<NightGraph, "boxes"> & Partial<Pick<NightGraph, "nowY">>): { x: number; y: number } | null {
   const run = g.boxes.filter((b) => b.phase === "now");
   const pick = run.length > 0 ? run : g.boxes.filter((b) => b.phase === "next");
   if (pick.length === 0) return null;
   const xs = pick.map((b) => b.x + NODE_W / 2);
   const ys = pick.map((b) => b.y + NODE_H / 2);
-  return { x: g.nowX ?? Math.min(...xs), y: (Math.min(...ys) + Math.max(...ys)) / 2 };
+  return { x: (Math.min(...xs) + Math.max(...xs)) / 2, y: g.nowY ?? Math.min(...ys) };
 }

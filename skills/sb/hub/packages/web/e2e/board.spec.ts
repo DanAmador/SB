@@ -94,7 +94,7 @@ test.describe("The run's graph", () => {
   const night = (page: Page) => page.getByTestId("night-graph");
   const box = (page: Page, name: RegExp) => night(page).getByRole("button", { name });
 
-  test("Everything shows the run as one timeline left to right: a band per project, a chip per map, the now line and one Done box", async ({ page }) => {
+  test("Everything shows the run as one timeline: a column per project, a chip per map, the now line and one Done box", async ({ page }) => {
     const errors: string[] = [];
     page.on("pageerror", (e) => errors.push(String(e)));
     await page.goto("/next/");
@@ -108,7 +108,7 @@ test.describe("The run's graph", () => {
     // a ticket the run never queued is not there
     await expect(night(page).getByText("Draw the shop window")).toHaveCount(0);
     await expect(night(page).getByText("Draw the header")).toHaveCount(0);
-    // the queued one has its place, drawn dashed right of now; an arrow crosses from the demo board to the shop site,
+    // the queued one has its place, drawn dashed below now; an arrow crosses from the demo board to the shop site,
     // and each project's last ticket points at Done
     await expect(box(page, /Show the queue in order.*Queued\s*next 1/)).toBeVisible();
     await expect(box(page, /Show the queue in order/)).toHaveClass(/border-dashed/);
@@ -128,6 +128,28 @@ test.describe("The run's graph", () => {
     await night(page).getByRole("group", { name: "Maps" }).getByRole("button", { pressed: false }).filter({ hasText: "The shop site" }).click();
     await expect(night(page).locator(".react-flow__node-box")).toHaveCount(8);
     expect(errors).toEqual([]);
+  });
+
+  test("the graph layout setting turns the run's graph from vertical to horizontal, and the page keeps the choice", async ({ page }) => {
+    await page.goto("/next/");
+    const now = night(page).locator(".react-flow__node-now");
+    const shape = async () => {
+      const b = await now.boundingBox();
+      return b === null ? "none" : b.width > b.height ? "across" : "down";
+    };
+    await expect(now).toHaveCount(1);
+    expect(await shape()).toBe("across"); // vertical: time runs down, so the now line lies across
+    await page.getByRole("button", { name: "Settings" }).click();
+    const layout = page.getByRole("radiogroup", { name: "Graph layout" });
+    await expect(layout.getByRole("radio", { name: /Vertical/ })).toHaveAttribute("aria-checked", "true");
+    await layout.getByRole("radio", { name: /Horizontal/ }).click();
+    await expect(layout.getByRole("radio", { name: /Horizontal/ })).toHaveAttribute("aria-checked", "true");
+    await page.keyboard.press("Escape");
+    await expect.poll(shape).toBe("down"); // horizontal: time runs across, so the now line stands up
+    await expect(night(page).locator(".react-flow__node-box")).toHaveCount(8);
+    await page.reload();
+    await expect.poll(shape).toBe("down");
+    await page.evaluate(() => { localStorage.removeItem("sbhub.graphLayout"); });
   });
 
   test("picking a project leaves only its frames", async ({ page }) => {
@@ -933,28 +955,19 @@ test.describe("Map view", () => {
       if (b === null) throw new Error(`${name} is not on screen`);
       return b;
     };
-    // the map runs left to right: A, B and C (none comes after another) share the first step, one under the other
-    const first = async () => {
-      const r = [await rect("Batch A"), await rect("Batch B"), await rect("Batch C")];
-      const area = await graph.boundingBox();
-      if (area === null) throw new Error("the graph is not on screen");
-      return { left: Math.min(...r.map((b) => b.x)), top: Math.min(...r.map((b) => b.y)), last: r.reduce((m, b) => (b.y > m.y ? b : m)), area };
-    };
-    // from the empty space left of the first step to the middle of its lowest box: A, B and C only
-    const tickFirst = async () => {
-      const f = await first();
-      await page.mouse.move(f.left - 6, f.top - 6);
-      await page.mouse.down();
-      await page.mouse.move(f.last.x + f.last.width / 2, f.last.y + f.last.height / 2, { steps: 8 });
-      await page.mouse.up();
-    };
-    const [a, d] = [await rect("Batch A"), await rect("Batch D")];
-    await tickFirst();
+    const [a, c, d] = [await rect("Batch A"), await rect("Batch C"), await rect("Batch D")];
+    const area = await graph.boundingBox();
+    if (area === null) throw new Error("the graph is not on screen");
+    // from the empty corner above the first row to the middle of the last box of that row: A, B and C only
+    await page.mouse.move(area.x + 4, a.y - 6);
+    await page.mouse.down();
+    await page.mouse.move(c.x + c.width / 2, a.y + a.height / 2, { steps: 8 });
+    await page.mouse.up();
     const bar = page.getByTestId("selection-bar");
     await expect(bar).toBeVisible();
     await expect(bar).toContainText("3");
     await expect(graph.getByText("Ticked")).toHaveCount(3);
-    expect(d.x).toBeGreaterThan(a.x + a.width);
+    expect(d.y).toBeGreaterThan(a.y + a.height);
     const shots = process.env.SB_SHOTS;
     if (shots !== undefined) await page.screenshot({ path: `${shots}/box-ticked-light.png`, fullPage: true });
     // Shift-click ticks a fourth, a second one unticks it
@@ -967,7 +980,10 @@ test.describe("Map view", () => {
       await page.emulateMedia({ colorScheme: "dark" });
       await page.reload();
       await expect(graph.getByText("Ticked")).toHaveCount(0);
-      await tickFirst();
+      await page.mouse.move(area.x + 4, a.y - 6);
+      await page.mouse.down();
+      await page.mouse.move(c.x + c.width / 2, a.y + a.height / 2, { steps: 8 });
+      await page.mouse.up();
       await expect(graph.getByText("Ticked")).toHaveCount(3);
       await page.screenshot({ path: `${shots}/box-ticked-dark.png`, fullPage: true });
     }
@@ -997,7 +1013,12 @@ test.describe("Map view", () => {
     // queue three by a box again. The page may have scrolled meanwhile so far that the graph's top edge sits
     // under the sticky header, where a drag would start on the header: bring the graph to the middle, then measure again
     await graph.evaluate((el) => { el.scrollIntoView({ block: "center" }); });
-    await tickFirst();
+    const [a2, c2, area2] = [await rect("Batch A"), await rect("Batch C"), await graph.boundingBox()];
+    if (area2 === null) throw new Error("the graph is not on screen");
+    await page.mouse.move(area2.x + 4, a2.y - 6);
+    await page.mouse.down();
+    await page.mouse.move(c2.x + c2.width / 2, a2.y + a2.height / 2, { steps: 8 });
+    await page.mouse.up();
     await expect(graph.getByText("Ticked")).toHaveCount(3);
     await bar.getByRole("button", { name: /^Queue 3/ }).click();
     await expect.poll(() => queuedKeys(page)).toEqual([...before, "demo/batch#1", "demo/batch#2", "demo/batch#3"]);

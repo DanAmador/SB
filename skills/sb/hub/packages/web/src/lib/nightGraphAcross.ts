@@ -1,0 +1,387 @@
+/**
+ * The run's graph laid out horizontally (the "Horizontal" graph layout setting): a band per project, stacked down,
+ * and SLOT_W of width per half hour (SLOT), so a long run grows sideways and the canvas scrolls. What ran and what
+ * runs sits at the time it started and is as wide as its run took (at least a box's width); boxes of a project whose
+ * runs would overlap go one under the other, each in the first lane free, and keep that lane. Right of the now line
+ * what is queued sits in the steps the hub would start it in. The counts, words and ticket info are the vertical
+ * layout's (nightGraph.ts); only where things sit differs. Pure: no React, no DOM.
+ */
+import type { QueueItem } from "@sb-hub/contract";
+import { ESTIMATE, itemInScope, itemMapKey, itemTitle, projOf, type Scope } from "./board.ts";
+import { NODE_H, NODE_W } from "./map.ts";
+import { boxState, tally, footOf, HUES, JOB_HUE, JOBS, countsLine, outcomeOf, projectOf, clock, type NightCard, type TicketInfo, type Counts } from "./nightGraph.ts";
+
+/** Between steps, and between lanes of a band. */
+export const GAP = 24;
+/** Between project bands. */
+export const BAND_GAP = 32;
+/** The clock strip along the top. */
+export const CLOCK_H = 32;
+/** A band's own head: the project's name above its boxes. */
+export const BAND_HEAD = 40;
+/** The room under a band's last lane. */
+export const BAND_FOOT = 12;
+/** Where the night's first start sits. */
+export const LEFT = 24;
+/** A step, and the width of a slot of the night. */
+export const SLOT_W = NODE_W + GAP;
+/** A lane of a band. */
+export const LANE_H = NODE_H + GAP;
+/** The time one step stands for, in seconds: half an hour. */
+export const SLOT = 1800;
+/** An empty stretch longer than this (seconds; nothing shown runs or starts in it) is drawn one slot wide. */
+export const LONG_EMPTY = 2 * 3600;
+/** Clock labels closer than this (px) drop the less telling one. */
+const LABEL_APART = 72;
+
+/** Where a ticket sits: left of the now line, on it, or right of it (where the hub would start it). */
+export type Phase = "ran" | "now" | "next";
+export interface NightBox extends NightCard {
+  phase: Phase;
+  /** Its rank from the left among the graph's distinct box starts: a later step is further right. */
+  step: number;
+  lane: number;
+  x: number;
+  y: number;
+  /** Its width: as long as its run took on the timeline, at least NODE_W; NODE_W for a queued one. */
+  w: number;
+}
+/** One map of the run: its chip above the graph and its group in the phone's list. */
+export interface NightFrame {
+  id: string;
+  /** "" for the jobs. */
+  map: string;
+  title: string;
+  line: string;
+  counts: Counts;
+  hue: string;
+  hidden: boolean;
+  boxes: NightCard[];
+}
+/** A project's band: from its head's top, as tall as its head and lanes. */
+export interface NightBand {
+  project: string;
+  y: number;
+  h: number;
+  lanes: number;
+}
+/** One clock label in the strip along the top, centred on its time's line at x. */
+export interface NightTick {
+  tick: number;
+  x: number;
+  /** The night's first start, a half hour, a start after a long empty stretch, 'now hh:mm', or '≈hh:mm' for a queued step. */
+  clock: string;
+  phase: Phase;
+}
+export interface NightEdge {
+  id: string;
+  from: string;
+  to: string;
+  /** From one project's column to another's. */
+  across: boolean;
+}
+export const DONE_ID = "done";
+export interface NightDone {
+  x: number;
+  y: number;
+  finished: number;
+  total: number;
+  line: string;
+}
+/** What the next build keeps so nothing moves: the bands' order, how many lanes each got, each started box's lane. */
+export interface NightMemo {
+  cols: readonly string[];
+  lanes: ReadonlyMap<string, number>;
+  /** Key -> lane, for the boxes that ran or run. */
+  slots?: ReadonlyMap<string, number>;
+}
+export interface NightGraph {
+  frames: NightFrame[];
+  boxes: NightBox[];
+  bands: NightBand[];
+  ticks: NightTick[];
+  edges: NightEdge[];
+  /** Where the now line runs (at the current time); null when nothing runs or waits. */
+  nowX: number | null;
+  /** Right of the last box: how wide the graph is. */
+  right: number;
+  /** Under the last band: how tall the graph is. */
+  bottom: number;
+  done: NightDone | null;
+  counts: Counts;
+  line: string;
+  memo: NightMemo;
+}
+
+export interface NightInput {
+  /** The queue's items, finished ones kept until the run is cleared, in the queue's order. */
+  items: readonly QueueItem[];
+  /** The queued maps in the hub's order. */
+  maps: readonly string[];
+  info: { tickets: ReadonlyMap<string, TicketInfo>; maps: ReadonlyMap<string, string> };
+  scope: Scope;
+  /** Maps whose chip is off. */
+  hidden?: ReadonlySet<string> | undefined;
+  /** Project -> how many of its tickets run at once (the queue's repos); 1 when absent. */
+  atOnce?: ReadonlyMap<string, number> | undefined;
+  /** Seconds, for the clock of the steps still to come. */
+  now?: number | undefined;
+  prev?: NightMemo | undefined;
+}
+
+/** The queue's repos as project -> tickets at once. */
+/** The steps to come by the hub's rules: queued step (0 first) and lane in its band per queued key. */
+function queueRows(all: readonly QueueItem[], maps: readonly string[], after: (k: string) => string[], atOnce: ReadonlyMap<string, number> | undefined) {
+  const row = new Map<string, number>();
+  const lane = new Map<string, number>();
+  const used = new Map<string, number>();
+  const at = (r: number, p: string): string => `${String(r)}|${p}`;
+  const take = (k: string, r: number, p: string): void => {
+    const n = used.get(at(r, p)) ?? 0;
+    used.set(at(r, p), n + 1);
+    row.set(k, r);
+    lane.set(k, n);
+  };
+  // a row at a time, the way the hub scans its queue; what ran or runs is already before every row to come
+  const cap = (p: string): number => Math.max(1, atOnce?.get(p) ?? 1);
+  const rank = (i: QueueItem): number => maps.indexOf(itemMapKey(i));
+  let left = all.filter((i) => i.state === "queued");
+  const waiting = new Set(left.map((i) => i.key));
+  for (let k = 0; left.length > 0; k += 1) {
+    const before = (key: string): boolean => !waiting.has(key) || (row.get(key) ?? Infinity) < k;
+    for (const i of left) {
+      const p = projectOf(i);
+      const n = used.get(at(k, p)) ?? 0;
+      if (n >= cap(p) || (i.kind === "job" && n > 0)) continue;
+      if (!after(i.key).every(before)) continue;
+      // in a project the hub starts tickets only from its first map with work
+      const mine = rank(i);
+      if (i.kind !== "job" && mine >= 0 && left.some((o) => o.kind !== "job" && projectOf(o) === p && rank(o) >= 0 && rank(o) < mine && !before(o.key))) continue;
+      take(i.key, k, p);
+      if (i.kind === "job") used.set(at(k, p), cap(p));
+    }
+    const rest = left.filter((i) => !row.has(i.key));
+    // nothing could start (an 'after' that loops): the first one left goes next so the row count stays finite
+    const first = rest[0];
+    if (rest.length === left.length && first !== undefined) take(first.key, k, projectOf(first));
+    left = rest.filter((i) => !row.has(i.key));
+  }
+  return { row, lane };
+}
+
+interface Span {
+  from: number;
+  to: number;
+}
+/**
+ * Time -> x: SLOT_W per SLOT from t0, except that each stretch over LONG_EMPTY that no span covers is drawn one slot
+ * wide (so a box that ended just before it never pushes the next one into another lane). Returns the stretches too.
+ */
+function timeline(spans: readonly Span[], t0: number): { xAt: (t: number) => number; breaks: Span[] } {
+  const breaks: Span[] = [];
+  let end = -Infinity;
+  for (const s of [...spans].sort((a, b) => a.from - b.from)) {
+    if (end > -Infinity && s.from - end > LONG_EMPTY) breaks.push({ from: end, to: s.from });
+    end = Math.max(end, s.to);
+  }
+  const xAt = (t: number): number => {
+    let v = t - t0;
+    for (const g of breaks) {
+      const len = g.to - g.from;
+      if (t >= g.to) v -= len - SLOT;
+      else if (t > g.from) v -= (t - g.from) * (1 - SLOT / len);
+    }
+    return LEFT + (SLOT_W * v) / SLOT;
+  };
+  return { xAt, breaks };
+}
+
+/** The local half hours (:00 and :30) after `from` up to `to`, as seconds. */
+function slotsBetween(from: number, to: number): number[] {
+  const d = new Date(from * 1000);
+  d.setMinutes(d.getMinutes() < 30 ? 0 : 30, 0, 0);
+  const out: number[] = [];
+  for (d.setMinutes(d.getMinutes() + 30); d.getTime() / 1000 <= to && out.length < 2000; d.setMinutes(d.getMinutes() + 30)) out.push(d.getTime() / 1000);
+  return out;
+}
+
+/** How long a run took, in words: "25 min", "1 h 5 min". */
+
+export function nightGraph(input: NightInput): NightGraph {
+  const { info, scope, maps } = input;
+  const hidden = input.hidden ?? new Set<string>();
+  // one box per key; a key the queue holds twice shows its latest
+  const latest = new Map<string, QueueItem>();
+  for (const i of input.items) latest.set(i.key, i);
+  const all = [...latest.values()];
+  const after = (k: string): string[] => (info.tickets.get(k)?.after ?? []).filter((a) => a !== k && latest.has(a));
+  // the rows to come come from the whole run, so a project or map left out still takes the turns it takes
+  const plan = queueRows(all, maps, after, input.atOnce);
+
+  const scoped = all.filter((i) => itemInScope(scope, i));
+  const queued = new Map(scoped.filter((i) => i.state === "queued").map((i, n) => [i.key, n + 1]));
+  const mapOrder = [...new Set([...maps, ...scoped.filter((i) => i.kind !== "job").map(itemMapKey)])];
+  const hueOf = (m: string): string => {
+    if (m === "") return JOB_HUE;
+    const same = mapOrder.filter((o) => projOf(o) === projOf(m));
+    return HUES[Math.max(0, same.indexOf(m)) % HUES.length] ?? JOB_HUE;
+  };
+  const cardOf = (i: QueueItem): NightCard => {
+    const p = queued.get(i.key) ?? null;
+    const m = itemMapKey(i);
+    return {
+      id: i.key,
+      map: m,
+      project: projectOf(i),
+      item: i,
+      title: info.tickets.get(i.key)?.title ?? itemTitle(i, null),
+      state: boxState(i, p),
+      foot: footOf(i, p),
+      place: p,
+      outcome: outcomeOf(i),
+      report: outcomeOf(i) !== null ? i.links.report : null,
+      hue: hueOf(m),
+    };
+  };
+
+  // the chips and the list: a map each in the hub's order, then the jobs
+  const frames: NightFrame[] = [];
+  for (const m of [...mapOrder, ""]) {
+    const its = scoped.filter((i) => itemMapKey(i) === m);
+    if (its.length === 0) continue;
+    const counts = tally(its);
+    frames.push({
+      id: m === "" ? "f:jobs" : `f:${m}`, map: m, title: m === "" ? JOBS : (info.maps.get(m) ?? (m.split("/").pop() ?? m)),
+      line: countsLine(counts), counts, hue: hueOf(m), hidden: hidden.has(m), boxes: its.map(cardOf),
+    });
+  }
+
+  // the graph: what the chips leave shown
+  const shown = scoped.filter((i) => !hidden.has(itemMapKey(i)));
+  const prevCols = input.prev?.cols ?? [];
+  const projects = [...new Set([...prevCols, ...mapOrder.map(projOf), ...shown.map(projectOf)])].filter((p) => shown.some((i) => projectOf(i) === p));
+  const phaseOf = (i: QueueItem): Phase => (i.state === "running" ? "now" : i.state === "queued" ? "next" : "ran");
+  const live = shown.some((i) => phaseOf(i) !== "ran");
+
+  // what ran and runs: at its start on the timeline, measured from the night's first start
+  const t = input.now ?? Date.now() / 1000;
+  const started = shown.filter((i) => phaseOf(i) !== "next");
+  const startAt = (i: QueueItem): number | null => i.started ?? i.ended ?? (i.state === "running" ? t : null);
+  const known = started.map(startAt).filter((s): s is number => s !== null);
+  // a clock behind a start still draws the now line below it
+  const nowT = Math.max(t, ...known);
+  const t0 = known.length > 0 ? Math.min(...known) : nowT;
+  const spanOf = (i: QueueItem): Span => {
+    // a ticket with no time at all (stopped before it started) sits at the night's start
+    const from = startAt(i) ?? t0;
+    return { from, to: i.state === "running" ? nowT : Math.max(from, i.ended ?? from) };
+  };
+  const spans = new Map(started.map((i) => [i.key, spanOf(i)]));
+  const { xAt, breaks } = timeline([...spans.values(), ...(live ? [{ from: nowT, to: nowT }] : [])], t0);
+
+  // a lane per box, in start order: the one it had if still free, else the first free one; the boxes that had a lane
+  // go first, so one that shows up late with an earlier start never pushes them over. A box holds its lane from its
+  // left to its right or its run's end, whichever is further, plus a gap.
+  const prevSlots = input.prev?.slots ?? new Map<string, number>();
+  const slots = new Map(prevSlots);
+  const where = new Map<string, { x: number; lane: number; w: number }>();
+  const taken = new Map<string, Span[][]>();
+  let furthest = -Infinity;
+  const byStart = [...started].sort((a, b) => (spans.get(a.key)?.from ?? 0) - (spans.get(b.key)?.from ?? 0));
+  for (const i of [...byStart.filter((o) => prevSlots.has(o.key)), ...byStart.filter((o) => !prevSlots.has(o.key))]) {
+    const s = spans.get(i.key) ?? { from: t0, to: t0 };
+    const left = xAt(s.from);
+    const right = Math.max(left + NODE_W, xAt(s.to));
+    const band = taken.get(projectOf(i)) ?? [];
+    taken.set(projectOf(i), band);
+    const fits = (l: number): boolean => (band[l] ?? []).every((o) => left >= o.to + GAP - 0.5 || right + GAP <= o.from + 0.5);
+    let l = prevSlots.get(i.key);
+    if (l === undefined || !fits(l)) {
+      l = 0;
+      while (!fits(l)) l += 1;
+    }
+    (band[l] ??= []).push({ from: left, to: right });
+    where.set(i.key, { x: left, lane: l, w: right - left });
+    slots.set(i.key, l);
+    furthest = Math.max(furthest, right);
+  }
+  const nowX = live ? xAt(nowT) : null;
+
+  // what is queued: right of the now line, a step at a time; a step nothing shown sits in drops out
+  const qSteps = [...new Set(shown.filter((i) => phaseOf(i) === "next").map((i) => plan.row.get(i.key) ?? 0))].sort((a, b) => a - b);
+  const qLeft = nowX === null ? LEFT : Math.max(nowX + SLOT_W / 2, furthest + GAP);
+  const qX = (o: number): number => qLeft + Math.max(0, qSteps.indexOf(o)) * SLOT_W;
+  for (const i of shown) if (phaseOf(i) === "next") where.set(i.key, { x: qX(plan.row.get(i.key) ?? 0), lane: plan.lane.get(i.key) ?? 0, w: NODE_W });
+
+  const lanes = new Map(input.prev?.lanes ?? []);
+  for (const i of shown) lanes.set(projectOf(i), Math.max(lanes.get(projectOf(i)) ?? 1, (where.get(i.key)?.lane ?? 0) + 1));
+  const bands: NightBand[] = [];
+  let y = CLOCK_H;
+  for (const p of projects) {
+    const n = lanes.get(p) ?? 1;
+    const h = BAND_HEAD + n * NODE_H + (n - 1) * GAP + BAND_FOOT;
+    bands.push({ project: p, y, h, lanes: n });
+    y += h + BAND_GAP;
+  }
+  const bandOf = new Map(bands.map((b) => [b.project, b]));
+  const levels = [...new Set([...where.values()].map((w) => w.x))].sort((a, b) => a - b);
+  const boxes: NightBox[] = shown.map((i) => {
+    const { x, lane: l, w } = where.get(i.key) ?? { x: LEFT, lane: 0, w: NODE_W };
+    return { ...cardOf(i), phase: phaseOf(i), step: levels.indexOf(x), lane: l, x, y: (bandOf.get(projectOf(i))?.y ?? CLOCK_H) + BAND_HEAD + l * LANE_H, w };
+  });
+
+  // the clock: 'now', the night's first start and each start after a long empty stretch, every half hour between, and
+  // about when each queued step would start, from the night's usual run; a label too close to a more telling one drops
+  const runs = all.filter((i) => i.started != null && i.ended != null && i.state !== "skipped").map((i) => (i.ended ?? 0) - (i.started ?? 0)).sort((a, b) => a - b);
+  // no ticket ended yet: the same rough 1.5 h a ticket the toolbar's end time counts with
+  const usual = runs[Math.floor(runs.length / 2)] ?? ESTIMATE;
+  const running = all.filter((i) => i.state === "running");
+  const nextAt = Math.max(t, ...running.map((i) => (i.started ?? t) + usual));
+  const labels: { at: number; clock: string; phase: Phase }[] = [];
+  if (nowX !== null) labels.push({ at: nowX, clock: `now ${clock(t)}`, phase: "now" });
+  if (started.length > 0) {
+    labels.push({ at: xAt(t0), clock: clock(t0), phase: "ran" });
+    for (const g of breaks) labels.push({ at: xAt(g.to), clock: clock(g.to), phase: "ran" });
+    const end = Math.max(live ? nowT : t0, ...[...spans.values()].map((s) => s.to));
+    for (const h of slotsBetween(t0, end)) if (!breaks.some((g) => h > g.from && h < g.to)) labels.push({ at: xAt(h), clock: clock(h), phase: "ran" });
+  }
+  for (const [n, o] of qSteps.entries()) labels.push({ at: qLeft + n * SLOT_W, clock: `≈${clock(nextAt + o * usual)}`, phase: "next" });
+  const kept: typeof labels = [];
+  for (const l of labels) if (kept.every((k) => Math.abs(k.at - l.at) >= LABEL_APART)) kept.push(l);
+  const ticks: NightTick[] = kept.sort((a, b) => a.at - b.at).map((l, n) => ({ tick: n, x: l.at, clock: l.clock, phase: l.phase }));
+
+  const shownKeys = new Set(shown.map((i) => i.key));
+  const edges: NightEdge[] = [];
+  for (const i of shown) {
+    for (const a of after(i.key)) {
+      const from = latest.get(a);
+      if (from === undefined || !shownKeys.has(a)) continue;
+      edges.push({ id: `${a}>${i.key}`, from: a, to: i.key, across: projectOf(from) !== projectOf(i) });
+    }
+  }
+  const bottom = y - BAND_GAP;
+  let right = Math.max(LEFT + NODE_W, ...boxes.map((b) => b.x + b.w), nowX ?? 0);
+  let done: NightDone | null = null;
+  if (boxes.length > 0) {
+    for (const b of bands) {
+      const last = boxes.filter((x) => x.project === b.project).sort((p, q) => q.x + q.w - (p.x + p.w) || q.lane - p.lane)[0];
+      if (last !== undefined) edges.push({ id: `${last.id}>${DONE_ID}`, from: last.id, to: DONE_ID, across: false });
+    }
+    const finished = boxes.filter((b) => b.outcome !== null).length;
+    done = { x: right + 2 * GAP, y: CLOCK_H + Math.max(0, (bottom - CLOCK_H - NODE_H) / 2), finished, total: boxes.length, line: `${String(finished)} of ${String(boxes.length)} finished` };
+    right = done.x + NODE_W;
+  }
+
+  const counts = tally(scoped);
+  return { frames, boxes, bands, ticks, edges, nowX, right, bottom, done, counts, line: countsLine(counts), memo: { cols: [...new Set([...prevCols, ...projects])], lanes, slots } };
+}
+
+/** The point to centre on: the now line, beside the tickets that run (else the ones queued); null when nothing does. */
+export function focusOf(g: Pick<NightGraph, "boxes"> & Partial<Pick<NightGraph, "nowX">>): { x: number; y: number } | null {
+  const run = g.boxes.filter((b) => b.phase === "now");
+  const pick = run.length > 0 ? run : g.boxes.filter((b) => b.phase === "next");
+  if (pick.length === 0) return null;
+  const xs = pick.map((b) => b.x + NODE_W / 2);
+  const ys = pick.map((b) => b.y + NODE_H / 2);
+  return { x: g.nowX ?? Math.min(...xs), y: (Math.min(...ys) + Math.max(...ys)) / 2 };
+}
