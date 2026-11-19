@@ -572,7 +572,7 @@ test.describe("The live run and its history", () => {
     expect(await (await request.get("/api/__night-stops")).json()).toEqual(["after"]);
   });
 
-  test("with no run live the tab says so, shows the last run as one line, and queuing a map makes the head appear", async ({ page, request }) => {
+  test("with no run live the tab says so, shows the last run as one line, queuing a map waits for Start, and Start opens the run", async ({ page, request }) => {
     await request.post("/api/__nolive");
     await page.goto("/next/");
     await expect(head(page)).toHaveAttribute("data-live", "false");
@@ -584,6 +584,10 @@ test.describe("The live run and its history", () => {
     await runTab(page, "Queue");
     const offer = page.getByRole("region", { name: "Queue a map" });
     await offer.locator("li[data-map='demo/batch']").getByRole("button", { name: "Queue The batch map" }).click();
+    // queueing never starts a run: the work waits for Start
+    await expect(head(page)).toHaveAttribute("data-live", "false");
+    await expect(page.getByTestId("waits-start")).toHaveText("5 queued, waiting for Start. Nothing runs until you press it.");
+    await head(page).getByTestId("run-start").click();
     await expect(head(page)).toHaveAttribute("data-live", "true");
     await expect(head(page).getByTestId("head-counts")).toHaveText("5 next");
   });
@@ -624,11 +628,13 @@ test.describe("The live run and its history", () => {
     expect(errors).toEqual([]);
   });
 
-  test("Queue these again queues the two not reached tickets and the run head appears", async ({ page, request }) => {
+  test("Queue these again queues the two not reached tickets, and Start opens a run with them", async ({ page, request }) => {
     await request.post("/api/__nolive");
     await page.goto("/next/?view=history&night=n-old");
     await page.getByTestId("not-reached").getByRole("button", { name: "Queue these again" }).click();
     await expect(page.getByRole("tab", { name: /^Run\b/ })).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByTestId("waits-start")).toContainText("2 queued, waiting for Start");
+    await head(page).getByTestId("run-start").click();
     await expect(head(page)).toHaveAttribute("data-live", "true");
     await expect(head(page).getByTestId("head-counts")).toHaveText("2 next");
   });

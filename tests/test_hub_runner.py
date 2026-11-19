@@ -19,7 +19,7 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills" / "sb" / "scripts"))
-from helpers import SBMAP, SCRIPT, free_port  # noqa: E402
+from helpers import SBMAP, SCRIPT, free_port, go  # noqa: E402
 import sbhub  # noqa: E402
 import sbqueue  # noqa: E402
 from sbhub import Hub, Supervisor  # noqa: E402
@@ -210,12 +210,12 @@ class RunnerCase(unittest.TestCase):
     def only(self, *nums, folder="repo/one"):
         """Just these tickets of the map ticked and resumed (a map's second pass waits for its whole run)."""
         self.hub.queue_set(["{}#{}".format(folder, n) for n in nums], self.hub.state()["queue"]["version"])
-        self.hub.queue_pause(False)
+        go(self.hub)
 
     def resume(self):
         """The owner's ticks, then the resume: nothing starts before this."""
         self.tick_all()
-        self.hub.queue_pause(False)
+        go(self.hub)
 
     def pids(self):
         """The hanging fake worker's pid and its child's, once it has written them."""
@@ -258,7 +258,7 @@ class UncleanCheckoutTest(RunnerCase):
         (self.repo / "one").mkdir(exist_ok=True)
         (self.repo / "one" / "done.txt").write_text("the owner's unsaved line\n")
         self.only(1)
-        self.hub.queue_pause(False)
+        go(self.hub)
         self.until(lambda: self.state_of("repo/one#1") not in (None, "queued", "running"))
         return self.items()["repo/one#1"]
 
@@ -291,7 +291,7 @@ class UncleanCheckoutTest(RunnerCase):
         self.assertEqual(subprocess.run(["git", "-C", str(self.repo), "status", "--porcelain"], capture_output=True,
                                         text=True).stdout, " M one/done.txt\n")
         self.only(1)
-        self.hub.queue_pause(False)
+        go(self.hub)
         self.until(lambda: self.state_of("repo/one#1") not in (None, "queued", "running"))
         item = self.items()["repo/one#1"]
         self.assertEqual(item["state"], "unclean", item.get("note"))
@@ -549,7 +549,7 @@ class TicketLoopTest(RunnerCase):
         self.assertEqual((q["paused"], [i["state"] for i in q["items"]]), (True, ["queued", "queued"]))
         self.assertEqual(self.launched, [])
         self.assertEqual(self.open_tickets()[1]["status"], "open")
-        self.hub.queue_pause(False)
+        go(self.hub)
         self.mode = "hang"
         self.sup.tick()
         self.assertEqual(self.state_of("repo/one#1"), "running")
@@ -1014,7 +1014,7 @@ class MapReviewTest(RunnerCase):
         self.hub.queue_pause(True)  # ticket 2 waits in the line; the run is over once ticket 1 ends
         self.until(lambda: self.state_of("repo/one#1") == "done")  # (6) judged while paused, 2 still queued
         self.assertEqual((self.state_of("repo/one#2"), [x["keys"] for x in self.reviewed]), ("queued", [["repo/one#1"]]))
-        self.hub.queue_pause(False)
+        go(self.hub)
         self.until(lambda: self.state_of("repo/one#2") == "done")
         self.assertEqual([x["keys"] for x in self.reviewed], [["repo/one#1"], ["repo/one#2"]])
 
@@ -1134,7 +1134,7 @@ class TimedReviewTest(RunnerCase):
         self.hub.queue_set(["repo/one#1", "repo/one#2", "repo/two#4", "repo/two#5"], self.hub.state()["queue"]["version"])
         for key in ("repo/two#4", "repo/two#5"):  # one ticket per agent: the second map runs on the spare one
             self.hub.queue_item_agent(key, "spare")
-        self.hub.queue_pause(False)
+        go(self.hub)
         want = {"repo/one#1": "landed", "repo/one#2": "running", "repo/two#4": "landed", "repo/two#5": "running"}
         self.until(lambda: {k: self.state_of(k) for k in want} == want)
         self.assertEqual(self.reviewed, [])  # both maps are busy and nothing waited 25 minutes
@@ -1168,7 +1168,7 @@ class ReviewRetryTest(RunnerCase):
     def only_one(self):
         """Ticket 1 alone in the queue (a hanging ticket 2 would hold the repo its one more try needs)."""
         self.hub.queue_set(["repo/one#1"], self.hub.state()["queue"]["version"])
-        self.hub.queue_pause(False)
+        go(self.hub)
 
     def runs(self, key="repo/one#1"):
         return [x for x in self.launched if x["key"] == key]
@@ -1672,7 +1672,7 @@ class RetryTest(RunnerCase):
         self.hub.queue_set(["repo/one#1", "repo/one#2", "repo/one#3"], self.hub.state()["queue"]["version"])
         self.hub.queue_item_agent("repo/one#1", "spare")
         self.modes = {"repo/one#1": "nothing"}
-        self.hub.queue_pause(False)
+        go(self.hub)
         self.sup.tick()
         self.assertEqual([x["key"] for x in self.launched], ["repo/one#1"])
         self.limit("spare", START + 3600)  # its next try cannot start yet: main is free for the others
@@ -2027,6 +2027,7 @@ class JobsTest(RunnerCase):
         self.assertIsNone(q.get("stop_at"))
         self.clock.t = START + 86400
         key = self.hub.queue_job("repo", "Audit it", "main")["key"]
+        go(self.hub)  # the next day's run is started like any other
         self.until(lambda: self.state_of(key) == "done")
 
     def test_a_stop_time_is_kept_while_a_worker_still_runs(self):
@@ -2126,8 +2127,8 @@ class LaunchAndHookTest(RunnerCase):
         r = subprocess.run([sys.executable, SCRIPT, "queue", "add", "repo/one", "1", "--port", str(port)],
                            capture_output=True, text=True, env=env, timeout=70)  # nothing is ticked on its own
         self.assertEqual(r.returncode, 0, r.stderr)
-        r = subprocess.run([sys.executable, SCRIPT, "queue", "resume", "--port", str(port)], capture_output=True,
-                           text=True, env=env, timeout=30)  # a new queue waits for this
+        r = subprocess.run([sys.executable, SCRIPT, "night", "start", "--drain", "--port", str(port)], capture_output=True,
+                           text=True, env=env, timeout=30)  # queued work waits for Start
         self.assertEqual(r.returncode, 0, r.stderr)
         leader, child = self.pids()
         state = json.loads(subprocess.run([sys.executable, SCRIPT, "state", "--port", str(port)], capture_output=True,

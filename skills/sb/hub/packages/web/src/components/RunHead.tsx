@@ -1,9 +1,10 @@
 /**
  * The head of the live run, above its graph: its name (click to rename), when it started and who started it, one
  * line of counts, the at-once-and-accounts settings, and Stop run, which asks once. While the run stops it says so and names what still runs. With no
- * run live it says so, shows the last run as one line with a link to it, and the page below offers a map to queue.
+ * run live it says so, counts what waits for Start, offers Start (queueing never starts a run), and shows the last
+ * run as one line with a link to it.
  */
-import { IconCheck, IconPencil, IconPlayerStop, IconX } from "@tabler/icons-react";
+import { IconCheck, IconPencil, IconPlayerPlay, IconPlayerStop, IconX } from "@tabler/icons-react";
 import { useState } from "react";
 import type * as React from "react";
 import type { Night } from "@sb-hub/contract";
@@ -36,10 +37,25 @@ export function RunHead(): React.JSX.Element | null {
 }
 
 function NoRun({ last }: { last: Night | null }): React.JSX.Element {
+  const { state, writes, down, busy } = useBoard();
+  const waiting = state.queue.items.filter((i) => i.state === "queued" && !i.night && !(i.kind === "job" && (i.close_off === true || i.hub === true))).length;
   return (
     <section aria-label="The live run" data-testid="run-head" data-live="false" className="flex flex-col gap-1 rounded-xl border bg-card px-4 py-3">
-      <h2 className="text-sm font-semibold">No run is live</h2>
-      <p className="text-sm text-muted-foreground">Queue a map or a ticket and a run starts by itself.</p>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <h2 className="min-w-0 flex-[1_1_12rem] text-sm font-semibold">No run is live</h2>
+        <Button
+          size="sm"
+          data-testid="run-start"
+          disabled={down || busy}
+          onClick={() => { void writes.night("POST /api/night/start", {}, "Run started."); }}
+        >
+          <IconPlayerPlay aria-hidden />
+          Start run
+        </Button>
+      </div>
+      <p className="text-sm text-muted-foreground" data-testid="waits-start">
+        {waiting === 0 ? "Queue a map or a ticket, then press Start." : `${String(waiting)} queued, waiting for Start. Nothing runs until you press it.`}
+      </p>
       {last !== null && (
         <p data-testid="last-run" className="flex flex-wrap items-baseline gap-x-2 text-sm">
           <span className="text-muted-foreground">Last run:</span>

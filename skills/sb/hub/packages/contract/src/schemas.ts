@@ -166,7 +166,7 @@ export type CheckRun = z.infer<typeof CheckRun>;
 
 /** What a queued item waits for. `with` names the ticket (files, after) or map (after) it waits on. */
 export const Waits = z.strictObject({
-  kind: z.enum(["files", "limit", "after", "account", "paused", "time", "build"]),
+  kind: z.enum(["files", "limit", "after", "account", "paused", "time", "build", "start"]),
   with: z.string().nullable(),
   text: z.string(),
 });
@@ -182,7 +182,7 @@ const itemFields = {
   started: Seconds.nullable(),
   ended: Seconds.nullable(),
   title: z.string().optional(),
-  /** The id of the night it belongs to; absent from an item only a close-off job is. */
+  /** The id of the night it belongs to; absent while it waits for Start, and from the hub's own jobs. */
   night: z.string().optional(),
   repo: z.string().optional(),
   runner: z.string().optional(),
@@ -289,6 +289,8 @@ export const JobItem = z.strictObject({
   /** Held until then (a job queued with `at`). */
   not_before: Seconds.optional(),
   close_off: z.literal(true).optional(),
+  /** One of the hub's own jobs (a final review, a build fix): it runs outside any run. */
+  hub: z.literal(true).optional(),
 });
 export type JobItem = z.infer<typeof JobItem>;
 
@@ -386,6 +388,8 @@ export const Night = z.strictObject({
   how: NightHow.nullable(),
   /** What a stop left out of the line: open tickets (and jobs) that never started. */
   not_reached: z.array(z.strictObject({ key: z.string(), title: z.string() })),
+  /** True: it ends by itself once its work is judged (sb tonight). False: it stays open until it is stopped. */
+  drain: z.boolean(),
   counts: NightCounts,
 });
 export type Night = z.infer<typeof Night>;
@@ -393,7 +397,7 @@ export type Night = z.infer<typeof Night>;
 export const NightsAnswer = z.strictObject({ nights: z.array(Night) });
 export const NightDetail = z.strictObject({ night: Night.extend({ items: z.array(QueueItem) }) });
 export const NightAnswer = z.strictObject({ ok: z.literal(true), night: Night });
-export const NightStartBody = z.strictObject({ name: z.string().nullable().optional(), by: z.string().nullable().optional() });
+export const NightStartBody = z.strictObject({ name: z.string().nullable().optional(), by: z.string().nullable().optional(), drain: z.boolean().optional() });
 export const NightRenameBody = z.strictObject({ name: z.string() });
 export const NightStopBody = z.strictObject({ mode: z.literal("after") });
 

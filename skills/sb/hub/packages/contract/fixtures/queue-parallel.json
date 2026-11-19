@@ -75,14 +75,14 @@
       "runs": {},
       "seeded": true,
       "stop_at": 1794549600.0,
-      "version": 23
+      "version": 25
     }
   },
   "contentType": "application/json",
   "request": {
     "n": 2,
     "repo": "/fixture/repo",
-    "version": 22
+    "version": 24
   },
   "route": "POST /api/queue/parallel",
   "status": 200

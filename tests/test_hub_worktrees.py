@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from test_hub_runner import TEMPLATES, RunnerCase, git, state_fixture
+from test_hub_runner import TEMPLATES, RunnerCase, git, go, state_fixture
 import sbhub
 from sbhub import Hub, Supervisor
 
@@ -58,7 +58,7 @@ class WorktreeTest(RunnerCase):
         self.mode = "hang"
         self.tick_all()
         self.spread()
-        self.hub.queue_pause(False)
+        go(self.hub)
         self.sup.tick()
         self.sup.tick()
         self.assertEqual([self.state_of("repo/one#{}".format(n)) for n in (1, 2, 3)],
@@ -75,7 +75,7 @@ class WorktreeTest(RunnerCase):
     def test_finished_worktree_tickets_land_on_the_checkout_and_their_worktrees_go(self):
         self.tick_all()
         self.spread()
-        self.hub.queue_pause(False)
+        go(self.hub)
         self.until(lambda: all(self.state_of("repo/one#{}".format(n)) == "done" for n in (1, 2, 3)))
         log = git(self.repo, "log", "--format=%B")
         for n in (1, 2, 3):
@@ -117,7 +117,7 @@ class WorktreeTest(RunnerCase):
         self.hub.queue_item_agent("repo/one#2", "spare")
         lock = self.repo / ".git" / "index.lock"
         lock.write_text("")  # a git command that crashed long ago left its lock
-        self.hub.queue_pause(False)
+        go(self.hub)
         self.until(lambda: self.state_of("repo/one#1") == "failed")
         item = self.items()["repo/one#1"]
         self.assertTrue(item["note"].startswith("could not land"))
@@ -150,7 +150,7 @@ class WorktreeTest(RunnerCase):
         self.hub.queue_item_agent("repo/one#2", "spare")
         lock = self.repo / ".git" / "index.lock"
         lock.write_text("")
-        self.hub.queue_pause(False)
+        go(self.hub)
         self.until(lambda: self.state_of("repo/one#1") == "failed")
         tree = self.items()["repo/one#1"]["tree"]
         lock.unlink()
@@ -175,7 +175,7 @@ class WorktreeTest(RunnerCase):
         hub = Hub(self.root / "hub", now=self.clock, launcher=self.launcher)  # a restart reads the saved queue
         self.assertIn("repo/two#1", [i["key"] for i in hub.state()["queue"]["items"]])
         self.hub.queue_set(["repo/two#1"], self.hub.state()["queue"]["version"])
-        self.hub.queue_pause(False)
+        go(self.hub)
         self.sup.tick()
         self.assertEqual(self.launched[0]["key"], "repo/two#1")
         self.assertEqual(self.state_of("repo/two#1"), "running")
@@ -184,7 +184,7 @@ class WorktreeTest(RunnerCase):
         self.modes = {"repo/one#1": "slow"}
         os.environ["FAKE_WORKER_SLEEP"] = "1.5"
         self.hub.queue_set(["repo/one#1"], self.hub.state()["queue"]["version"])  # alone: its map's review follows it
-        self.hub.queue_pause(False)
+        go(self.hub)
         self.sup.tick()
         tree = self.cwd_of("repo/one#1")
         hub = Hub(self.root / "hub", now=self.clock, launcher=self.launcher)  # the hub died; a new one starts

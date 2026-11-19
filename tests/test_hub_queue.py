@@ -40,6 +40,8 @@ class QueueTest(unittest.TestCase):
         self.h = Hub(self.home, run=lambda: json.dumps(TICKETS))
         self.h.tickets()  # state() only reads the cache; this fills it (and ticks nothing)
         self.h.queue_set(["repo/one#1", "repo/one#4"], self.h.state()["queue"]["version"])  # the owner's ticks
+        self.h.night_start(drain=True)  # and Start
+        self.h.queue_pause(True)  # held, so these tests start nothing
 
     def tearDown(self):
         self._tmp.cleanup()
@@ -694,6 +696,7 @@ class WaitsTest(unittest.TestCase):
             self.h._data["installed"] = {n: {"kind": "claude", "dir": "/x", "model": None, "limited_until": None}
                                          for n in ("main", "spare", "third")}
             self.h._data["queue"].update(agents=["main", "spare", "third"], paused=False)
+        self.h.night_start()  # Start: what is queued from here on joins this run
         self.h.tickets()
         self.started = []
         self.sup = Supervisor(self.h, port=4321)
@@ -835,6 +838,7 @@ class WholeMapsTest(unittest.TestCase):
             self.h._data["installed"] = {n: {"kind": "claude", "dir": "/x", "model": None, "limited_until": None}
                                          for n in ("main", "spare")}
             self.h._data["queue"].update(agents=["main", "spare"], paused=False)
+        self.h.night_start()  # Start: what is queued from here on joins this run
         self.h.tickets()
         self.started = []
         sup = Supervisor(self.h, port=4321)
@@ -992,23 +996,51 @@ class NightTest(unittest.TestCase):
         name = self.h.night_start()["night"]["name"]
         self.assertRegex(name, r"^Night of \d{4}-\d\d-\d\d, \d\d:\d\d$")
 
-    def test_queuing_with_none_live_starts_one_and_what_follows_joins_it(self):
+    def test_queuing_with_none_live_opens_no_run_and_start_takes_it_in(self):
         self.assertIsNone(self.q()["night"])
         self.set(1)
-        nid = self.q()["night"]
-        self.assertTrue(nid)
+        self.assertIsNone(self.q()["night"])  # queueing never starts a run (ticket 167)
+        self.assertEqual(self.h.nights()["nights"], [])
+        self.assertNotIn("night", self.q()["items"][0])
+        self.assertTrue(self.q()["paused"])
+        nid = self.h.night_start()["night"]["id"]
+        self.assertEqual([i["night"] for i in self.q()["items"]], [nid])
+        self.assertFalse(self.q()["paused"])  # Start resumes the queue
         self.set(1, 4)
         self.assertEqual({i["night"] for i in self.q()["items"]}, {nid})
         self.assertEqual(len(self.h.nights()["nights"]), 1)
+
+    def test_what_waits_for_start_never_starts_and_says_so(self):
+        self.set(1)
+        with self.h._lock:
+            self.h._data["queue"]["paused"] = False
+        sup = Supervisor(self.h, port=1)
+        sup.close_off = False
+        sup._set_waits()
+        item = self.q()["items"][0]
+        self.assertEqual((item["state"], item["waits"]["kind"]), ("queued", "start"))
+        self.assertEqual(sup._start(), None)
+        self.assertEqual(self.q()["items"][0]["state"], "queued")
+
+    def test_a_run_started_without_drain_stays_open_when_its_work_is_judged(self):
+        nid = self.h.night_start()["night"]["id"]
+        self.set(1)
+        self.judge("repo/one#1")
+        self.assertEqual(self.q()["night"], nid)  # open until you stop it
+        n = self.h.night(nid)["night"]
+        self.assertEqual((n["state"], n["drain"]), ("live", False))
+        out = self.h.night_stop("after")["night"]
+        self.assertEqual((out["state"], out["how"]), ("ended", "stopped"))
+        self.assertEqual(self.h.night(nid)["night"]["counts"]["done"], 1)
 
     def test_a_night_started_first_takes_what_is_queued_and_names_who_queued(self):
         nid = self.h.night_start("Mine")["night"]["id"]
         self.set(1)
         self.assertEqual([i["night"] for i in self.q()["items"]], [nid])
 
-    def test_when_the_last_item_is_judged_the_night_ends_as_finished(self):
+    def test_when_the_last_item_is_judged_a_draining_night_ends_as_finished(self):
         self.set(1, 4)
-        nid = self.q()["night"]
+        nid = self.h.night_start(drain=True)["night"]["id"]
         self.judge("repo/one#1")
         self.assertEqual(self.q()["night"], nid)  # one is still queued
         self.assertEqual(len(self.q()["items"]), 2)
@@ -1020,13 +1052,15 @@ class NightTest(unittest.TestCase):
         self.assertEqual({i["key"]: i["state"] for i in n["items"]}, {"repo/one#1": "done", "repo/one#4": "failed"})
         self.assertEqual(n["counts"]["done"], 1)
         self.assertEqual(n["counts"]["failed"], 1)
-        self.set(4)  # the next queue write opens a new night
+        self.set(4)  # the next queue write waits for the next Start
+        self.assertIsNone(self.q()["night"])
+        self.h.night_start()
         self.assertNotEqual(self.q()["night"], nid)
         self.assertEqual([n["state"] for n in self.h.nights()["nights"]], ["live", "ended"])  # newest first
 
     def test_stop_after_starts_nothing_new_lets_the_running_one_finish_and_lists_the_unreached(self):
         self.set(1, 4)
-        nid = self.q()["night"]
+        nid = self.h.night_start()["night"]["id"]
         with self.h._lock:
             next(i for i in self.h._data["queue"]["items"] if i["key"] == "repo/one#4").update(state="running")
         out = self.h.night_stop("after")["night"]
@@ -1048,7 +1082,7 @@ class NightTest(unittest.TestCase):
 
     def test_stop_with_nothing_running_ends_the_night_at_once(self):
         self.set(1)
-        nid = self.q()["night"]
+        nid = self.h.night_start()["night"]["id"]
         out = self.h.night_stop("after")["night"]
         self.assertEqual((out["state"], out["how"], len(out["not_reached"])), ("ended", "stopped", 1))
         self.assertEqual(self.h.night(nid)["night"]["items"], [])
@@ -1085,6 +1119,7 @@ class NightTest(unittest.TestCase):
 
     def test_the_stop_time_ends_the_night_as_stop_time_reached(self):
         self.set(1)
+        self.h.night_start()
         with self.h._lock:
             self.h._data["queue"]["stop_at"] = self.clock[0] - 1
         sup = Supervisor(self.h, port=1)

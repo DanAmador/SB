@@ -198,3 +198,12 @@ class HubCase(unittest.TestCase):
         except urllib.error.HTTPError as e:
             with e:
                 return e.code, json.load(e)
+
+
+def go(hub):
+    """The owner's go for what is queued: Start, a run that ends by itself once its work is judged, as sb tonight
+    opens it (ticket 167: queueing alone never starts one); with a run live already, Resume."""
+    if hub.state()["queue"].get("night"):
+        hub.queue_pause(False)
+    else:
+        hub.night_start(drain=True)

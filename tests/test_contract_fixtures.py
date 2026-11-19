@@ -259,7 +259,7 @@ class ContractFixturesTest(unittest.TestCase):
         r("queue_set", {"keys": ["repo/one#1"], "version": v, "agent": "sess-1"})
         self.record("report-queue-worker", "/api/report", {"agent": "repo/one#1", "role": "worker", "parent": "queue",
                                                             "state": "working"})
-        r("queue_pause", {"paused": False})
+        self.hub.night_start(drain=True)  # Start: queueing alone starts nothing (ticket 167)
         self.sup.tick()
         item = self.hub.state()["queue"]["items"][0]
         self.assertEqual(item["state"], "running", item)
@@ -287,6 +287,8 @@ class ContractFixturesTest(unittest.TestCase):
         # tonight's queue: B and C ticked, two jobs, a stop time, B on the spare account
         v = self.hub.state()["queue"]["version"]
         r("queue_set", {"keys": ["repo/one#2", "repo/one#3"], "version": v})
+        self.hub.night_start()  # the second run, held paused so nothing of it starts here
+        r("queue_pause", {"paused": True})
         self.record("queue-set-stale", "/api/queue/set", {"keys": ["repo/one#2"], "version": v}, 409)
         v = self.hub.state()["queue"]["version"]
         r("queue_move", {"key": "repo/one#3", "to": 0, "version": v})
@@ -375,7 +377,7 @@ class ContractFixturesTest(unittest.TestCase):
         b = next(i for i in self.hub.state()["queue"]["items"] if i["key"] == "repo/one#2")
         self.assertEqual(b["state"], "skipped")
         self.assertTrue(b["note"].startswith("stopped by you: It edits the wrong checkout."), b["note"])
-        # the night:the first queue write started it; a second start is refused; a stop after ends it as stopped
+        # the night: Start opened it; a second start is refused; a stop after ends it as stopped
         nights = self.record("nights", "/api/nights")["nights"]
         self.assertEqual([n["state"] for n in nights], ["live", "ended"])
         live = nights[0]["id"]

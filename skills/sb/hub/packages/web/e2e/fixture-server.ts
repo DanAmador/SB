@@ -95,10 +95,11 @@ const bareRoute = (): unknown => {
   }, ctx));
 };
 
-/** The id of the live run: every item the queue holds belongs to it, as the hub's own do. */
-let liveId = "n-live";
+/** The id of the live run: every item queued while it is live belongs to it, as the hub's own do; with none live
+ * an item belongs to no run and waits for Start. */
+let liveId: string | null = "n-live";
 const item = (key: string, state: QueueItem["state"]): Raw<QueueItem> => ({
-  key, kind: "ticket", agent: null, state, note: "", commit: null, tries: 0, started: state === "running" ? now() - 300 : null, ended: null, night: liveId,
+  key, kind: "ticket", agent: null, state, note: "", commit: null, tries: 0, started: state === "running" ? now() - 300 : null, ended: null, ...(liveId === null ? {} : { night: liveId }),
 });
 const RUN = "/vault/runs/2026-11-13-board";
 const start = now();
@@ -128,15 +129,15 @@ const queue = {
 const first = JSON.stringify(queue.items);
 
 // ---- runs: a live one (the queue above) and an ended one the owner stopped, with two tickets it never reached ----
-interface NightRec { id: string; name: string; started: number; by: string | null; state: "live" | "stopping" | "ended"; ended: number | null; how: "finished" | "stopped" | "stop_time" | null; not_reached: { key: string; title: string }[] }
+interface NightRec { id: string; name: string; started: number; by: string | null; state: "live" | "stopping" | "ended"; ended: number | null; how: "finished" | "stopped" | "stop_time" | null; not_reached: { key: string; title: string }[]; drain: boolean }
 const oldItems = (): Raw<QueueItem>[] => [
   { ...item("demo/board#2", "done"), night: "n-old", title: "Drag a ticket into the queue", ended: start - 86400 + 600, started: start - 86400, commit: "abcdef0123456789", run: RUN, log: `${RUN}/o2.log` },
   { ...item("other/old#1", "failed"), night: "n-old", title: "Sweep the old attic", ended: start - 86400 + 900, started: start - 86400 + 100, note: "check failed: pnpm test", run: RUN, log: `${RUN}/o1.log` },
 ] as Raw<QueueItem>[];
 const freshNights = (): NightRec[] => [
-  { id: "n-live", name: "Night of 2026-11-14, 22:45", started: start - 3600, by: "s-1", state: "live", ended: null, how: null, not_reached: [] },
+  { id: "n-live", name: "Night of 2026-11-14, 22:45", started: start - 3600, by: "s-1", state: "live", ended: null, how: null, not_reached: [], drain: false },
   { id: "n-old", name: "Night of 2026-11-13, 21:30", started: start - 86400 - 600, by: null, state: "ended", ended: start - 86400 + 1200, how: "stopped",
-    not_reached: [{ key: "demo/batch#1", title: "Batch A" }, { key: "demo/batch#2", title: "Batch B" }] },
+    not_reached: [{ key: "demo/batch#1", title: "Batch A" }, { key: "demo/batch#2", title: "Batch B" }], drain: true },
 ];
 let nights = freshNights();
 let oldRun = oldItems();
@@ -147,12 +148,15 @@ const nightView = (n: NightRec): Record<string, unknown> => {
   return { ...n, counts: { items: items.length, queued: c("queued"), running: c("running", "landed", "review", "recheck"), done: c("done"), failed: c("failed"), skipped: c("skipped"), not_reached: n.not_reached.length } };
 };
 const liveNight = (): NightRec | undefined => nights.find((n) => n.id === queue.night);
-/** Queuing with no run live starts one by itself. */
-const ensureNight = (): void => {
+/** Start: opens a run and takes in what waits for it (queueing never opens one). */
+const startNight = (): void => {
   if (queue.night !== null) return;
-  liveId = `n-${String(nights.length + 1)}`;
-  nights = [{ id: liveId, name: "Night of 2026-11-15, 08:00", started: now(), by: null, state: "live", ended: null, how: null, not_reached: [] }, ...nights];
-  queue.night = liveId;
+  const id = `n-${String(nights.length + 1)}`;
+  liveId = id;
+  nights = [{ id, name: "Night of 2026-11-15, 08:00", started: now(), by: null, state: "live", ended: null, how: null, not_reached: [], drain: false }, ...nights];
+  queue.night = id;
+  queue.paused = false;
+  for (const i of queue.items) if (i.state === "queued" && i.night === undefined) i.night = id;
 };
 /** A job of the live run, between landing and its checks: only the run's graph tests ask for it. (A real close-off job belongs to no run and is left out of the page.) */
 const closeOff = {
@@ -309,7 +313,6 @@ createServer((req, res) => {
       const b = QueueSetBody.parse(await body(req));
       if (b.version !== null && b.version !== queue.version) { send(res, 409, addLinks("POST /api/queue/set", { ok: false, stale: true, queue }, ctx)); return; }
       if (liveNight()?.state === "stopping") { send(res, 400, { ok: false, error: "the run is stopping" }); return; }
-      ensureNight();
       const others = queue.items.filter((i) => i.state !== "queued");
       queue.items = [...others, ...b.keys.map((k) => queue.items.find((i) => i.key === k && i.state === "queued") ?? item(k, "queued"))];
       syncMaps();
@@ -338,7 +341,6 @@ createServer((req, res) => {
     }
     if (req.method === "POST" && path === "/api/queue/map") {
       const b = QueueMapBody.parse(await body(req));
-      ensureNight();
       if (b.map === "demo/bare") {
         const add = bareChecks.length === 0 ? [] : ["demo/bare#1", "demo/bare#2", "demo/bare#3"].filter((k) => !queue.items.some((i) => i.key === k && i.state === "queued"));
         queue.items = [...queue.items, ...add.map((k) => item(k, "queued"))];
@@ -405,6 +407,7 @@ createServer((req, res) => {
       if (live) { live.state = "ended"; live.how = "finished"; live.ended = now(); }
       queue.items = [];
       queue.night = null;
+      liveId = null;
       syncMaps();
       queue.version += 1;
       send(res, 200, { ok: true });
@@ -441,7 +444,7 @@ createServer((req, res) => {
     }
     if (req.method === "POST" && path === "/api/night/start") {
       NightStartBody.parse(await body(req));
-      ensureNight();
+      startNight();
       const n = liveNight();
       if (n === undefined) { send(res, 400, { ok: false, error: "no night is live" }); return; }
       send(res, 200, { ok: true, night: nightView(n) });

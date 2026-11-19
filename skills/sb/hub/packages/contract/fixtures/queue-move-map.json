@@ -67,14 +67,14 @@
       "repos": {},
       "runs": {},
       "seeded": true,
-      "version": 20
+      "version": 22
     }
   },
   "contentType": "application/json",
   "request": {
     "map": "repo/two",
     "to": 0,
-    "version": 19
+    "version": 21
   },
   "route": "POST /api/queue/move_map",
   "status": 200

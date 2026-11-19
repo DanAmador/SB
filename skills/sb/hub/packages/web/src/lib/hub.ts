@@ -89,7 +89,7 @@ type QueueRoute =
   | "POST /api/queue/stop"
   | "POST /api/queue/item_agent";
 
-type NightRoute = "POST /api/night/stop" | "POST /api/night/rename";
+type NightRoute = "POST /api/night/start" | "POST /api/night/stop" | "POST /api/night/rename";
 
 function putQueue(qc: QueryClient, queue: Queue): void {
   qc.setQueryData<State>(["state"], (s) => (s ? { ...s, queue } : s));

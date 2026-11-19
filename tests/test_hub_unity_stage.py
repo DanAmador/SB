@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from test_hub_runner import TEMPLATES, RunnerCase, git
+from test_hub_runner import TEMPLATES, RunnerCase, git, go
 from test_hub_worktrees import FAKE_COMPILE, SK4TE_CHECKS
 import sbhub
 from sbhub import Hub, Supervisor
@@ -191,6 +191,7 @@ class UnityStageTest(RunnerCase):
         workers, stages = len(self.workers()), len(self.stages())
         self.verdicts["repo/one#1"] = "finished"  # the review judges it again after the pass, met this time
         self.hub.queue_integrate(["repo/one#1"])
+        go(self.hub)
         self.until(lambda: len(self.stages()) == stages + 1 and self.state_of("repo/one#1") == "done")
         self.assertEqual(len(self.workers()), workers)  # no worker ran
         brief = self.launched[-1]["brief"]
@@ -207,6 +208,7 @@ class UnityStageTest(RunnerCase):
         workers, stages = len(self.workers()), len(self.stages())
         os.environ["FAKE_INTEGRATE"] = "broken"
         self.hub.queue_integrate(["repo/one#1"])
+        go(self.hub)
         self.until(lambda: len(self.stages()) == stages + 1 and self.state_of("repo/one#1") == "failed")
         self.assertEqual(len(self.workers()), workers)
         self.assertIn("the Unity pass: the integrator could not make it work", self.items()["repo/one#1"]["note"])

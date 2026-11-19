@@ -288,6 +288,7 @@ export function waitWords(w: Waits, name: (keyOrMap: string) => string): string 
   const who = w.with === null ? "" : name(w.with);
   switch (w.kind) {
     case "paused": return "the queue is paused";
+    case "start": return "waits for Start";
     case "build": return `waits: ${w.text}`;
     case "time": return w.text.startsWith("starts at") ? `waits: ${w.text}` : `waits until ${w.text}`;
     case "after": return w.with === null ? w.text : w.with.includes("#") ? `waits for ${who}` : `waits for the map ${who}`;

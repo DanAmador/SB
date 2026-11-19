@@ -15,7 +15,6 @@
           "ended": null,
           "key": "repo/one#2",
           "kind": "ticket",
-          "night": "night-20261113-010100",
           "note": "",
           "started": null,
           "state": "queued",
@@ -27,7 +26,6 @@
           "ended": null,
           "key": "repo/one#3",
           "kind": "ticket",
-          "night": "night-20261113-010100",
           "note": "",
           "started": null,
           "state": "queued",
@@ -37,7 +35,7 @@
       "maps": [
         "repo/one"
       ],
-      "night": "night-20261113-010100",
+      "night": null,
       "paused": true,
       "repos": {},
       "runs": {},

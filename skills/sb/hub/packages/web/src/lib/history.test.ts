@@ -100,7 +100,7 @@ describe("grouping and numbers", () => {
 
 describe("History by run", () => {
   const counts = (c: Partial<Night["counts"]>): Night["counts"] => ({ items: 0, queued: 0, running: 0, done: 0, failed: 0, skipped: 0, not_reached: 0, ...c });
-  const night = (id: string, started: number, more: Partial<Night> = {}): Night => ({ id, name: id, started, by: null, state: "ended", ended: started + 100, how: "finished", not_reached: [], counts: counts({}), ...more });
+  const night = (id: string, started: number, more: Partial<Night> = {}): Night => ({ id, name: id, started, by: null, state: "ended", ended: started + 100, how: "finished", not_reached: [], drain: true, counts: counts({}), ...more });
   it("lists runs newest first, whatever order the hub gave", () => {
     const list = [night("a", 100), night("c", 300, { state: "live", ended: null, how: null }), night("b", 200)];
     expect(sortNights(list).map((n) => n.id)).toEqual(["c", "b", "a"]);

@@ -8,14 +8,41 @@
         "spare"
       ],
       "bases": {},
-      "items": [],
-      "maps": [],
-      "night": null,
+      "items": [
+        {
+          "agent": null,
+          "commit": null,
+          "ended": null,
+          "key": "repo/one#2",
+          "kind": "ticket",
+          "night": "night-20261113-010100",
+          "note": "",
+          "started": null,
+          "state": "queued",
+          "tries": 0
+        },
+        {
+          "agent": null,
+          "commit": null,
+          "ended": null,
+          "key": "repo/one#3",
+          "kind": "ticket",
+          "night": "night-20261113-010100",
+          "note": "",
+          "started": null,
+          "state": "queued",
+          "tries": 0
+        }
+      ],
+      "maps": [
+        "repo/one"
+      ],
+      "night": "night-20261113-010100",
       "paused": true,
       "repos": {},
       "runs": {},
       "seeded": true,
-      "version": 16
+      "version": 19
     }
   },
   "contentType": "application/json",

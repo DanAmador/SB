@@ -11,6 +11,7 @@
         "running": 0,
         "skipped": 1
       },
+      "drain": false,
       "ended": null,
       "how": null,
       "id": "night-fixture",

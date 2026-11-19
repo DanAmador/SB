@@ -12,6 +12,7 @@
           "running": 0,
           "skipped": 1
         },
+        "drain": false,
         "ended": null,
         "how": null,
         "id": "night-20261113-010100",
@@ -21,7 +22,7 @@
         "state": "live"
       },
       {
-        "by": "sess-1",
+        "by": null,
         "counts": {
           "done": 1,
           "failed": 0,
@@ -31,6 +32,7 @@
           "running": 0,
           "skipped": 0
         },
+        "drain": true,
         "ended": 1794528000.0,
         "how": "finished",
         "id": "night-20261113-010000",

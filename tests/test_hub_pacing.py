@@ -16,7 +16,7 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills" / "sb" / "scripts"))
-from helpers import SCRIPT  # noqa: E402
+from helpers import SCRIPT, go  # noqa: E402
 from test_hub_runner import START, TEMPLATES, RunnerCase, git  # noqa: E402
 import sbhub  # noqa: E402
 from sbhub import Hub  # noqa: E402
@@ -114,7 +114,7 @@ class FitTest(PacingCase):
         self.mode = "hang"
         self.tick_all()
         self.hub.queue_item_agent("repo/one#1", "main")
-        self.hub.queue_pause(False)
+        go(self.hub)
         self.sup.tick()
         self.assertNotIn("repo/one#1", [x["key"] for x in self.launched])
         self.assertEqual(self.items()["repo/one#1"]["note"], "waits: main 85% used, needs about 15%; resets 04:20")
@@ -136,7 +136,7 @@ class FitTest(PacingCase):
         self.tick_all()
         first = list(self.items())[0]
         self.modes = {first: "slow"}  # commits, then 2 s before its result: still running at the check below
-        self.hub.queue_pause(False)
+        go(self.hub)
         self.sup.tick()
         self.sup.tick()
         self.assertEqual(list(self.running()), [first])  # no learned cost yet: one worker
@@ -204,7 +204,7 @@ class FitTest(PacingCase):
         self.mode = "hang"
         self.tick_all()
         self.hub.queue_item_agent("repo/one#1", "main")
-        self.hub.queue_pause(False)
+        go(self.hub)
         self.sup.tick()
         self.assertEqual([x["name"] for x in self.launched if x["key"] == "repo/one#1"], ["main"])
 
@@ -286,7 +286,7 @@ class StopsTest(PacingCase):
         key = self.hub.queue_job("repo", "Audit it", None, "sonnet", "audit")["key"]
         self.tick_all()
         self.hub.queue_set([], self.hub.state()["queue"]["version"])
-        self.hub.queue_pause(False)
+        go(self.hub)
         self.until(lambda: self.state_of(key) == "done")
         self.assertEqual(Path(self.items()[key]["result"]).read_text(encoding="utf-8").strip(), "did: Audit it")
         self.assertEqual(self.inst("main")["costs"]["sonnet"], {"avg": 0.08, "n": 1})
@@ -424,7 +424,7 @@ class FixRoundOneTest(PacingCase):
             self.hub._data["installed"]["main"]["limited_until"] = R
             self.hub._data["queue"]["items"][0].update(
                 tries=1, model="opus", resume={"agent": "main", "log": "x.log", "why": "at its usage limit"})
-        self.hub.queue_pause(False)
+        go(self.hub)
         self.sup.tick()
         self.assertEqual(self.launched, [])  # the sonnet ticket behind it would fit on spare, but waits
 
@@ -445,7 +445,7 @@ class FixRoundOneTest(PacingCase):
         key = self.hub.queue_job("repo", "Audit it", None, "sonnet", "audit")["key"]
         self.tick_all()
         self.hub.queue_set([], self.hub.state()["queue"]["version"])
-        self.hub.queue_pause(False)
+        go(self.hub)
         self.sup.tick()
         self.hub.report({"agent": key, "role": "worker", "parent": "queue", "state": "working"})
         sent = lambda: [m["text"] for m in self.hub.state()["messages"].values() if m["to"] == key]
@@ -493,6 +493,8 @@ class Batch2Test(PacingCase):
 
     def test_a_night_end_dismiss_and_clear_quiet_change_only_what_the_board_shows(self):
         self.tick_all()
+        self.hub.night_start(drain=True)
+        self.hub.queue_pause(True)  # no worker needed: the items' states are set by hand
         log = self.root / "1.log"
         log.write_text("argv: x\n")
         with self.hub._lock:  # one finished item and one still running: no worker needed for a display change
@@ -532,7 +534,7 @@ class Batch2Test(PacingCase):
         self.assertEqual(self.items()[key]["not_before"], at)
         with self.assertRaises(ValueError):
             self.hub.queue_job("repo", "Other", None, None, None, at="25:00")
-        self.hub.queue_pause(False)
+        go(self.hub)
         self.sup.tick()
         self.assertEqual((self.launched, self.items()[key]["note"]), ([], "waits until 09:00"))
         self.clock.t = at + 1
@@ -581,7 +583,7 @@ class Batch2Test(PacingCase):
         self.mode = "hang"
         self.tick_all()
         self.sb("claim", "repo/one", "001", "--by", "hub main")  # a release that failed earlier
-        self.hub.queue_pause(False)
+        go(self.hub)
         self.sup.tick()
         self.assertEqual(self.state_of("repo/one#1"), "running")
         self.assertEqual([x["key"] for x in self.launched], ["repo/one#1"])
