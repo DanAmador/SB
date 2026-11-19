@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AgentRow, QueueItem, State, Trail, TrailAction } from "@sb-hub/contract";
 import { splitAgents, ticketIndex } from "./board.ts";
-import { boardOf, entryOf, IDLE, mapSvg, sessionCards, stationsOf } from "./sessions.ts";
+import { actionWords, boardOf, entryOf, IDLE, mapSvg, sessionCards, stationsOf } from "./sessions.ts";
 
 const a = (tool: string, label: string, more: Partial<TrailAction> = {}): TrailAction => ({ tool, label, start: 1000, end: 1001, ok: true, sub: false, ...more });
 const trail = (actions: TrailAction[], ctx: number | null = null): Trail => ({ agent: "demo/board#5", ctx, ended: null, actions });
@@ -90,5 +90,16 @@ describe("a worker whose run ended, or that went silent", () => {
   it("with a queue item stays as the queue says", () => {
     const c = cards({ "r#1": row("r#1", { parent: "queue", at: NOW - IDLE - 60 }) }, [{ key: "r#1", state: "running" } as QueueItem]);
     expect(live(c)).toEqual(["r#1"]);
+  });
+});
+
+describe("actionWords", () => {
+  it("says what the newest tool call did", () => {
+    expect(actionWords([a("Read", "a.ts"), a("Bash", "pnpm typecheck", { end: null, ok: null })])).toBe("Bash: pnpm typecheck");
+  });
+  it("skips a subagent's run and gives the bare tool when it has no label", () => {
+    expect(actionWords([a("Bash", "ls"), a("Agent", "check", { sub: true })])).toBe("Bash: ls");
+    expect(actionWords([a("Bash", "")])).toBe("Bash");
+    expect(actionWords([])).toBeNull();
   });
 });

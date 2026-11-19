@@ -58,6 +58,8 @@ test("Run is the landing page: one row per worker run, the silent one amber, nev
 });
 
 test("the panel's Stop asks why, confirms and calls the stop route; no message is sent", async ({ page }) => {
+  // a retry after a slow first try finds the earlier stop still recorded
+  await page.request.post("/api/__restore");
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(String(e)));
   await page.request.post("/api/__restore"); // a retry starts clean: the first try may have posted the stop

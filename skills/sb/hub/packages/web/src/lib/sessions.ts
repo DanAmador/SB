@@ -146,3 +146,11 @@ export function sessionCards(state: State, ix: TicketIndex, ags: Agents = splitA
 export function helperCards(state: State, ix: TicketIndex, ags: Agents = splitAgents(state)): ReadonlyMap<string, readonly SessionCard[]> {
   return new Map([...ags.kids].map(([chat, list]) => [chat, list.map((a) => cardOf(state, ix, a, "worker"))] as const));
 }
+
+/** What the newest tool call did, in words: "Bash: pnpm typecheck"; null when the trail holds no tool call. */
+export function actionWords(actions: readonly TrailAction[]): string | null {
+  const a = [...actions].reverse().find((x) => !x.sub && x.tool !== "" && x.tool !== "Stop" && x.tool !== "Prompt");
+  if (a === undefined) return null;
+  const label = a.label.replace(/\s+/g, " ").trim();
+  return label === "" ? a.tool : `${a.tool}: ${label}`;
+}
