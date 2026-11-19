@@ -90,6 +90,7 @@ function Accounts(): React.JSX.Element {
                     />
                     <span className="font-medium">{n}</span>
                     {e.kind === "agy" && <span className="text-xs text-muted-foreground">emergencies</span>}
+                    {e.kind === "codex" && <span className="text-xs text-muted-foreground">Codex</span>}
                     <span className={cn("ml-auto text-xs", st.tone === "out" ? "text-destructive" : st.tone === "lim" ? "text-warn" : st.tone === "run" ? "text-brand" : "text-muted-foreground")}>
                       {u ? `${String(u.pct)}% · ` : ""}
                       {st.words}

@@ -32,7 +32,7 @@ and never fail a session when it is down.
   sbhub.py queue agent <name>         the agent that runs the night's items (an installed one)
   sbhub.py queue agents <name>...     the night's pool of agents: each item goes to the one where its likely
                                       usage fits with the most room left (an item's own agent still wins)
-  sbhub.py agents [--scan]            the installed agents; --scan finds ~/.claude* configs and agy
+  sbhub.py agents [--scan]            the installed agents; --scan finds ~/.claude* configs, agy and ~/.codex* accounts
   sbhub.py trust  <project path>      let the hub run that project's own .sb/providers scripts
   sbhub.py untrust <project path>     stop doing so (both work with the hub stopped)
   sbhub.py run-ticket <map>#<num> [--agent A] [--model M] [--item JSON] [--limit SECONDS]
@@ -49,7 +49,7 @@ Every command but `serve` also takes --port N.
 
 `serve` also runs tonight's queue (SB_HUB_QUEUE=0 serves the board only). A new queue waits paused until
 the owner resumes it (`queue resume`); a resumed queue stays so across restarts. Every 5 s it starts the next
-queued ticket whose agent and repo are free as a headless worker (`claude -p` in auto mode, or `agy -p`),
+queued ticket whose agent and repo are free as a headless worker (`claude -p` in auto mode, `agy -p` or `codex exec`),
 with SB_HUB_AGENT=<ticket key> and SB_HUB_PARENT=queue so `hook` reports it as that item's worker; when the
 worker exits it checks the commit, paths and checks in code; when they pass, the work lands and the ticket is
 `landed` (not judged yet): it holds no files, and what comes after it may start. When a map has nothing queued,
@@ -1400,9 +1400,10 @@ class Hub:
         sign-in: a `.credentials.json`, or a `.claude.json` with an `oauthAccount`. On this machine
         `~/.claude`, `~/.claude-personal` and `~/.claude-assembio` have no `.credentials.json` (the
         login is in the keychain) and each has `.claude.json` with `oauthAccount`, so that is the
-        marker; a folder without either is not an agent. `agy` counts when `which("agy")` finds it.
-        The queue's default agent is set to `main` (else the first by name) if none is chosen yet,
-        and is never `agy`."""
+        marker; a folder without either is not an agent. `agy` counts when `which("agy")` finds it. A Codex
+        account is `~/.codex` (named `codex`) or `~/.codex-<name>` (named `codex-<name>`) holding the `auth.json` its
+        sign-in writes, counted when `which("codex")` finds the CLI. The queue's default agent is set to `main`
+        (else the first by name) if none is chosen yet, and is never agy or Codex."""
         home = Path(home) if home else Path.home()
         found = {}
         for d in sorted(home.glob(".claude*")):
@@ -1414,6 +1415,10 @@ class Hub:
                 "kind": "claude", "dir": str(d), "model": None, "limited_until": None}
         if which("agy"):
             found["agy"] = {"kind": "agy", "dir": None, "model": None, "limited_until": None}
+        if which("codex"):
+            for d in sorted(home.glob(".codex*")):
+                if (d.name == ".codex" or d.name.startswith(".codex-")) and (d / "auth.json").is_file():
+                    found[d.name[1:]] = {"kind": "codex", "dir": str(d), "model": None, "limited_until": None}
         with self._lock:
             inst = self._data["installed"]
             for name, entry in found.items():
@@ -1587,15 +1592,24 @@ REVIEW_MODEL = "opus"  # the second pass runs on Opus, whichever model did the w
 #             finished leaves the ticket open, waiting for the owner. A verdict never reverts a commit.
 LOG_TAIL = 65536  # the end of a worker's log that is searched for a limit message
 # what an agent prints when its plan's usage runs out (case-insensitive); any other failure is just `failed`
-LIMIT_PATTERNS = ("usage limit reached", "hit your session limit", "hit your weekly limit", "spend limit")
-RESET = re.compile(r"\bresets\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*([ap]m)?", re.I)
+LIMIT_PATTERNS = ("usage limit reached", "hit your session limit", "hit your weekly limit", "spend limit",
+                  "hit your usage limit")  # the last is Codex's
+RESET = re.compile(r"\b(?:resets|try again)\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*([ap]m)?", re.I)
+RESET_ON = re.compile(r"\btry again at\s+([a-z]{3} \d{1,2})(?:st|nd|rd|th)?,\s+(\d{4} \d{1,2}:\d{2} [ap]m)", re.I)  # Codex, a later day
 
 
 def limited_until(text, now):
     """When an agent whose output is `text` may run again: None when it hit no limit; the next time the
-    message's reset clock time (`resets 4:40am`, `resets 23:10`) comes round; else an hour from now."""
+    message's reset clock time (`resets 4:40am`, `resets 23:10`, Codex's `try again at 9:31 PM`) comes round; the
+    date and time Codex names for a later day (`try again at Nov 21st, 2026 3:04 AM`); else an hour from now."""
     if not any(p in text.lower() for p in LIMIT_PATTERNS):
         return None
+    m = RESET_ON.search(text)
+    if m:
+        try:
+            return datetime.strptime(m.group(1) + " " + m.group(2), "%b %d %Y %I:%M %p").timestamp()
+        except ValueError:
+            pass
     for m in RESET.finditer(text):
         hour, minute, half = int(m.group(1)), int(m.group(2) or 0), (m.group(3) or "").lower()
         if not (m.group(2) or half) or half and not 1 <= hour <= 12:
@@ -1637,9 +1651,11 @@ IDLE_FLOOR = 0.10  # an account running nothing and under this much 5-hour use a
 READING_OLD = 1800  # a reading older than this counts as none (one worker; the probe is due long before)
 STOPS_MAX = 3  # an item cut off by a limit or a logout this many times ends failed
 TRIES_MAX = 5  # a ticket whose try failed is queued again, from its kept work, up to this many tries in all
-OPUS_FROM = 3  # ...the first tries on its own tier, this one and later on Opus (an agy agent keeps its model)
+OPUS_FROM = 3  # ...the first tries on its own tier, this one and later on Opus (an agy or Codex agent keeps its model)
+OWN_MODEL = ("agy", "codex")  # agents that run their own model: never told sonnet or opus, never a Claude session
 SAME_MAX = 3  # the same failure this many tries in a row with no new commit: it waits for the owner sooner
-AUTH_PATTERNS = ("authentication_failed", "failed to authenticate", "oauth session expired")
+AUTH_PATTERNS = ("authentication_failed", "failed to authenticate", "oauth session expired",
+                 "access token could not be refreshed", "401 unauthorized")  # the last two are Codex's
 RESUME = ("\n## An earlier try stopped\n\nAn earlier try on {agent} stopped {why}. Its changes may already be in "
           "the tree, committed or not: read `git log {base}..HEAD` and {diff} first, continue from there, do not "
           "redo finished work. Its log: {log}.\n")
@@ -1710,10 +1726,94 @@ def readings(text):
     return out
 
 
+CODEX_TAIL = 262144  # the end of a Codex session file searched for its newest rate limits
+CODEX_WINDOWS = {300: "five_hour", 10080: "seven_day"}  # a Codex rate limit's window_minutes: our window
+CODEX_COST = "codex"  # a Codex account's learned cost per ticket is kept under this key, apart from Claude's tiers
+
+
+def _codex_reading(line):
+    """The usage reading in one line of a Codex session file ({five_hour, five_hour_resets, seven_day,
+    seven_day_resets}, as `readings` gives it), or None when it holds no rate limits."""
+    if '"rate_limits"' not in line:
+        return None
+    try:
+        d = json.loads(line)
+    except ValueError:
+        return None
+    payload = d.get("payload") if isinstance(d, dict) and isinstance(d.get("payload"), dict) else {}
+    rl = payload.get("rate_limits")
+    if not isinstance(rl, dict):
+        return None
+    u = {}
+    for w in (rl.get("primary"), rl.get("secondary")):
+        key = CODEX_WINDOWS.get(w.get("window_minutes")) if isinstance(w, dict) else None
+        if key and _num(w.get("used_percent")) is not None:
+            u[key], u[key + "_resets"] = _num(w["used_percent"]) / 100, _num(w.get("resets_at"))
+    if "five_hour" not in u:
+        return None
+    return {"five_hour": u["five_hour"], "five_hour_resets": u.get("five_hour_resets"),
+            "seven_day": u.get("seven_day"), "seven_day_resets": u.get("seven_day_resets")}
+
+
+def _codex_files(home):
+    """The session files of a Codex account's two newest days, newest first."""
+    root = Path(home or Path.home() / ".codex") / "sessions"
+    days = sorted(root.glob("[0-9]*/[0-9]*/[0-9]*"), reverse=True)[:2]
+    try:
+        return sorted((f for d in days for f in d.glob("rollout-*.jsonl")), key=lambda f: f.stat().st_mtime,
+                      reverse=True)
+    except OSError:
+        return []
+
+
+def _codex_lines(f, tail=None):
+    try:
+        with open(f, "rb") as fh:
+            if tail:
+                fh.seek(max(0, f.stat().st_size - tail))
+            return fh.read().decode("utf-8", "replace").splitlines()
+    except OSError:
+        return []
+
+
+def codex_usage(home):
+    """A Codex account's newest usage, {five_hour, five_hour_resets, seven_day, seven_day_resets} as `readings`
+    gives it, or None. `codex exec --json` prints no rate limits; each session's file under
+    `<home>/sessions/YYYY/MM/DD/` (home: CODEX_HOME, default ~/.codex) records them in its `token_count` events.
+    Only the two newest days and each file's last CODEX_TAIL bytes are read: the folder grows without end."""
+    for f in _codex_files(home)[:3]:  # the newest may have just started, with no limits yet
+        for line in reversed(_codex_lines(f, CODEX_TAIL)):
+            u = _codex_reading(line)
+            if u:
+                return u
+    return None
+
+
+def codex_run_cost(home, log_text):
+    """What one Codex run took of its account's 5-hour window: the rise from the first reading to the last in the
+    session file its `thread.started` event names, when both are in one window; else None. The first reading comes
+    with the first answer, so the cost of that first request is missed; Codex counts in whole percents."""
+    thread = None
+    for line in log_text.splitlines():
+        if '"thread.started"' in line:
+            try:
+                thread = json.loads(line).get("thread_id")
+            except (ValueError, AttributeError):
+                continue
+            break
+    if not isinstance(thread, str) or not re.fullmatch(r"[\w-]+", thread):
+        return None
+    f = next((f for f in _codex_files(home) if f.name.endswith("-{}.jsonl".format(thread))), None)
+    got = [u for u in map(_codex_reading, _codex_lines(f)) if u] if f else []
+    if not got or not _same_window(got[0], got[-1]):
+        return None
+    return max(0.0, got[-1]["five_hour"] - got[0]["five_hour"])
+
+
 def _said(text):
-    """What the agent itself printed: each JSON line's `error`, the `result` of one marked `is_error`, and every
-    line that is not JSON (stderr, agy's output). Tool output inside the stream is left out: a worker that read a file
-    naming a usage limit has not hit one."""
+    """What the agent itself printed: each JSON line's `error`, the `result` of one marked `is_error`, the message of
+    a Codex `error` or `turn.failed` event, and every line that is not JSON (stderr, agy's output). Tool output inside
+    the stream is left out: a worker that read a file naming a usage limit has not hit one."""
     out = []
     for line in text.splitlines():
         try:
@@ -1728,6 +1828,11 @@ def _said(text):
             out.append(d["error"])
         if d.get("is_error") is True and isinstance(d.get("result"), str):  # a summary that went well is not a stop
             out.append(d["result"])
+        e = d.get("msg") if isinstance(d.get("msg"), dict) else d  # Codex before 0.40 wraps each event in `msg`
+        if e.get("type") in ("error", "stream_error") and isinstance(e.get("message"), str):
+            out.append(e["message"])
+        if e.get("type") == "turn.failed" and isinstance(e.get("error"), dict) and isinstance(e["error"].get("message"), str):
+            out.append(e["error"]["message"])
     return "\n".join(out)
 
 
@@ -1823,12 +1928,19 @@ def launch(agent, brief, repo, model, env, log, resume=None):
     """Start one headless worker and return its Popen: the only place that knows the agents' commands.
     Own process group, cwd the ticket's repo, stdout and stderr to `log`; `env` adds the hub's ids. A Claude worker
     runs as a new session (`--session-id`) or, with `resume`, goes on with that one; the Popen's `session` is its id
-    (None for agy)."""
+    (None for agy and Codex). A Codex worker runs `codex exec` under its account's CODEX_HOME in the `sandbox` its
+    entry names (default workspace-write, with the network, the repo's git folder and the run folder writable)."""
     full = worker_env(repo, env)
     brief += GIT_RULE
     session = None
     if agent.get("kind") == "agy":
         cmd = [_exe("agy", full), "-p", brief] + (["--model", model] if model else []) + ["--output-format", "json"]
+    elif agent.get("kind") == "codex":
+        if agent.get("dir"):
+            full["CODEX_HOME"] = agent["dir"]
+        cmd = [_exe("codex", full), "exec", brief, "--json", "-C", str(repo), "--skip-git-repo-check",
+               "-c", 'approval_policy="never"'] + (
+            ["-m", model] if model else []) + _codex_sandbox(agent.get("sandbox") or "workspace-write", repo, env)
     else:
         if agent.get("dir"):
             full["CLAUDE_CONFIG_DIR"] = agent["dir"]
@@ -1848,6 +1960,23 @@ def launch(agent, brief, repo, model, env, log, resume=None):
     return p
 
 
+def _codex_sandbox(mode, repo, env):
+    """`codex exec` sandbox flags. workspace-write lets a worker write only its repo and temp, so the repo's git
+    folder (a worktree's lives in the main checkout; a commit writes there) and the run folder (its report) are added
+    as writable roots, and the network is on (its checks may fetch). `bypass` runs it unsandboxed."""
+    if mode == "bypass":
+        return ["--dangerously-bypass-approvals-and-sandbox"]
+    if mode != "workspace-write":
+        return ["-s", mode]
+    try:
+        git = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=repo,
+                             capture_output=True, text=True, timeout=10).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        git = ""
+    roots = [r for r in (git, env.get("SB_HUB_RUN")) if r]
+    return ["-s", mode, "-c", "sandbox_workspace_write.network_access=true"] + [a for r in roots for a in ("--add-dir", r)]
+
+
 SESSION_DAY = 86400  # a session older than this is not resumed: the try starts afresh, told the old log
 
 
@@ -1865,10 +1994,10 @@ def session_file(config, cwd, sid):
 
 def resumable(item, agent, cwd, now=time.time):
     """The session id a stopped or reviewed ticket goes on with on `agent` in `cwd`, or None for a fresh start: no
-    session kept, an agy agent, its file missing or older than SESSION_DAY, or it could not be copied into this
+    session kept, an agy or Codex agent, its file missing or older than SESSION_DAY, or it could not be copied into this
     agent's account (a session lives in one account's folder)."""
     sid, was = item.get("session"), item.get("session_dir")
-    if not sid or not was or agent.get("kind") == "agy":
+    if not sid or not was or agent.get("kind") in OWN_MODEL:
         return None
     src = session_file(was, cwd, sid)
     try:
@@ -2474,6 +2603,16 @@ def landing_of(repo, files, upto, since=None):
             "before": before, "sha": sha}
 
 
+def _head(path, start=0, size=LOG_TAIL):
+    """The first `size` bytes of a log from byte `start` on: the opening lines of one try."""
+    try:
+        with open(path, "rb") as f:
+            f.seek(start)
+            return f.read(size).decode("utf-8", "replace")
+    except (OSError, TypeError):
+        return ""
+
+
 def _tail(path, start=0, size=LOG_TAIL):
     """The end of a log from byte `start` on (whole lines only): one try's output, as tries of an item share its log."""
     try:
@@ -2540,14 +2679,22 @@ def _project_of(map_name):
 
 
 def _job_result(text):
-    """A headless run's final text: the `result` of the last JSON line that has one, else the log's end."""
+    """A headless run's final text: the `result` of the last JSON line that has one (Codex: its last agent
+    message), else the log's end."""
     for line in reversed(text.splitlines()):
         try:
             got = json.loads(line)
         except ValueError:
             continue
-        if isinstance(got, dict) and isinstance(got.get("result"), str):
+        if not isinstance(got, dict):
+            continue
+        if isinstance(got.get("result"), str):
             return got["result"]
+        item = got.get("item") if isinstance(got.get("item"), dict) else got.get("msg")  # Codex, new and old
+        if isinstance(item, dict) and item.get("type") == "agent_message":
+            said = item.get("text") or item.get("message")
+            if isinstance(said, str):
+                return said
     return text[-4000:]
 
 
@@ -2956,17 +3103,18 @@ class TicketRun:
         after the last, or once the same failure came SAME_MAX tries in a row with no new commit. A stop at a limit
         or a logout never gets here: it is no try."""
         t = run["t"]
-        fails = list(item.get("fails") or []) + [{"model": item.get("model") or t.get("tier") or "sonnet",
+        own = (run.get("inst") or {}).get("kind") in OWN_MODEL  # keeps its own model: never sonnet or opus
+        fails = list(item.get("fails") or []) + [{"model": item.get("model") or (
+                                                       "its default model" if own else t.get("tier") or "sonnet"),
                                                    "why": firstline(reason)[:300], "commit": sha}]
         last = [(_fail_class(f["why"]) or f["why"], f["commit"]) for f in fails[-SAME_MAX:]]
         same = len(last) == SAME_MAX and len(set(last)) == 1
         stuck = UNDO_FAILED in reason  # its work is still in the checkout: another try would land on top of it
         if len(fails) < TRIES_MAX and not same and not stuck:
-            opus = len(fails) + 1 >= OPUS_FROM and (run.get("inst") or {}).get("kind") != "agy"  # agy keeps its model
-            model = "opus" if opus else fails[-1]["model"]
+            model = item.get("model") if own else "opus" if len(fails) + 1 >= OPUS_FROM else fails[-1]["model"]
             self.release(item["key"])
             return self.result(item, "retry", "try {} of {} failed, try {} {}: {}".format(
-                len(fails), TRIES_MAX, len(fails) + 1, "on " + model, firstline(reason)), run, sha, checks,
+                len(fails), TRIES_MAX, len(fails) + 1, "on " + (model or fails[-1]["model"]), firstline(reason)), run, sha, checks,
                 retry={"model": model, "reason": reason, "fails": fails})
         why = ("its landing could not be backed out" if stuck else
                "the same failure {} tries in a row with no new commit".format(SAME_MAX) if same else
@@ -3512,6 +3660,7 @@ class Supervisor:
         self.runner.backed_out = self._backed_out
         self.probe = probe or probe_usage  # (agent entry, cwd) -> its output; tests hand in their own
         self.probe_async, self.probing = True, []  # probes run in their own thread (tests may run them inline)
+        self.codex_usage = os.environ.get("SB_HUB_CODEX_USAGE") != "0"  # read Codex accounts' session files
         self.idle_usage = os.environ.get("SB_HUB_IDLE_USAGE") != "0"  # probe the pool with nothing to start
         self.close_off = True  # the daily morning close-off job (tests of other things turn it off)
         # item key -> {p, t (the ticket row it started from), agent, inst, base, log, start, pos (log read up to),
@@ -3587,6 +3736,7 @@ class Supervisor:
             self._unclean()
             self._reviews()  # and one a recheck asked for starts at once
             self._probe()
+            self._codex_usage()
             self._settle_night(False)  # a redo or retry the steps above queued for a stopping night never starts
             self._start()
         self._set_waits()
@@ -3722,6 +3872,16 @@ class Supervisor:
         both are in one window and no other worker of that agent overlapped it. With one reading only, the
         next reading of the agent (the probe that follows) closes it."""
         u0, u1 = run.get("u0"), run.get("u1")
+        if (run.get("inst") or {}).get("kind") == "codex":  # no readings in its stream: its session file has them
+            cost = codex_run_cost(run["inst"].get("dir"), _head(run["log"], run.get("start") or 0)) if run.get(
+                "alone") else None
+            if cost is not None:
+                with self.hub._lock:
+                    inst = self.hub._data["installed"].get(run["agent"])
+                    if inst is not None:
+                        self._add_cost(inst, CODEX_COST, cost)
+                        self.hub._save()
+            return
         if not run.get("alone") or u0 is None:
             return
         with self.hub._lock:
@@ -3741,7 +3901,7 @@ class Supervisor:
         for run in list(self.procs.values()):
             self._consume(run)
         with self.hub._lock:
-            usage = {n: e.get("usage") for n, e in self.hub._data["installed"].items()}
+            usage = {n: e.get("usage") for n, e in self.hub._data["installed"].items() if e.get("kind") == "claude"}
         for key, run in list(self.procs.items()):
             u = usage.get(run["agent"])
             if run.get("braked") or not u or (u.get("five_hour_resets") or 0) <= now or u["five_hour"] < BRAKE_5H:
@@ -3792,6 +3952,23 @@ class Supervisor:
         th = threading.Thread(target=self._probe_run, args=(todo,), daemon=True)
         self.probing = [x for x in self.probing if x.is_alive()] + [th]
         th.start()
+
+    def _codex_usage(self):
+        """Each installed Codex account's usage, read from its session files (codex_usage) at most once per
+        USAGE_STALE, whatever the queue holds: no model call. For the board only: a Codex account is not paced.
+        SB_HUB_CODEX_USAGE=0 turns it off."""
+        if not self.codex_usage:
+            return
+        now = self.hub.now()
+        with self.hub._lock:
+            todo = [(n, e.get("dir")) for n, e in self.hub._data["installed"].items()
+                    if e.get("kind") == "codex" and now - (e.get("probed") or 0) >= USAGE_STALE]
+            for n, _ in todo:
+                self.hub._data["installed"][n]["probed"] = now
+        for n, home in todo:
+            u = codex_usage(home)
+            if u:
+                self._usage(n, [(u, None)])
 
     def _probe_run(self, todo):
         for n, inst in todo:
@@ -4200,7 +4377,7 @@ class Supervisor:
                "branch": stage["branch"], "integrate": stage}
         repo, nnn = stage["repo"], "{:03d}".format(num)
         try:
-            if inst.get("kind") == "agy" or not inst:
+            if inst.get("kind") in OWN_MODEL or not inst:
                 raise OSError("its agent cannot run the integrator")
             landed = ("Its work landed earlier and is in this folder. The Opus review judged it short: read its findings "
                       "in `{}` and play each one it marks not met or not played. Fix what is really broken, or "
@@ -4990,7 +5167,7 @@ class Supervisor:
                 if any(sbqueue._blocker_key(t, b) not in landed for b in t["blocked_by_open"]):
                     continue  # a blocker is queued ahead of it: it waits for it (one that landed does not hold it)
                 model = (item.get("model") if item.get("tries") or item.get("model") else
-                         inst.get("model") if inst.get("kind") == "agy" else t.get("tier") or "sonnet")
+                         inst.get("model") if inst.get("kind") in OWN_MODEL else t.get("tier") or "sonnet")
                 if parallel(t["repo"]) > 1 or is_unity(t["repo"]):  # its own worktree; a later try keeps it
                     tree, branch = ((item["tree"], item["branch"]) if item.get("tree") and item.get("branch")
                                     else tree_of(self.hub.home, t["repo"], t["map"], t["num"]))
@@ -5168,7 +5345,7 @@ class Supervisor:
             r = item["resume"]
             brief += ("\nAn earlier try on {} stopped {}. What it wrote may already be in that folder; its log: {}. "
                       "Continue from there, do not redo finished work.\n").format(r["agent"], r["why"], log)
-        model = item.get("model") or (inst.get("model") if inst.get("kind") == "agy" else "sonnet")
+        model = item.get("model") or (inst.get("model") if inst.get("kind") in OWN_MODEL else "sonnet")
         env = {"SB_HUB_AGENT": key, "SB_HUB_PARENT": "queue", "SB_HUB_PORT": str(self.port),
                "SB_HUB_RUN": str(folder)}
         try:
@@ -6126,12 +6303,12 @@ def _run_status_file(home, pid):
 def _ticket_agent(hub, name):
     """(name, entry) of the agent a ticket runs on: the one named, else the queue's pool's first installed one,
     else the first installed Claude account, else plain `claude` with its default config. ValueError for a name
-    that is not installed (except `claude` and `agy` themselves)."""
+    that is not installed (except `claude`, `agy` and `codex` themselves; `codex` runs under ~/.codex)."""
     installed = hub._data.get("installed") or {}
     if name:
         if name in installed:
             return name, dict(installed[name])
-        if name in ("claude", "agy"):
+        if name in ("claude", "agy", "codex"):
             return name, {"kind": name, "dir": None, "model": None}
         raise ValueError("{} is not an installed agent (sbhub.py agents --scan lists them)".format(name))
     for n in pool(hub._data.get("queue") or {}) + sorted(n for n, e in installed.items() if e.get("kind") == "claude"):
@@ -6165,7 +6342,7 @@ def run_ticket(key, agent=None, model=None, item=None, home=None, port=None, lim
     if not skip and not usable_project(t.get("repo")):
         skip = "its map's repo is not a folder here: {}".format(t.get("repo") or "none")
     item["model"] = model or (item.get("model") if item.get("tries") else None) or (
-        inst.get("model") if inst.get("kind") == "agy" else None) or t.get("tier") or "sonnet"
+        inst.get("model") if inst.get("kind") in OWN_MODEL else t.get("tier") or "sonnet")  # agy, Codex: never a tier
     if skip:
         return runner.result(item, "skipped", skip, {"t": t, "agent": name, "inst": inst})
     run, res = runner.start(item, t, name, inst)

@@ -32,6 +32,16 @@ export function costOf(e: Installed, tier: Tier): number {
   return DEFAULT_COST[tier];
 }
 
+/** The least a Codex ticket is taken to cost: Codex counts in whole percents, so a small one can read as 0. */
+const CODEX_FLOOR = 0.01;
+
+/** The share of a 5-hour window one ticket costs on a Codex account, learned by the hub from its runs (sbhub.py
+ * codex_run_cost); null until its first finished ticket. Never a Claude default: the two are not alike. */
+export function codexCost(e: Installed): number | null {
+  const own = e.costs?.codex;
+  return own ? Math.max(CODEX_FLOOR, own.avg) : null;
+}
+
 export interface WeekPace {
   used: number;
   resets: number;
@@ -50,6 +60,8 @@ export interface AccountPace {
   inPool: boolean;
   /** Workers running on it now. */
   running: number;
+  /** A Codex account: shown, never paced, so left out of the pool's sums. */
+  codex: boolean;
   /** null: no reading to go by (never read, or not a Claude account). */
   five: {
     used: number;
@@ -59,8 +71,9 @@ export interface AccountPace {
     free: number;
     /** null: the window it was read in has ended; the next one opens with the next work. */
     resets: number | null;
-    /** How many more tickets of each tier fit under the gate. */
-    fits: Record<Tier, number>;
+    /** How many more tickets of each tier fit under the gate; a Codex account's count of its own tickets, null
+     * while no cost is learned. */
+    fits: Record<Tier, number> | { tickets: number | null };
     /** The reading is too old for the hub to trust. */
     old: boolean;
     at: number;
@@ -71,14 +84,18 @@ export interface AccountPace {
 export function accountPace(name: string, e: Installed, state: State): AccountPace {
   const now = state.now;
   const mine = state.queue.items.filter((i) => i.state === "running" && i.runner === name);
-  const base = { name, inPool: poolOf(state).includes(name), running: mine.length };
-  const u = e.kind === "claude" ? e.usage : undefined;
+  const codex = e.kind === "codex";
+  const base = { name, inPool: poolOf(state).includes(name), running: mine.length, codex };
+  const u = e.kind === "agy" ? undefined : e.usage; // Claude streams it; Codex is read from its session files
   if (!u) return { ...base, five: null, week: null };
   const live = (u.five_hour_resets ?? 0) > now;
   const used = live ? u.five_hour : 0;
-  const held = mine.reduce((n, i) => n + costOf(e, tierOf(i.model)), 0);
+  const each = codex ? codexCost(e) : null;
+  const held = codex ? mine.length * (each ?? 0) : mine.reduce((n, i) => n + costOf(e, tierOf(i.model)), 0);
   const free = Math.max(0, GATE_5H - used - held);
-  const fits = { sonnet: Math.floor(free / costOf(e, "sonnet") + 1e-9), opus: Math.floor(free / costOf(e, "opus") + 1e-9) };
+  const fits = codex
+    ? { tickets: each === null ? null : Math.floor(free / each + 1e-9) }
+    : { sonnet: Math.floor(free / costOf(e, "sonnet") + 1e-9), opus: Math.floor(free / costOf(e, "opus") + 1e-9) };
   const five = { used, held, free, resets: live ? u.five_hour_resets : null, fits, old: now - u.at > READING_OLD, at: u.at };
   return { ...base, five, week: weekPace(u.seven_day, u.seven_day_resets, now) };
 }
@@ -118,7 +135,7 @@ export interface PoolPace {
 export function poolPace(state: State): PoolPace {
   const accounts = Object.entries(state.installed).map(([n, e]) => accountPace(n, e, state));
   // tonight's accounts, and any other one that is running work now (an item pinned to it, or a changed pool)
-  const pool = accounts.filter((a) => (a.inPool || a.running > 0) && a.five !== null);
+  const pool = accounts.filter((a) => (a.inPool || a.running > 0) && a.five !== null && !a.codex);
   const busiest = [...pool].sort((x, y) => y.running - x.running)[0];
   const first = busiest ? state.installed[busiest.name] : poolOf(state).map((n) => state.installed[n]).find((e) => e !== undefined);
   const line = state.queue.items.filter((i) => i.state === "queued");

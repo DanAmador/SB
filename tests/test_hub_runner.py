@@ -23,6 +23,7 @@ from helpers import SBMAP, SCRIPT, free_port  # noqa: E402
 import sbhub  # noqa: E402
 import sbqueue  # noqa: E402
 from sbhub import Hub, Supervisor  # noqa: E402
+from fake_worker import CODEX_LIMIT  # noqa: E402
 
 FAKE = Path(__file__).resolve().parent / "fake_worker.py"
 START = datetime(2026, 11, 13, 1, 0).timestamp()  # 01:00 local: the limit's 4:40am is later the same night
@@ -97,7 +98,7 @@ class RunnerCase(unittest.TestCase):
         t = Path(cls._template.name).resolve()
         (t / "Vault" / "wayfinder").mkdir(parents=True)
         (t / "bin").mkdir()
-        for name in ("claude", "agy"):
+        for name in ("claude", "agy", "codex"):
             f = t / "bin" / name
             f.write_text("#!/bin/sh\nexec {} {} \"$@\"\n".format(shlex.quote(sys.executable), shlex.quote(str(FAKE))))
             f.chmod(0o755)
@@ -377,6 +378,164 @@ class LimitTextTest(unittest.TestCase):
                          datetime(2026, 11, 14, 1, 0).timestamp())
         self.assertIsNone(sbhub.limited_until("all good, it resets 4:40 nothing", START))
         self.assertEqual(sbhub.ran_past(90 * 60), "ran past 90 minutes")
+
+
+class CodexTextTest(unittest.TestCase):
+    def test_codex_names_its_clock_time_or_its_date(self):
+        self.assertEqual(sbhub.limited_until(CODEX_LIMIT, START), datetime(2026, 11, 15, 3, 4).timestamp())
+        self.assertEqual(sbhub.limited_until("You've hit your usage limit for gpt-x. Switch to another model now, or "
+                                             "try again at Nov 21st, 2026 9:31 PM.", START),
+                         datetime(2026, 11, 21, 21, 31).timestamp())
+        self.assertEqual(sbhub.limited_until("You've hit your usage limit. Try again later.", START), START + 3600)
+        self.assertEqual(sbhub.limited_until("You've hit your usage limit. Try again at 9:31 PM.", START),
+                         datetime(2026, 11, 13, 21, 31).timestamp())
+        self.assertIsNone(sbhub.limited_until("try again at Nov 15th, 2026 3:04 AM", START))  # no limit named: no stop
+
+    def test_codex_errors_are_what_it_said_and_tool_output_is_not(self):
+        log = "\n".join(json.dumps(e) for e in (
+            {"type": "item.completed", "item": {"type": "command_execution", "aggregated_output": "usage limit reached"}},
+            {"type": "error", "message": "boom"},
+            {"type": "turn.failed", "error": {"message": "401 Unauthorized"}},
+            {"id": "0", "msg": {"type": "error", "message": "old"}}))
+        said = sbhub._said(log)
+        self.assertEqual(said.splitlines(), ["boom", "401 Unauthorized", "old"])
+        self.assertTrue(sbhub.logged_out(said))
+
+    def test_a_codex_jobs_result_is_its_last_agent_message(self):
+        log = "\n".join(json.dumps(e) for e in (
+            {"type": "item.completed", "item": {"type": "agent_message", "text": "first"}},
+            {"type": "item.completed", "item": {"type": "agent_message", "text": "done: wrote it"}},
+            {"type": "turn.completed", "usage": {"input_tokens": 1}}))
+        self.assertEqual(sbhub._job_result(log), "done: wrote it")
+        self.assertEqual(sbhub._job_result(json.dumps({"msg": {"type": "agent_message", "message": "old"}})), "old")
+
+
+def codex_session(home, day, name, *limits, mtime=None):
+    """A Codex session file under home/sessions/<day>/ with one token_count event per (five, week) used percent."""
+    d = Path(home) / "sessions" / day
+    d.mkdir(parents=True, exist_ok=True)
+    f = d / "rollout-{}.jsonl".format(name)
+    lines = [json.dumps({"type": "session_meta", "payload": {"id": name}})]
+    for five, week in limits:
+        lines.append(json.dumps({"type": "event_msg", "payload": {"type": "token_count", "rate_limits": {
+            "primary": {"used_percent": five, "window_minutes": 300, "resets_at": START + 3600},
+            "secondary": {"used_percent": week, "window_minutes": 10080, "resets_at": START + 86400}}}}))
+    f.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    if mtime:
+        os.utime(f, (mtime, mtime))
+    return f
+
+
+class CodexUsageTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.home = Path(self._tmp.name)
+
+    def test_the_newest_sessions_last_limits_are_the_reading(self):
+        codex_session(self.home, "2026/11/12", "old", (90.0, 90.0), mtime=START - 86400)
+        codex_session(self.home, "2026/11/13", "a", (3.0, 20.0), (4.0, 21.0), mtime=START - 60)
+        codex_session(self.home, "2026/11/13", "b", mtime=START)  # just started: no limits yet
+        self.assertEqual(sbhub.codex_usage(self.home), {"five_hour": 0.04, "five_hour_resets": START + 3600,
+                                                        "seven_day": 0.21, "seven_day_resets": START + 86400})
+
+    def test_a_runs_cost_is_the_rise_in_the_session_its_thread_names(self):
+        codex_session(self.home, "2026/11/13", "2026-11-13T01-00-00-th1", (3.0, 20.0), (3.0, 20.0), (5.0, 20.0))
+        codex_session(self.home, "2026/11/13", "2026-11-13T01-05-00-th2", (40.0, 20.0), mtime=START + 600)
+        log = "argv: []\n" + json.dumps({"type": "thread.started", "thread_id": "th1"}) + "\n"
+        self.assertAlmostEqual(sbhub.codex_run_cost(self.home, log), 0.02)
+        self.assertIsNone(sbhub.codex_run_cost(self.home, "no thread here\n"))
+        self.assertIsNone(sbhub.codex_run_cost(self.home, json.dumps({"type": "thread.started", "thread_id": "gone"})))
+
+    def test_no_sessions_no_reading(self):
+        self.assertIsNone(sbhub.codex_usage(self.home))
+        codex_session(self.home, "2026/11/13", "a")
+        self.assertIsNone(sbhub.codex_usage(self.home))
+
+
+class CodexRunTest(RunnerCase):
+    """A Codex account in the pool takes tickets as a Claude account does; its limit and logout take it out."""
+
+    def setUp(self):
+        super().setUp()
+        with self.hub._lock:
+            self.hub._data["installed"] = {"codex": {"kind": "codex", "dir": str(self.root / ".codex"), "model": None,
+                                                     "limited_until": None}}
+            self.hub._data["queue"]["agent"] = "codex"
+
+    def test_a_codex_accounts_use_is_read_from_its_sessions_while_the_queue_is_paused(self):
+        codex_session(self.root / ".codex", "2026/11/13", "a", (4.0, 21.0))
+        self.sup.tick()
+        u = self.hub.state()["installed"]["codex"]["usage"]
+        self.assertEqual((u["five_hour"], u["seven_day"], u["at"]), (0.04, 0.21, START))
+        codex_session(self.root / ".codex", "2026/11/13", "a", (9.0, 22.0))
+        self.sup.tick()
+        self.assertEqual(self.hub.state()["installed"]["codex"]["usage"]["five_hour"], 0.04)  # once per USAGE_STALE
+        self.clock.t += sbhub.USAGE_STALE
+        self.sup.tick()
+        self.assertEqual(self.hub.state()["installed"]["codex"]["usage"]["five_hour"], 0.09)
+
+    def test_a_finished_codex_ticket_teaches_its_account_a_cost_of_its_own(self):
+        codex_session(self.root / ".codex", "2026/11/13", "2026-11-13T01-00-00-th1", (3.0, 20.0), (5.0, 20.0))
+        log = self.root / "w.log"
+        log.write_text("earlier try\n" + json.dumps({"type": "thread.started", "thread_id": "th1"}) + "\n")
+        inst = self.hub.state()["installed"]["codex"]
+        run = {"agent": "codex", "inst": inst, "log": str(log), "start": len("earlier try\n"), "alone": True}
+        self.sup._learn(run, None)
+        self.assertEqual(self.hub.state()["installed"]["codex"]["costs"], {"codex": {"avg": 0.02, "n": 1}})
+        self.sup._learn({**run, "alone": False}, None)  # overlapped by another worker: it says nothing
+        self.assertEqual(self.hub.state()["installed"]["codex"]["costs"]["codex"]["n"], 1)
+
+    def test_codex_usage_is_off_with_sb_hub_codex_usage_0(self):
+        codex_session(self.root / ".codex", "2026/11/13", "a", (4.0, 21.0))
+        with mock.patch.dict(os.environ, {"SB_HUB_CODEX_USAGE": "0"}):
+            sup = Supervisor(self.hub, port=4321)
+        self.addCleanup(sup.stop)
+        self.assertFalse(sup.codex_usage)
+        self.sup.codex_usage = False
+        self.sup.tick()
+        self.assertNotIn("usage", self.hub.state()["installed"]["codex"])
+
+    def test_a_ticket_runs_on_codex_exec_under_its_account_and_resolves(self):
+        self.only(1)
+        self.until(lambda: self.state_of("repo/one#1") == "done")
+        item, log = self.items()["repo/one#1"], self.launched[0]["log"]
+        argv = self.printed(log, 1)[0]
+        self.assertEqual(argv[:6], ["--json", "-C", str(self.repos["repo/one"]), "--skip-git-repo-check", "-c",
+                                    'approval_policy="never"'])
+        self.assertNotIn("-m", argv)  # no model named: the account's own default, never sonnet
+        self.assertEqual(argv[argv.index("-s") + 1], "workspace-write")
+        roots = [b for a, b in zip(argv, argv[1:]) if a == "--add-dir"]
+        self.assertIn(str(self.repos["repo/one"] / ".git"), roots)
+        self.assertIsNone(item.get("session"))
+        self.assertEqual(json.loads(self.printed(log, 1, "env")[0])["CODEX_HOME"], str(self.root / ".codex"))
+        self.assertEqual(self.open_tickets(), {2: self.open_tickets()[2]})
+
+    def test_a_codex_usage_limit_takes_the_account_out_until_the_time_it_names(self):
+        self.mode = "limit"
+        self.only(1)
+        self.until(lambda: self.hub.state()["installed"]["codex"]["limited_until"])
+        self.assertEqual(self.hub.state()["installed"]["codex"]["limited_until"], datetime(2026, 11, 15, 3, 4).timestamp())
+        self.assertEqual(self.state_of("repo/one#1"), "queued")
+        self.assertEqual(self.open_tickets()[1]["status"], "open")
+
+    def test_a_signed_out_codex_account_is_marked_and_its_ticket_waits(self):
+        self.mode = "auth"
+        self.only(1)
+        self.until(lambda: self.hub.state()["installed"]["codex"].get("login") == "expired")
+        self.assertEqual(self.state_of("repo/one#1"), "queued")
+        self.assertEqual(len(self.launched), 1)
+
+    def test_failed_tries_on_codex_come_back_with_no_model_never_sonnet_or_opus(self):
+        script = self.root / "fails.sh"  # exits 1 twice, then 0
+        script.write_text('n=$(cat "{c}" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "{c}"; [ $n -le 2 ] && exit 1; '
+                          'exit 0\n'.format(c=self.root / "fails"))
+        self.sb("set", "repo/one", "001", "checks=sh " + str(script), "--no-sync")
+        self.only(1)
+        self.until(lambda: self.state_of("repo/one#1") == "done")
+        runs = [x for x in self.launched if x["key"] == "repo/one#1"]
+        self.assertEqual([x["model"] for x in runs], [None, None, None])
+        self.assertNotIn("-m", self.printed(runs[2]["log"], 3)[2])
 
 
 class TicketLoopTest(RunnerCase):
@@ -1928,6 +2087,19 @@ class LaunchAndHookTest(RunnerCase):
         self.assertNotIn("OPENAI_API_KEY", env)
         self.assertNotIn("OPENAI_API_KEY", popen.call_args_list[1].kwargs["env"])
         self.assertNotIn("UNITY_PATH", popen.call_args_list[1].kwargs["env"])
+
+    def test_launch_starts_codex_with_its_model_and_the_sandbox_its_entry_names(self):
+        log = self.root / "codex.log"
+        p = sbhub.launch({"kind": "codex", "dir": "/cx", "model": None, "sandbox": "bypass"}, "Ticket: m/001\n",
+                         str(self.repos["repo/one"]), "gpt-x", {"SB_HUB_AGENT": "m#1", "SB_HUB_PARENT": "queue",
+                                                                "SB_HUB_PORT": "1", "FAKE_WORKER_MODE": "nothing"}, str(log))
+        self.assertEqual(os.getpgid(p.pid), p.pid)
+        self.assertEqual(p.wait(timeout=10), 1)
+        self.assertIsNone(p.session)
+        text = log.read_text(encoding="utf-8")
+        self.assertIn('"-m", "gpt-x", "--dangerously-bypass-approvals-and-sandbox"]', text)
+        self.assertIn('"CODEX_HOME": "/cx"', text)
+        self.assertIsNone(sbhub.resumable({"session": "s", "session_dir": "/d"}, {"kind": "codex"}, self.root))
 
     def test_launch_starts_agy_in_its_own_group_with_its_model(self):
         log = self.root / "agy.log"

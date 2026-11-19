@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""A stand-in for `claude -p` / `agy -p` in the hub's runner tests: never a model.
+"""A stand-in for `claude -p` / `agy -p` / `codex exec` in the hub's runner tests: never a model.
 
 The runner tests put a `claude` on PATH that runs this script with the launcher's own arguments, so
 `sbhub.launch` is exercised for real. It reads the ticket and its paths from the brief (`-p`), prints
-its arguments (the log keeps them), and does what FAKE_WORKER_MODE says:
+its arguments (the log keeps them), and does what FAKE_WORKER_MODE says (run as `codex exec <brief>`, its `limit`
+and `auth` print Codex's JSON events instead):
 
   commit   commit a change inside the ticket's paths with the right trailer, exit 0
   stray    commit a file outside the ticket's paths, with the trailer, exit 0
@@ -59,6 +60,10 @@ import time
 
 LIMIT = "You've hit your session limit · resets 4:40am (Europe/Madrid)"
 AUTH = "Failed to authenticate: OAuth session expired and could not be refreshed"
+CODEX_LIMIT = ("You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit "
+               "https://chatgpt.com/codex/settings/usage to purchase more credits or try again at Nov 15th, 2026 3:04 AM.")
+CODEX_AUTH = ("Your access token could not be refreshed because your refresh token has expired. "
+              "Please log out and sign in again.")
 
 
 def event(five, status="allowed"):
@@ -160,9 +165,13 @@ def integrator(brief):
 
 def main():
     argv = sys.argv[1:]
-    brief = argv[argv.index("-p") + 1]
-    print("argv: " + json.dumps(argv[argv.index("-p") + 2:]), flush=True)
+    codex = argv[:1] == ["exec"]
+    at = 0 if codex else argv.index("-p")
+    brief = argv[at + 1]
+    print("argv: " + json.dumps(argv[at + 2:]), flush=True)
     env = {k: os.environ.get(k) for k in ("CLAUDE_CONFIG_DIR", "SB_HUB_AGENT", "SB_HUB_PARENT", "SB_HUB_PORT")}
+    if codex:
+        env["CODEX_HOME"] = os.environ.get("CODEX_HOME")
     if os.environ.get("SB_HUB_UNITY"):  # only a Unity project's worker or integrator has it
         env["SB_HUB_UNITY"] = os.environ["SB_HUB_UNITY"]
     print("env: " + json.dumps(env), flush=True)
@@ -232,6 +241,11 @@ def main():
         return 0
     if mode == "nothing":
         result({"type": "result", "subtype": "success", "is_error": True, "result": "gave up"})
+        return 1
+    if codex and mode in ("limit", "auth"):
+        print(json.dumps({"type": "thread.started", "thread_id": "t1"}))
+        print(json.dumps({"type": "error", "message": CODEX_LIMIT if mode == "limit" else CODEX_AUTH}))
+        print(json.dumps({"type": "turn.failed", "error": {"message": CODEX_LIMIT if mode == "limit" else CODEX_AUTH}}))
         return 1
     if mode == "limit":
         if os.environ.get("FAKE_WORKER_RESET"):

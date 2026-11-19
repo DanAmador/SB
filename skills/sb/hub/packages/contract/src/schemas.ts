@@ -100,7 +100,9 @@ export const Usage = UsageReading.extend({ at: Seconds });
 export type Usage = z.infer<typeof Usage>;
 
 export const Installed = z.strictObject({
-  kind: z.enum(["claude", "agy"]),
+  kind: z.enum(["claude", "agy", "codex"]),
+  /** A Codex agent's `codex exec` sandbox: workspace-write (default), read-only, danger-full-access or bypass. */
+  sandbox: z.string().optional(),
   dir: z.string().nullable(),
   model: z.string().nullable(),
   limited_until: Seconds.nullable(),
