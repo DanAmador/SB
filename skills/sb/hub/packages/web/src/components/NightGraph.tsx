@@ -1,6 +1,7 @@
 /**
- * The run's graph, what Everything (or a project) shows where a map's own graph would: a timeline, a column per
- * project and a row per step, oldest at the top; the now line; the rows still to come drawn dashed; one Done box.
+ * The run's graph, what Everything (or a project) shows where a map's own graph would: a timeline running left to
+ * right, a band per project, oldest at the left; the now line; the steps still to come drawn dashed; one Done box.
+ * The live run and History both draw it.
  * Map chips above it show or hide each map. Below 768 px it is a list grouped by map. It reads the queue the page
  * already polls, so a box changes in place when its ticket does.
  */
@@ -14,7 +15,7 @@ import { useMapRoutes } from "@/lib/hub.ts";
 import { setLink } from "@/lib/link.ts";
 import { liveItems } from "@/lib/night.ts";
 import { NODE_H, NODE_W, type MapNode } from "@/lib/map.ts";
-import { atOnceOf, CLOCK_W, DONE_ID, focusOf, HEAD, infoOf, nightGraph, type NightBox, type NightDone, type NightFrame, type NightMemo } from "@/lib/nightGraph.ts";
+import { atOnceOf, CLOCK_H, DONE_ID, focusOf, infoOf, LEFT, nightGraph, type NightBox, type NightDone, type NightFrame, type NightMemo } from "@/lib/nightGraph.ts";
 import { cn } from "@/lib/utils";
 import { itemProject } from "@/lib/board.ts";
 import { ProjectChips, ScrollRow, tally } from "./bits.tsx";
@@ -30,17 +31,17 @@ function nodeOf(b: NightBox): MapNode {
     num, title: b.title, type: item.kind === "job" ? "other" : "task", status: "open", state: "ready", why: "", priority: null, tier: "", place: b.place,
     last_run: null, blocked_by: [], file: "", links: item.links,
   };
-  return { id: b.id, ticket, title: b.title, state: b.state, other: b.map, x: 0, y: 0, w: NODE_W, h: NODE_H };
+  return { id: b.id, ticket, title: b.title, state: b.state, other: b.map, x: 0, y: 0, w: b.w, h: NODE_H };
 }
 
 interface TextData extends Record<string, unknown> {
   text: string;
   now?: boolean;
 }
-/** A row's clock time, at its left. */
+/** A time in the strip along the top, centred on its line. */
 function Clock({ data }: NodeProps<Node<TextData>>): React.JSX.Element {
   return (
-    <div className={cn("flex size-full items-center text-xs tabular-nums", data.now === true ? "font-semibold text-brand" : "text-muted-foreground")}>{data.text}</div>
+    <div className={cn("flex size-full items-center justify-center text-xs whitespace-nowrap tabular-nums", data.now === true ? "font-semibold text-brand" : "text-muted-foreground")}>{data.text}</div>
   );
 }
 interface FrameData extends Record<string, unknown> {
@@ -48,8 +49,8 @@ interface FrameData extends Record<string, unknown> {
   ids: string[];
 }
 /**
- * A project's column as one framed group behind its boxes: its name and box count on top, and a button that fits the
- * view to just that column. The frame lets clicks through to the boxes; only its label takes them.
+ * A project's band as one framed group behind its boxes: its name and box count on top, and a button that fits the
+ * view to just that band. The frame lets clicks through to the boxes; only its label takes them.
  */
 function Head({ data }: NodeProps<Node<FrameData>>): React.JSX.Element {
   const rf = useReactFlow();
@@ -71,11 +72,11 @@ function Head({ data }: NodeProps<Node<FrameData>>): React.JSX.Element {
     </div>
   );
 }
-/** The now line, across every column. */
+/** The now line, down through every band. */
 function Now(): React.JSX.Element {
   return (
     <div className="relative size-full" aria-hidden>
-      <div className="absolute inset-x-0 top-1/2 border-t-2 border-brand" />
+      <div className="absolute inset-y-0 left-1/2 border-l-2 border-brand" />
     </div>
   );
 }
@@ -86,7 +87,7 @@ interface DoneData extends Record<string, unknown> {
 function Done({ data }: NodeProps<Node<DoneData>>): React.JSX.Element {
   return (
     <>
-      <Handle type="target" position={Position.Top} isConnectable={false} className="!pointer-events-none !opacity-0" />
+      <Handle type="target" position={Position.Left} isConnectable={false} className="!pointer-events-none !opacity-0" />
       <div data-testid="night-done" className="flex size-full flex-col justify-center gap-0.5 rounded-lg border-2 border-foreground bg-card px-3 text-sm">
         <span className="flex items-center gap-1.5 font-semibold">
           <IconFlag className="size-4" aria-hidden />
@@ -215,6 +216,8 @@ function List({ frames }: { frames: readonly NightFrame[] }): React.JSX.Element 
 const ARROW = { type: MarkerType.ArrowClosed, width: 16, height: 16 } as const;
 /** The room a project's frame leaves around its boxes. */
 const FRAME_PAD = 12;
+/** A clock label's width, centred on its time. */
+const TICK_W = 88;
 
 /** The live run's graph, or the graph of the run it is given (History's). Either narrows to the sidebar's pick. */
 export function NightGraph({ items: given, title }: { items?: readonly QueueItem[]; title?: string }): React.JSX.Element | null {
@@ -237,7 +240,7 @@ export function NightGraph({ items: given, title }: { items?: readonly QueueItem
       return n;
     });
   };
-  // the columns keep their order and width, so an update moves nothing that stays
+  // the bands keep their order and height, so an update moves nothing that stays
   const [memo] = useState(() => new Map<"v", NightMemo>());
   const g = useMemo(
     () => nightGraph({ items, maps: state.queue.maps ?? [], info, scope, hidden, atOnce, now: minute, prev: memo.get("v") }),
@@ -263,21 +266,19 @@ export function NightGraph({ items: given, title }: { items?: readonly QueueItem
   const projects = tally(items.map((i) => itemProject(i, ix.byKey.get(i.key))));
   const chips = <ProjectChips counts={projects} label="Projects in the run" />;
   if (g.frames.length === 0) return scope.project !== "" && projects.length > 0 ? chips : null;
-  const right = Math.max(CLOCK_W + NODE_W, ...g.columns.map((c) => c.x + c.w));
   const fixed = { draggable: false, connectable: false, selectable: false, focusable: false } as const;
   const nodes: Node[] = [
-    ...g.columns.map((c): Node => {
+    ...g.bands.map((c): Node => {
       const its = g.boxes.filter((b) => b.project === c.project);
-      const bottom = Math.max(HEAD, ...its.map((b) => b.y + b.h)) + FRAME_PAD;
       return {
-        id: `head:${c.project}`, type: "head", position: { x: c.x - FRAME_PAD, y: 0 }, width: c.w + 2 * FRAME_PAD, height: bottom,
+        id: `head:${c.project}`, type: "head", position: { x: LEFT - FRAME_PAD, y: c.y }, width: g.right - LEFT + 2 * FRAME_PAD, height: c.h,
         data: { text: c.project, ids: its.map((b) => b.id) }, zIndex: -1, style: { pointerEvents: "none" }, ...fixed,
       };
     }),
-    ...g.rows.map((r): Node => ({ id: `clock:${String(r.row)}`, type: "clock", position: { x: 0, y: r.y }, width: CLOCK_W - 12, height: NODE_H, data: { text: r.clock, now: r.phase === "now" }, ...fixed })),
-    ...(g.nowY !== null ? [{ id: "now", type: "now", position: { x: 0, y: g.nowY - 6 }, width: right, height: 12, data: {}, zIndex: -1, ...fixed } satisfies Node] : []),
+    ...g.ticks.map((r): Node => ({ id: `clock:${String(r.tick)}`, type: "clock", position: { x: r.x - TICK_W / 2, y: 0 }, width: TICK_W, height: CLOCK_H - 8, data: { text: r.clock, now: r.phase === "now" }, ...fixed })),
+    ...(g.nowX !== null ? [{ id: "now", type: "now", position: { x: g.nowX - 6, y: CLOCK_H - 8 }, width: 12, height: g.bottom - CLOCK_H + 8, data: {}, zIndex: -1, ...fixed } satisfies Node] : []),
     ...g.boxes.map((b): Node<Data> => ({
-      id: b.id, type: "box", position: { x: b.x, y: b.y }, width: NODE_W, height: b.h, draggable: false, connectable: false, focusable: false, style: { pointerEvents: "all" },
+      id: b.id, type: "box", position: { x: b.x, y: b.y }, width: b.w, height: NODE_H, draggable: false, connectable: false, focusable: false, style: { pointerEvents: "all" },
       data: { n: nodeOf(b), map: b.map, ...(b.place === null && { foot: b.foot }), key: b.id, report: b.report, flash: changed.has(b.id), hue: b.hue, dashed: b.phase === "next" },
     })),
     ...(g.done !== null ? [{ id: DONE_ID, type: "done", position: { x: g.done.x, y: g.done.y }, width: NODE_W, height: NODE_H, data: { d: g.done }, ...fixed } satisfies Node] : []),

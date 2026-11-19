@@ -29,12 +29,12 @@ describe("layoutMap", () => {
     expect(out.nodes.filter((n) => n.ticket === null).map((n) => n.other).sort()).toEqual(["other/map", "third/map"]);
   });
 
-  it("puts every ticket below all the tickets it comes after", () => {
+  it("puts every ticket right of all the tickets it comes after", () => {
     expect(out.edges).toHaveLength(7);
     for (const e of out.edges) {
       const from = at.get(e.from);
       const to = at.get(e.to);
-      expect(from && to && to.y >= from.y + from.h).toBe(true);
+      expect(from && to && to.x >= from.x + from.w).toBe(true);
     }
   });
 
@@ -53,7 +53,7 @@ describe("layoutMap", () => {
     const l = layoutMap(big);
     expect(l.nodes).toHaveLength(58);
     const m = new Map(l.nodes.map((n) => [n.id, n]));
-    for (const e of l.edges) expect((m.get(e.to)?.y ?? 0) >= (m.get(e.from)?.y ?? 0) + 68).toBe(true);
+    for (const e of l.edges) expect((m.get(e.to)?.x ?? 0) >= (m.get(e.from)?.x ?? 0) + 220).toBe(true);
   });
 });
 

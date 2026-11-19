@@ -112,7 +112,7 @@ export function Box({ data }: NodeProps<Node<Data>>): React.JSX.Element {
   };
   return (
     <>
-      <Handle type="target" position={Position.Top} isConnectable={false} className="!pointer-events-none !opacity-0" />
+      <Handle type="target" position={Position.Left} isConnectable={false} className="!pointer-events-none !opacity-0" />
       <button
         type="button"
         onClick={open}
@@ -149,7 +149,7 @@ export function Box({ data }: NodeProps<Node<Data>>): React.JSX.Element {
           Report
         </a>
       )}
-      <Handle type="source" position={Position.Bottom} isConnectable={false} className="!pointer-events-none !opacity-0" />
+      <Handle type="source" position={Position.Right} isConnectable={false} className="!pointer-events-none !opacity-0" />
     </>
   );
 }

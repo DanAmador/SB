@@ -93,7 +93,8 @@ export function layoutMap(route: Pick<MapRoute, "map" | "checks" | "tickets">): 
     }
   }
   const g = new dagre.graphlib.Graph();
-  g.setGraph({ rankdir: "TB", nodesep: 24, ranksep: 48, marginx: 16, marginy: 16 });
+  // left to right, as the run's graph runs (ticket 168): what comes after sits to the right
+  g.setGraph({ rankdir: "LR", nodesep: 24, ranksep: 64, marginx: 16, marginy: 16 });
   g.setDefaultEdgeLabel(() => ({}));
   for (const n of nodes.values()) g.setNode(n.id, { width: n.w, height: n.h });
   for (const e of edges) g.setEdge(e.from, e.to);
