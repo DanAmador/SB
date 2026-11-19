@@ -1,0 +1,107 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "sb-hub",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "skills/sb/scripts/sbhub.py",
+        "serve",
+        "--port",
+        "8765"
+      ],
+      "port": 8765
+    },
+    {
+      "name": "sb-hub-test",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "SB_HUB_HOME=/private/tmp/claude-501/-Users-danamador--claude-spares-spare-2ivhfw/35588daa-d04f-4e5c-83b5-96c6b83dd57b/scratchpad/hubhome",
+        "SB_HUB_NOTIFY=0",
+        "python3",
+        "skills/sb/scripts/sbhub.py",
+        "serve",
+        "--port",
+        "18991"
+      ],
+      "port": 18991
+    },
+    {
+      "name": "hub-demo",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "/private/tmp/claude-501/-Users-danamador-Documents-Coding-sb-workflow/0e9c2266-381c-4256-84bd-11127f1c9446/scratchpad/hubdemo.py",
+        "--port",
+        "8791"
+      ],
+      "port": 8791
+    },
+    {
+      "name": "sb-hub-lan",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "skills/sb/scripts/sbhub_lan.py",
+        "serve",
+        "--port",
+        "8766"
+      ],
+      "port": 8766
+    },
+    {
+      "name": "hub-web-live",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--dir",
+        "/Users/danamador/.sb-hub/worktrees/sb-workflow-74ed4c/live-active-only/skills/sb/hub/packages/web",
+        "exec",
+        "vite",
+        "--port",
+        "5199",
+        "--strictPort"
+      ],
+      "port": 5199
+    },
+    {
+      "name": "hub-web-dev",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--dir",
+        "/Users/danamador/Documents/Coding/sb-workflow/skills/sb/hub/packages/web",
+        "exec",
+        "vite",
+        "--port",
+        "5198",
+        "--strictPort"
+      ],
+      "port": 5198
+    },
+    {
+      "name": "hub-fixture",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "FIXTURE_PORT=18992",
+        "node",
+        "/Users/danamador/Documents/Coding/sb-workflow/skills/sb/hub/packages/web/e2e/fixture-server.ts"
+      ],
+      "port": 18992
+    },
+    {
+      "name": "hub-web-fixture",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "SB_HUB_URL=http://127.0.0.1:18992",
+        "pnpm",
+        "--dir",
+        "/Users/danamador/Documents/Coding/sb-workflow/skills/sb/hub/packages/web",
+        "exec",
+        "vite",
+        "--port",
+        "5197",
+        "--strictPort",
+        "--host",
+        "127.0.0.1"
+      ],
+      "port": 5197
+    }
+  ]
+}
