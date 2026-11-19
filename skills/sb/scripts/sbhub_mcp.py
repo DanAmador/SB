@@ -378,6 +378,30 @@ def build_server():
         return "{}: {}; the hub does it now, and the board says how it went".format(
             key, "landing" if action == "land" else "sent back")
 
+    @mcp.tool(description="Build a queued ticket of the live run yourself (join it first with sb_join). Answers the "
+                          "ticket's own worktree and branch, and its brief: work and commit only in that worktree, "
+                          "never in the repo's main folder; no worker runs it. Then call sb_done.")
+    def sb_take(agent: str, key: str) -> str:
+        code, out = hub("/api/run/take", {"agent": agent, "key": key})
+        if code == 0:
+            return HUB_DOWN
+        if code != 200:
+            return "not taken: {}".format(out.get("error") if isinstance(out, dict) else out)
+        return "{} is yours: build it in {} (branch {}), never in the repo's main folder; commit there, then call " \
+               "sb_done.\n\n{}".format(key, out["tree"], out["branch"], out["brief"])
+
+    @mcp.tool(description="Say a ticket you took with sb_take is built and committed in its worktree. The hub runs its "
+                          "checks, then hands it to its integrator (or lands it). When its checks fail it comes back "
+                          "to you: `sbhub.py watch --chat <agent>` in the background wakes you, or run "
+                          "`sbhub.py done KEY --agent <agent>` instead, which waits and prints how it went.")
+    def sb_done(agent: str, key: str, note: str = "") -> str:
+        code, out = hub("/api/run/done", {"agent": agent, "key": key, **({"note": note} if note else {})})
+        if code == 0:
+            return HUB_DOWN
+        if code != 200:
+            return "not done: {}".format(out.get("error") if isinstance(out, dict) else out)
+        return "{}: its checks run now; the board says how it went".format(key)
+
     @mcp.tool(description="Leave the run joined with sb_join: the board stops showing this chat.")
     def sb_leave(agent: str) -> str:
         code, out = hub("/api/run/leave", {"agent": agent})

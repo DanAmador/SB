@@ -35,6 +35,11 @@ and never fail a session when it is down.
                                       with how to land it, 3 when X has joined no live run
   sbhub.py integrate KEY land|back --agent X [--note N]
                                       land a ticket handed to X after reviewing it, or send it back with a note
+  sbhub.py take KEY --agent X         joined chat X builds a queued ticket itself: prints its worktree, branch and
+                                      brief; no worker runs it
+  sbhub.py done KEY --agent X [--note N] [--wait S]
+                                      X says the ticket it took is built: the hub runs its checks and hands it on
+                                      (or lands it); prints how it went, or what to fix when its checks fail
   sbhub.py queue integrate <map> <NNN>...   a Unity pass for failed tickets whose work is in the checkout: no
                                       worker, the integrator plays what the review found short and fixes it
   sbhub.py queue pause|resume         hold or release the queue
@@ -107,6 +112,8 @@ import sbruns
 CHAT_WORKING = ("working", "waiting", "needs you", "blocked")
 # what a chat joins the live run as (ticket 170): an integrator reviews and lands, an implementer builds tickets
 JOIN_ROLES = ("integrator", "implementer")
+# the `runner` of a queue item a joined chat took to build itself (ticket 173): no worker runs it
+CHAT_RUNNER = "chat"
 CHAT_IDLE = 1800
 CHAT_RUNS_KEPT = 7 * 86400
 AGENT_FIELDS = ("name", "title", "asked", "project", "role", "parent", "ticket", "map", "state", "note", "done", "total")
@@ -454,13 +461,112 @@ class Hub:
             a = self._data["agents"].get(agent)
             if a is None or not a.pop("joined", None):
                 raise ValueError("that chat has not joined the run")
+            freed = []
             for i in self._data["queue"]["items"]:  # what waited for it goes to another integrator, or the hub lands it
                 if i.get("state") == "handed" and (i.get("handed") or {}).get("to") == agent and not i.get("integrate_ask"):
                     self._rehand(i)
+                elif i.get("state") == "running" and i.get("runner") == CHAT_RUNNER and i.get("agent") == agent:
+                    self._untake(i, "its chat left; a worker goes on from the chat's branch", kept=True)
+                    freed.append(i["key"])
             self._data["queue"]["version"] += 1
             self._save()
             self.queue_kick.set()
-            return {"ok": True}
+        for key in freed:  # the claim was the chat's: a worker claims it afresh
+            if self.supervisor is not None:
+                self.supervisor.runner.release(key)
+        return {"ok": True}
+
+    @staticmethod
+    def _untake(item, note, kept=False):
+        """(the lock is held) A ticket a chat took goes back to the queue; `kept`: its worktree has the chat's work, so
+        the worker that takes it goes on there."""
+        item.update(state="queued", runner=None, agent=item.pop("agent_was", None), started=None, note=note)
+        for f in ("done_ask", "chat_back", "chat_back_at"):
+            item.pop(f, None)
+        if kept:
+            item["from_chat"] = True
+
+    def take_ticket(self, agent, key):
+        """A joined chat takes a queued ticket of the live run to build it itself (ticket 173): the ticket gets its own
+        worktree and branch (never the repo's main folder, ticket 133) and the hub's claim, no worker starts for it,
+        and the answer carries the brief a worker would get. A ticket a worker already runs is refused."""
+        sup = self.supervisor
+        if sup is None:
+            raise ValueError("this hub runs no queue")
+        rows = self._fresh_tickets()
+        if rows is None:
+            raise ValueError("the tickets could not be read")
+        t = next((r for r in rows if sbqueue.key(r) == key), None)
+        with self._lock:
+            night = self._night_live()
+            if night is None or night["state"] != "live":
+                raise ValueError("no run is live: press Start first")
+            chat = self._resolve(str(agent or ""))
+            if ((self._data["agents"].get(chat) or {}).get("joined") or {}).get("night") != night["id"]:
+                raise ValueError("{} has not joined the run (sbhub.py night join --agent {})".format(chat, chat))
+            item = next((i for i in self._data["queue"]["items"] if i["key"] == key), None)
+            if item is None or item["kind"] != "ticket" or item.get("night") != night["id"]:
+                raise ValueError("{} is not queued in the live run".format(key))
+            if item["state"] == "running":
+                raise ValueError("{} already runs: {}".format(key, "chat " + str(item.get("agent")) + " builds it"
+                                                              if item.get("runner") == CHAT_RUNNER else
+                                                              "a worker on " + str(item.get("runner"))))
+            if item["state"] != "queued":
+                raise ValueError("{} is {}, not queued".format(key, item["state"]))
+            if t is None:
+                raise ValueError("{} is no longer an open ticket".format(key))
+            state, reason = sbqueue.classify({**t, "status": "open", "claimed_by": None} if _hub_holds(t) else t,
+                                             set(), rows)
+            if state != "ready":
+                raise ValueError("{} is {}: {}".format(key, state, reason))
+            if not usable_project(t.get("repo")):
+                raise ValueError("its map's repo is not a folder here: {}".format(t.get("repo") or "none"))
+            item.update(state="running", runner=CHAT_RUNNER, agent_was=item.get("agent"), agent=chat,
+                        started=self.now(), ended=None, note="taken by " + chat)
+            self._data["queue"]["version"] += 1
+            self._save()
+            before = dict(item)
+        try:
+            got, brief, why = sup.runner.taken(before, t, chat)
+        except Exception as e:  # the item never stays taken by a take that broke
+            got, brief, why = None, None, "{}: {}".format(type(e).__name__, e)
+        with self._lock:
+            item = next((i for i in self._data["queue"]["items"] if i["key"] == key), None)
+            if item is not None:
+                if why:
+                    self._untake(item, "could not be taken by {}: {}".format(chat, why), kept=bool(item.get("from_chat")))
+                else:
+                    item.update(got)
+                    item.pop("from_chat", None)
+            self._data["queue"]["version"] += 1
+            self._save()
+            self.queue_kick.set()
+        if why:
+            raise ValueError("could not take {}: {}".format(key, why))
+        return {"ok": True, "key": key, "tree": got["tree"], "branch": got["branch"], "base": got["base_sha"],
+                "brief": brief}
+
+    def ticket_done(self, agent, key, note=""):
+        """The chat that took a ticket says it is built: the hub runs its checks at its next tick and hands it to its
+        integrator (or lands it the hub's way with none joined); failing checks send it back to the chat."""
+        with self._lock:
+            q = self._data["queue"]
+            chat = self._resolve(str(agent or ""))
+            item = next((i for i in q["items"] if i["key"] == key), None)
+            if item is None or item.get("state") != "running" or item.get("runner") != CHAT_RUNNER:
+                raise ValueError("{} is not a ticket a chat builds".format(key))
+            if item.get("agent") != chat:
+                raise ValueError("{} is taken by {}, not {}".format(key, item.get("agent"), chat))
+            if item.get("done_ask"):
+                raise ValueError("{}'s checks already run".format(key))
+            item["done_ask"] = {"by": chat, "note": str(note or "").strip(), "at": self.now()}
+            for f in ("chat_back", "chat_back_at"):
+                item.pop(f, None)
+            item["note"] = "{} says it is built: its checks run".format(chat)
+            q["version"] += 1
+            self._save()
+            self.queue_kick.set()
+            return {"ok": True, "queue": json.loads(json.dumps(q))}
 
     def _integrator_for(self, item):
         """(the lock is held) The chat a finished ticket goes to (ticket 172): the chat that queued it while it is
@@ -2924,7 +3030,7 @@ def media_in(run_folder, num):
 # through TicketRun, so there is one way to run a ticket. Its answer is one result (the contract's
 # RunTicketResult): what happened, and what the queue does next (retry on another model, or wait for a limit) ----
 
-RESULT_STATES = ("done", "failed", "skipped", "retry", "stopped", "recheck", "redo", "unclean", "handed")
+RESULT_STATES = ("done", "failed", "skipped", "retry", "stopped", "recheck", "redo", "unclean", "handed", "chat")
 STOP_WHY = {"auth": "when its login expired", "limit": "at its usage limit"}
 
 
@@ -3169,7 +3275,7 @@ class TicketRun:
         tree, branch = item.get("tree"), item.get("branch")
         bare = {"t": t, "agent": name, "inst": inst, "tree": tree, "branch": branch}
         # a later try (cut off by a limit, or after a failed one) goes on in the worktree it had
-        reuse = bool(tree) and bool(item.get("resume") or item.get("tries")) and Path(tree).is_dir()
+        reuse = bool(tree) and bool(item.get("resume") or item.get("tries") or item.get("from_chat")) and Path(tree).is_dir()
         where = tree if tree else t["repo"]
         # a try after one cut off by a limit or a logout keeps its base: the verdict sees all of the ticket's commits
         base = item.get("resume") and item.get("base_sha") or _git(where if reuse else t["repo"], "rev-parse", "HEAD")
@@ -3367,6 +3473,57 @@ class TicketRun:
             return self.again(item, run, reason, sha, checks)
         said = "{} reviewed it and landed it{}".format(ask["by"], ": " + ask["note"] if ask.get("note") else "")
         return self.resolve(item, run, sha, "{}; {}".format(reason, said), checks)
+
+    def taken(self, item, t, chat):
+        """(fields, brief, None) once chat `chat` took a queued ticket (ticket 173): its own worktree and branch made
+        (a later take, or one after a chat left, goes on in the one it had), the ticket claimed as the hub's, a run
+        folder for its report; `brief` is what a worker would be told. (None, None, why) when it could not."""
+        nnn = "{:03d}".format(int(t["num"]))
+        board = self.board(t["map"])
+        if board is None:
+            return None, None, "sbmap run failed"
+        tree, branch = ((item["tree"], item["branch"]) if item.get("tree") and item.get("branch")
+                        else tree_of(self.hub.home, t["repo"], t["map"], t["num"]))
+        reuse = bool(item.get("tries") or item.get("from_chat")) and Path(tree).is_dir()
+        base = (item.get("base_sha") if reuse else None) or _git(tree if reuse else t["repo"], "rev-parse", "HEAD")
+        if not base:
+            return None, None, "the repo has no commit to start from"
+        if not reuse:
+            why = make_tree(t["repo"], tree, branch, base)
+            if why:
+                return None, None, "could not make its worktree: " + firstline(why)
+        if _hub_holds(t):  # an earlier try's claim: reopened, then claimed for the chat
+            self.sbmap("set", t["map"], nnn, "status=open")
+        rc, out, err = self.sbmap("claim", t["map"], nnn, "--by", "hub chat " + chat)
+        if rc != 0:
+            return None, None, "could not claim it: " + (err or out)
+        folder = Path(board).parent
+        fields = {"repo": t["repo"], "map": t["map"], "title": t["title"], "tree": tree, "branch": branch,
+                  "paths": list(t.get("paths") or []), "base_sha": base, "first_base": item.get("first_base") or base,
+                  "run": str(folder), "log": str(folder / "{}.log".format(int(t["num"]))), **frozen_of(t)}
+        return fields, sbqueue.brief(t, _plain_words(t), str(folder), tree, branch), None
+
+    def chat_done(self, item, run, to):
+        """The result of a ticket a chat built and said is done (ticket 173), judged as a worker's would be: `handed`
+        to `to`, or, with no chat to hand it to, landed the hub's way (its map's Opus review judges it). One whose
+        checks fail or could not run is `chat`: back to the chat that builds it, its work kept, no try spent."""
+        t, tree, chat = run["t"], run["tree"], item.get("agent")
+        passed, reason, sha, checks = (self.hand if to else self.land)(t, run, tree)
+        self.report_checks(t, run, passed, reason, sha, checks)
+        if passed and to:
+            return {**self.result(item, "handed", "built by {}; checks passed; waits for {} to review and land it".format(
+                chat, to), run, sha, checks), "checked": reason, "to": to}
+        if run.get("integrate"):
+            return {**self.result(item, "integrate", "landed; its Unity stage starts", run, sha, checks),
+                    "integrate": run["integrate"], "t": t}
+        if run.get("blocking"):
+            return {**self.result(item, "unclean", "landed on its branch {}, waiting for a clean checkout: unsaved "
+                                  "changes to {}".format(run.get("branch"), ", ".join(run["blocking"])), run, sha, checks),
+                    "blocking": run["blocking"]}
+        if passed:
+            return {**self.result(item, "landed", "built by {}, landed, not judged yet: the Opus review judges it when its "
+                                  "map's run ends".format(chat), run, sha, checks), "checked": reason}
+        return {**self.result(item, "chat", firstline(reason), run, sha, checks), "checked": reason}
 
     def land(self, t, run, tree):
         self.rebuild.landing_in(t["repo"], 1)
@@ -3958,6 +4115,7 @@ class Supervisor:
             self._held_builds()
             self._rechecks()
             self._handoffs()
+            self._chat_dones()
             self._unclean()
             self._reviews()  # and one a recheck asked for starts at once
             self._probe()
@@ -4312,6 +4470,12 @@ class Supervisor:
             running = [dict(i) for i in self.hub._data["queue"]["items"]
                        if i["state"] == "running"]
         for item in running:
+            if item.get("runner") == CHAT_RUNNER:  # a chat builds it (ticket 173): no worker to watch or recover
+                if item.get("stop_asked"):  # the owner's Stop: it ends as stopped by you, its work left where it is
+                    self._release(item["key"])
+                    self._end(item["key"], "skipped", note="stopped by you: {}. {}".format(
+                        item["stop_asked"]["reason"], self._work_left(item)))
+                continue
             if item.get("stop_asked"):  # the owner's Stop, before a restart's recovery could queue it again
                 self._stop_asked(item)
                 continue
@@ -4763,6 +4927,43 @@ class Supervisor:
                 self._update(item["key"], drop=("integrate_ask",), note="{} did not run: {}: {}".format(
                     item["integrate_ask"]["action"], type(e).__name__, e))
 
+    def _chat_dones(self):
+        """Each ticket a chat built and said is done (Hub.ticket_done), one at a time."""
+        with self.hub._lock:
+            asks = [dict(i) for i in self.hub._data["queue"]["items"] if i["kind"] == "ticket" and i["state"] == "running"
+                    and i.get("runner") == CHAT_RUNNER and i.get("done_ask")]
+        for item in asks:
+            try:
+                self._chat_done(item)
+            except Exception as e:  # back to the chat, which says done again
+                why = "its checks did not run: {}: {}".format(type(e).__name__, e)
+                self._update(item["key"], drop=("done_ask",), chat_back=why, chat_back_at=self.hub.now(),
+                             note="back to {}: {}".format(item.get("agent"), why))
+
+    def _chat_done(self, item):
+        key, chat = item["key"], item.get("agent")
+        found, row = self._row(key)
+        if not found:  # the tickets could not be read: at the next tick
+            return
+        if row is None:
+            self._end(key, "skipped", note="no longer open: it was resolved or dropped while {} built it".format(chat))
+            return
+        run = {"t": row, "agent": "chat " + str(chat), "inst": {}, "base": item.get("base_sha"),
+               "first_base": item.get("first_base"), "log": item.get("log"), "folder": item.get("run"),
+               "tree": item.get("tree"), "branch": item.get("branch")}
+        res = self.runner.chat_done(item, run, self.hub.integrator_for(item))
+        if res["state"] == "chat":
+            self._update(key, drop=("done_ask",), commit=res["commit"], checks=res["checks"],
+                         chat_back=res["checked"][:4000], chat_back_at=self.hub.now(),
+                         note="back to {}: {}".format(chat, res["note"]))
+            return
+        # it leaves the chat: the item names who built it, and its account choice comes back
+        self._update(key, drop=("done_ask", "agent_was"), checks=res["checks"], runner="chat " + str(chat),
+                     agent=item.get("agent_was"))
+        self._apply(item, res)
+        if res["state"] == "done" and res["commit"]:
+            self.runner.rebuild_after(row["repo"], run.get("landed_on") or run.get("base"), res["commit"])
+
     def _handoff(self, item):
         key, ask = item["key"], item["integrate_ask"]
         found, row = self._row(key)
@@ -5211,6 +5412,8 @@ class Supervisor:
         less the rise its agent's use has already shown since it started (only when it runs alone), never below 0."""
         load = {}
         for i in running:
+            if i.get("runner") == CHAT_RUNNER:  # a chat's ticket spends none of the pool's accounts
+                continue
             inst = self.hub._data["installed"].get(i.get("runner")) or {}
             run = self.procs.get(i["key"]) or {}
             u, u0 = inst.get("usage"), run.get("u0")
@@ -5440,7 +5643,8 @@ class Supervisor:
                     continue  # a blocker is queued ahead of it: it waits for it (one that landed does not hold it)
                 model = (item.get("model") if item.get("tries") or item.get("model") else
                          inst.get("model") if inst.get("kind") in OWN_MODEL else t.get("tier") or "sonnet")
-                if parallel(t["repo"]) > 1 or is_unity(t["repo"]):  # its own worktree; a later try keeps it
+                if parallel(t["repo"]) > 1 or is_unity(t["repo"]) or item.get("from_chat"):  # its own worktree; a later
+                    # try keeps it, and so does one a chat left, which goes on from the chat's work
                     tree, branch = ((item["tree"], item["branch"]) if item.get("tree") and item.get("branch")
                                     else tree_of(self.hub.home, t["repo"], t["map"], t["num"]))
                     paths = list(t.get("paths") or [])
@@ -6053,6 +6257,10 @@ def make_handler(hub):
                     out = hub.leave(d["agent"])
                 elif path == "/api/run/integrate":
                     out = hub.integrate(d["key"], d["agent"], d["action"], d.get("note") or "")
+                elif path == "/api/run/take":
+                    out = hub.take_ticket(d["agent"], d["key"])
+                elif path == "/api/run/done":
+                    out = hub.ticket_done(d["agent"], d["key"], d.get("note") or "")
                 elif path == "/api/run/seen":
                     out = hub.run_seen(d["key"])
                 elif path == "/api/agents/dismiss":
@@ -6578,6 +6786,22 @@ def _handed_to(state, chat):
     return me, joined, items
 
 
+def _sent_back(state, me):
+    """{key: chat_back_at} of the tickets chat `me` builds itself whose checks failed and came back to it."""
+    return {i["key"]: i.get("chat_back_at") for i in (state.get("queue") or {}).get("items") or []
+            if i.get("state") == "running" and i.get("runner") == CHAT_RUNNER and i.get("agent") == me
+            and i.get("chat_back") and not i.get("done_ask")}
+
+
+def back_lines(me, items):
+    out = []
+    for i in items:
+        out.append("{} came back to you: {}".format(i["key"], firstline(i.get("chat_back") or "its checks failed")))
+        out.append("  fix it in {} (branch {}), then: sbhub.py done {} --agent {}".format(
+            i.get("tree") or "-", i.get("branch") or "-", i["key"], me))
+    return out
+
+
 def handed_lines(me, items):
     out = []
     for i in items:
@@ -6598,17 +6822,24 @@ def cmd_watch(a):
         print("sbhub: say which chat with --chat", file=sys.stderr)
         return 1
     deadline = time.time() + a.timeout if a.timeout else None
+    seen = None  # the send-backs already there when the watch began: only a new one wakes the chat
     while True:
         code, s = call(a.port, "/api/state")
         if code == 0:
             print("sbhub: not running", file=sys.stderr)
             return 2
-        me, joined, items = _handed_to(s if code == 200 and isinstance(s, dict) else {}, chat)
+        s = s if code == 200 and isinstance(s, dict) else {}
+        me, joined, items = _handed_to(s, chat)
         if code == 200 and not joined:
             print("sbhub: {} has not joined a live run (sbhub.py night join --agent {})".format(me, me), file=sys.stderr)
             return 3
-        if items:
-            print("\n".join(handed_lines(me, items)), flush=True)
+        back = _sent_back(s, me)
+        if seen is None and code == 200:
+            seen = back
+        fresh = [i for i in (s.get("queue") or {}).get("items") or []
+                 if i.get("key") in back and seen is not None and seen.get(i["key"]) != back[i["key"]]]
+        if items or fresh:
+            print("\n".join(handed_lines(me, items) + back_lines(me, fresh)), flush=True)
             return 0
         if deadline is not None and time.time() >= deadline:
             return 1
@@ -6632,6 +6863,59 @@ def cmd_integrate(a):
     print("{}: {}; the hub does it now, and its board says how it went".format(
         a.key, "landing" if a.action == "land" else "sent back"))
     return 0
+
+
+def cmd_take(a):
+    """sbhub take <key> --agent X: joined chat X builds a queued ticket itself (ticket 173)."""
+    agent = a.agent or os.environ.get("SB_HUB_AGENT")
+    if not agent:
+        print("sbhub: say which chat with --agent", file=sys.stderr)
+        return 1
+    code, out = call(a.port, "/api/run/take", {"agent": agent, "key": a.key})
+    if code == 0:
+        print("sbhub: not running", file=sys.stderr)
+        return 2
+    if code != 200:
+        print("sbhub: {}".format(out.get("error") if isinstance(out, dict) else out), file=sys.stderr)
+        return 1
+    print("{} is yours: build it in {} (branch {}, from {}), never in the repo's main folder.".format(
+        a.key, out["tree"], out["branch"], (out.get("base") or "")[:9]))
+    print("Commit there, then: sbhub.py done {} --agent {}".format(a.key, agent))
+    print()
+    print(out["brief"])
+    return 0
+
+
+def cmd_done(a):
+    """sbhub done <key> --agent X: the chat that took a ticket says it is built; waits for the hub's checks and prints
+    how it went. Exits 0 when it was handed on or landed, 4 when it came back to fix, 1 on an error or --wait."""
+    agent = a.agent or os.environ.get("SB_HUB_AGENT")
+    if not agent:
+        print("sbhub: say which chat with --agent", file=sys.stderr)
+        return 1
+    code, out = call(a.port, "/api/run/done", {"agent": agent, "key": a.key, **({"note": a.note} if a.note else {})})
+    if code == 0:
+        print("sbhub: not running", file=sys.stderr)
+        return 2
+    if code != 200:
+        print("sbhub: {}".format(out.get("error") if isinstance(out, dict) else out), file=sys.stderr)
+        return 1
+    deadline = time.time() + a.wait
+    while time.time() < deadline:
+        time.sleep(1)
+        code, s = call(a.port, "/api/state")
+        item = next((i for i in ((s or {}).get("queue") or {}).get("items") or [] if i.get("key") == a.key),
+                    None) if code == 200 and isinstance(s, dict) else None
+        if item is None or item.get("done_ask"):
+            continue
+        if item.get("state") == "running" and item.get("runner") == CHAT_RUNNER:
+            print("\n".join(back_lines(item.get("agent"), [item])))
+            print(item.get("chat_back") or "")
+            return 4
+        print("{}: {}".format(a.key, item.get("note") or item.get("state")))
+        return 0
+    print("sbhub: its checks still run; the board says how it went", file=sys.stderr)
+    return 1
 
 
 def cmd_agents(a):
@@ -6877,6 +7161,8 @@ def main(argv=None):
     add("agents", ("--scan", {"action": "store_true"}))
     add("watch", ("--chat", {}), ("--every", {"type": float, "default": 5.0}), ("--timeout", {"type": float}))
     add("integrate", ("key", {}), ("action", {"choices": ("land", "back")}), ("--agent", {}), ("--note", {}))
+    add("take", ("key", {}), ("--agent", {}))
+    add("done", ("key", {}), ("--agent", {}), ("--note", {}), ("--wait", {"type": float, "default": 900.0}))
     add("review-now")
     add("trust", ("project", {}))
     add("untrust", ("project", {}))
@@ -6910,6 +7196,10 @@ def main(argv=None):
         return cmd_watch(a)
     if a.cmd == "integrate":
         return cmd_integrate(a)
+    if a.cmd == "take":
+        return cmd_take(a)
+    if a.cmd == "done":
+        return cmd_done(a)
     if a.cmd == "review-now":
         return cmd_review_now(a)
     if a.cmd == "run-ticket":

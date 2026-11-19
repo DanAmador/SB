@@ -57,6 +57,8 @@ export const ROUTES = {
   "POST /api/run/join": post(s.RunJoinBody, { 200: s.RunJoinAnswer }),
   "POST /api/run/leave": post(s.RunLeaveBody, { 200: s.Ok }),
   "POST /api/run/integrate": post(s.RunIntegrateBody, { 200: s.QueueAnswer }),
+  "POST /api/run/take": post(s.RunTakeBody, { 200: s.RunTakeAnswer }),
+  "POST /api/run/done": post(s.RunDoneBody, { 200: s.QueueAnswer }),
   "POST /api/queue/item_agent": post(s.QueueItemAgentBody, { 200: s.QueueAnswer }),
   "POST /api/run/seen": post(s.RunSeenBody, { 200: s.Ok }),
   "POST /api/agents/dismiss": post(s.AgentsDismissBody, { 200: s.Ok }),

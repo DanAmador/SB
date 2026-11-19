@@ -247,6 +247,7 @@ When the `sbhub` MCP server is connected (`./install.sh --hub`):
 - **`sb_report`**, **`sb_lock`**, **`sb_unlock`**: same semantics as the CLI below; calling
   `sb_report` as an orchestrator aliases the session just like `sbhub.py report`.
 - **`sb_join`**, **`sb_leave`**: join the live run as `integrator` or `implementer`, or leave it
+- **`sb_take`**, **`sb_done`**: a joined chat builds a queued ticket itself in its own worktree, then says it is built
   (see *Joining a run*).
 
 ## Joining a run
@@ -278,6 +279,19 @@ run. The chat reviews the branch, then `sb_integrate(agent, key, action)` / `POS
 - `back` (a note is required): it is queued again at the front as its next try, the worker told the note.
 
 A chat that leaves hands its waiting tickets to the next integrator, or, with none, to the hub, which lands them.
+
+### A chat builds a ticket itself
+
+A joined chat can take a queued ticket of the live run instead of leaving it to a worker:
+`sbhub.py take KEY --agent <chat>` (`sb_take`). The hub makes the ticket's own worktree and branch, claims
+it as `hub chat <chat>`, starts no worker for it, and prints the brief a worker would get. Build and commit
+only in that worktree, never in the repo's main folder. A ticket a worker already runs is refused.
+
+When it is built, `sbhub.py done KEY --agent <chat>` (`sb_done`). The hub runs its checks as it would a
+worker's: passed, it goes to the run's integrator, or, with none joined, lands the hub's way and its map's
+review judges it. Failed, it comes back to the chat with why, its work kept and no try spent; `done` prints
+that and exits 4, and `watch` wakes the chat for it. A chat that leaves gives its ticket back to the queue,
+and the worker that takes it goes on in the chat's worktree. The owner's Stop ends it, its work kept.
 
 ## Report, ask, lock
 

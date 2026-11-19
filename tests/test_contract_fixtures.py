@@ -404,6 +404,16 @@ class ContractFixturesTest(unittest.TestCase):
         asked = r("run_integrate", {"agent": "sess-1", "key": handed["key"], "action": "back", "note": "name it better"})
         self.assertEqual(next(i for i in asked["queue"]["items"] if i["key"] == handed["key"])["integrate_ask"]["action"], "back")
         self.record("run-integrate-refused", "/api/run/integrate", {"agent": "sess-1", "key": handed["key"], "action": "merge"}, 400)
+        with self.hub._lock:  # a ticket the joined chat builds itself (ticket 173; the run itself: test_hub_integrator)
+            taken = {**sbhub.Hub._item("repo/one#3"), "night": self.hub._data["queue"]["night"], "state": "running",
+                     "runner": sbhub.CHAT_RUNNER, "agent": "sess-1", "agent_was": None, "started": self.clock.t}
+            self.hub._data["queue"]["items"].append(taken)
+        said = r("run_done", {"agent": "sess-1", "key": taken["key"], "note": "built it"})
+        self.assertEqual(next(i for i in said["queue"]["items"] if i["key"] == taken["key"])["done_ask"]["by"], "sess-1")
+        self.record("run-done-refused", "/api/run/done", {"agent": "sess-1"}, 400)
+        self.record("run-take-refused", "/api/run/take", {"agent": "sess-1"}, 400)
+        with self.hub._lock:
+            self.hub._data["queue"]["items"] = [i for i in self.hub._data["queue"]["items"] if i["key"] != taken["key"]]
         with self.hub._lock:
             self.hub._data["queue"]["items"] = [i for i in self.hub._data["queue"]["items"] if i["key"] != handed["key"]]
         r("run_leave", {"agent": "sess-1"})  # leaving twice is refused: test_hub

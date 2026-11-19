@@ -79,6 +79,15 @@ describe("nightGraph", () => {
     expect(s.counts).toMatchObject({ checking: 1 });
   });
 
+  it("names the chat that builds a ticket it took, and says when its checks run or failed", () => {
+    const chat = { runner: "chat", agent: "main-chat", started: T };
+    expect(box("alpha/one#1", run({ items: [it_("alpha/one#1", "running", chat)] }))?.foot).toBe("In chat main-chat");
+    expect(box("alpha/one#1", run({ items: [it_("alpha/one#1", "running", { ...chat, done_ask: { by: "main-chat", note: "", at: T } })] }))?.foot)
+      .toBe("Checks run · chat main-chat");
+    expect(box("alpha/one#1", run({ items: [it_("alpha/one#1", "running", { ...chat, chat_back: "one/test failed", chat_back_at: T })] }))?.foot)
+      .toBe("Back to chat main-chat");
+  });
+
   it("puts a column per project and each box at its start time, a row per half hour; what runs at its start, what is queued below now", () => {
     const x = run({ now: T + 3.5 * H, items: [
       it_("alpha/one#1", "done", { started: T, ended: T + H / 2 }),

@@ -289,6 +289,16 @@ export const TicketItem = z.strictObject({
   handed: z.strictObject({ to: z.string(), at: Seconds }).optional(),
   /** That chat asked to land it or send it back; the hub does it at its next tick. */
   integrate_ask: z.strictObject({ action: z.enum(["land", "back"]), by: z.string(), note: z.string(), at: Seconds }).optional(),
+  /** While a joined chat builds it itself (`runner` "chat", `agent` that chat, ticket 173): the account choice it had
+   * before, given back when it leaves the chat. */
+  agent_was: z.string().nullable().optional(),
+  /** Back in the queue after the chat that took it left: its worktree holds the chat's work, and a worker goes on there. */
+  from_chat: z.boolean().optional(),
+  /** The chat said it is built; the hub runs its checks at its next tick. */
+  done_ask: z.strictObject({ by: z.string(), note: z.string(), at: Seconds }).optional(),
+  /** Its checks failed after the chat said it was built: why, and since when. It stays the chat's to fix. */
+  chat_back: z.string().optional(),
+  chat_back_at: Seconds.optional(),
 });
 export type TicketItem = z.infer<typeof TicketItem>;
 
@@ -426,6 +436,11 @@ export const RunJoinBody = z.strictObject({ agent: z.string(), role: JoinRole })
 export const RunJoinAnswer = z.strictObject({ ok: z.literal(true), agent: z.string(), joined: Joined });
 export const RunLeaveBody = z.strictObject({ agent: z.string() });
 export const RunIntegrateBody = z.strictObject({ agent: z.string(), key: z.string(), action: z.enum(["land", "back"]), note: z.string().optional() });
+/** A joined chat takes a queued ticket to build itself (ticket 173): its worktree, branch, base commit and brief. */
+export const RunTakeBody = z.strictObject({ agent: z.string(), key: z.string() });
+export const RunTakeAnswer = z.strictObject({ ok: z.literal(true), key: z.string(), tree: z.string(), branch: z.string(), base: z.string(), brief: z.string() });
+/** The chat says the ticket it took is built: the hub runs its checks and hands it on. */
+export const RunDoneBody = z.strictObject({ agent: z.string(), key: z.string(), note: z.string().optional() });
 
 // ---- providers: the hub's own panel is strict, a project's script may add anything ----
 

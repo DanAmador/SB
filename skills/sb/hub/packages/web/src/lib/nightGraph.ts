@@ -352,10 +352,18 @@ export function took(secs: number): string {
   return m % 60 === 0 ? `${String(m / 60)} h` : `${String(Math.floor(m / 60))} h ${String(m % 60)} min`;
 }
 
+/** A running ticket a chat builds: whose, and, for one it took from the queue (ticket 173), its checks or their failure. */
+function chatRunning(i: QueueItem): string {
+  const who = `chat ${i.agent ?? ""}`.trim();
+  if (i.kind === "ticket" && i.done_ask !== undefined) return `Checks run · ${who}`;
+  if (i.kind === "ticket" && i.chat_back !== undefined) return `Back to ${who}`;
+  return `In ${who}`;
+}
+
 /** A box's second line: where it is, and for a finished run how long it took. */
 export function footOf(i: QueueItem, p: number | null): string {
   if (p !== null) return `${STATE_WORDS[i.state]} ${String(p)}`;
-  const words = i.runner === CHAT_RUNNER ? (i.state === "running" ? "In a chat" : i.state === "done" ? "Done in a chat" : "A chat stopped, still open") : landedShort(i) ? "Landed, needs your look" : i.kind === "ticket" && i.handed ? `To integrate · ${i.handed.to}` : STATE_WORDS[i.state];
+  const words = i.runner === CHAT_RUNNER ? (i.state === "running" ? chatRunning(i) : i.state === "done" ? "Done in a chat" : "A chat stopped, still open") : landedShort(i) ? "Landed, needs your look" : i.kind === "ticket" && i.handed ? `To integrate · ${i.handed.to}` : STATE_WORDS[i.state];
   return i.started != null && i.ended != null && i.ended > i.started ? `${words} · ${took(i.ended - i.started)}` : words;
 }
 
