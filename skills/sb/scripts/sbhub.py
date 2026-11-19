@@ -2444,6 +2444,70 @@ def _git_run(repo, *args, timeout=120, strip=True):
         time.sleep(0.25)  # another git in this checkout holds its index for a moment: wait it out
 
 
+# A checkout's index.lock that no process holds open, with no git running in the checkout, is a crashed git's
+# leftover once it is STALE_LOCK_AGE old: the hub removes it before it lands (2026-11-19: one left at 17:52 in
+# sk4te failed every landing for hours, and each failure ran its worker again). A younger or held one is waited for:
+# the ticket is held (CHECKOUT_LOCKED), not failed, and tries to land again every LOCK_POLL seconds.
+STALE_LOCK_AGE = 10 * 60
+LOCK_POLL = 60
+CHECKOUT_LOCKED = "another git holds the checkout's index.lock"
+
+
+def _lock_users(repo, lock):
+    """Processes that may still own `lock`: those holding it open, and git processes working in `repo`, as
+    'pid name' strings; None when lsof could not tell."""
+    try:
+        lsof = shutil.which("lsof") or "/usr/sbin/lsof"  # launchd's and the tests' PATH may lack /usr/sbin
+        r = subprocess.run([lsof, "-F", "pc", "--", str(lock)], capture_output=True, text=True, timeout=10)
+        users, pid = [], None
+        for line in r.stdout.splitlines():
+            if line[:1] == "p":
+                pid = line[1:]
+            elif line[:1] == "c" and pid:
+                users.append("{} {}".format(pid, line[1:]))
+        gits = subprocess.run([shutil.which("pgrep") or "/usr/bin/pgrep", "-x", "git"], capture_output=True, text=True, timeout=10).stdout.split()
+        if gits:
+            r = subprocess.run([lsof, "-a", "-d", "cwd", "-F", "pn", "-p", ",".join(gits)], capture_output=True,
+                               text=True, timeout=10)
+            root, pid = os.path.realpath(repo), None
+            for line in r.stdout.splitlines():
+                if line[:1] == "p":
+                    pid = line[1:]
+                elif line[:1] == "n" and pid:
+                    cwd = os.path.realpath(line[1:])
+                    if cwd == root or cwd.startswith(root + os.sep):
+                        users.append("{} git".format(pid))
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return sorted(set(users))
+
+
+def checkout_lock(repo):
+    """None when the checkout's index.lock is gone or was a stale leftover the hub just removed (said in the hub's
+    log), else why the checkout is locked: CHECKOUT_LOCKED, the lock's age and who may hold it."""
+    rc, path, _ = _git_run(repo, "rev-parse", "--path-format=absolute", "--git-path", "index.lock", timeout=10)
+    lock = Path(path) if rc == 0 and path else Path(repo) / ".git" / "index.lock"
+    try:
+        age = time.time() - lock.stat().st_mtime
+    except OSError:
+        return None
+    users = _lock_users(repo, lock)
+    if users == [] and age >= STALE_LOCK_AGE:
+        try:
+            lock.unlink()
+        except FileNotFoundError:
+            return None
+        except OSError as e:
+            return "{} ({} minutes old, held by no process; removing it failed: {})".format(
+                CHECKOUT_LOCKED, int(age // 60), e)
+        print("sb hub: removed {}, {} minutes old and held by no process: a crashed git left it".format(
+            lock, int(age // 60)), flush=True)
+        return None
+    who = "held by " + ", ".join(users) if users else "held by no process yet" if users == [] else \
+        "lsof could not say who holds it"
+    return "{} ({} minutes old, {})".format(CHECKOUT_LOCKED, int(age // 60), who)
+
+
 def project_root(path):
     """The checkout a folder belongs to: its repo's main checkout (a worktree's too), the folder itself outside git."""
     rc, common, _ = _git_run(path, "rev-parse", "--path-format=absolute", "--git-common-dir", timeout=10)
@@ -2584,9 +2648,14 @@ def land(repo, sha):
     head = _git(repo, "rev-parse", "HEAD")
     if not head or _git_run(repo, "merge-base", "--is-ancestor", head, sha)[0] != 0:
         return MOVED
+    locked = checkout_lock(repo)
+    if locked:
+        return locked
     rc, out, err = _git_run(repo, "merge", "--ff-only", "--quiet", sha, timeout=300)
     if rc == 0:
         return None
+    if "index.lock" in err:  # taken since: the ticket waits for it, as for a lock that was there before
+        return checkout_lock(repo) or CHECKOUT_LOCKED
     changed = _git(repo, "diff", "--name-only", "-z", head, sha).split("\0")
     blocking = sorted(set(unsaved(repo) or ()) & {n for n in changed if n})
     return blocking or "git merge --ff-only into the checkout failed: " + (err or out or "no reason given")
@@ -2796,6 +2865,7 @@ def revert_landing(repo, before, sha, why, own=()):
     rc, new, err = _git_run(repo, "commit-tree", tree, "-p", head, "-m", msg)
     if rc != 0:
         return "git commit-tree failed: " + firstline(err), None
+    checkout_lock(repo)  # a crashed git's leftover lock goes first; a live one fails the merge below
     rc, out, err = _git_run(repo, "merge", "--ff-only", "--quiet", new.strip(), timeout=300)
     if rc != 0:
         return "git merge --ff-only of the revert failed: " + firstline(err or out), None
@@ -3544,6 +3614,9 @@ class TicketRun:
         checks, sha = [], None
         for _ in range(LAND_TRIES):
             checks = []
+            locked = checkout_lock(t["repo"])
+            if locked:  # before its checks run: they would only run again once the lock is gone
+                return None, "could not land yet: " + locked, _git(tree, "rev-parse", "HEAD") or None, checks
             head = _git(t["repo"], "rev-parse", "HEAD")
             why = rebase_tree(tree, head) if head else "the checkout has no commit"
             if why:
@@ -3584,6 +3657,8 @@ class TicketRun:
             if isinstance(why, list):  # unsaved edits to its files in the checkout: it waits on its branch for them
                 run["blocking"] = why
                 return None, "could not land yet: the checkout has unsaved changes to " + ", ".join(why), sha, checks
+            if why and why.startswith(CHECKOUT_LOCKED):  # not its try: it lands once the lock is gone
+                return None, "could not land yet: " + why, sha, checks
             if why:
                 return False, "could not land: " + why, sha, checks
             drop_tree(t["repo"], tree, run.get("branch") or "")
@@ -4615,6 +4690,15 @@ class Supervisor:
             self._update(key, state="recheck", ended=None, commit=res["commit"], pid=None, pid_start=None, started=None,
                          recheck_at=self.hub.now() + UNITY_POLL, checked=None,
                          note=res["note"] + "; it lands when the Editor is free, with no try spent")
+            return
+        if state == "recheck" and CHECKOUT_LOCKED in (res.get("note") or ""):  # a git in the checkout holds its index
+            first = CHECKOUT_LOCKED not in (item.get("note") or "")
+            self._update(key, state="recheck", ended=None, commit=res["commit"] or item.get("commit"), pid=None,
+                         pid_start=None, started=None, rechecks=None, recheck_at=self.hub.now() + LOCK_POLL,
+                         checked=None, note=res["note"] + "; it lands once the lock is gone, with no try spent")
+            if first:  # one alert, not one a minute
+                threading.Thread(target=notify, daemon=True, args=("sb hub: needs you", "{}: {}".format(
+                    key, firstline(res["note"])))).start()
             return
         if state == "handed":  # the checks passed: it waits, rebased on its branch, for the chat that lands it
             self._update(key, state="handed", ended=None, commit=res["commit"], checked=res.get("checked"), pid=None,

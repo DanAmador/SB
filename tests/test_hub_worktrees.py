@@ -110,30 +110,57 @@ class WorktreeTest(RunnerCase):
         self.assertEqual(self.open_tickets()[1]["status"], "open")
         self.assertEqual(git(Path(item["tree"]), "status", "--porcelain"), "")  # no rebase left half done
 
-    def test_a_run_a_stale_git_lock_kept_from_landing_lands_again_without_its_worker(self):
-        self.modes = {"repo/one#2": "slow"}  # keeps the night going a while, so the failed run stays on the line
+    def locked_landing(self):
+        """Ticket 1 run to its landing while the checkout's index.lock is there, ticket 2 keeping the night going."""
+        self.modes = {"repo/one#2": "slow"}
         os.environ["FAKE_WORKER_SLEEP"] = "6"
         self.hub.queue_set(["repo/one#1", "repo/one#2"], self.hub.state()["queue"]["version"])
         self.hub.queue_item_agent("repo/one#2", "spare")
         lock = self.repo / ".git" / "index.lock"
-        lock.write_text("")  # a git command that crashed long ago left its lock
+        lock.write_text("")
+        self.addCleanup(lambda: lock.unlink(missing_ok=True))
+        return lock
+
+    def test_a_landing_that_meets_a_git_lock_waits_for_it_and_lands_without_its_worker_again(self):
+        lock = self.locked_landing()  # a git in the checkout, a moment ago: not the ticket's fault
         go(self.hub)
-        self.until(lambda: self.state_of("repo/one#1") == "failed")
+        self.until(lambda: sbhub.CHECKOUT_LOCKED in (self.items()["repo/one#1"].get("note") or ""))
         item = self.items()["repo/one#1"]
-        self.assertTrue(item["note"].startswith("could not land"))
+        self.assertEqual(item["state"], "recheck")
+        self.assertIn("no try spent", item["note"])
+        self.assertFalse(item.get("fails"))
         self.assertTrue(Path(item["tree"]).is_dir())
+        self.assertTrue(lock.exists())  # young: waited for, never removed
         workers = len(self.launched)
-        with self.assertRaisesRegex(ValueError, "not waiting"):
-            self.hub.recheck_now("repo/one#2")  # running, not failed
         lock.unlink()
-        self.hub.ticket_action("recheck", "repo/one#1")
-        self.assertEqual(self.state_of("repo/one#1"), "recheck")
+        self.clock.t += sbhub.LOCK_POLL
         self.until(lambda: self.state_of("repo/one#1") in ("done", "skipped", "failed"), timeout=60)
-        self.assertEqual(self.state_of("repo/one#1"), "done")  # reviewed and closed: the hub held its ticket again
-        self.assertNotIn(1, self.open_tickets())
+        self.assertEqual(self.state_of("repo/one#1"), "done", self.items()["repo/one#1"]["note"])
         self.assertEqual(len(self.launched), workers)  # the worker did not run again; only the review did
         git(self.repo, "merge-base", "--is-ancestor", self.items()["repo/one#1"]["commit"], "HEAD")
         self.assertNotIn(item["tree"], self.trees())
+
+    def test_a_crashed_gits_old_lock_is_removed_and_the_ticket_lands(self):
+        lock = self.locked_landing()
+        old = time.time() - sbhub.STALE_LOCK_AGE - 60
+        os.utime(lock, (old, old))
+        go(self.hub)
+        self.until(lambda: self.state_of("repo/one#1") in ("done", "skipped", "failed", "recheck"), timeout=60)
+        self.assertEqual(self.state_of("repo/one#1"), "done", self.items()["repo/one#1"]["note"])
+        self.assertFalse(lock.exists())
+        self.assertFalse(self.items()["repo/one#1"].get("fails"))
+
+    def test_an_old_lock_a_process_still_holds_is_kept_and_named(self):
+        lock = self.locked_landing()
+        old = time.time() - sbhub.STALE_LOCK_AGE - 60
+        os.utime(lock, (old, old))
+        with open(lock):  # this test's own process holds it, as an editor opened by `git commit` would
+            os.utime(lock, (old, old))
+            go(self.hub)
+            self.until(lambda: sbhub.CHECKOUT_LOCKED in (self.items()["repo/one#1"].get("note") or ""))
+            self.assertTrue(lock.exists())
+            self.assertIn("held by {} ".format(os.getpid()), self.items()["repo/one#1"]["note"])
+            self.assertEqual(self.state_of("repo/one#1"), "recheck")
 
     def move_to_two(self, num):
         """The real `sbmap move` of a ticket to a second map of the same repo."""
@@ -148,12 +175,10 @@ class WorktreeTest(RunnerCase):
         os.environ["FAKE_WORKER_SLEEP"] = "6"
         self.hub.queue_set(["repo/one#1", "repo/one#2"], self.hub.state()["queue"]["version"])
         self.hub.queue_item_agent("repo/one#2", "spare")
-        lock = self.repo / ".git" / "index.lock"
-        lock.write_text("")
-        go(self.hub)
-        self.until(lambda: self.state_of("repo/one#1") == "failed")
+        with mock.patch.object(sbhub, "land", return_value="git merge --ff-only into the checkout failed: test"):
+            go(self.hub)
+            self.until(lambda: self.state_of("repo/one#1") == "failed")
         tree = self.items()["repo/one#1"]["tree"]
-        lock.unlink()
         self.move_to_two(1)
         self.hub.ticket_action("recheck", "repo/one#1")  # the page still holds the old key
         keys = [i["key"] for i in self.hub.state()["queue"]["items"]]
@@ -528,7 +553,9 @@ class BlameTest(RunnerCase):
             # the next ticket's work waits on its branch: it does not land on the broken build
             b = self.until(lambda: "could not land yet" in ((self.items().get("repo/one#2") or {}).get("note") or "")
                            and self.items()["repo/one#2"])
-            self.assertIn(self.lock, b["note"])
+            # held by the Unity lock or, first, by the index.lock the compile left in the checkout
+            self.assertTrue(self.lock in b["note"] or sbhub.CHECKOUT_LOCKED in b["note"], b["note"])
+            self.assertEqual(self.hub.state()["locks"][self.lock]["by"], "sb-hub landing repo/one#1")
             self.assertEqual(git(self.repo, "rev-parse", "HEAD"), head)
 
     def test_a_check_that_could_not_run_says_what_was_last_known_broken(self):
