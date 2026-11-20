@@ -6700,10 +6700,10 @@ def cmd_hook(port, event=None):
             if title:
                 r["title"] = title
         if r:
-            call(port, "/api/report", {**r, "via": "hook"})  # the hub keeps it only from a worker or a joined chat
+            call(port, "/api/report", {**r, "via": "hook"}, timeout=1)  # the hub keeps it only from a worker or a joined chat; 1 s keeps the whole hook inside its limit
         who = e.get("agent_id") or queued or e.get("session_id") if isinstance(e, dict) and not event else None
         if isinstance(who, str) and who and e.get("hook_event_name") in DELIVERS:
-            code, got = call(port, "/api/take", {"agent": who, "how": e["hook_event_name"]}, timeout=1)
+            code, got = call(port, "/api/take", {"agent": who, "how": e["hook_event_name"]}, timeout=0.8)
             msgs = got.get("messages") if code == 200 else None
             out = delivery(e, [m for m in msgs if isinstance(m, str)] if isinstance(msgs, list) else [])
     except Exception:
