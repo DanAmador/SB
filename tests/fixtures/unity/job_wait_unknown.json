@@ -1,0 +1,12 @@
+{
+  "success": false,
+  "command": "unity job wait",
+  "data": null,
+  "errors": [
+    {
+      "code": "COMMAND_FAILED",
+      "message": "Job Not Found. No job with id 'nope000' (jobs do not survive domain reloads and are pruned after retention)"
+    }
+  ],
+  "warnings": []
+}

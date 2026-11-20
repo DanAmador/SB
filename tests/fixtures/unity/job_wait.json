@@ -1,0 +1,24 @@
+{
+  "success": true,
+  "command": "job wait",
+  "data": {
+    "jobId": "37445d6b0ee5469cb4158f19b5a2b8e7",
+    "command": "editor_status",
+    "state": "completed",
+    "cancellationRequested": false,
+    "result": {
+      "status": "ready",
+      "compiling": false,
+      "domainReloadInProgress": false,
+      "playMode": "stopped",
+      "lastHeartbeat": "2026-11-20T03:16:26.006026Z",
+      "projectPath": "/Users/danamador/Documents/Coding/sk4te",
+      "unityVersion": "6000.7.0b10"
+    },
+    "error": null,
+    "errorDetails": null,
+    "progress": null
+  },
+  "errors": [],
+  "warnings": []
+}

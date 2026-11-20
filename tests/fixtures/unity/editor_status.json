@@ -1,0 +1,24 @@
+{
+  "success": true,
+  "command": "command editor_status",
+  "data": {
+    "command": "editor_status",
+    "parameters": {},
+    "result": {
+      "status": "ready",
+      "compiling": false,
+      "domainReloadInProgress": false,
+      "playMode": "stopped",
+      "lastHeartbeat": "2026-11-20T03:16:24.964127Z",
+      "projectPath": "/Users/danamador/Documents/Coding/sk4te",
+      "unityVersion": "6000.7.0b10"
+    },
+    "target": {
+      "host": "127.0.0.1",
+      "port": 7800,
+      "projectPath": "/Users/danamador/Documents/Coding/sk4te"
+    }
+  },
+  "errors": [],
+  "warnings": []
+}

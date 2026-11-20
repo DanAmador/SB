@@ -2709,6 +2709,11 @@ def _landing_by(landing):
     return "sb-hub landing " + landing["key"]
 
 
+def _landing_kept(landing):
+    """The fields of a landing the hub saves with a lock or in the queue's `checking` (the contract's Landing)."""
+    return {k: landing[k] for k in ("key", "repo", "before", "sha", "tree", "branch", "only") if k in landing}
+
+
 def landing_lock(repo):
     """The lock an integrator chat's landing holds in a repo (ticket 172): two integrators never land at once, and a
     chat that lands by hand takes it with sb_lock first."""
@@ -2718,6 +2723,111 @@ def landing_lock(repo):
 def unity_lock(repo):
     """The lock a repo's one Unity editor goes by: chat sessions take it with sb_lock, the hub while it lands."""
     return "unity:" + Path(str(repo)).name
+
+
+# ---- Unity check lines (ticket 185): `unity: <command> [args]` is sent into the Editor's own command queue as a
+# detached job (`unity command --detach`, then `unity job wait`) and takes no hub lock: the Pipeline package runs one
+# command at a time. `unity-session: <command> [args]` is the same, under the repo's Unity lock for that one command
+# (TicketRun.unity_line). Design: wayfinder/sb-workflow/research/unity-editor-queue.md
+UNITY_JOB_WAIT = 15 * 60  # seconds a `unity:` job may wait in the Editor's queue and run before it is not judged
+UNITY_SEND = 120  # seconds for `unity command --detach` itself to answer
+UNITY_LOST = "Job Not Found"  # a domain reload (a recompile) drops every queued job
+UNITY_BUSY = re.compile(r"compil|domain ?reload|reloading|play ?mode|in play|not ready|is busy|importing", re.I)
+
+
+def _unity_json(out):
+    """The first JSON object in a `unity --json` output, else None."""
+    start = (out or "").find("{")
+    try:
+        data = json.JSONDecoder().raw_decode(out[start:])[0] if start >= 0 else None
+    except ValueError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _unity_errors(data):
+    return "; ".join(str((e or {}).get("message") or e) for e in (data or {}).get("errors") or []
+                     if isinstance(e, dict) or e)
+
+
+def unity_not_ready(result):
+    """Why a Unity command's result says the Editor was not ready to judge (compiling, reloading, in Play), else ''.
+    The `editor` field of an sb check's answer (`ready`, `compiling`, `playing`), or editor_status's own fields."""
+    if not isinstance(result, dict):
+        return ""
+    editor = result.get("editor")
+    editor = editor.get("status") if isinstance(editor, dict) else editor
+    if isinstance(editor, str) and editor and editor != "ready":
+        return "the Editor was " + editor
+    if result.get("compiling") is True:
+        return "the Editor was compiling"
+    if result.get("domainReloadInProgress") is True:
+        return "the Editor was reloading its scripts"
+    if result.get("playMode") not in (None, "", "stopped", "edit"):
+        return "the Editor was in Play ({})".format(result.get("playMode"))
+    status = result.get("status")
+    if "compiling" in result and isinstance(status, str) and status and status != "ready":
+        return "the Editor was " + status
+    return ""
+
+
+def unity_check(line, cwd, run=subprocess.run, wait=None):
+    """Run one Unity check line's command in the Editor that has `cwd` open, as a detached job: None when it passed
+    (the job `completed` and its result's `ok` is not false), else the failure in words, as sbqueue._run_checks
+    words it. It could not run (NOT_RUN, the exit-75 path: not judged, never broken code) when the Editor did not
+    take the job or answer, said it was not ready, the wait ran out, or the job was lost twice: a lost job ('Job Not
+    Found', a recompile's reload drops queued jobs) is sent once more first. `run` is called with shell=True, so the
+    hub's recording keeps each call."""
+    words = shlex.split(line.split(":", 1)[1]) if ":" in line else []
+    wait = UNITY_JOB_WAIT if wait is None else wait
+    if not words:
+        return "check failed: {}\na Unity line needs a command".format(line)
+
+    def call(args, timeout):
+        cmd = shlex.join(["unity", *args])
+        try:
+            r = run(cmd, shell=True, cwd=str(cwd), capture_output=True, text=True, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return None, "{} did not answer in {} s".format(cmd, timeout)
+        out = (r.stdout or "") + (r.stderr or "")
+        return _unity_json(out), "\n".join(out.splitlines()[-20:])
+
+    def not_run(why, tail=""):
+        return "{}: {}: {}\n{}".format(sbqueue.NOT_RUN, line, why, tail).rstrip()
+
+    for attempt in (1, 2):
+        sent, tail = call(["command", *words, "--detach", "--json", "--project-path", str(cwd)], UNITY_SEND)
+        job = ((sent or {}).get("data") or {}).get("jobId")
+        if not sent or not sent.get("success") or not job:
+            return not_run("the Editor did not take the command ({})".format(
+                _unity_errors(sent) or "no answer"), tail)
+        got, tail = call(["job", "wait", job, "--json", "--timeout", str(int(wait))], wait + 60)
+        if got is None:
+            return not_run("no answer while waiting for job " + job, tail)
+        if UNITY_LOST.lower() in _unity_errors(got).lower():
+            if attempt == 1:
+                continue  # a reload dropped it: once more
+            return not_run("the job was lost twice ({}): a recompile's reload drops queued jobs".format(UNITY_LOST),
+                           tail)
+        if not got.get("success"):
+            return not_run("could not collect job {} ({})".format(job, _unity_errors(got) or "no answer"), tail)
+        data = got.get("data") or {}
+        state, result = data.get("state"), data.get("result")
+        busy = unity_not_ready(result)
+        if busy:
+            return not_run(busy + ", so the code was not judged", tail)
+        if state == "completed":
+            if isinstance(result, dict) and result.get("ok") is False:
+                return "check failed: {}\n{}".format(line, "\n".join(
+                    json.dumps(result, indent=1).splitlines()[-20:]))
+            return None
+        error = str(data.get("error") or "") + " " + json.dumps(data.get("errorDetails") or "")
+        if state == "failed" and not UNITY_BUSY.search(error):
+            return "check failed: {}\nthe command failed in the Editor: {}".format(line, error.strip()[:1500])
+        if state == "failed":
+            return not_run("the Editor was busy: " + error.strip()[:300], tail)
+        return not_run("job {} is {} after {} s".format(job, state or "in no state", int(wait)), tail)
+    return not_run("unreachable")  # the loop returns on its second pass
 
 
 # ---- the review plays the In Play lines: a map's second pass whose tickets have Done-when items starting `In Play`
@@ -3436,7 +3546,8 @@ class TicketRun:
         elif not tree:
             report = Path(run["log"]).parent / "{}.md".format(int(t["num"])) if run.get("log") else None
             passed, reason, sha = sbqueue.verdict(t, t["repo"], run["base"], run=_recording(checks), report=report,
-                                                    first_base=run.get("first_base"))
+                                                    first_base=run.get("first_base"),
+                                                    unity=lambda line, cwd, r: self.unity_line(line, cwd, r))
             self.report_checks(t, run, passed, reason, sha, checks)
         elif to:
             passed, reason, sha, checks = self.hand(t, run, tree)
@@ -3642,8 +3753,10 @@ class TicketRun:
             if not passed:
                 return passed, reason, sha, checks
             stage = is_unity(t["repo"])
-            locked = (after or stage) and sha and {"key": sbqueue.key(t), "repo": str(t["repo"]), "before": head,
-                                                   "sha": sha, "tree": str(tree), "branch": run.get("branch") or ""}
+            landing = (after or stage) and sha and {"key": sbqueue.key(t), "repo": str(t["repo"]), "before": head,
+                                                    "sha": sha, "tree": str(tree), "branch": run.get("branch") or ""}
+            # Unity lines alone take no lock here: `unity-session:` takes it for its one command (unity_line)
+            locked = landing if landing and (stage or not all(map(sbqueue.is_unity_line, after))) else None
             if locked:
                 held = self.take_unity(locked)
                 if held:
@@ -3654,8 +3767,8 @@ class TicketRun:
             if locked and why is None and stage:  # its Unity stage: the lock stays held until the integrator ends
                 run["integrate"] = {**locked, "dirty": dirty_files(t["repo"])}
                 return True, reason, sha, checks
-            if locked and why is None:
-                failed = self.after_landing(locked, after, checks)
+            if landing and why is None:
+                failed = self.after_landing(landing, after, checks)
                 if failed:
                     return failed + (sha, checks)
             elif locked:
@@ -3757,10 +3870,13 @@ class TicketRun:
         checks run again, and this ticket stays landed when they pass. A landing that cannot be backed out keeps
         the Unity lock, so nothing lands on a broken build until it is fixed."""
         repo, keep = landing["repo"], False
+        self.checking(landing, True)  # a hub that stops now backs it out (Supervisor._unland), lock or none
+        if cmds and all(map(sbqueue.is_unity_line, cmds)):  # Unity lines only: the Editor is free until a session
+            self.hub.unlock(unity_lock(repo), _landing_by(landing))
         try:
             changed = "\n".join([_git(repo, "diff", "--name-only", landing["before"], landing["sha"])] + [
                 _git(repo, "show", "--name-only", "--format=", c) for c in landing.get("own") or ()]).strip()
-            failed = sbqueue._run_checks(cmds, repo, _recording(checks), changed)
+            failed = self.run_checks(cmds, repo, _recording(checks), changed, landing)
             if failed and not failed.startswith(sbqueue.NOT_RUN):
                 failed = self._blame_earlier(landing, failed, set(changed.split()), cmds, checks)
             if not failed:
@@ -3778,6 +3894,7 @@ class TicketRun:
             err = undo_landing(landing, failed.splitlines()[0])
             if err:  # the checkout keeps the broken work: nothing lands on it, and the owner must see it
                 keep = True
+                self.hub.lock(unity_lock(repo), _landing_by(landing), landing=_landing_kept(landing))  # held again
                 self.build_mark(repo, broken=True, errors=lines, by=landing["key"])
                 why = ("{}\nIt landed on {} as {} and " + UNDO_FAILED + ": {}\nThe {} lock stays held, so nothing "
                        "else lands on the broken build: fix it, then free the lock.").format(
@@ -3785,7 +3902,7 @@ class TicketRun:
                 threading.Thread(target=notify, daemon=True, args=("sb hub: needs you", "{}: the build is broken "
                                  "and {} could not be backed out".format(Path(repo).name, landing["key"]))).start()
             elif elsewhere:  # backed out, its work kept on its branch: is the main folder broken without it too?
-                alone = sbqueue._run_checks(cmds, repo, _recording(checks), "")
+                alone = self.run_checks(cmds, repo, _recording(checks), "", landing)
                 if alone is None:  # it builds without this landing: the clash is this ticket's to mend, its try
                     self.build_mark(repo, green=_git(repo, "rev-parse", "HEAD"))
                     return False, ("after landing, {}\nThe main folder builds without your work, so the clash is "
@@ -3798,6 +3915,52 @@ class TicketRun:
         finally:
             if not keep:
                 self.hub.unlock(unity_lock(repo), _landing_by(landing))
+            self.checking(landing, False)
+
+    def checking(self, landing, on):
+        """Keep (on) or drop the landing whose after-landing checks run now in the queue's `checking`, so a hub that
+        stops mid-check backs it out even when it holds no lock (only `unity:` lines run)."""
+        with self.hub._lock:
+            q = self.hub._data["queue"]
+            if on:
+                q.setdefault("checking", {})[landing["key"]] = _landing_kept(landing)
+            elif landing["key"] in (q.get("checking") or {}):
+                del q["checking"][landing["key"]]
+                if not q["checking"]:
+                    del q["checking"]
+            else:
+                return
+            self.hub._save()
+
+    def run_checks(self, cmds, repo, run, changed, landing=None):
+        """sbqueue._run_checks, with the Unity lines run by unity_line."""
+        return sbqueue._run_checks(cmds, repo, run, changed,
+                                   unity=lambda line, cwd, r: self.unity_line(line, cwd, r, landing))
+
+    def unity_line(self, line, cwd, run, landing=None):
+        """One `unity:` line (no lock: the Editor's own queue orders it) or `unity-session:` line: the repo's Unity
+        lock for that one command, waited for up to LAND_LOCK_WAIT and let go right after, whatever it answered.
+        Held by the landing (kept with the lock, so a restarted hub backs it out as any after-landing lock); one
+        the landing already holds stays held."""
+        if not line.startswith(sbqueue.UNITY_SESSION):
+            return unity_check(line, cwd, run)
+        key = unity_lock(cwd)
+        by = _landing_by(landing) if landing else "sb-hub check " + Path(str(cwd)).name
+        with self.hub._lock:
+            mine = (self.hub._data["locks"].get(key) or {}).get("by") == by
+        end = time.time() + LAND_LOCK_WAIT
+        while not mine:
+            got = self.hub.lock(key, by, **({"landing": _landing_kept(landing)} if landing else {}))
+            if got.get("ok"):
+                break
+            if time.time() >= end or self.stopping():
+                return "{}: {}: {} is held by {}".format(sbqueue.NOT_RUN, line, key, got.get("held_by"))
+            time.sleep(LAND_LOCK_POLL)
+        try:
+            return unity_check(line, cwd, run)
+        finally:
+            if not mine:
+                self.hub.unlock(key, by)
 
     def _blame_earlier(self, landing, failed, mine, cmds, checks):
         """`failed` when this landing's own files are among the errors' or no earlier landing of tonight is to
@@ -3817,8 +3980,8 @@ class TicketRun:
                                      "landed on top: {}".format(landing["key"], lines[0] if lines else firstline(failed)))
         if err or not revert:
             return failed
-        again = sbqueue._run_checks(cmds, repo, _recording(checks),
-                                    _git(repo, "diff", "--name-only", landing["before"], landing["sha"]))
+        again = self.run_checks(cmds, repo, _recording(checks),
+                                _git(repo, "diff", "--name-only", landing["before"], landing["sha"]), landing)
         if again:  # backing it out did not mend the build: it was not that landing, so it goes back in
             revert_landing(repo, _git(repo, "rev-parse", revert + "^"), revert,
                            "backing out {} did not mend the build".format(culprit["key"]))
@@ -3857,13 +4020,16 @@ class TicketRun:
         could not run (the Unity lock is busy, or the tool did not answer). An after-landing check runs in the
         checkout under the Unity lock; any other in a clean copy of `head`."""
         if held.get("after"):
-            by = "sb-hub build check"
-            if not self.hub.lock(unity_lock(repo), by).get("ok"):
+            by, cmd = "sb-hub build check", held["cmd"]
+            lock = not cmd.startswith(sbqueue.UNITY)  # a `unity:` line needs none; a session or a shell line does
+            if lock and not self.hub.lock(unity_lock(repo), by).get("ok"):
                 return None
             try:
-                failed = sbqueue._run_checks([held["cmd"]], repo, subprocess.run, "")
+                failed = (unity_check(cmd, repo) if sbqueue.is_unity_line(cmd) else
+                          sbqueue._run_checks([cmd], repo, subprocess.run, ""))
             finally:
-                self.hub.unlock(unity_lock(repo), by)
+                if lock:
+                    self.hub.unlock(unity_lock(repo), by)
         else:
             d = sbqueue._clean_copy(repo, head, subprocess.run)
             if d is None:
@@ -4824,10 +4990,16 @@ class Supervisor:
         """A hub that stopped while a landing held a repo's Unity lock (its work fast-forwarded into the checkout,
         its after-landing checks not yet passed) left it half landed: the landing is backed out by a revert, its
         work replayed on its branch, the lock let go, and the ticket lands again at once as a recheck (its worker
-        does not run again). Landings run inside the tick, so at the first tick none of this hub's is under way."""
+        does not run again). Landings run inside the tick, so at the first tick none of this hub's is under way.
+        A landing whose checks ran with no lock (`unity:` lines only, TicketRun.checking) is backed out the same."""
         self.unlanded = True
         with self.hub._lock:
             held = [(k, dict(v)) for k, v in self.hub._data["locks"].items() if v.get("landing")]
+            checking = dict(self.hub._data["queue"].get("checking") or {})
+            self.hub._data["queue"].pop("checking", None)
+            self.hub._save()
+        keys = {v["landing"]["key"] for _, v in held}
+        held += [(None, {"landing": l, "by": None}) for k, l in checking.items() if k not in keys]
         for k, v in held:
             landing = v["landing"]
             with self.hub._lock:
@@ -4841,8 +5013,11 @@ class Supervisor:
             if err:  # the lock stays, so nothing else lands on top until the owner looks
                 print("sb hub: could not undo the landing of {}: {}".format(landing["key"], err), file=sys.stderr,
                       flush=True)
+                if k is None:  # held now, so nothing else lands on top until the owner looks
+                    self.hub.lock(unity_lock(landing["repo"]), _landing_by(landing), landing=landing)
                 continue
-            self.hub.unlock(k, v["by"])
+            if k is not None:
+                self.hub.unlock(k, v["by"])
             with self.hub._lock:
                 item = next((dict(i) for i in self.hub._data["queue"]["items"] if i["key"] == landing["key"]), None)
             if item and item["state"] in ("running", "recheck"):

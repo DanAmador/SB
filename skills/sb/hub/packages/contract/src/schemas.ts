@@ -382,6 +382,9 @@ export const Queue = z.strictObject({
   repos: z.record(z.string(), RepoLoad).optional(),
   /** Repo -> what the hub knows of its build from the after-landing checks. */
   builds: z.record(z.string(), Build).optional(),
+  /** Queue key -> the landing whose after-landing checks run now (sbhub TicketRun.checking, ticket 185): with only
+   * `unity:` lines it holds no lock, so a restarted hub backs it out from here. */
+  checking: z.record(z.string(), Landing).optional(),
 });
 export type Queue = z.infer<typeof Queue>;
 

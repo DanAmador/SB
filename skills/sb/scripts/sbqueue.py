@@ -16,16 +16,28 @@ NOT_RUN = "check could not run"
 # a check line starting with this runs in the checkout itself once the ticket's work landed there, under the repo's
 # Unity lock (sbhub TicketRun._land): sk4te's compile asks the one open Unity, which has the checkout open
 AFTER_LANDING = "after-landing: "
+# two more kinds that run in the checkout after landing, as Unity commands rather than shell (sbhub.unity_check):
+# `unity: <command> [args]` queues in the Editor's own command queue and takes no hub lock; `unity-session: <command>`
+# takes the repo's Unity lock for that one command (a recompile, Play). Both keep their mark so the hub knows the kind.
+UNITY = "unity: "
+UNITY_SESSION = "unity-session: "
+
+
+def is_unity_line(cmd):
+    """True for a `unity:` or `unity-session:` check line."""
+    return cmd.startswith(UNITY) or cmd.startswith(UNITY_SESSION)
 
 
 def after_landing(checks):
-    """The commands of the check lines marked after-landing, without the mark."""
-    return [c[len(AFTER_LANDING):].strip() for c in checks if c.startswith(AFTER_LANDING)]
+    """The check lines that run in the checkout once the ticket landed: after-landing commands without the mark,
+    and the Unity lines with theirs."""
+    return [c[len(AFTER_LANDING):].strip() if c.startswith(AFTER_LANDING) else c
+            for c in checks if c.startswith(AFTER_LANDING) or is_unity_line(c)]
 
 
 def before_landing(checks):
-    """The check lines that run before landing (every line not marked after-landing)."""
-    return [c for c in checks if not c.startswith(AFTER_LANDING)]
+    """The check lines that run before landing (every line not marked after-landing, unity or unity-session)."""
+    return [c for c in checks if not c.startswith(AFTER_LANDING) and not is_unity_line(c)]
 
 
 def key(t):
@@ -440,7 +452,7 @@ def _owned_test(f, paths):
     return False
 
 
-def verdict(t, repo, base_sha, run=subprocess.run, report=None, first_base=None):
+def verdict(t, repo, base_sha, run=subprocess.run, report=None, first_base=None, unity=None):
     """(passed, reason, sha): `passed` is None when a check exited 75 (could not run: neither passed nor failed, the
     commit stands). A trailered commit after base_sha and every check green. Files changed outside the
     ticket's paths are allowed (a change may need them) and named in the reason. A research ticket that made no
@@ -482,7 +494,7 @@ def verdict(t, repo, base_sha, run=subprocess.run, report=None, first_base=None)
                 f" and {len(stray) - 10} more" if len(stray) > 10 else "")
     changed = run(["git", "-C", str(repo), "diff-tree", "--root", "--no-commit-id", "--name-only", "-r", sha],
                   capture_output=True, text=True).stdout.strip()
-    failed = _run_checks(t["checks"], repo, run, changed)
+    failed = _run_checks(t["checks"], repo, run, changed, unity)
     if not failed:
         return True, "commit and checks all good" + outside, sha
     if failed.startswith(NOT_RUN):
@@ -498,7 +510,7 @@ def verdict(t, repo, base_sha, run=subprocess.run, report=None, first_base=None)
     if clean is None:
         return False, failed, sha
     try:
-        again = _run_checks(t["checks"], clean, run, changed)
+        again = _run_checks(t["checks"], clean, run, changed, unity)
     finally:
         _drop_clean_copy(repo, clean, run)
     if again:
@@ -508,12 +520,18 @@ def verdict(t, repo, base_sha, run=subprocess.run, report=None, first_base=None)
                   f"other uncommitted work in the shared folder breaks them there ({shown})" + outside), sha
 
 
-def _run_checks(checks, cwd, run, changed=""):
+def _run_checks(checks, cwd, run, changed="", unity=None):
     """None when every check exits 0, else the first failure in words (starting NOT_RUN when it exited 75).
     SB_CHANGED holds the files the ticket's commit changed, one per line, so a check can test only what they reach
-    (`codegraph affected --stdin`, see reference/hub.md)."""
+    (`codegraph affected --stdin`, see reference/hub.md). A Unity line goes to `unity(line, cwd, run)` (the hub's
+    runner, same answer as this); with none it could not run."""
     env = {**os.environ, "SB_CHANGED": changed}
     for cmd in checks:
+        if is_unity_line(cmd):
+            failed = unity(cmd, cwd, run) if unity else f"{NOT_RUN}: {cmd} (only the hub runs Unity lines)"
+            if failed:
+                return failed
+            continue
         if cmd.startswith(AFTER_LANDING):  # a ticket worked in the checkout itself: it already is where it lands
             cmd = cmd[len(AFTER_LANDING):].strip()
         try:

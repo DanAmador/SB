@@ -98,6 +98,13 @@ describe("fixtures written by the hub", () => {
     expect(lock?.by).toBe("sb-hub landing repo/one#1");
     expect(lock?.landing?.key).toBe("repo/one#1");
   });
+
+  it("takes a hub mid-check with no lock, its landing kept in `checking` (tests/test_hub_unity_checks.py)", () => {
+    const body: unknown = JSON.parse(readFileSync(join(dir, "state", "checking.json"), "utf8"));
+    const state = State.parse(addLinks("GET /api/state", body, bare()));
+    expect(state.locks).toEqual({});
+    expect(state.queue.checking?.["repo/one#1"]?.key).toBe("repo/one#1");
+  });
 });
 
 describe("the schemas refuse what the hub never sends", () => {

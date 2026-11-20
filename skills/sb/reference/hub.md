@@ -42,6 +42,24 @@ the vault. Only the running hub writes the queue (`$SB_HUB_HOME/state.json`); CL
   backed out too and lands again at its recheck. A hub that stops mid-landing keeps the landing in
   the lock; the next hub backs it out, lets go of the lock and lands the ticket again without its
   worker. A ticket that ran in the checkout itself (no worktree) runs the line there like any other.
+  **Unity lines** (ticket 185; design `wayfinder/sb-workflow/research/unity-editor-queue.md`): two more kinds run
+  in the checkout after landing, as Unity commands rather than shell. Unity runs one command at a time already
+  (the Pipeline package's exec gate), so the Editor's own queue orders them.
+  - `unity: <command> [args]` takes **no hub lock**: the hub runs `unity command <command> [args] --detach --json
+    --project-path <checkout>`, then `unity job wait <id> --json --timeout 900`. It passes when the job's `state`
+    is `completed` and its result's `ok` is not `false`; `ok: false` fails it (the result is the failure's tail),
+    and so does a job that threw. It is **not judged** (the exit-75 path above: backed out, lands again at its
+    recheck, no try spent) when the result says the Editor was not ready (`editor` other than `ready`, compiling,
+    reloading, in Play), the Editor did not take the command, or the wait ran out. **Job Not Found** (a
+    recompile's reload drops every queued job) sends the command once more, then is not judged. A chat or an
+    integrator holding `unity:<repo>` does not hold it up.
+  - `unity-session: <command> [args]` is the same command, run holding `unity:<repo>` for that one command only
+    (a recompile, Play: anything that changes the Editor's state). It waits up to 10 minutes for the lock (not
+    judged after), and lets go right after, failed or not; a lock the landing already holds stays held.
+  A landing whose after-landing lines are all Unity lines holds no lock while they run (in a Unity project the
+  stage's lock is let go once the integrator ends); the queue keeps it under `checking`, so a hub that stops
+  mid-check backs it out like an after-landing lock. One that stops inside a `unity-session:` line leaves the
+  lock with its landing, cleared by that same recovery. `after-landing:` and plain lines work as before.
   **The Unity stage** (a repo with `ProjectSettings/ProjectVersion.txt`): Unity is a ticket's last stage, one
   ticket at a time.
   1. **The worker codes without Unity.** It always runs in its own worktree, and its guard refuses any `unity`

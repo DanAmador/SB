@@ -1,0 +1,12 @@
+{
+  "success": true,
+  "command": "command editor_status",
+  "data": {
+    "command": "editor_status",
+    "jobId": "37445d6b0ee5469cb4158f19b5a2b8e7",
+    "state": "queued",
+    "detached": true
+  },
+  "errors": [],
+  "warnings": []
+}
