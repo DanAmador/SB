@@ -65,7 +65,7 @@ function ProjectTree({ tree: whole, scope, onPick }: { tree: Tree; scope: Scope;
   };
   return (
     <nav aria-label="Projects and maps" className="flex flex-col gap-0.5 text-sm">
-      <div className="flex items-center px-2 pb-1 text-[11px] text-muted-foreground">
+      <div className="flex items-center px-2 pb-1 text-xs text-muted-foreground">
         <button
           type="button"
           role="switch"
@@ -80,7 +80,7 @@ function ProjectTree({ tree: whole, scope, onPick }: { tree: Tree; scope: Scope;
           <IconFilter className="size-3" aria-hidden />
           Active only
         </button>
-        <span className="ml-auto">can run · queued</span>
+        <span className="ml-auto pr-0.5 font-medium">can run · queued</span>
       </div>
       <div className="flex">
         <button type="button" aria-current={!isScoped(scope) ? "page" : undefined} className={rowCls(!isScoped(scope))} onClick={() => { pick("", ""); }}>

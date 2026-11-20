@@ -811,6 +811,28 @@ test("Waits for you at 375 px: nothing scrolls sideways; screenshot", async ({ p
   if (dir !== undefined) await page.screenshot({ path: `${dir}/waits-375.png`, fullPage: true });
 });
 
+test("a 1,136-character 'judged partly' reason does not widen Waits or hide History at 375 px", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(String(e)));
+  const long = `judged partly: ${"the first item is not met because the report does not say what was run. ".repeat(15)}`.slice(0, 1136);
+  await page.route("**/api/state", async (route) => {
+    const res = await route.fetch();
+    const st = (await res.json()) as { queue: { items: { state: string; note: string; verdict?: string; landed_at?: number | null }[] } };
+    const it = st.queue.items.find((i) => i.state === "failed");
+    if (it !== undefined) { it.note = long; it.verdict = "partly"; it.landed_at = 1; }
+    await route.fulfill({ response: res, json: st });
+  });
+  await page.setViewportSize({ width: 375, height: 800 });
+  await page.goto("/next/?view=waits");
+  await expect(page.getByRole("button", { name: "Mark all seen" })).toBeVisible();
+  await page.waitForTimeout(300);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  await expect(page.getByRole("tablist", { name: "Views" }).getByRole("tab", { name: /History/ })).toBeInViewport({ ratio: 1 });
+  const dir = process.env.SB_SHOTS;
+  if (dir !== undefined) await page.screenshot({ path: `${dir}/waits-375-long.png`, fullPage: true });
+  expect(errors).toEqual([]);
+});
+
 for (const [view, scheme] of [["run", "light"], ["run", "dark"], ["waits", "light"], ["waits", "dark"], ["history", "light"], ["history", "dark"]] as const) {
   test(`axe finds no serious or critical issue on ${view} (${scheme})`, async ({ page }) => {
     // A whole-page axe scan ran past 30 s at load 42 (ticket 153's hub check); slow() gives it 90 s.

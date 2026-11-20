@@ -20,3 +20,19 @@ class TicketNowTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BashCommandLabelTest(unittest.TestCase):
+    """The real hook report: a Bash call without a description says its command, so the trail can name it."""
+
+    def report(self, tin):
+        return sbhub.event_report({"session_id": "s1", "cwd": "/w/p", "hook_event_name": "PreToolUse",
+                                   "tool_name": "Bash", "tool_input": tin})
+
+    def test_command_when_no_description(self):
+        r = self.report({"command": "pnpm   typecheck\n&& echo ok"})
+        self.assertEqual(r["trail"]["label"], "pnpm typecheck && echo ok")
+        self.assertEqual(r["note"], "Bash: pnpm typecheck && echo ok")
+
+    def test_description_still_wins(self):
+        self.assertEqual(self.report({"description": "Typecheck", "command": "pnpm typecheck"})["trail"]["label"], "Typecheck")

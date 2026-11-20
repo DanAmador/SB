@@ -928,7 +928,9 @@ class Hub:
                 seq = sbqueue.move(seq, k, end, rows)
         q["maps"] = sbqueue.map_list(maps, seq)
         freed = sbqueue.chains(rows, seq + sorted(running))
-        fresh = lambda k: {**self._item(k), "note": "frees %d" % freed[k] if freed.get(k) else ""}
+        titles = {sbqueue.key(t): t.get("title") for t in rows if t.get("title")}
+        fresh = lambda k: {**self._item(k), "note": "frees %d" % freed[k] if freed.get(k) else "",
+                           **({"title": titles[k]} if k in titles else {})}  # the row reads its title, not "map ticket 354"
         q["items"] = keep + [self._afresh(have.get(k)) or fresh(k) for k in seq]
 
     @staticmethod
@@ -6784,6 +6786,8 @@ def _tool_detail(e):
     """The tool of a PreToolUse, PostToolUse or PostToolUseFailure event and what it works on."""
     tin = e.get("tool_input") or {}
     detail = next((tin[k] for k in ("description", "file_path", "pattern", "question", "note") if tin.get(k)), "")
+    if not detail and isinstance(tin.get("command"), str) and tin["command"].strip():
+        detail = " ".join(tin["command"].split())[:120]  # a Bash call without a description: the command itself
     return e["tool_name"].rsplit("__", 1)[-1], detail  # mcp__Server__navigate -> navigate
 
 
