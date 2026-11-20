@@ -139,7 +139,8 @@ class TsLifecycleTest(unittest.TestCase):
 @unittest.skipUnless(sys.platform == "darwin" and shutil.which("plutil"), "macOS LaunchAgents")
 class ServicePlistTest(unittest.TestCase):
     def plist(self, *args):
-        r = subprocess.run(["bash", str(SERVICE), "plist", *args], capture_output=True, text=True, timeout=30)
+        env = {k: v for k, v in os.environ.items() if k != "SB_HUB_PORT"}  # a hub's own port is not the default
+        r = subprocess.run(["bash", str(SERVICE), "plist", *args], capture_output=True, text=True, timeout=30, env=env)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         lint = subprocess.run(["plutil", "-lint", "-"], input=r.stdout, capture_output=True, text=True)
         self.assertEqual(lint.returncode, 0, lint.stdout)
