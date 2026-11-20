@@ -1250,7 +1250,7 @@ test.describe("Ticket table", () => {
 });
 
 test.describe("Run tab: why it waits, how many at once, which account and model", () => {
-  interface Calls { parallel: { repo: string; n: number }[]; agents: string[][]; itemAgent: Record<string, unknown>[] }
+  interface Calls { parallel: { repo: string; n: number }[]; agents: string[][]; itemAgent: Record<string, unknown>[]; options: Record<string, unknown>[] }
   const calls = async (page: Page): Promise<Calls> => (await page.request.get("/api/__calls")).json() as Promise<Calls>;
   const noSideways = (page: Page): Promise<boolean> => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
 
@@ -1266,6 +1266,28 @@ test.describe("Run tab: why it waits, how many at once, which account and model"
     expect((await calls(page)).parallel).toEqual([{ repo: "/demo", n: 3 }]);
     await line.getByRole("button", { name: /one fewer at once/ }).click();
     await expect(line.getByTestId("repo-words")).toContainText("of 2 at once");
+  });
+
+  test("the toolbar shows when the run should finish, with no time input; final review lives in the Run settings", async ({ page }) => {
+    await page.goto("/next/");
+    await expect(page.locator("input[type=time]")).toHaveCount(0);
+    const chip = page.getByTestId("eta-chip");
+    await expect(chip).toContainText(/Done ~\d/);
+    await chip.click();
+    await expect(page.locator("input[type=time]")).toHaveCount(0);
+    // earlier tests may have queued more; the demo board's queued ticket is always listed
+    await expect(page.getByTestId("eta-map").first()).toBeVisible();
+    await expect(page.getByTestId("eta-maps")).toContainText("The demo board");
+    await expect(page.getByTestId("eta-maps")).toContainText("queued at 90 min each");
+    await page.screenshot({ path: "/Users/danamador/Documents/Second Brain/wayfinder/sb-workflow/runs/2026-11-19-hub-typed/183-media/eta-popover.png" });
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: /^At once and accounts/ }).click();
+    const box = page.getByRole("checkbox", { name: "Final review after the last ticket" });
+    await expect(box).not.toBeChecked();
+    await box.click();
+    await expect(box).toBeChecked();
+    expect((await calls(page)).options.at(-1)).toMatchObject({ final_review: true });
+    await page.screenshot({ path: "/Users/danamador/Documents/Second Brain/wayfinder/sb-workflow/runs/2026-11-19-hub-typed/183-media/run-settings.png" });
   });
 
   test("an account's two bars, and its switch calls the agents route", async ({ page }) => {
@@ -1299,7 +1321,7 @@ test.describe("Run tab: why it waits, how many at once, which account and model"
     const bar = page.getByTestId("tick-bar");
     await expect(bar).toContainText("1 ticket ticked");
     await bar.getByRole("button", { name: "Set account and model" }).click();
-    await page.getByRole("option", { name: /^Tonight's accounts/ }).click();
+    await page.getByRole("option", { name: /^The run's accounts/ }).click();
     await expect(row.getByTestId("row-agent")).toHaveText("pool · opus");
     await expect(bar).toHaveCount(0);
   });

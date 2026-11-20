@@ -12,6 +12,7 @@ import {
   dayStart,
   endedToday,
   endsAt,
+  mapEtas,
   queueView,
   scopeItems,
   scopeWaits,
@@ -298,9 +299,66 @@ describe("the queue", () => {
     expect(qv.failedCleared.map((i) => i.key)).toEqual(["m#9"]);
   });
 
-  it("reckons the end at 1.5 h a ticket", () => {
+  it("reckons an end after now, and 0 with nothing queued", () => {
     expect(endsAt(s, null)).toBeGreaterThan(NOW);
     expect(endsAt(state(), null)).toBe(0);
+  });
+});
+
+describe("endsAt: from how long each map's tickets took", () => {
+  const done = (key: string, minutes: number): QueueItem =>
+    item(key, "done", { spend: { run_minutes: minutes, check_minutes: 0, tries: 1, model: "sonnet", account: null } });
+  const st = (items: QueueItem[], repos: Record<string, number> = {}, agents: string[] = []): State =>
+    ({
+      now: NOW,
+      queue: { version: 1, items, maps: [], paused: false, agent: agents[0] ?? null, agents, stop_at: null, repos: Object.fromEntries(Object.entries(repos).map(([r, n]) => [r, { at_once: n, running: 0, side_by_side: n }])) },
+      installed: Object.fromEntries(agents.map((a) => [a, { login: "ok" }])),
+    }) as unknown as State;
+  const q = (key: string, repo: string): QueueItem => item(key, "queued", { repo });
+
+  it("gives a map whose finished tickets took 30 and 50 minutes 40 minutes per queued ticket", () => {
+    const s = st([done("a/m#1", 30), done("a/m#2", 50), q("a/m#3", "/a"), q("a/m#4", "/a")]);
+    const [e] = mapEtas(s, null);
+    expect(e?.minutes).toBe(40);
+    expect(e?.measured).toBe(true);
+    expect(endsAt(s, null)).toBe(NOW + 2 * 40 * 60);
+  });
+
+  it("uses 90 minutes for a map with no finished ticket", () => {
+    const s = st([q("a/m#3", "/a")]);
+    expect(mapEtas(s, null)[0]).toMatchObject({ minutes: 90, measured: false });
+    expect(endsAt(s, null)).toBe(NOW + 90 * 60);
+  });
+
+  it("runs two repos side by side: the end is the later repo's, not the sum", () => {
+    const s = st([q("a/m#1", "/a"), q("a/m#2", "/a"), q("b/m#1", "/b")], {}, ["x", "y"]);
+    expect(endsAt(s, null)).toBe(NOW + 2 * 90 * 60);
+  });
+
+  it("runs a repo's tickets at its at-once limit", () => {
+    const s = st([q("a/m#1", "/a"), q("a/m#2", "/a")], { "/a": 2 });
+    expect(endsAt(s, null)).toBe(NOW + 90 * 60);
+  });
+
+  it("is capped by the accounts' slots", () => {
+    const s = st([q("a/m#1", "/a"), q("a/m#2", "/a"), q("a/m#3", "/a"), q("a/m#4", "/a")], { "/a": 4 }, ["x"]);
+    expect(endsAt(s, null)).toBe(NOW + 4 * 90 * 60);
+  });
+
+  it("ignores a stop_at saved before", () => {
+    const s = st([q("a/m#1", "/a")]);
+    s.queue.stop_at = NOW + 60;
+    expect(endsAt(s, null)).toBe(NOW + 90 * 60);
+  });
+
+  it("reads the hub's real queue and state (contract fixture): after now, before 1.5 h a queued ticket", () => {
+    const file = JSON.parse(readFileSync(join(import.meta.dirname, "../../../contract/fixtures/state.json"), "utf8")) as { body: unknown };
+    const real = State.parse(addLinks("GET /api/state", file.body, { exists: () => false, real: (p) => p, findTicket: () => null, runs: {} }));
+    const queued = real.queue.items.filter((i) => i.state === "queued").length;
+    expect(queued).toBeGreaterThan(0);
+    const end = endsAt(real, null);
+    expect(end).toBeGreaterThan(real.now);
+    expect(end).toBeLessThan(real.now + 5400 * queued);
   });
 });
 

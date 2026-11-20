@@ -38,7 +38,7 @@ export function RunView(): React.JSX.Element {
   // the live run only: nothing from an ended one
   const night = nightBlocks(liveState(state), ix, scope, true);
   const pairing = pairNight(state, night, sessionCards(state, ix, agents), helperCards(state, ix, agents));
-  const stop = night.line.stopAt ?? endsAt(state, ix);
+  const stop = endsAt(state, ix);
   const live = state.queue.night !== null;
   const running = liveState(state).queue.items.filter((i) => i.state === "running" && itemInScope(scope, i)).length;
   const table = !(scope.map !== "" && link.mv === "table");
@@ -95,7 +95,7 @@ export function RunView(): React.JSX.Element {
               {stop > state.now && (
                 <span className="inline-flex items-center gap-1 text-muted-foreground">
                   <IconClock className="size-3.5" aria-hidden />
-                  {night.line.stopAt !== null ? `the queue stops at ${hm(stop)}` : `the queue ends about ${hm(stop)}`}
+                  the queue ends about {hm(stop)}
                 </span>
               )}
               {state.queue.paused && <Badge tone="warn">paused</Badge>}

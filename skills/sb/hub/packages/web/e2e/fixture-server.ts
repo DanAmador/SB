@@ -7,7 +7,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { QueueAgentsBody, QueueItemAgentBody, QueueParallelBody, QueueMapBody, QueueMoveBody, QueueMoveMapBody, QueueSetBody, QueueStopBody, NightRenameBody, NightStopBody, NightStartBody, NightsAnswer, NightDetail, TicketActionBody, RunDetail, RunSeenBody, MapRoute, RunsPage, SendBody, State, Tickets, Trail, addLinks, type LinkContext, type Message, type QueueItem, type TicketRow } from "@sb-hub/contract";
+import { QueueAgentsBody, QueueItemAgentBody, QueueOptionsBody, QueueParallelBody, QueueMapBody, QueueMoveBody, QueueMoveMapBody, QueueSetBody, QueueStopBody, NightRenameBody, NightStopBody, NightStartBody, NightsAnswer, NightDetail, TicketActionBody, RunDetail, RunSeenBody, MapRoute, RunsPage, SendBody, State, Tickets, Trail, addLinks, type LinkContext, type Message, type QueueItem, type TicketRow } from "@sb-hub/contract";
 
 /** Every file the fixtures name exists; the server's own vault lookup is covered by the server's tests. */
 const ctx: LinkContext = { exists: () => true, real: (p) => p, findTicket: (map, num) => `/vault/${map}/issues/${String(num)}.md`, runs: {} };
@@ -174,7 +174,7 @@ const advance = (): void => {
   queue.version += 1;
 };
 
-const calls = { moveMap: 0, map: 0, parallel: [] as { repo: string; n: number }[], agents: [] as string[][], itemAgent: [] as Record<string, unknown>[] };
+const calls = { moveMap: 0, map: 0, parallel: [] as { repo: string; n: number }[], agents: [] as string[][], itemAgent: [] as Record<string, unknown>[], options: [] as Record<string, unknown>[] };
 /** Every Stop run the page posted. */
 const stopCalls: string[] = [];
 /** Every Stop the page posted, for the test to read. */
@@ -365,6 +365,14 @@ createServer((req, res) => {
       const r = queue.repos[b.repo];
       if (r !== undefined) r.at_once = b.n;
       calls.parallel.push({ repo: b.repo, n: b.n });
+      queue.version += 1;
+      send(res, 200, addLinks("POST /api/queue/set", { ok: true, queue }, ctx));
+      return;
+    }
+    if (req.method === "POST" && path === "/api/queue/options") {
+      const b = QueueOptionsBody.parse(await body(req));
+      (queue as Record<string, unknown>).final_review = b.final_review === true;
+      calls.options.push({ stop_at: b.stop_at, final_review: b.final_review === true });
       queue.version += 1;
       send(res, 200, addLinks("POST /api/queue/set", { ok: true, queue }, ctx));
       return;

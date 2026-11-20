@@ -1,4 +1,4 @@
-/** Which account launches one ticket: tonight's accounts by default, or one installed account. */
+/** Which account launches one ticket: the run's accounts by default, or one installed account. */
 import { IconCheck, IconChevronDown, IconRobot } from "@tabler/icons-react";
 import { useState } from "react";
 import type * as React from "react";
@@ -12,7 +12,7 @@ export function AccountList({ chosen, onPick }: { chosen: string | null; onPick:
   const { state } = useBoard();
   const pool = poolOf(state);
   const options: [string | null, string, string][] = [
-    [null, "Tonight's accounts", pool.join(", ") || "none chosen"],
+    [null, "The run's accounts", pool.join(", ") || "none chosen"],
     ...Object.entries(state.installed).map(([n, e]): [string, string, string] => [n, n, accountState(n, e, state).words]),
   ];
   return (
@@ -61,7 +61,7 @@ export function AccountPicker({ itemKey, chosen, title }: { itemKey: string; cho
           onPick={(name) => {
             setOpen(false);
             if (name !== chosen) {
-              void queueWrite("POST /api/queue/item_agent", { key: itemKey, name }, name === null ? "It runs on tonight's accounts." : `It runs on ${name}.`);
+              void queueWrite("POST /api/queue/item_agent", { key: itemKey, name }, name === null ? "It runs on the run's accounts." : `It runs on ${name}.`);
             }
           }}
         />

@@ -1,5 +1,5 @@
 /**
- * What the Run tab lets you set: how many tickets each repo runs at once, which accounts are in tonight's pool, the
+ * What the Run tab lets you set: how many tickets each repo runs at once, which accounts are in the run's pool, the
  * account and model of a waiting ticket (one, or every ticked one), and the words for why a ticket waits.
  */
 import { IconAdjustmentsHorizontal, IconCheck, IconChecklist, IconChevronDown, IconMinus, IconPlus, IconRobot, IconX } from "@tabler/icons-react";
@@ -100,7 +100,7 @@ export function RowMenu({ item, title }: { item: QueueItem; title: string }): Re
           model={model}
           onPick={(b) => {
             setOpen(false);
-            void queueWrite("POST /api/queue/item_agent", { key: item.key, ...b }, `${title}: ${b.name !== undefined ? (b.name ?? "tonight's accounts") : (b.model ?? "its own tier")}.`);
+            void queueWrite("POST /api/queue/item_agent", { key: item.key, ...b }, `${title}: ${b.name !== undefined ? (b.name ?? "the run's accounts") : (b.model ?? "its own tier")}.`);
           }}
         />
       </PopoverContent>
@@ -255,11 +255,28 @@ export function Limits(): React.JSX.Element | null {
             disabled={!can || (a.inPool && pool.length <= 1)}
             onSwitch={() => {
               const next = poolWith(pool, a.name, !a.inPool);
-              if (next !== null) void queueWrite("POST /api/queue/agents", { names: next, version: state.queue.version }, a.inPool ? `${a.name} is out of tonight's accounts.` : `${a.name} is in tonight's accounts.`);
+              if (next !== null) void queueWrite("POST /api/queue/agents", { names: next, version: state.queue.version }, a.inPool ? `${a.name} is out of the run's accounts.` : `${a.name} is in the run's accounts.`);
             }}
           />
         ))}
       </div>
+      <label className="flex items-center gap-2 px-1 text-sm">
+        <input
+          type="checkbox"
+          className="size-4 accent-[var(--brand)]"
+          checked={state.queue.final_review === true}
+          disabled={!can}
+          onChange={(ev) => {
+            const on = ev.currentTarget.checked;
+            void queueWrite(
+              "POST /api/queue/options",
+              { stop_at: state.queue.stop_at ?? null, final_review: on, version: state.queue.version },
+              on ? "A final review follows the last ticket." : "No final review.",
+            );
+          }}
+        />
+        Final review after the last ticket
+      </label>
     </section>
   );
 }
@@ -293,8 +310,8 @@ function AccountRow({ a, now, disabled, onSwitch }: { a: AccountLine; now: numbe
         type="button"
         role="switch"
         aria-checked={a.inPool}
-        aria-label={`${a.name} takes work tonight`}
-        title={a.inPool ? "In tonight's accounts" : "Out of tonight's accounts"}
+        aria-label={`${a.name} takes work in the run`}
+        title={a.inPool ? "In the run's accounts" : "Out of the run's accounts"}
         disabled={disabled}
         onClick={onSwitch}
         className={cn("relative ml-auto inline-flex h-5 w-9 shrink-0 items-center rounded-full border transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:opacity-50", a.inPool ? "bg-brand" : "bg-muted")}

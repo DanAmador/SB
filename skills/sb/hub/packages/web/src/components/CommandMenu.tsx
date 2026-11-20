@@ -160,7 +160,7 @@ export function JobDialog({ open, onClose }: { open: boolean; onClose: () => voi
           <Label>
             Account
             <Select name="agent" defaultValue="">
-              <option value="">{`Tonight's (${poolOf(state).join(", ")})`}</option>
+              <option value="">{`The run's (${poolOf(state).join(", ")})`}</option>
               {Object.keys(state.installed).map((n) => (
                 <option key={n} value={n}>
                   {n}

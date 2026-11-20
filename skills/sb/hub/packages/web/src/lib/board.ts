@@ -397,31 +397,88 @@ export function canTickAgain(i: QueueItem, ix: TicketIndex): boolean {
   return i.kind === "ticket" && i.state !== "done" && ix.byKey.has(i.key) && !ix.live.has(i.key) && !ix.doneKeys.has(i.key);
 }
 
+/** One map's finish: when its last queued ticket should end, and how that was worked out. */
+export interface MapEta {
+  /** The map's key; "" for jobs. */
+  readonly map: string;
+  readonly end: number;
+  readonly queued: number;
+  /** Minutes each of its tickets is reckoned at. */
+  readonly minutes: number;
+  /** True when the minutes come from tickets of this map that finished; false for the flat 90. */
+  readonly measured: boolean;
+  readonly atOnce: number;
+}
+
+const median = (xs: readonly number[]): number => {
+  const s = [...xs].sort((a, b) => a - b);
+  const m = s.length >> 1;
+  return s.length % 2 === 1 ? (s[m] ?? 0) : ((s[m - 1] ?? 0) + (s[m] ?? 0)) / 2;
+};
+
 /**
- * When the queue should end: each repo runs its items one after another, repos side by side, and all of them
- * share the accounts' worker slots (2 for an account with a learned cost, else 1).
+ * When each map should finish. A queued ticket takes its map's median run_minutes of finished tickets (90 minutes
+ * when the map has none). Each repo runs its items at its at-once limit, in queue order; repos run side by side.
  */
-export function endsAt(state: State, ix: TicketIndex | null): number {
-  const live = state.queue.items.filter((i) => i.state === "running" || i.state === "queued");
-  if (live.length === 0) return 0;
+export function mapEtas(state: State, ix: TicketIndex | null): MapEta[] {
+  const items = state.queue.items;
+  const live = items.filter((i) => i.state === "running" || i.state === "queued");
+  const out: MapEta[] = [];
+  const minutesOf = (map: string): { minutes: number; measured: boolean } => {
+    const took = items.filter((i) => (i.state === "done" || i.state === "landed") && itemMapKey(i) === map && i.spend !== undefined && i.spend.run_minutes > 0).map((i) => i.spend?.run_minutes ?? 0);
+    return took.length > 0 ? { minutes: median(took), measured: true } : { minutes: ESTIMATE / 60, measured: false };
+  };
   const byRepo = new Map<string, QueueItem[]>();
   for (const i of live) {
     const t = ix?.byKey.get(i.key);
     const r = i.repo ?? t?.repo ?? (itemProject(i, t) || i.key);
     byRepo.set(r, [...(byRepo.get(r) ?? []), i]);
   }
-  let end = state.now;
-  for (const list of byRepo.values()) {
+  const ends = new Map<string, number>();
+  const queuedBy = new Map<string, number>();
+  for (const [repo, list] of byRepo) {
+    const atOnce = Math.max(1, state.queue.repos?.[repo]?.at_once ?? 1);
+    const lanes: number[] = Array.from({ length: atOnce }, () => state.now);
+    const take = (): number => lanes.indexOf(Math.min(...lanes));
     const run = list.filter((i) => i.state === "running");
-    const from = run.length > 0 ? Math.min(...run.map((i) => i.started ?? state.now)) : state.now;
-    end = Math.max(end, from + ESTIMATE * list.length);
+    run.forEach((i) => {
+      const secs = minutesOf(itemMapKey(i)).minutes * 60;
+      const end = Math.max(state.now, (i.started ?? state.now) + secs);
+      lanes[take()] = end;
+      ends.set(itemMapKey(i), Math.max(ends.get(itemMapKey(i)) ?? 0, end));
+    });
+    for (const i of list.filter((x) => x.state === "queued")) {
+      const m = itemMapKey(i);
+      const l = take();
+      const end = (lanes[l] ?? state.now) + minutesOf(m).minutes * 60;
+      lanes[l] = end;
+      ends.set(m, Math.max(ends.get(m) ?? 0, end));
+      queuedBy.set(m, (queuedBy.get(m) ?? 0) + 1);
+    }
+    for (const i of list) {
+      const m = itemMapKey(i);
+      if (!out.some((e) => e.map === m)) out.push({ map: m, end: 0, queued: 0, ...minutesOf(m), atOnce });
+    }
   }
-  const slots = poolOf(state)
+  return out.map((e) => ({ ...e, end: ends.get(e.map) ?? 0, queued: queuedBy.get(e.map) ?? 0 })).sort((a, b) => a.end - b.end);
+}
+
+/** The accounts' worker slots (2 for an account with a learned cost, else 1). */
+const slotsOf = (state: State): number =>
+  poolOf(state)
     .map((n) => state.installed[n])
     .filter((e): e is Installed => e !== undefined && e.login !== "expired")
     .reduce((n, e) => n + (e.costs && Object.keys(e.costs).length > 0 ? 2 : 1), 0);
-  const queued = live.filter((i) => i.state === "queued").length;
-  return Math.max(end, state.now + (ESTIMATE * queued) / Math.max(1, slots));
+
+/** When the queue should end, 0 with nothing queued or running: the later map's end, but not before the accounts' slots could work through it all. */
+export function endsAt(state: State, ix: TicketIndex | null): number {
+  const etas = mapEtas(state, ix);
+  if (etas.length === 0) return 0;
+  const end = Math.max(state.now, ...etas.map((e) => e.end));
+  const slots = slotsOf(state);
+  if (slots === 0) return end;
+  const work = etas.reduce((n, e) => n + e.queued * e.minutes * 60, 0);
+  return Math.max(end, state.now + work / slots);
 }
 
 /** An account's state in words, for the toolbar. */

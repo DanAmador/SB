@@ -49,7 +49,7 @@ export function Pace(): React.JSX.Element {
   );
 }
 
-/** One line for tonight's accounts together: what the line needs against what is free. */
+/** One line for the run's accounts together: what the line needs against what is free. */
 function poolWords(p: PoolPace): string {
   if (p.top === null) return "No usage reading for the accounts in use yet.";
   const until = `${p.inUse > 1 ? ` across ${String(p.inUse)} accounts` : ""}${p.resets !== null ? ` until ${hm(p.resets)}` : ""}`;
@@ -75,7 +75,7 @@ function Account({ a, now }: { a: AccountPace; now: number }): React.JSX.Element
     <div className="flex flex-col gap-1.5 text-sm">
       <div className="flex items-baseline gap-2">
         <span className="font-medium">{a.name}</span>
-        <span className="text-xs text-muted-foreground">{a.inPool ? "tonight" : a.running > 0 ? "not one of tonight's, but running" : "not in tonight's accounts"}</span>
+        <span className="text-xs text-muted-foreground">{a.inPool ? "in the run" : a.running > 0 ? "not one of the run's, but running" : "not in the run's accounts"}</span>
         {a.running > 0 && <span className="ml-auto text-xs text-brand">{String(a.running)} running</span>}
       </div>
       {f === null ? (
