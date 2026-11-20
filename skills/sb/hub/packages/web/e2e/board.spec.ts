@@ -16,9 +16,44 @@ const runTab = async (page: Page, name: "Flow" | "Now" | "Maps" | "Queue"): Prom
   await page.getByRole("tablist", { name: "Run" }).getByRole("tab", { name: new RegExp(`^${name}`) }).click();
 };
 
-// the hub keeps the seen marks, so every test starts with none
-test.beforeEach(async ({ request }) => {
+// the hub keeps the seen marks, so every test starts with none. The graph tests below were written for the 15-minute
+// columns, which are the Horizontal setting; Vertical, the default, has its own test ("the graph runs time down").
+test.beforeEach(async ({ request, page }) => {
   await request.post("/api/__reset-seen");
+  await page.addInitScript(() => { if (!sessionStorage.getItem("vertical-test")) localStorage.setItem("sbhub.graphLayout", "horizontal"); });
+});
+
+test.describe("The run's graph, vertical by default", () => {
+  test.beforeEach(async ({ request, page }) => {
+    await request.post("/api/__restore");
+    await request.post("/api/__job");
+    await page.addInitScript(() => { sessionStorage.setItem("vertical-test", "1"); localStorage.removeItem("sbhub.graphLayout"); });
+  });
+  test.afterEach(async ({ request }) => {
+    await request.post("/api/__restore");
+  });
+
+  test("the graph runs time down: a column per project, a box per ticket, the now line across, one Done box; Horizontal in Settings switches to 15-minute columns", async ({ page }) => {
+    const errors: string[] = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await page.goto("/next/");
+    const night = page.getByTestId("night-graph");
+    await expect(night).toBeVisible();
+    for (const p of ["demo", "other"]) await expect(night.locator(".react-flow__node-head", { hasText: p })).toBeVisible();
+    await expect(night.locator(".react-flow__node-box")).toHaveCount(8);
+    await expect(night.locator(".react-flow__node-now")).toHaveCount(1);
+    await expect(night.getByTestId("night-done")).toContainText("of 8 finished");
+    await expect(night.getByTestId("night-bar")).toHaveCount(0);
+    // the now line lies across: wider than tall
+    const now = await night.locator(".react-flow__node-now").boundingBox();
+    expect(now && now.width > now.height).toBe(true);
+    // the Settings choice switches to the 15-minute columns
+    await page.getByRole("button", { name: /settings/i }).click();
+    await page.getByRole("radio", { name: /horizontal/i }).click();
+    await page.keyboard.press("Escape");
+    await expect(night.getByTestId("night-bar")).toHaveCount(8);
+    expect(errors).toEqual([]);
+  });
 });
 
 test("Run is the landing page: one row per worker run, the silent one amber, never a chat session", async ({ page }) => {
