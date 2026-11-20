@@ -110,8 +110,8 @@ describe("an account's week", () => {
     const w = weekPace(0.4, resets, NOW);
     expect(w?.gone).toBeCloseTo(0.3);
     expect(w?.even).toBeCloseTo(0.3 * GATE_7D);
-    // 40% in 30% of the week reaches 80% at 60% of the week
-    expect(w?.stopsAt).toBeCloseTo(resets - 0.4 * WEEK_SECONDS, 0);
+    // 40% in 30% of the week reaches the stop at 30% x GATE_7D / 40% of the week
+    expect(w?.stopsAt).toBeCloseTo(resets - (1 - (0.3 * GATE_7D) / 0.4) * WEEK_SECONDS, 0);
     expect(w?.stopped).toBe(false);
   });
   it("lasts when the rate so far ends under the stop", () => {
@@ -119,7 +119,7 @@ describe("an account's week", () => {
     expect(weekPace(0, resets, NOW)?.stopsAt).toBeNull();
   });
   it("is stopped once past it, and unknown without a reading or after its reset", () => {
-    expect(weekPace(0.85, resets, NOW)).toMatchObject({ stopped: true, stopsAt: null });
+    expect(weekPace(0.99, resets, NOW)).toMatchObject({ stopped: true, stopsAt: null });
     expect(weekPace(null, resets, NOW)).toBeNull();
     expect(weekPace(0.4, NOW - 1, NOW)).toBeNull();
   });

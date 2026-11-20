@@ -94,7 +94,7 @@ the vault. Only the running hub writes the queue (`$SB_HUB_HOME/state.json`); CL
   soonest, then the most room), so what is about to expire is spent first: the account's use, plus what its
   running items still need, plus this item's cost (learned per account and tier from finished
   items), stays under 90% of the 5-hour window (a reset before the item would need the rest counts),
-  and weekly use is under 80%. Up to 4 workers per account (one per repo still holds); one until its cost is learned. An item
+  and weekly use is under 97% (98% in the week's last two days). Up to 4 workers per account (one per repo still holds); one until its cost is learned. An item
   that fits nowhere waits with a note naming the account, its use and the reset time. At 95% the hub
   tells running workers to commit what passes and stop. A ticket cut off by a limit or a logout
   resumes on another account with room, from where it stopped. An expired login takes that account

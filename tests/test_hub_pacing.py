@@ -120,12 +120,12 @@ class FitTest(PacingCase):
         self.assertEqual(self.items()["repo/one#1"]["note"], "waits: main 85% used, needs about 15%; resets 04:20")
 
     def test_the_weekly_gate_holds_an_agent_with_room_in_its_window(self):
-        self.probe_out = {"main": ev(0.10, week=0.85), "spare": ev(0.80)}
+        self.probe_out = {"main": ev(0.10, week=0.99), "spare": ev(0.80)}
         self.resume()
         self.sup.tick()
         self.assertEqual(self.launched, [])
         note = self.items()["repo/one#1"]["note"]
-        self.assertIn("main used 85% of its week; resets Tue 04:20", note)
+        self.assertIn("main used 99% of its week; resets Tue 04:20", note)
         self.assertIn("spare 80% used, needs about 15%", note)
 
     def test_the_first_ticket_runs_alone_its_cost_is_learned_and_replaces_the_default(self):
@@ -188,11 +188,11 @@ class FitTest(PacingCase):
         self.assertEqual(got, "spare")
 
     def test_an_account_past_a_gate_is_never_picked_for_its_early_reset(self):
-        got = self._first(ev(0.20, week_resets=R + 5 * 86400), ev(0.10, week=0.85, week_resets=R + 3 * 86400))
+        got = self._first(ev(0.20, week_resets=R + 5 * 86400), ev(0.10, week=0.975, week_resets=R + 3 * 86400))
         self.assertEqual(got, "main")
 
     def test_in_its_weeks_last_two_days_an_account_runs_up_to_98_percent(self):
-        got = self._first(ev(0.20, week_resets=R + 5 * 86400), ev(0.10, week=0.85, week_resets=R + 86400))
+        got = self._first(ev(0.20, week_resets=R + 5 * 86400), ev(0.10, week=0.975, week_resets=R + 86400))
         self.assertEqual(got, "spare")
 
     def test_past_98_percent_even_the_last_two_days_hold(self):

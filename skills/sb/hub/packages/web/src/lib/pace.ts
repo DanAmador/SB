@@ -9,7 +9,7 @@ import { poolOf } from "./board.ts";
 /** Nothing starts that would take an account's 5-hour window past this. */
 export const GATE_5H = 0.9;
 /** Nothing starts on an account whose week is used past this. */
-export const GATE_7D = 0.8;
+export const GATE_7D = 0.97;
 export const WINDOW = 5 * 3600;
 export const WEEK_SECONDS = 7 * 86400;
 /** A reading older than this is shown as old: the hub no longer trusts it either. */

@@ -1908,7 +1908,7 @@ def ran_past(limit):
 USAGE_STALE = 600  # a reading older than this is refreshed by a probe; at most one probe per agent this often
 IDLE_USAGE = 1800  # with nothing to start, each pool account is probed this often, so the board shows its use
 GATE_5H = 0.90  # nothing starts that would take an account's 5-hour window past this
-GATE_7D = 0.80  # nothing starts on an account whose week is used past this...
+GATE_7D = 0.97  # nothing starts on an account whose week is used past this...
 GATE_7D_LAST = 0.98  # ...or past this in its week's last WEEK_LAST seconds: what is left would expire unused
 WEEK_LAST = 48 * 3600
 BRAKE_5H = 0.95  # a running worker whose account passes this is told, once, to wrap up
