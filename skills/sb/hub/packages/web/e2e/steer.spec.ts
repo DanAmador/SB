@@ -19,8 +19,13 @@ const panel = async (page: Page, key: string): Promise<ReturnType<Page["getByRol
   return sheet.getByRole("region", { name: "Steer" });
 };
 const today = new Date().toLocaleDateString("sv");
+/** A save runs the real sbmap: on a loaded machine (2026-11-20, load ~48) one took over 5 s, so wait longer for its result. */
+const SAVED = { timeout: 20_000 };
 
 test("Done when, files and what it comes after change from the panel and the note on disk shows each", async ({ page }) => {
+  // Three real sbmap writes: the 30 s default ran out under load, and a retry cannot help, as the first try already
+  // changed the note on disk.
+  test.slow();
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(String(e)));
   const steer = await panel(page, "steer/lab#1");
@@ -31,7 +36,7 @@ test("Done when, files and what it comes after change from the panel and the not
   await steer.getByRole("textbox").fill("The wall stands\nand the test passes.");
   await steer.getByRole("button", { name: "Save…" }).click();
   await steer.getByRole("button", { name: "Yes, save it" }).click();
-  await expect(steer.getByTestId("steer-done_when")).toContainText("The wall stands");
+  await expect(steer.getByTestId("steer-done_when")).toContainText("The wall stands", SAVED);
   let note = await noteOf(page, 1);
   expect(note).toContain("## Done when\n\nThe wall stands\nand the test passes.\n");
   expect(note).toContain(`- **${today}**: Owner changed Done when from the hub; it was: It stands.`);
@@ -41,7 +46,7 @@ test("Done when, files and what it comes after change from the panel and the not
   await steer.getByRole("textbox").fill("src/a.py\ndocs/");
   await steer.getByRole("button", { name: "Save…" }).click();
   await steer.getByRole("button", { name: "Yes, save it" }).click();
-  await expect(steer.getByTestId("steer-paths")).toContainText("docs/");
+  await expect(steer.getByTestId("steer-paths")).toContainText("docs/", SAVED);
   note = await noteOf(page, 1);
   expect(note).toMatch(/paths:\n\s+- src\/a\.py\n\s+- docs\//);
   expect(note).toContain("Owner changed files from the hub; it was: src/");
@@ -51,7 +56,7 @@ test("Done when, files and what it comes after change from the panel and the not
   await steer.getByRole("checkbox", { name: "Build the wall" }).check();
   await steer.getByRole("button", { name: "Save…" }).click();
   await steer.getByRole("button", { name: "Yes, save it" }).click();
-  await expect(steer.getByTestId("steer-after")).toHaveText("Build the wall");
+  await expect(steer.getByTestId("steer-after")).toHaveText("Build the wall", SAVED);
   note = await noteOf(page, 1);
   expect(note).toContain("blocked_by:");
   expect(note).toContain("Owner changed what it comes after from the hub; it was: empty");
@@ -65,7 +70,7 @@ test("a loop in the order is refused with sbmap's words and the note is left as 
   await steer.getByRole("checkbox", { name: "Lay the base" }).check();
   await steer.getByRole("button", { name: "Save…" }).click();
   await steer.getByRole("button", { name: "Yes, save it" }).click();
-  await expect(steer.getByRole("alert")).toContainText("it would be a loop");
+  await expect(steer.getByRole("alert")).toContainText("it would be a loop", SAVED);
   await page.screenshot({ path: "/tmp/steer-loop-desktop.png" });
   expect(await noteOf(page, 2)).toBe(before);
 });
