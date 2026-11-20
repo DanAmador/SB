@@ -5,7 +5,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { State, TicketRow } from "@sb-hub/contract";
 import { NODE_H, NODE_W } from "./map.ts";
-import { atOnceOf, clock, countsLine, DONE_ID, focusOf, frozenInfo, spanOf, GAP, HEAD, infoOf, nightGraph, ROW_H, type NightInput, type TicketInfo } from "./nightGraph.ts";
+import { atOnceOf, BAR_GAP, chunkGraph, CHUNK_W, clock, countsLine, DONE_ID, focusOf, frozenInfo, spanOf, GAP, HEAD, infoOf, LEFT, nightGraph, pathsMeet, pathsOf, ROW_H, type ChunkGraph, type ChunkInput, type NightInput, type TicketInfo } from "./nightGraph.ts";
+import type { Queue } from "@sb-hub/contract";
 
 const links = (report: string | null) => ({ ticket: null, map: null, board: null, report, log: null });
 const it_ = (key: string, state: QueueItem["state"], more: Record<string, unknown> = {}): QueueItem =>
@@ -297,5 +298,162 @@ describe("nightGraph", () => {
     expect([row("job:aaaaaaaaaaaa:1"), row("job:tttttttttttt:1")]).toEqual([2, 3]);
     expect(x.frames.map((f) => f.map)).toEqual(["repo/two", "repo/one", ""]);
     expect(x.done).toMatchObject({ finished: 0, total: 6 });
+  });
+});
+
+describe("chunkGraph: 15-minute columns, left to right", () => {
+  const M = 60;
+  const t = (title: string, after: string[] = []): TicketInfo => ({ title, after });
+  const tickets = (...rows: [string, string[]?][]): ChunkInput["info"] => ({ maps: new Map(), tickets: new Map(rows.map(([k, a]) => [k, t(k, a ?? [])])) });
+  const chunks = (more: Partial<ChunkInput> & Pick<ChunkInput, "items">): ChunkGraph =>
+    chunkGraph({ maps: ["alpha/one", "beta/two"], info: tickets(), scope: EVERYTHING, ...more });
+  const bar = (g: ChunkGraph, id: string) => {
+    const b = g.bars.find((x) => x.id === id);
+    if (b === undefined) throw new Error(`no bar ${id}`);
+    return b;
+  };
+  /** Every bar's arrow leaves its right end and meets the next one's left end; Done's left end too. */
+  const ends = (g: ChunkGraph) => g.edges.map((e) => {
+    const from = bar(g, e.from);
+    const to = e.to === DONE_ID ? (g.done?.x ?? 0) : bar(g, e.to).x;
+    return [from.x + from.w, to] as const;
+  });
+  const overlapsInTrack = (g: ChunkGraph): string[] => {
+    const out: string[] = [];
+    for (const a of g.bars) for (const b of g.bars) if (a.id < b.id && a.project === b.project && a.track === b.track && a.from <= b.to && b.from <= a.to) out.push(`${a.id}~${b.id}`);
+    return out;
+  };
+
+  it("starts at the quarter the night's first start falls in and labels each column with its clock", () => {
+    const g = chunks({ items: [it_("alpha/one#1", "done", { started: T + 5 * M, ended: T + 40 * M })], now: T + 2 * H });
+    expect(g.columns.map((c) => c.clock)).toEqual(["21:00", "21:15", "21:30"]);
+    expect(g.columns.map((c) => c.x)).toEqual([LEFT, LEFT + CHUNK_W, LEFT + 2 * CHUNK_W]);
+  });
+
+  it("puts two overlapping tickets of one band on two tracks, and a later one back on the first", () => {
+    const g = chunks({
+      items: [
+        it_("alpha/one#1", "done", { started: T, ended: T + 40 * M }),
+        it_("alpha/one#2", "done", { started: T + 20 * M, ended: T + 50 * M }),
+        it_("alpha/one#3", "done", { started: T + 60 * M, ended: T + 70 * M }),
+      ],
+      now: T + 2 * H,
+    });
+    expect([bar(g, "alpha/one#1").track, bar(g, "alpha/one#2").track, bar(g, "alpha/one#3").track]).toEqual([0, 1, 0]);
+    expect(g.bands).toMatchObject([{ project: "alpha", tracks: 2 }]);
+    expect(bar(g, "alpha/one#2").y).toBeGreaterThan(bar(g, "alpha/one#1").y);
+    expect(overlapsInTrack(g)).toEqual([]);
+  });
+
+  it("draws a 50-minute ticket across 4 columns, and a running one to the now column", () => {
+    const g = chunks({ items: [it_("alpha/one#1", "done", { started: T, ended: T + 50 * M }), it_("beta/two#1", "running", { started: T + 10 * M })], now: T + 65 * M });
+    expect(bar(g, "alpha/one#1")).toMatchObject({ from: 0, to: 3, x: LEFT, w: 4 * CHUNK_W - BAR_GAP });
+    // a run ending on a column's line stays out of that column
+    expect(bar(chunks({ items: [it_("alpha/one#1", "done", { started: T, ended: T + 60 * M })], now: T + 2 * H }), "alpha/one#1").to).toBe(3);
+    expect(bar(g, "beta/two#1")).toMatchObject({ from: 0, to: 4, phase: "now" });
+    expect(g.nowX).toBe(LEFT + (65 / 15) * CHUNK_W);
+    expect(g.columns.find((c) => c.chunk === 4)?.phase).toBe("now");
+  });
+
+  it("puts a queued ticket right of the estimated end of the ticket it comes after, running or queued", () => {
+    // the night's usual run: the one finished ticket's 45 minutes
+    const g = chunks({
+      items: [
+        it_("alpha/one#1", "done", { started: T, ended: T + 45 * M }),
+        it_("alpha/one#2", "running", { started: T + 50 * M }),
+        it_("alpha/one#3", "queued"),
+        it_("alpha/one#4", "queued"),
+      ],
+      info: tickets(["alpha/one#3", ["alpha/one#2"]], ["alpha/one#4", ["alpha/one#3"]]),
+      paths: new Map([["alpha/one#2", ["a/"]], ["alpha/one#3", ["b/"]], ["alpha/one#4", ["c/"]]]),
+      now: T + 60 * M,
+    });
+    const two = bar(g, "alpha/one#2");
+    const three = bar(g, "alpha/one#3");
+    expect(two.until).toBe(T + 95 * M);
+    // 22:35 ends #2, so #3 takes the 22:45 column, right of the now line and of that end
+    expect(three.from).toBe(7);
+    expect(three.x).toBeGreaterThanOrEqual(LEFT + (95 / 15) * CHUNK_W);
+    expect(three.x).toBeGreaterThan(g.nowX ?? Infinity);
+    expect(bar(g, "alpha/one#4").from).toBe(three.to + 1);
+  });
+
+  it("lets two queued tickets with paths apart share a column; two that share a path, or one naming none, wait", () => {
+    const g = chunks({
+      items: [it_("alpha/one#1", "queued"), it_("alpha/one#2", "queued"), it_("alpha/one#3", "queued"), it_("alpha/one#4", "queued"), it_("beta/two#1", "queued")],
+      paths: new Map([["alpha/one#1", ["src/a/"]], ["alpha/one#2", ["src/b"]], ["alpha/one#3", ["src/a/x.ts"]], ["beta/two#1", ["src/a/"]]]),
+      now: T,
+    });
+    const [one, two, three, four, other] = ["alpha/one#1", "alpha/one#2", "alpha/one#3", "alpha/one#4", "beta/two#1"].map((k) => bar(g, k));
+    expect(two?.from).toBe(one?.from);
+    expect(three?.from).toBe((one?.to ?? 0) + 1);
+    // #4 names no path: it waits for everything else of its project
+    expect(four?.from).toBe((three?.to ?? 0) + 1);
+    // another project never shares
+    expect(other?.from).toBe(one?.from);
+    expect(one?.track).not.toBe(two?.track);
+    expect(overlapsInTrack(g)).toEqual([]);
+    expect(pathsMeet(["/src/a/"], ["src/a/b.ts"])).toBe(true);
+    expect(pathsMeet(["src/ab"], ["src/a"])).toBe(false);
+  });
+
+  it("notes a future column whose layout runs more than the project's at-once limit", () => {
+    const items = [it_("alpha/one#1", "queued"), it_("alpha/one#2", "queued"), it_("alpha/one#3", "queued")];
+    const paths = new Map([["alpha/one#1", ["a"]], ["alpha/one#2", ["b"]], ["alpha/one#3", ["c"]]]);
+    const g = chunks({ items, paths, now: T });
+    const first = bar(g, "alpha/one#1").from;
+    expect(g.notes.find((n) => n.chunk === first)).toMatchObject({ project: "alpha", could: 3, runs: 1, text: "3 could run, hub runs 1" });
+    expect(g.notes.every((n) => n.chunk > 0)).toBe(true);
+    expect(chunks({ items, paths, now: T, atOnce: new Map([["alpha", 3]]) }).notes).toEqual([]);
+  });
+
+  it("points every arrow right, Done right of the last column", () => {
+    const g = chunks({
+      items: [
+        it_("alpha/one#1", "done", { started: T, ended: T + 30 * M }),
+        it_("alpha/one#2", "running", { started: T + 30 * M }),
+        it_("alpha/one#3", "queued"),
+        it_("beta/two#1", "queued"),
+        it_("beta/two#2", "queued"),
+      ],
+      info: tickets(["alpha/one#2", ["alpha/one#1"]], ["alpha/one#3", ["alpha/one#2"]], ["beta/two#1", ["alpha/one#1", "alpha/one#3"]], ["beta/two#2", ["beta/two#1"]]),
+      now: T + 40 * M,
+    });
+    expect(g.edges.filter((e) => e.to !== DONE_ID).map((e) => e.id).sort()).toEqual(["alpha/one#1>alpha/one#2", "alpha/one#1>beta/two#1", "alpha/one#2>alpha/one#3", "alpha/one#3>beta/two#1", "beta/two#1>beta/two#2"]);
+    expect(g.edges.filter((e) => e.to === DONE_ID)).toHaveLength(2);
+    for (const [a, b] of ends(g)) expect(a).toBeLessThan(b);
+    const lastCol = g.columns[g.columns.length - 1];
+    expect(g.done?.x).toBeGreaterThan((lastCol?.x ?? 0) + CHUNK_W - 1);
+  });
+
+  it("keeps the bands where they were when a new project's ticket comes in", () => {
+    const items = [it_("alpha/one#1", "running", { started: T }), it_("beta/two#1", "queued")];
+    const first = chunks({ items, now: T + 10 * M });
+    expect(first.bands.map((b) => b.project)).toEqual(["alpha", "beta"]);
+    const more = { items: [...items, it_("gamma/three#1", "queued")], maps: ["gamma/three", "beta/two", "alpha/one"], now: T + 20 * M };
+    expect(chunks(more).bands.map((b) => b.project)).toEqual(["gamma", "beta", "alpha"]);
+    const second = chunks({ ...more, prev: first.memo });
+    expect(second.bands.map((b) => b.project)).toEqual(["alpha", "beta", "gamma"]);
+    expect(chunks({ ...more, prev: second.memo }).bands.map((b) => b.project)).toEqual(["alpha", "beta", "gamma"]);
+  });
+
+  it("lays out the hub's recorded queue answer (contract fixtures) with its ticket rows' paths: no two bars of a track overlap", () => {
+    const body = (f: string): unknown => (JSON.parse(readFileSync(join(import.meta.dirname, `../../../contract/fixtures/${f}`), "utf8")) as { body: unknown }).body;
+    // the answer to a stop: repo/one#2 runs, two tickets of each map and a job wait
+    const q = (body("queue-stop.json") as { queue: Queue }).queue;
+    const rows = body("tickets.json") as TicketRow[];
+    const started = q.items.find((i) => i.state === "running")?.started ?? 0;
+    const g = chunkGraph({ items: q.items, maps: q.maps ?? [], info: infoOf([], rows), scope: EVERYTHING, atOnce: atOnceOf(q.repos), paths: pathsOf(rows), now: started + 600 });
+    expect(g.bars).toHaveLength(q.items.length);
+    expect(overlapsInTrack(g)).toEqual([]);
+    const from = (k: string) => bar(g, k).from;
+    // two#5 and two#6 both name five/: one after the other; one#3 (three/) meets neither, nor the running one#2 (two/)
+    expect(from("repo/one#3")).toBe(from("repo/two#5"));
+    expect(from("repo/two#6")).toBeGreaterThan(bar(g, "repo/two#5").to);
+    // the job names no path, so it waits for every ticket of its project
+    expect(from("job:aaaaaaaaaaaa:1")).toBeGreaterThan(Math.max(...g.bars.filter((b) => b.item.kind === "ticket").map((b) => b.to)));
+    // the running one, two queued beside it: 3 could run where the repo runs 2 at once
+    expect(g.notes[0]).toMatchObject({ project: "repo", could: 3, runs: 2, text: "3 could run, hub runs 2" });
+    for (const [a, b] of ends(g)) expect(a).toBeLessThan(b);
   });
 });

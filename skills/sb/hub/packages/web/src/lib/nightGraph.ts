@@ -367,7 +367,8 @@ export function footOf(i: QueueItem, p: number | null): string {
   return i.started != null && i.ended != null && i.ended > i.started ? `${words} · ${took(i.ended - i.started)}` : words;
 }
 
-export function nightGraph(input: NightInput): NightGraph {
+/** What both layouts share: one item per key, the 'after' arrows among them, the cards and the chips, what is shown. */
+function cardsOf(input: Pick<NightInput, "items" | "maps" | "info" | "scope" | "hidden">) {
   const { info, scope, maps } = input;
   const hidden = input.hidden ?? new Set<string>();
   // one box per key; a key the queue holds twice shows its latest
@@ -375,8 +376,6 @@ export function nightGraph(input: NightInput): NightGraph {
   for (const i of input.items) latest.set(i.key, i);
   const all = [...latest.values()];
   const after = (k: string): string[] => (info.tickets.get(k)?.after ?? []).filter((a) => a !== k && latest.has(a));
-  // the rows to come come from the whole run, so a project or map left out still takes the turns it takes
-  const plan = queueRows(all, maps, after, input.atOnce);
 
   const scoped = all.filter((i) => itemInScope(scope, i));
   const queued = new Map(scoped.filter((i) => i.state === "queued").map((i, n) => [i.key, n + 1]));
@@ -415,12 +414,26 @@ export function nightGraph(input: NightInput): NightGraph {
       line: countsLine(counts), counts, hue: hueOf(m), hidden: hidden.has(m), boxes: its.map(cardOf),
     });
   }
-
   // the graph: what the chips leave shown
   const shown = scoped.filter((i) => !hidden.has(itemMapKey(i)));
+  return { latest, all, after, scoped, mapOrder, cardOf, frames, shown };
+}
+
+const phaseOf = (i: QueueItem): Phase => (i.state === "running" ? "now" : i.state === "queued" ? "next" : "ran");
+/** The night's usual run in seconds: the middle of the finished runs, else the rough 1.5 h the toolbar counts with. */
+const usualOf = (all: readonly QueueItem[]): number => {
+  const runs = all.filter((i) => i.started != null && i.ended != null && i.state !== "skipped").map((i) => (i.ended ?? 0) - (i.started ?? 0)).sort((a, b) => a - b);
+  return runs[Math.floor(runs.length / 2)] ?? ESTIMATE;
+};
+
+export function nightGraph(input: NightInput): NightGraph {
+  const { maps } = input;
+  const { latest, all, after, scoped, mapOrder, cardOf, frames, shown } = cardsOf(input);
+  // the rows to come come from the whole run, so a project or map left out still takes the turns it takes
+  const plan = queueRows(all, maps, after, input.atOnce);
+
   const prevCols = input.prev?.cols ?? [];
   const projects = [...new Set([...prevCols, ...mapOrder.map(projOf), ...shown.map(projectOf)])].filter((p) => shown.some((i) => projectOf(i) === p));
-  const phaseOf = (i: QueueItem): Phase => (i.state === "running" ? "now" : i.state === "queued" ? "next" : "ran");
   const live = shown.some((i) => phaseOf(i) !== "ran");
 
   // what ran and runs: at its start on the timeline, measured from the night's first start
@@ -492,9 +505,7 @@ export function nightGraph(input: NightInput): NightGraph {
 
   // the clock: 'now', the night's first start and each start after a long empty stretch, every half hour between, and
   // about when each queued row would start, from the night's usual run; a label too close to a more telling one drops
-  const runs = all.filter((i) => i.started != null && i.ended != null && i.state !== "skipped").map((i) => (i.ended ?? 0) - (i.started ?? 0)).sort((a, b) => a - b);
-  // no ticket ended yet: the same rough 1.5 h a ticket the toolbar's end time counts with
-  const usual = runs[Math.floor(runs.length / 2)] ?? ESTIMATE;
+  const usual = usualOf(all);
   const running = all.filter((i) => i.state === "running");
   const nextAt = Math.max(t, ...running.map((i) => (i.started ?? t) + usual));
   const labels: { at: number; clock: string; phase: Phase }[] = [];
@@ -548,4 +559,248 @@ export function focusOf(g: Pick<NightGraph, "boxes"> & Partial<Pick<NightGraph, 
   const xs = pick.map((b) => b.x + NODE_W / 2);
   const ys = pick.map((b) => b.y + NODE_H / 2);
   return { x: (Math.min(...xs) + Math.max(...xs)) / 2, y: g.nowY ?? Math.min(...ys) };
+}
+
+/*
+ * The run graph in 15-minute columns (ticket 149): time runs left to right, a column (CHUNK_W) per quarter hour from
+ * the quarter the night's first start falls in, a band per project top to bottom. What ran or runs is a bar from the
+ * column it started in to the column it ended in (a running one to the now column); bars of a band that share a
+ * column take separate tracks, as few as fit. Right of the now line each queued ticket sits in the earliest column
+ * where every ticket it comes after has ended (a queued or running one by the night's usual run) and no ticket of
+ * its project in the columns it would take shares a path with it (the hub's rule: a ticket naming no path, and a
+ * job, shares with all), as long as the usual run: what could run at once if only the after arrows and shared files
+ * held tickets back. A future column of a project that runs more than the project's at-once limit says so. Pure.
+ */
+
+/** A column of the chunk graph, in seconds: a quarter hour. */
+export const CHUNK = 900;
+/** A column's width. */
+export const CHUNK_W = 120;
+/** The space between two bars side by side in time. */
+export const BAR_GAP = 8;
+/** A bar's height, and the space between two tracks. */
+export const BAR_H = 52;
+export const TRACK_GAP = 8;
+/** The strip of column clocks along the top. */
+export const CLOCK_H = 32;
+/** A band's head (its project's name) and the space under its last track; between bands. */
+export const BAND_HEAD = 28;
+export const BAND_FOOT = 12;
+export const BAND_GAP = 16;
+/** Where the first column starts: room for the project names at the left of the bands. */
+export const LEFT = 140;
+
+/** The hub's overlap rule (sbhub.py paths_overlap): either names no path, or one path lies in or is another. */
+export function pathsMeet(a: readonly string[], b: readonly string[]): boolean {
+  const clean = (l: readonly string[]): string[] => l.map((x) => x.trim().replace(/^\/+|\/+$/g, ""));
+  const x = clean(a);
+  const y = clean(b);
+  if (x.length === 0 || y.length === 0) return true;
+  return x.some((p) => y.some((q) => p === "" || q === "" || p === q || p.startsWith(`${q}/`) || q.startsWith(`${p}/`)));
+}
+
+/** The open tickets' paths, map#num -> paths, from sbmap's rows. */
+export const pathsOf = (rows: readonly TicketRow[]): Map<string, readonly string[]> =>
+  new Map(rows.map((r) => [`${r.map}#${String(r.num)}`, r.paths] as const));
+
+export interface ChunkBar extends NightCard {
+  phase: Phase;
+  project: string;
+  /** Its first and last column (0 is the night's first), both its own. */
+  from: number;
+  to: number;
+  track: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** When it ends, in seconds: its real end, or for one that runs or waits the end the night's usual run gives it. */
+  until: number;
+}
+export interface ChunkColumn {
+  chunk: number;
+  x: number;
+  /** Its start, seconds. */
+  at: number;
+  /** 'hh:mm', '≈hh:mm' for a column still to come. */
+  clock: string;
+  phase: Phase;
+}
+export interface ChunkBand {
+  project: string;
+  y: number;
+  h: number;
+  tracks: number;
+}
+/** Under a future column of a project: more of its tickets could run in it than the hub runs at once. */
+export interface ChunkNote {
+  project: string;
+  chunk: number;
+  x: number;
+  y: number;
+  could: number;
+  runs: number;
+  text: string;
+}
+/** What the next build keeps so the bands stay in place. */
+export interface ChunkMemo {
+  bands: readonly string[];
+}
+export interface ChunkInput extends Omit<NightInput, "prev"> {
+  /** map#num -> the ticket's paths (the open tickets' rows); a running ticket's own paths win. */
+  paths?: ReadonlyMap<string, readonly string[]> | undefined;
+  prev?: ChunkMemo | undefined;
+}
+export interface ChunkGraph {
+  frames: NightFrame[];
+  bars: ChunkBar[];
+  columns: ChunkColumn[];
+  bands: ChunkBand[];
+  notes: ChunkNote[];
+  /** Every 'after' arrow, and one from each band's last bar to Done. */
+  edges: NightEdge[];
+  /** The now line; null when nothing runs or waits. */
+  nowX: number | null;
+  done: NightDone | null;
+  right: number;
+  bottom: number;
+  counts: Counts;
+  line: string;
+  memo: ChunkMemo;
+}
+
+/** The local quarter hour `t` falls in, as seconds. */
+const quarterOf = (t: number): number => {
+  const d = new Date(t * 1000);
+  d.setMinutes(Math.floor(d.getMinutes() / 15) * 15, 0, 0);
+  return d.getTime() / 1000;
+};
+
+export function chunkGraph(input: ChunkInput): ChunkGraph {
+  const { latest, all, after, scoped, mapOrder, cardOf, frames, shown } = cardsOf(input);
+  const t = input.now ?? Date.now() / 1000;
+  const startAt = (i: QueueItem): number | null => i.started ?? i.ended ?? (i.state === "running" ? t : null);
+  const known = all.filter((i) => i.state !== "queued").map(startAt).filter((s): s is number => s !== null);
+  const nowT = Math.max(t, ...known);
+  const c0 = quarterOf(known.length > 0 ? Math.min(...known) : nowT);
+  /** The column `s` falls in; `end` for an end time, which belongs to the column before when it falls on a line. */
+  const chunkOf = (s: number, end = false): number => Math.max(0, end ? Math.ceil((s - c0) / CHUNK) - 1 : Math.floor((s - c0) / CHUNK));
+  const startOf = (c: number): number => c0 + c * CHUNK;
+  const nowC = chunkOf(nowT);
+  const usual = usualOf(all);
+  const len = Math.max(1, Math.ceil(usual / CHUNK));
+  const cap = (p: string): number => Math.max(1, input.atOnce?.get(p) ?? 1);
+  const pathOf = (i: QueueItem): readonly string[] => (i.kind === "job" ? [] : (i.paths ?? input.paths?.get(i.key) ?? []));
+
+  // what ran or runs: a bar from its start's column to its end's; a running one also holds its paths until its usual end
+  const span = new Map<string, { from: number; to: number; until: number }>();
+  interface Hold { key: string; project: string; paths: readonly string[]; from: number; to: number }
+  const holds: Hold[] = [];
+  for (const i of all) {
+    if (i.state === "queued") continue;
+    const from = startAt(i) ?? startOf(0);
+    const until = i.state === "running" ? Math.max(nowT, from + usual) : Math.max(from, i.ended ?? from);
+    const a = chunkOf(from);
+    span.set(i.key, { from: a, to: i.state === "running" ? Math.max(a, nowC) : Math.max(a, chunkOf(until, true)), until });
+    if (i.state === "running") holds.push({ key: i.key, project: projectOf(i), paths: pathOf(i), from: a, to: Math.max(a, nowC, chunkOf(until, true)) });
+  }
+
+  // what is queued, in the queue's order over the whole run (a hidden map still holds its files): each in the earliest
+  // column right of now where its after tickets have ended and nothing of its project it meets on a path is held
+  let left = all.filter((i) => i.state === "queued");
+  while (left.length > 0) {
+    const ready = left.filter((i) => after(i.key).every((a) => span.has(a)));
+    // an 'after' that loops: the first one left goes as if its after tickets had ended, so the layout stays finite
+    const go = ready.length > 0 ? ready : left.slice(0, 1);
+    for (const i of go) {
+      const ends = after(i.key).map((a) => span.get(a)?.until ?? nowT);
+      let c = Math.max(nowC + 1, ...ends.map((e) => Math.ceil((e - c0) / CHUNK)));
+      const p = projectOf(i);
+      const mine = pathOf(i);
+      const clash = (at: number): boolean => holds.some((h) => h.project === p && h.from <= at + len - 1 && h.to >= at && pathsMeet(mine, h.paths));
+      while (clash(c)) c += 1;
+      span.set(i.key, { from: c, to: c + len - 1, until: startOf(c) + usual });
+      holds.push({ key: i.key, project: p, paths: mine, from: c, to: c + len - 1 });
+    }
+    const placed = new Set(go.map((i) => i.key));
+    left = left.filter((i) => !placed.has(i.key));
+  }
+
+  // the bands, in the order they had, then the hub's map order; tracks inside each, first free from the earliest bar
+  const prev = input.prev?.bands ?? [];
+  const projects = [...new Set([...prev, ...mapOrder.map(projOf), ...shown.map(projectOf)])].filter((p) => shown.some((i) => projectOf(i) === p));
+  const track = new Map<string, number>();
+  const tracksOf = new Map<string, number>();
+  for (const p of projects) {
+    const ends: number[] = [];
+    const mine = shown.filter((i) => projectOf(i) === p).map((i, n) => ({ i, n, s: span.get(i.key) ?? { from: 0, to: 0, until: c0 } }));
+    for (const { i, s } of mine.sort((a, b) => a.s.from - b.s.from || a.s.to - b.s.to || a.n - b.n)) {
+      let k = ends.findIndex((e) => e < s.from);
+      if (k < 0) k = ends.push(s.to) - 1;
+      else ends[k] = s.to;
+      track.set(i.key, k);
+    }
+    tracksOf.set(p, Math.max(1, ends.length));
+  }
+  const bands: ChunkBand[] = [];
+  let y = CLOCK_H;
+  for (const p of projects) {
+    const n = tracksOf.get(p) ?? 1;
+    const h = BAND_HEAD + n * BAR_H + (n - 1) * TRACK_GAP + BAND_FOOT;
+    bands.push({ project: p, y, h, tracks: n });
+    y += h + BAND_GAP;
+  }
+  const bandOf = new Map(bands.map((b) => [b.project, b]));
+  const xOf = (c: number): number => LEFT + c * CHUNK_W;
+  const bars: ChunkBar[] = shown.map((i) => {
+    const s = span.get(i.key) ?? { from: 0, to: 0, until: c0 };
+    const k = track.get(i.key) ?? 0;
+    return {
+      ...cardOf(i), phase: phaseOf(i), project: projectOf(i), from: s.from, to: s.to, track: k, until: s.until,
+      x: xOf(s.from), y: (bandOf.get(projectOf(i))?.y ?? CLOCK_H) + BAND_HEAD + k * (BAR_H + TRACK_GAP), w: (s.to - s.from + 1) * CHUNK_W - BAR_GAP, h: BAR_H,
+    };
+  });
+
+  const live = shown.some((i) => phaseOf(i) !== "ran");
+  const last = Math.max(live ? nowC : 0, ...bars.map((b) => b.to));
+  const columns: ChunkColumn[] = [];
+  for (let c = 0; c <= last; c += 1) {
+    const phase: Phase = !live || c < nowC ? "ran" : c === nowC ? "now" : "next";
+    columns.push({ chunk: c, x: xOf(c), at: startOf(c), clock: `${phase === "next" ? "≈" : ""}${clock(startOf(c))}`, phase });
+  }
+
+  // a future column of a project whose layout runs more than the hub runs at once there
+  const notes: ChunkNote[] = [];
+  for (const b of bands) {
+    const p = b.project;
+    for (let c = nowC + 1; live && c <= last; c += 1) {
+      const could = holds.filter((h) => h.project === p && h.from <= c && h.to >= c).length;
+      if (could > cap(p)) notes.push({ project: p, chunk: c, x: xOf(c), y: b.y + b.h - BAND_FOOT, could, runs: cap(p), text: `${String(could)} could run, hub runs ${String(cap(p))}` });
+    }
+  }
+
+  const shownKeys = new Set(shown.map((i) => i.key));
+  const edges: NightEdge[] = [];
+  for (const i of shown) {
+    for (const a of after(i.key)) {
+      const from = latest.get(a);
+      if (from === undefined || !shownKeys.has(a)) continue;
+      edges.push({ id: `${a}>${i.key}`, from: a, to: i.key, across: projectOf(from) !== projectOf(i) });
+    }
+  }
+  const bottom = Math.max(CLOCK_H, y - BAND_GAP);
+  let right = xOf(last + 1);
+  let done: NightDone | null = null;
+  if (bars.length > 0) {
+    for (const b of bands) {
+      const end = bars.filter((x) => x.project === b.project).sort((p, q) => q.to - p.to || q.track - p.track)[0];
+      if (end !== undefined) edges.push({ id: `${end.id}>${DONE_ID}`, from: end.id, to: DONE_ID, across: false });
+    }
+    const finished = bars.filter((b) => b.outcome !== null).length;
+    done = { x: right + BAR_GAP, y: CLOCK_H + Math.max(0, (bottom - CLOCK_H - NODE_H) / 2), finished, total: bars.length, line: `${String(finished)} of ${String(bars.length)} finished` };
+    right = done.x + NODE_W;
+  }
+  const nowX = live ? LEFT + ((nowT - c0) / CHUNK) * CHUNK_W : null;
+  const counts = tally(scoped);
+  return { frames, bars, columns, bands, notes, edges, nowX, done, right, bottom, counts, line: countsLine(counts), memo: { bands: [...new Set([...prev, ...projects])] } };
 }
