@@ -1,4 +1,7 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
+import { addLinks } from "@sb-hub/contract";
 
 /** Tests share one fixture hub; they run one after another, in this order. */
 test.describe.configure({ mode: "serial" });
@@ -92,6 +95,7 @@ test.describe("The run's graph", () => {
     await request.post("/api/__restore");
   });
   const night = (page: Page) => page.getByTestId("night-graph");
+  const maps = (page: Page) => page.getByRole("group", { name: "Maps" });
   const box = (page: Page, name: RegExp) => night(page).getByRole("button", { name });
 
   test("Everything shows the run as one timeline: a column per project, a chip per map, the now line and one Done box", async ({ page }) => {
@@ -99,20 +103,20 @@ test.describe("The run's graph", () => {
     page.on("pageerror", (e) => errors.push(String(e)));
     await page.goto("/next/");
     await expect(night(page)).toBeVisible();
-    for (const f of ["The demo board", "The shop site", "Jobs"]) await expect(night(page).getByText(f, { exact: true })).toBeVisible();
-    for (const p of ["demo", "other"]) await expect(night(page).locator(".react-flow__node-head", { hasText: p })).toBeVisible();
-    await expect(night(page).locator(".react-flow__node-now")).toHaveCount(1);
+    for (const f of ["The demo board", "The shop site", "Jobs"]) await expect(maps(page).getByText(f, { exact: true })).toBeVisible();
+    for (const p of ["demo", "other"]) await expect(night(page).getByTestId("night-band").filter({ hasText: p })).toBeVisible();
+    await expect(night(page).getByTestId("night-now")).toHaveCount(1);
     await expect(night(page).getByTestId("night-done")).toContainText("of 8 finished");
     await expect(page.getByTestId("run-counts")).toHaveText("1 done · 3 running · 1 in checks · 1 next · 2 fell short");
-    await expect(night(page).locator(".react-flow__node-box")).toHaveCount(8);
+    await expect(night(page).getByTestId("night-bar")).toHaveCount(8);
     // a ticket the run never queued is not there
     await expect(night(page).getByText("Draw the shop window")).toHaveCount(0);
     await expect(night(page).getByText("Draw the header")).toHaveCount(0);
     // the queued one has its place, drawn dashed below now; an arrow crosses from the demo board to the shop site,
     // and each project's last ticket points at Done
-    await expect(box(page, /Show the queue in order.*Queued\s*next 1/)).toBeVisible();
+    await expect(box(page, /Show the queue in order.*Queued 1/)).toBeVisible();
     await expect(box(page, /Show the queue in order/)).toHaveClass(/border-dashed/);
-    await expect(night(page).locator(".react-flow__edge")).toHaveCount(1 + 2);
+    await expect(night(page).getByTestId("night-arrow")).toHaveCount(1 + 2);
     // the graph is the Run view's first tab
     await expect(page.getByRole("tablist", { name: "Run" }).getByRole("tab", { name: /^Flow/ })).toHaveAttribute("aria-selected", "true");
     // any box opens the ticket's panel
@@ -121,55 +125,74 @@ test.describe("The run's graph", () => {
     await expect(page).toHaveURL(/t=demo%2Fboard%235/);
     await page.keyboard.press("Escape");
     // a map chip hides that map's boxes and its arrows; pressed again they come back
-    const chip = night(page).getByRole("group", { name: "Maps" }).getByRole("button", { pressed: true }).filter({ hasText: "The shop site" });
+    const chip = maps(page).getByRole("button", { pressed: true }).filter({ hasText: "The shop site" });
     await chip.click();
-    await expect(night(page).locator(".react-flow__node-box")).toHaveCount(6);
-    await expect(night(page).locator(".react-flow__edge")).toHaveCount(1);
-    await night(page).getByRole("group", { name: "Maps" }).getByRole("button", { pressed: false }).filter({ hasText: "The shop site" }).click();
-    await expect(night(page).locator(".react-flow__node-box")).toHaveCount(8);
+    await expect(night(page).getByTestId("night-bar")).toHaveCount(6);
+    await expect(night(page).getByTestId("night-arrow")).toHaveCount(1);
+    await maps(page).getByRole("button", { pressed: false }).filter({ hasText: "The shop site" }).click();
+    await expect(night(page).getByTestId("night-bar")).toHaveCount(8);
     expect(errors).toEqual([]);
   });
 
-  test("the graph layout setting turns the run's graph from vertical to horizontal, and the page keeps the choice", async ({ page }) => {
+  test("the graph is 15-minute columns: clocks 15 minutes apart, the now line upright, a running bar ending on it, a click on a bar opening its sheet", async ({ page }) => {
     await page.goto("/next/");
-    const now = night(page).locator(".react-flow__node-now");
-    const shape = async () => {
-      const b = await now.boundingBox();
-      return b === null ? "none" : b.width > b.height ? "across" : "down";
-    };
-    await expect(now).toHaveCount(1);
-    expect(await shape()).toBe("across"); // vertical: time runs down, so the now line lies across
-    await page.getByRole("button", { name: "Settings" }).click();
-    const layout = page.getByRole("radiogroup", { name: "Graph layout" });
-    await expect(layout.getByRole("radio", { name: /Vertical/ })).toHaveAttribute("aria-checked", "true");
-    await layout.getByRole("radio", { name: /Horizontal/ }).click();
-    await expect(layout.getByRole("radio", { name: /Horizontal/ })).toHaveAttribute("aria-checked", "true");
+    await expect(night(page).getByTestId("night-bar")).toHaveCount(8);
+    // the clocks along the top are a quarter hour apart, left to right
+    const ats = await night(page).getByTestId("night-clock").evaluateAll((els) => els.map((e) => Number(e.getAttribute("data-at"))));
+    expect(ats.length).toBeGreaterThan(1);
+    for (let n = 1; n < ats.length; n += 1) expect((ats[n] ?? 0) - (ats[n - 1] ?? 0)).toBe(900);
+    const first = await night(page).getByTestId("night-clock").first().boundingBox();
+    const second = await night(page).getByTestId("night-clock").nth(1).boundingBox();
+    expect(second?.x ?? 0).toBeGreaterThan(first?.x ?? 0);
+    // the now line stands up
+    const now = await night(page).getByTestId("night-now").boundingBox();
+    expect(now?.height ?? 0).toBeGreaterThan(50);
+    expect(now?.width ?? 99).toBeLessThan(6);
+    // a running ticket's bar ends at it
+    const running = night(page).getByTestId("night-bar").filter({ hasText: "Run the board against the real hub" });
+    const bar = await running.boundingBox();
+    expect(Math.abs((bar?.x ?? 0) + (bar?.width ?? 0) - (now?.x ?? 0))).toBeLessThanOrEqual(3);
+    // the view opens with the now line a third of the way across
+    const frame = await night(page).boundingBox();
+    expect(Math.abs((now?.x ?? 0) - (frame?.x ?? 0) - (frame?.width ?? 0) / 3)).toBeLessThanOrEqual(frame === null ? 0 : frame.width * 0.1);
+    // a title cut to fit shows whole on hover; a click opens the ticket's sheet
+    await expect(running).toHaveAttribute("title", "Run the board against the real hub");
+    await running.click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await expect(page).toHaveURL(/t=demo%2Fboard%235/);
     await page.keyboard.press("Escape");
-    await expect.poll(shape).toBe("down"); // horizontal: time runs across, so the now line stands up
-    await expect(night(page).locator(".react-flow__node-box")).toHaveCount(8);
-    await page.reload();
-    await expect.poll(shape).toBe("down");
-    await page.evaluate(() => { localStorage.removeItem("sbhub.graphLayout"); });
+  });
+
+  test("the clocks stay at the top and the project names at the left while the graph scrolls", async ({ page }) => {
+    await page.goto("/next/");
+    const clock = night(page).getByTestId("night-clock").first();
+    const band = night(page).getByTestId("night-band").first().getByText("demo", { exact: true });
+    await expect(night(page).getByTestId("night-bar")).toHaveCount(8);
+    const top = (await clock.boundingBox())?.y ?? 0;
+    const left = (await band.boundingBox())?.x ?? 0;
+    await night(page).evaluate((el) => { el.scrollTo({ top: 1000, left: 1000 }); });
+    await expect.poll(async () => Math.abs(((await clock.boundingBox())?.y ?? 0) - top)).toBeLessThan(2);
+    await expect.poll(async () => Math.abs(((await band.boundingBox())?.x ?? 0) - left)).toBeLessThan(2);
   });
 
   test("picking a project leaves only its frames", async ({ page }) => {
     await page.goto("/next/?project=other");
-    await expect(night(page).getByText("The shop site", { exact: true })).toBeVisible();
-    await expect(night(page).getByText("The demo board", { exact: true })).toHaveCount(0);
-    await expect(night(page).getByText("Jobs", { exact: true })).toHaveCount(0);
+    await expect(maps(page).getByText("The shop site", { exact: true })).toBeVisible();
+    await expect(maps(page).getByText("The demo board", { exact: true })).toHaveCount(0);
+    await expect(maps(page).getByText("Jobs", { exact: true })).toHaveCount(0);
     await expect(page.getByTestId("run-counts")).toHaveText("1 running · 1 fell short");
     await page.goto("/next/?project=demo");
-    await expect(night(page).getByText("The demo board", { exact: true })).toBeVisible();
-    await expect(night(page).getByText("Jobs", { exact: true })).toBeVisible();
-    await expect(night(page).getByText("The shop site", { exact: true })).toHaveCount(0);
+    await expect(maps(page).getByText("The demo board", { exact: true })).toBeVisible();
+    await expect(maps(page).getByText("Jobs", { exact: true })).toBeVisible();
+    await expect(maps(page).getByText("The shop site", { exact: true })).toHaveCount(0);
   });
 
   test("a finished box shows its outcome and opens its report; a map chip's arrow picks the map", async ({ page }) => {
     await page.goto("/next/");
-    const done = night(page).locator(".react-flow__node-box", { hasText: "Wait on the shop's fonts" });
+    const done = night(page).getByTestId("night-bar").filter({ hasText: "Wait on the shop's fonts" });
     await expect(done).toContainText("Done");
     await expect(done.getByRole("link", { name: "Report" })).toHaveAttribute("href", /^obsidian:\/\/open\?path=/);
-    await expect(night(page).locator(".react-flow__node-box", { hasText: "Fix the sheet's focus" })).toContainText("Fell short");
+    await expect(night(page).getByTestId("night-bar").filter({ hasText: "Fix the sheet's focus" })).toContainText("Fell short");
     await page.getByRole("button", { name: "Open the map The demo board" }).click();
     await expect(page).toHaveURL(/map=demo%2Fboard/);
     await expect(page.getByTestId("map-graph")).toBeVisible();
@@ -197,7 +220,7 @@ test.describe("The run's graph", () => {
       const { default: AxeBuilder } = await import("@axe-core/playwright");
       await page.emulateMedia({ colorScheme: scheme });
       await page.goto("/next/");
-      await expect(night(page).locator(".react-flow__node-box")).toHaveCount(8);
+      await expect(night(page).getByTestId("night-bar")).toHaveCount(8);
       await page.waitForTimeout(800);
       const dir = process.env.SB_SHOTS;
       if (dir !== undefined) await page.screenshot({ path: `${dir}/run-${scheme}-1440.png` });
@@ -207,22 +230,23 @@ test.describe("The run's graph", () => {
     });
   }
 
-  test("a ticket that starts and one that ends change in place, without a reload, keeping the zoom and the panel", async ({ page, request }) => {
+  test("a ticket that starts and one that ends change in place, without a reload, keeping the scroll and the panel", async ({ page, request }) => {
     await page.goto("/next/");
-    await expect(box(page, /Show the queue in order.*Queued\s*next 1/)).toBeVisible();
-    await night(page).getByRole("button", { name: "Zoom in" }).click();
-    await page.waitForTimeout(400);
-    const view = (): Promise<string> => page.locator(".react-flow__viewport").first().evaluate((el) => (el as HTMLElement).style.transform);
-    const where = (): Promise<string> => night(page).locator(".react-flow__node-box", { hasText: "Fix the sheet's focus" }).evaluate((el) => (el as HTMLElement).style.transform);
+    await expect(box(page, /Show the queue in order.*Queued 1/)).toBeVisible();
+    // the frame is the same element after the update: it is redrawn in place, never remounted (a remount would reopen it at the now line)
+    await night(page).evaluate((el) => { (el as unknown as { same: boolean }).same = true; });
+    const view = (): Promise<string> => night(page).evaluate((el) => String((el as unknown as { same?: boolean }).same === true));
+    const where = (): Promise<string> => night(page).getByTestId("night-bar").filter({ hasText: "Fix the sheet's focus" }).evaluate((el) => `${el.style.left},${el.style.top}`);
     const zoom = await view();
+    expect(zoom).toBe("true");
     const spot = await where();
     await page.evaluate(() => { (window as unknown as { kept: boolean }).kept = true; });
     await box(page, /Fix the sheet's focus/).click();
     await expect(page.getByRole("dialog")).toBeVisible();
     await request.post("/api/__advance");
     try {
-      await expect(night(page).locator(".react-flow__node-box", { hasText: "Show the queue in order" })).toContainText("Running", { timeout: 8000 });
-      await expect(night(page).locator(".react-flow__node-box", { hasText: "Run the board against the real hub" })).toContainText("Done");
+      await expect(night(page).getByTestId("night-bar").filter({ hasText: "Show the queue in order" })).toContainText("Running", { timeout: 8000 });
+      await expect(night(page).getByTestId("night-bar").filter({ hasText: "Run the board against the real hub" })).toContainText("Done");
       await expect(page.getByTestId("run-counts")).toHaveText("2 done · 3 running · 1 in checks · 2 fell short");
       expect(await view()).toBe(zoom);
       expect(await where()).toBe(spot);
@@ -231,6 +255,40 @@ test.describe("The run's graph", () => {
     } finally {
       await request.post("/api/__restore");
     }
+  });
+});
+
+/** What the hub itself wrote in its contract test (packages/contract/fixtures): the page's own tests read the same files. */
+const recorded = (name: string): { route: string; body: Record<string, unknown> } => JSON.parse(readFileSync(join(import.meta.dirname, "../../contract/fixtures", name), "utf8")) as { route: string; body: Record<string, unknown> };
+const linked = (route: string, body: unknown): unknown => addLinks(route as "GET /api/state", body, { exists: () => false, real: (p) => p, findTicket: () => null, runs: {} });
+
+test.describe("The run's graph on the hub's recorded queue answer", () => {
+  test("the stop answer's queue draws a band, a bar over several columns and arrows pointing right", async ({ page }) => {
+    const state = recorded("state.json");
+    const stop = recorded("queue-stop.json").body as { queue: { items: { state: string; started?: number }[] } };
+    const started = stop.queue.items.find((i) => i.state === "running")?.started ?? 0;
+    // the page's clock stands ten minutes into the recorded run; the recorded answers are not touched
+    await page.clock.install({ time: new Date((started + 600) * 1000) });
+    await page.route("**/api/state*", (r) => r.fulfill({ json: linked(state.route, { ...state.body, queue: stop.queue }) }));
+    await page.route("**/api/tickets*", (r) => { const t = recorded("tickets.json"); return r.fulfill({ json: linked(t.route, t.body) }); });
+    await page.goto("/next/");
+    const g = page.getByTestId("night-graph");
+    await expect(g.getByTestId("night-bar")).toHaveCount(5);
+    await expect(g.getByTestId("night-band")).toHaveCount(1); // the recorded answer holds one project (repo) and a job of it
+    // one bar spans more than one column, and every arrow runs left to right
+    const widths = await g.getByTestId("night-bar").evaluateAll((els) => els.map((e) => e.getBoundingClientRect().width));
+    expect(Math.max(...widths)).toBeGreaterThan(120);
+    const arrows = g.getByTestId("night-arrow");
+    expect(await arrows.count()).toBeGreaterThan(0);
+    const dirs = await arrows.evaluateAll((els) => els.map((e) => { const m = /^M([\d.]+) .* ([\d.]+) [\d.]+$/.exec(e.getAttribute("d") ?? ""); return Number(m?.[2]) - Number(m?.[1]); }));
+    for (const d of dirs) expect(d).toBeGreaterThanOrEqual(0);
+    // the running bar ends on the now line
+    const now = await g.getByTestId("night-now").boundingBox();
+    const run = await g.getByTestId("night-bar").filter({ hasText: /\b2\b|one#2/ }).first().boundingBox();
+    expect(now).not.toBeNull();
+    expect(run).not.toBeNull();
+    const dir = process.env.SB_SHOTS;
+    if (dir !== undefined) await page.screenshot({ path: `${dir}/run-recorded-1440.png` });
   });
 });
 
@@ -544,7 +602,7 @@ test.describe("The live run and its history", () => {
     await expect(head(page).getByTestId("head-counts")).toHaveText("1 done · 3 running · 1 next · 2 fell short");
     // the ended run's tickets are nowhere: not in the graph, not in the blocks, not in the line
     const graph = page.getByTestId("night-graph");
-    await expect(graph.locator(".react-flow__node-box")).toHaveCount(7);
+    await expect(graph.getByTestId("night-bar")).toHaveCount(7);
     await expect(graph.getByText("Sweep the old attic")).toHaveCount(0);
     await expect(graph.getByText("The old attic")).toHaveCount(0);
     await runTab(page, "Maps");
@@ -558,12 +616,11 @@ test.describe("The live run and its history", () => {
 
   test("a project shows frames for its maps, never a bare list; a map shows its own graph", async ({ page }) => {
     await page.goto("/next/?project=demo");
-    const g = page.getByTestId("night-graph");
-    await expect(g.getByText("The demo board", { exact: true })).toBeVisible();
-    await expect(g.getByText("The shop site", { exact: true })).toHaveCount(0);
+    await expect(page.getByRole("group", { name: "Maps" }).getByText("The demo board", { exact: true })).toBeVisible();
+    await expect(page.getByRole("group", { name: "Maps" }).getByText("The shop site", { exact: true })).toHaveCount(0);
     await page.goto("/next/?project=other");
-    await expect(page.getByTestId("night-graph").getByText("The shop site", { exact: true })).toBeVisible();
-    await expect(page.getByTestId("night-graph").getByText("The old attic", { exact: true })).toHaveCount(0);
+    await expect(page.getByRole("group", { name: "Maps" }).getByText("The shop site", { exact: true })).toBeVisible();
+    await expect(page.getByRole("group", { name: "Maps" }).getByText("The old attic", { exact: true })).toHaveCount(0);
     await page.goto("/next/?project=demo&map=demo%2Fboard");
     await expect(page.getByTestId("map-graph")).toBeVisible();
     await expect(page.getByTestId("night-graph")).toHaveCount(0);
@@ -628,7 +685,7 @@ test.describe("The live run and its history", () => {
     await runs.getByRole("button", { name: "Night of 2026-11-13, 21:30" }).click();
     await expect(page).toHaveURL(/night=n-old/);
     await expect(page.getByTestId("night-detail")).toContainText("Stopped by you");
-    await expect(page.getByTestId("night-graph").locator(".react-flow__node-box")).toHaveCount(2);
+    await expect(page.getByTestId("night-graph").getByTestId("night-bar")).toHaveCount(2);
     const lost = page.getByTestId("not-reached");
     await expect(lost.locator("li[data-mark='not reached']")).toHaveCount(2);
     await expect(lost).toContainText("Batch A");
