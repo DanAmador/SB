@@ -99,7 +99,7 @@ function Live({ rec }: { rec: Night | null }): React.JSX.Element {
             <button
               type="button"
               title="Rename the run"
-              aria-label={`Rename the run ${rec?.name ?? ""}`}
+              aria-label={`Rename the run ${rec?.name ?? "This run"}`}
               disabled={rec === null || !can}
               className="group inline-flex max-w-full items-center gap-1.5 rounded-md text-left hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
               onClick={() => { setNaming(rec?.name ?? ""); }}

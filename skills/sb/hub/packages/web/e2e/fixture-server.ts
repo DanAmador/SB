@@ -466,7 +466,7 @@ createServer((req, res) => {
     if (req.method === "POST" && path === "/api/__between") { queue.items = [...queue.items.filter((i) => !between.some((b) => b.key === i.key)), ...between]; queue.version += 1; send(res, 200, { ok: true }); return; }
     if (req.method === "POST" && path === "/api/__job") { queue.items = [...queue.items.filter((i) => i.key !== closeOff.key), closeOff]; queue.version += 1; send(res, 200, { ok: true }); return; }
     if (req.method === "POST" && path === "/api/__advance") { advance(); send(res, 200, { ok: true }); return; }
-    if (req.method === "POST" && path === "/api/__restore") { liveId = "n-live"; queue.night = "n-live"; nights = freshNights(); oldRun = oldItems(); queue.items = JSON.parse(first) as Raw<QueueItem>[]; syncMaps(); queue.version += 1; send(res, 200, { ok: true }); return; }
+    if (req.method === "POST" && path === "/api/__restore") { stops.length = 0; liveId = "n-live"; queue.night = "n-live"; nights = freshNights(); oldRun = oldItems(); queue.items = JSON.parse(first) as Raw<QueueItem>[]; syncMaps(); queue.version += 1; send(res, 200, { ok: true }); return; }
     if (req.method === "GET" && path === "/api/__actions") { send(res, 200, actions); return; }
     if (req.method === "POST" && path?.startsWith("/api/ticket/") === true) {
       const b = TicketActionBody.parse(await body(req));

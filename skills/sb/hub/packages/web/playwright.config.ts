@@ -17,7 +17,7 @@ const WEB = Number(process.env.SB_E2E_WEB_PORT);
 
 export default defineConfig({
   testDir: "e2e",
-  timeout: 30_000,
+  timeout: 60_000, // the machine ran at load 40-70 while this ran: 30 s timed out unrelated tests
   // One more go for a test that fails once: on 2026-11-16 the map view's box-drag test failed two unrelated hub
   // tickets while Unity and three workers loaded the machine, and passed on main. A real break fails twice.
   retries: 1,

@@ -60,6 +60,7 @@ test("Run is the landing page: one row per worker run, the silent one amber, nev
 test("the panel's Stop asks why, confirms and calls the stop route; no message is sent", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(String(e)));
+  await page.request.post("/api/__restore"); // a retry starts clean: the first try may have posted the stop
   await page.goto("/next/?rt=now");
   const row = page.getByRole("list", { name: "Running now" }).getByRole("listitem").filter({ hasText: "writing the copy" });
   await row.getByRole("button", { name: "Show details" }).click();
