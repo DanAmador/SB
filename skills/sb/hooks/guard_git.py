@@ -43,6 +43,10 @@ UNITY_WAY_OUT = ("Unity is the ticket's last stage, not yours: after you commit,
                  "folder and an integrator compiles and plays it in the one Unity Editor, one ticket at a time. Write "
                  "what to play under `## Play checks` in your report, and check the APIs you call by reading their "
                  "source instead.")
+UNITY_POLL_WAY_OUT = ("Do not poll Unity by hand: it keeps the Editor and its lock busy longer than the check needs. Run "
+                      "the project's check in one command: `unity command sb_check`, or the repo's `tools/compile` when "
+                      "it has one; when the repo has neither, write the check as a `[CliCommand]` tagged `sb/check`.")
+LOOPS = {"while", "until", "for"}
 
 
 def segments(command):
@@ -125,9 +129,34 @@ def unity_refusal(command, env=os.environ):
     return None
 
 
+def unity_poll_refusal(command, env=os.environ):
+    """An integrator (SB_HUB_UNITY=integrator) checks Unity with one command: a hand-written poll is refused.
+
+    A poll is `unity command recompile_status` run directly, or `unity command` inside a while/until/for loop or
+    next to a `sleep`. `unity command recompile`, `editor_status`, `sb_check` and `tools/compile` stay allowed."""
+    if env.get("SB_HUB_UNITY") != "integrator":
+        return None
+    unity, loop, sleep, status = None, False, False, False
+    for toks in segments(command):
+        loop = loop or toks[0] in LOOPS
+        while toks and toks[0] in LOOPS | {"do", "then", "if", "elif", "!", "{"}:
+            toks = toks[1:]
+        toks = _bare(toks)
+        if not toks:
+            continue
+        if toks[0].rsplit("/", 1)[-1] == "unity" and toks[1:2] == ["command"]:
+            unity = unity or toks
+            status = status or toks[2:3] == ["recompile_status"]
+        sleep = sleep or toks[0] == "sleep"
+    if unity and (status or loop or sleep):
+        what = "`unity command recompile_status`" if status else "A `unity command` in a loop or next to `sleep`"
+        return "{} is refused for the integrator: a hand-written poll. {}".format(what, UNITY_POLL_WAY_OUT)
+    return None
+
+
 def refusal(command, cwd, main=in_main_checkout, env=os.environ):
     """The reason to refuse this command line, or None."""
-    other = other_refusal(command) or unity_refusal(command, env)
+    other = other_refusal(command) or unity_refusal(command, env) or unity_poll_refusal(command, env)
     if other:
         return other
     for where, sub, args in git_calls(command):

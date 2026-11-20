@@ -97,6 +97,48 @@ class AllowedTest(unittest.TestCase):
         self.assertIsNone(run_guard("Grep", {"pattern": "x"}))
 
 
+INTEGRATOR = {"SB_HUB_UNITY": "integrator"}
+# Lines copied verbatim from real sk4te integrator logs (wayfinder/sk4te/runs/*/*-integrate.log).
+REAL_POLLS = (
+    "cat /tmp/c1290b.txt; cd /Users/danamador/Documents/Coding/sk4te; unity command recompile_status --format json | head -30",
+    "cd /Users/danamador/Documents/Coding/sk4te; unity command recompile --format json | head -30; for i in $(seq 1 40); do s=$(unity command recompile_status --format json 2>/dev/null | python3 -c 'import sys,json;d=json.load(sys.stdin);print(json.dumps(d[\"data\"][\"result\"]))' 2>/dev/null); echo \"$s\"; echo \"$s\" | grep -q '\"completed\"' && break; sleep 10; done",
+    "cd /Users/danamador/Documents/Coding/sk4te; for i in $(seq 1 40); do s=$(unity command recompile_status --format json 2>/dev/null | python3 -c 'import sys,json;d=json.load(sys.stdin);print(d[\"data\"][\"result\"].get(\"status\"))' 2>/dev/null); echo \"$s\"; [ \"$s\" = completed ] && break; sleep 5; done; unity command console --tail 20 --level error",
+    "cd /Users/danamador/Documents/Coding/sk4te; sleep 20; unity command editor_status --format json | grep -E 'status|compiling|domainReload'; unity command recompile_status --format json | grep -E '\"status\"|Failed'; unity command console --tail 20 --level error",
+    "cd /Users/danamador/Documents/Coding/sk4te; grep -n \"eval\" tools/compile | head; unity command recompile_status 2>&1 | tail -2",
+)
+
+
+class IntegratorPollTest(RefusedTest):
+    def test_real_hand_written_polls_are_refused_with_the_way_out(self):
+        for c in REAL_POLLS:
+            out = bash(c, env=INTEGRATOR)
+            self.deny(out, "unity command sb_check")
+            self.assertIn("tools/compile", out["permissionDecisionReason"])
+            self.assertIn("[CliCommand]", out["permissionDecisionReason"])
+
+    def test_a_loop_or_sleep_next_to_a_unity_command_is_refused(self):
+        for c in ("while true; do unity command editor_status; sleep 2; done", "until unity command sb_check; do :; done",
+                  "unity command editor_status && sleep 5", "for i in 1 2 3; do unity command console --tail 5; done"):
+            self.deny(bash(c, env=INTEGRATOR), "unity command sb_check")
+
+    def test_the_project_checks_stay_allowed_for_an_integrator(self):
+        for c in ("unity command sb_check", "tools/compile", "unity command recompile",
+                  "unity command editor_status --format json", "cd /x; unity command console --tail 20 --level error",
+                  "sleep 5", "for f in a b; do echo $f; done"):
+            self.assertIsNone(bash(c, env=INTEGRATOR), c)
+
+    def test_a_worker_and_a_plain_session_are_as_before(self):
+        poll = REAL_POLLS[1]
+        out = bash(poll, env={"SB_HUB_UNITY": "off"})  # a worker: every unity command, with the worker's own way out
+        self.deny(out, "last stage")
+        self.assertNotIn("hand-written poll", out["permissionDecisionReason"])
+        plain = {k: v for k, v in hook_env().items() if k != "SB_HUB_UNITY"}
+        for c in REAL_POLLS:
+            r = subprocess.run([sys.executable, str(GUARD)], capture_output=True, text=True, env=plain,
+                               input=json.dumps({"tool_name": "Bash", "tool_input": {"command": c}, "cwd": "/nonexistent-dir"}))
+            self.assertEqual(r.stdout, "", c)
+
+
 class RefusalReachesTheTrail(HubCase):
     def test_a_refusal_is_on_the_workers_trail_with_its_label(self):
         env = {"SB_HUB_AGENT": "repo/one#1", "SB_HUB_PORT": str(self.port)}
@@ -107,6 +149,14 @@ class RefusalReachesTheTrail(HubCase):
         self.assertEqual([a["tool"] for a in acts], ["Bash", "Bash"])
         self.assertTrue(all(a["ok"] is False for a in acts))
         self.assertIn("sbmap resolve", acts[0]["label"])
+
+    def test_an_integrators_poll_refusal_is_on_the_trail(self):
+        env = {"SB_HUB_AGENT": "repo/one#1", "SB_HUB_PORT": str(self.port), "SB_HUB_UNITY": "integrator"}
+        self.assertEqual(bash(REAL_POLLS[0], env=env)["permissionDecision"], "deny")
+        acts = self.get("/api/trail?agent=" + "repo/one%231")["actions"]
+        self.assertEqual(len(acts), 1)
+        self.assertIs(acts[0]["ok"], False)
+        self.assertIn("recompile_status", acts[0]["label"])
 
     def test_no_hub_no_failure(self):
         self.assertEqual(bash("git push", env={"SB_HUB_AGENT": "a", "SB_HUB_PORT": "1"})["permissionDecision"], "deny")

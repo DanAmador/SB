@@ -15,8 +15,10 @@ and every other ticket waits for it. So work steadily, and end once it works or 
 1. **The Editor.** `unity command editor_status --format json`. If it is in Play, stop Play (`unity command editor_stop`).
    If it is compiling or reloading, wait. If it does not answer within 5 minutes, write the report with the verdict
    `VERDICT: no unity` and end.
-2. **Compile.** Follow the repo's AGENTS.md: recompile, poll its status until it has completed, then read the console
-   errors since that recompile. Fix every compile error with the smallest change, in any file. The worker could not
+2. **Compile.** Follow the repo's AGENTS.md, and check with the project's own command, never a hand-written
+   poll (the guard refuses `recompile_status`, and `unity command` in a loop or next to `sleep`): `unity command sb_check`,
+   or the repo's `tools/compile` when it has one; a repo with neither writes the check as a `[CliCommand]` tagged
+   `sb/check`. Then read the console errors since that recompile. Fix every compile error with the smallest change, in any file. The worker could not
    compile.
 3. **Play.** Play each of the report's Play checks and the ticket's Done when, and measure what the ticket promises. Fix what
    does not work, staying inside what the ticket asked for. Stop Play before you edit any file.
