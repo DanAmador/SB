@@ -142,6 +142,9 @@ def unity_poll_refusal(command, env=os.environ):
         while toks and toks[0] in LOOPS | {"do", "then", "if", "elif", "!", "{"}:
             toks = toks[1:]
         toks = _bare(toks)
+        while toks[:1] == ["timeout"]:  # `timeout 20 unity command ...`: the real logs wrap polls in it
+            toks = _bare([t for t in toks[1:]][next((i for i, t in enumerate(toks[1:]) if not t.startswith("-")
+                                                    and not re.fullmatch(r"[\d.]+[smhd]?", t)), len(toks)):])
         if not toks:
             continue
         if toks[0].rsplit("/", 1)[-1] == "unity" and toks[1:2] == ["command"]:

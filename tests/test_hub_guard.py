@@ -121,6 +121,15 @@ class IntegratorPollTest(RefusedTest):
                   "unity command editor_status && sleep 5", "for i in 1 2 3; do unity command console --tail 5; done"):
             self.deny(bash(c, env=INTEGRATOR), "unity command sb_check")
 
+    def test_a_timeout_prefix_does_not_hide_a_poll(self):
+        for c in ("timeout 20 unity command recompile_status",
+                  "timeout -k 5 30 unity command recompile_status --format json",
+                  "for i in 1 2 3 4 5 6; do r=$(timeout 20 unity command editor_status --format json 2>&1); "
+                  "[ -n \"$r\" ] && break; done"):  # the last is a real integrator loop from sk4te's logs
+            self.deny(bash(c, env=INTEGRATOR), "unity command sb_check")
+        out = bash("timeout 60 unity command sb_check", env=INTEGRATOR)
+        self.assertFalse(out)
+
     def test_the_project_checks_stay_allowed_for_an_integrator(self):
         for c in ("unity command sb_check", "tools/compile", "unity command recompile",
                   "unity command editor_status --format json", "cd /x; unity command console --tail 20 --level error",
