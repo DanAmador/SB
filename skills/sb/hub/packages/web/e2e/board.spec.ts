@@ -266,7 +266,7 @@ const recorded = (name: string): { route: string; body: Record<string, unknown> 
 const linked = (route: string, body: unknown): unknown => addLinks(route as "GET /api/state", body, { exists: () => false, real: (p) => p, findTicket: () => null, runs: {} });
 
 test.describe("The run's graph on the hub's recorded queue answer", () => {
-  test("the stop answer's queue draws a band, a bar over several columns and arrows pointing right", async ({ page }) => {
+  test("the stop answer's queue draws a band, a bar over several columns and arrows pointing right; clocks 15 minutes apart, the running bar ending on the upright now line, a click opening its sheet", async ({ page }) => {
     const state = recorded("state.json");
     const stop = recorded("queue-stop.json").body as { queue: { items: { state: string; started?: number }[] } };
     const started = stop.queue.items.find((i) => i.state === "running")?.started ?? 0;
@@ -285,13 +285,27 @@ test.describe("The run's graph on the hub's recorded queue answer", () => {
     expect(await arrows.count()).toBeGreaterThan(0);
     const dirs = await arrows.evaluateAll((els) => els.map((e) => { const m = /^M([\d.]+) .* ([\d.]+) [\d.]+$/.exec(e.getAttribute("d") ?? ""); return Number(m?.[2]) - Number(m?.[1]); }));
     for (const d of dirs) expect(d).toBeGreaterThanOrEqual(0);
-    // the running bar ends on the now line
+    // the clocks along the top are a quarter hour apart, left to right
+    const ats = await g.getByTestId("night-clock").evaluateAll((els) => els.map((e) => Number(e.getAttribute("data-at"))));
+    expect(ats.length).toBeGreaterThan(1);
+    for (let n = 1; n < ats.length; n += 1) expect((ats[n] ?? 0) - (ats[n - 1] ?? 0)).toBe(900);
+    const xs = await g.getByTestId("night-clock").evaluateAll((els) => els.map((e) => e.getBoundingClientRect().x));
+    for (let n = 1; n < xs.length; n += 1) expect(xs[n] ?? 0).toBeGreaterThan(xs[n - 1] ?? 0);
+    // the now line stands up, and the recorded running ticket (repo/one#2) ends on it
     const now = await g.getByTestId("night-now").boundingBox();
-    const run = await g.getByTestId("night-bar").filter({ hasText: /\b2\b|one#2/ }).first().boundingBox();
-    expect(now).not.toBeNull();
-    expect(run).not.toBeNull();
+    if (now === null) throw new Error("no now line");
+    expect(now.height).toBeGreaterThan(50);
+    expect(now.width).toBeLessThan(6);
+    const running = g.locator("[data-testid='night-bar'][data-key='repo/one#2']");
+    const run = await running.boundingBox();
+    if (run === null) throw new Error("no bar for the running repo/one#2");
+    expect(Math.abs(run.x + run.width - now.x)).toBeLessThanOrEqual(3);
     const dir = process.env.SB_SHOTS;
     if (dir !== undefined) await page.screenshot({ path: `${dir}/run-recorded-1440.png` });
+    // a click on the running bar opens its ticket sheet
+    await running.getByRole("button").click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await expect(page).toHaveURL(/t=repo%2Fone%232/);
   });
 });
 
