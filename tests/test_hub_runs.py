@@ -57,6 +57,13 @@ class RunsTest(unittest.TestCase):
         (run,) = [r for r in sbruns.list_runs(self.vault, items)["runs"] if r["key"] == "proj/one#8"]
         self.assertEqual((run["outcome"], run["ended"]), ("done", 900.0))
 
+    def test_the_account_is_the_one_that_ran_it(self):
+        items = [item("proj/one#8", agent=None, runner="personal"),  # the pool picked it
+                 item("proj/one#9", ended=900.0, agent="main"),  # pinned, no runner recorded
+                 item("proj/one#10", ended=800.0, agent=None)]  # neither
+        runs = {r["key"]: r["account"] for r in sbruns.list_runs(self.vault, items)["runs"]}
+        self.assertEqual((runs["proj/one#8"], runs["proj/one#9"], runs["proj/one#10"]), ("personal", "main", None))
+
     def test_since_and_paging(self):
         items = [item("proj/one#%d" % n, ended=1000.0 + n) for n in range(10, 15)]
         page = sbruns.list_runs(self.vault, items, since=900, offset=1, limit=2)
