@@ -2002,6 +2002,7 @@ def readings(text):
 
 CODEX_TAIL = 262144  # the end of a Codex session file searched for its newest rate limits
 CODEX_WINDOWS = {300: "five_hour", 10080: "seven_day"}  # a Codex rate limit's window_minutes: our window
+CODEX_SANDBOX_CHECK = 3600  # a Codex account's sandbox is tried this often (`codex sandbox -- true`, no model call)
 CODEX_COST = "codex"  # a Codex account's learned cost per ticket is kept under this key, apart from Claude's tiers
 
 
@@ -2082,6 +2083,28 @@ def codex_run_cost(home, log_text):
     if not got or not _same_window(got[0], got[-1]):
         return None
     return max(0.0, got[-1]["five_hour"] - got[0]["five_hour"])
+
+
+def codex_sandbox_ok(agent):
+    """(ok, why): whether `codex sandbox -- true` runs under the account's CODEX_HOME. On Linux Codex sandboxes with
+    bubblewrap, which Ubuntu 24.04 and later refuse user namespaces unless an AppArmor profile allows it: every
+    command a worker ran would fail, so an account whose sandbox cannot start takes nothing."""
+    env = dict(os.environ)
+    if agent.get("dir"):
+        env["CODEX_HOME"] = agent["dir"]
+    try:  # ponytail: run on the tick, once per CODEX_SANDBOX_CHECK; it takes well under a second when it works
+        r = subprocess.run([_exe("codex", env), "sandbox", "--", "true"], cwd=str(Path.home()), env=env,
+                           stdin=subprocess.DEVNULL, capture_output=True, text=True, errors="replace", timeout=30)
+    except (OSError, subprocess.SubprocessError) as e:
+        return False, str(e)
+    return r.returncode == 0, firstline((r.stderr or r.stdout or "exit {}".format(r.returncode)).strip())
+
+
+def _codex_auth_mtime(agent):
+    try:
+        return (Path(agent.get("dir") or Path.home() / ".codex") / "auth.json").stat().st_mtime
+    except OSError:
+        return None
 
 
 def _said(text):
@@ -2181,6 +2204,8 @@ GIT_RULE = ("\n\nGit rule: never run git stash, stash pop/apply, checkout or res
             "like, an empty or amended commit, push, tag, reset, rm or mv inside .git, and a Write or Edit outside the repo, "
             "the run folder and temp. To compare with a clean tree, make a "
             "throwaway worktree (git worktree add --detach /tmp/clean-tree HEAD), run there, then remove it.\n")
+# a Codex worker gets no PreToolUse hook: the same rule, kept by the worker alone (its sandbox is the hard line)
+GIT_RULE_CODEX = GIT_RULE.replace("a hook refuses them, as it refuses", "these are not allowed, and neither are")
 
 
 PLUGIN = Path(__file__).resolve().parents[3] / "mods" / "hub-report"  # the hub's tools and message hooks
@@ -2205,7 +2230,7 @@ def launch(agent, brief, repo, model, env, log, resume=None):
     (None for agy and Codex). A Codex worker runs `codex exec` under its account's CODEX_HOME in the `sandbox` its
     entry names (default workspace-write, with the network, the repo's git folder and the run folder writable)."""
     full = worker_env(repo, env)
-    brief += GIT_RULE
+    brief += GIT_RULE_CODEX if agent.get("kind") == "codex" else GIT_RULE
     session = None
     if agent.get("kind") == "agy":
         cmd = [_exe("agy", full), "-p", brief] + (["--model", model] if model else []) + ["--output-format", "json"]
@@ -4117,6 +4142,7 @@ class Supervisor:
         self.probe = probe or probe_usage  # (agent entry, cwd) -> its output; tests hand in their own
         self.probe_async, self.probing = True, []  # probes run in their own thread (tests may run them inline)
         self.codex_usage = os.environ.get("SB_HUB_CODEX_USAGE") != "0"  # read Codex accounts' session files
+        self.codex_sandbox = codex_sandbox_ok  # (agent entry) -> (ok, why); tests hand in their own
         self.idle_usage = os.environ.get("SB_HUB_IDLE_USAGE") != "0"  # probe the pool with nothing to start
         self.close_off = True  # the daily morning close-off job (tests of other things turn it off)
         # item key -> {p, t (the ticket row it started from), agent, inst, base, log, start, pos (log read up to),
@@ -4195,6 +4221,7 @@ class Supervisor:
             self._reviews()  # and one a recheck asked for starts at once
             self._probe()
             self._codex_usage()
+            self._codex_checks()
             self._settle_night(False)  # a redo or retry the steps above queued for a stopping night never starts
             self._start()
         self._set_waits()
@@ -4429,6 +4456,37 @@ class Supervisor:
             if u:
                 self._usage(n, [(u, None)])
 
+    def _codex_checks(self):
+        """Each installed Codex account: its sandbox is tried every CODEX_SANDBOX_CHECK (unless its entry runs
+        unsandboxed); one that cannot start takes nothing and the owner is asked once, until it starts again. A
+        signed-out one is signed in again once its auth.json changed (`codex login` rewrote it)."""
+        now = self.hub.now()
+        with self.hub._lock:
+            codex = {n: dict(e) for n, e in self.hub._data["installed"].items() if e.get("kind") == "codex"}
+        for n, e in codex.items():
+            if e.get("login") == "expired" and _codex_auth_mtime(e) != e.get("login_seen"):
+                self._signed_in(n)
+            if e.get("sandbox") in ("bypass", "danger-full-access") or now - (e.get("sandbox_tried") or 0) < CODEX_SANDBOX_CHECK:
+                continue
+            ok, why = self.codex_sandbox(e)
+            with self.hub._lock:
+                inst = self.hub._data["installed"].get(n)
+                if inst is None:
+                    continue
+                inst["sandbox_tried"] = now
+                was = inst.get("no_sandbox")
+                inst["no_sandbox"] = None if ok else (why or "it did not start")
+                self.hub._save()
+            if ok and was:
+                self.hub._remove("sandbox:" + n)
+            elif not ok and not was:
+                text = ("Codex's sandbox does not start for {}: {}. On Ubuntu 24.04 and later, allow bubblewrap user "
+                        "namespaces with an AppArmor profile for /usr/bin/bwrap (reference/hub.md), or set the "
+                        "entry's sandbox to bypass.").format(n, why or "it did not start")
+                self.hub.report({"agent": "sandbox:" + n, "name": "Codex sandbox on " + n, "role": "orchestrator",
+                                 "state": "needs you", "note": text})
+                notify("sb hub: needs you", text)
+
     def _probe_run(self, todo):
         for n, inst in todo:
             try:
@@ -4450,8 +4508,13 @@ class Supervisor:
             if inst is None or inst.get("login") == "expired":
                 return
             inst["login"] = "expired"
+            if inst.get("kind") == "codex":  # signed in again once this changes
+                inst["login_seen"] = _codex_auth_mtime(inst)
             self.hub._save()
-        text = "Sign in to {}: run `CLAUDE_CONFIG_DIR={} claude`, type /login".format(name, inst.get("dir") or "~/.claude")
+        if inst.get("kind") == "codex":
+            text = "Sign in to {}: run `CODEX_HOME={} codex login`".format(name, inst.get("dir") or "~/.codex")
+        else:
+            text = "Sign in to {}: run `CLAUDE_CONFIG_DIR={} claude`, type /login".format(name, inst.get("dir") or "~/.claude")
         self.hub.report({"agent": "sign-in:" + name, "name": "Sign in to " + name, "role": "orchestrator",
                          "state": "needs you", "note": text})
         notify("sb hub: needs you", text)
@@ -5518,6 +5581,8 @@ class Supervisor:
             return None, 0.0, "{} is not an installed agent".format(name)
         if inst.get("login") == "expired":
             return None, 0.0, "{} is signed out until you sign in to it".format(name)
+        if inst.get("no_sandbox"):
+            return None, 0.0, "{} cannot start its Codex sandbox: {}".format(name, inst["no_sandbox"])
         if (inst.get("limited_until") or 0) > now:
             return None, 0.0, "{} is at its usage limit until {}".format(name, _hm(inst["limited_until"]))
         n, owed = load.get(name, (0, 0.0))
