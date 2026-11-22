@@ -13,6 +13,7 @@ SBMAP = Path(__file__).resolve().parent / "sbmap.py"
 CHECK_TIMEOUT = 20 * 60
 EX_TEMPFAIL = 75  # a check exits it when the tool it needs did not answer: it could not run, it did not fail
 NOT_RUN = "check could not run"
+SETUP_WRONG = "the check is set up wrong"
 # a check line starting with this runs in the checkout itself once the ticket's work landed there, under the repo's
 # Unity lock (sbhub TicketRun._land): sk4te's compile asks the one open Unity, which has the checkout open
 AFTER_LANDING = "after-landing: "
@@ -497,6 +498,11 @@ def verdict(t, repo, base_sha, run=subprocess.run, report=None, first_base=None,
     failed = _run_checks(t["checks"], repo, run, changed, unity)
     if not failed:
         return True, "commit and checks all good" + outside, sha
+    if SETUP_WRONG in failed:  # never reaches Unity from here: no retry, no clean copy
+        where = {"ticket": "the ticket's own `checks`", "map": "the map's `checks`",
+                 "repo": "the repo's .sb/checks"}.get(t.get("checks_from"), "the ticket, its map or the repo")
+        return False, failed + "\nFix the line in {}: this check runs in the ticket's own folder, where Unity " \
+                               "never answers; call it with a `unity:` or `after-landing:` line, which runs on the main folder.".format(where), sha
     if failed.startswith(NOT_RUN):
         return None, failed, sha
     # Others' uncommitted work in the shared folder can break a check the commit itself passes: only then, try the
@@ -520,6 +526,15 @@ def verdict(t, repo, base_sha, run=subprocess.run, report=None, first_base=None,
                   f"other uncommitted work in the shared folder breaks them there ({shown})" + outside), sha
 
 
+NO_INSTANCE = re.compile(r"EDITOR_NOT_RUNNING|No Pipeline instance found for project", re.I)
+
+
+def unreachable_unity(cwd, text):
+    """True when a check's output says Unity has no instance for `cwd` and `cwd` is a linked worktree (a ticket's own
+    copy of the repo): no Editor ever opens it, so trying again changes nothing."""
+    return bool(NO_INSTANCE.search(text or "")) and (Path(str(cwd)) / ".git").is_file()
+
+
 def _run_checks(checks, cwd, run, changed="", unity=None):
     """None when every check exits 0, else the first failure in words (starting NOT_RUN when it exited 75).
     SB_CHANGED holds the files the ticket's commit changed, one per line, so a check can test only what they reach
@@ -540,6 +555,8 @@ def _run_checks(checks, cwd, run, changed="", unity=None):
             return f"check timed out after 20 minutes: {cmd}"
         if r.returncode != 0:
             tail = "\n".join(((r.stdout or "") + (r.stderr or "")).splitlines()[-20:])
+            if unreachable_unity(cwd, tail):
+                return f"check failed: {cmd}\n{SETUP_WRONG}: Unity has no instance for {cwd}\n{tail}"
             if r.returncode == EX_TEMPFAIL:
                 return f"{NOT_RUN}: {cmd} exited {EX_TEMPFAIL} (the tool it needs did not answer)\n{tail}"
             return f"check failed: {cmd}\n{tail}"
