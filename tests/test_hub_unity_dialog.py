@@ -3,6 +3,8 @@ once a minute and puts 'Unity shows <title>: click it' on the board and the phon
 import json
 import subprocess
 import sys
+import threading
+import time
 import unittest
 from unittest import mock
 
@@ -37,7 +39,9 @@ class WindowListTest(unittest.TestCase):
         hub = {"owner": "Unity Hub", "name": "Projects", "layer": 0, "w": 300, "h": 200}
         self.assertEqual(sbhub.unity_dialogs([MAIN, pop, hub]), ["Scene Modified Externally"])
         self.assertEqual(sbhub.unity_dialogs([MAIN]), [])
-        self.assertEqual(sbhub.unity_dialogs([dict(MAIN, name="")]), [])  # one untitled window: cannot be told apart
+        self.assertEqual(sbhub.unity_dialogs([dict(MAIN, name="")]), [])  # one big untitled window: the editor
+        lone = {"owner": "Unity", "name": "", "layer": 0, "w": 260, "h": 304}  # what this Mac's list really showed
+        self.assertEqual(sbhub.unity_dialogs([lone]), ["a window"])
         self.assertEqual(sbhub.unity_dialogs([MAIN, dict(pop, name="")]), ["a window"])
         self.assertEqual(sbhub.unity_dialogs([MAIN, dict(pop, layer=25)]), [])  # menus and tooltips sit above layer 0
         self.assertEqual(sbhub.dialog_text(["A", "B"]), "Unity shows A, B: click it")
@@ -92,6 +96,23 @@ class DialogWatchTest(RunnerCase):
         self.clock.t += sbhub.DIALOG_POLL
         self.look()
         self.assertEqual(self.rows(), {})
+
+    def test_the_watcher_looks_while_the_tick_is_held_by_a_running_check(self):
+        gate = threading.Event()
+        self.addCleanup(gate.set)
+        self.shown = [MAIN, {"owner": "Unity", "name": "Reimport", "layer": 0, "w": 400, "h": 160}]
+        with mock.patch.object(sbhub, "DIALOG_TICK", 0.05), mock.patch.object(self.sup, "tick", lambda: gate.wait(30)), \
+                mock.patch.object(self.hub, "agents_scan", lambda: None):
+            with self.hub._lock:
+                self.hub._data["queue"]["items"][-1]["state"] = "running"
+            th = threading.Thread(target=self.sup.run, daemon=True)
+            th.start()  # its tick never returns: a check is running
+            end = time.time() + 20  # not `until`: it ticks, and this tick is the one held
+            while not self.rows() and time.time() < end:
+                time.sleep(0.05)
+            self.assertEqual([r["note"] for r in self.rows().values()], ["Unity shows Reimport: click it"])
+            self.sup.stopped = True
+            gate.set()
 
     def test_nothing_running_in_the_repo_means_no_listing(self):
         self.look("queued")

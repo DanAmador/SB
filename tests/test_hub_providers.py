@@ -60,7 +60,7 @@ class ProviderCase(unittest.TestCase):
         script(self.repo, "b-crash", 'raise SystemExit(3)')
         script(self.repo, "c-hang", 'import time; time.sleep(30)')
         script(self.repo, "d-ok", 'print(json.dumps({"title": "Ok", "widgets": []}))')
-        out = run_providers(self.repo, timeout=1)
+        out = run_providers(self.repo, timeout=4)  # room for a loaded parallel run to start the ok script
         self.assertEqual([p["title"] for p in out], ["Repo and maps", "a-garbage", "b-crash", "c-hang", "Ok"])
         self.assertTrue(all(p["widgets"][0]["level"] == "bad" for p in out[1:4]))
 

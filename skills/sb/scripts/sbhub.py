@@ -2992,6 +2992,8 @@ def editor_answers(repo, run=subprocess.run):
 # on-screen windows once a minute through the macOS window list (CoreGraphics, via osascript's JavaScript bridge; it
 # needs no Accessibility permission) and names any dialog on the board and the phone. It never clicks one.
 DIALOG_POLL = 60
+DIALOG_SMALL = 700 * 600  # a window this small is never the editor's main window, even when it is the only one
+DIALOG_TICK = 5  # how often the watcher asks whether a repo is due its once-a-minute look
 WINDOW_LIST_JS = (
     "ObjC.import('CoreGraphics');"
     "var o=ObjC.castRefToObject($.CGWindowListCopyWindowInfo($.kCGWindowListOptionOnScreenOnly|"
@@ -3018,15 +3020,15 @@ def unity_windows(run=subprocess.run):
 def unity_dialogs(windows):
     """The titles of the dialogs among Unity's windows: ordinary-layer windows that are not the editor's main window
     (its title names the Unity version or the graphics API) and are far smaller than the largest one. A window the
-    list gives no title (the process may lack screen-recording rights) is named "a window", and counts only beside
-    a larger one: a lone window cannot be told from the editor itself."""
+    list gives no title (the process may lack screen-recording rights) is named "a window". A lone window counts
+    when it is small (DIALOG_SMALL): the editor's own is never that small."""
     wins = [w for w in windows if w.get("owner") == "Unity" and not w.get("layer")]
     area = lambda w: (w.get("w") or 0) * (w.get("h") or 0)
     big = max([area(w) for w in wins] or [0])
     found = []
     for w in wins:
         name = str(w.get("name") or "").strip()
-        if area(w) < big * 0.4 and area(w) > 0 and not UNITY_MAIN_TITLE.search(name):
+        if 0 < area(w) and (area(w) < big * 0.4 or area(w) <= DIALOG_SMALL) and not UNITY_MAIN_TITLE.search(name):
             found.append(name or "a window")
     return list(dict.fromkeys(found))
 
@@ -4521,6 +4523,7 @@ class Supervisor:
             scan = not self.hub._data["installed"]
         if scan:
             self.hub.agents_scan()
+        threading.Thread(target=self._dialog_loop, daemon=True).start()  # not in the tick: a check blocks the tick
         while not self.stopped:
             try:
                 self.tick()
@@ -4528,6 +4531,16 @@ class Supervisor:
                 print("sb hub queue: {}: {}".format(type(e).__name__, e), file=sys.stderr, flush=True)
             self.hub.queue_kick.wait(every)  # or sooner, when the owner changes the queue (a resume)
             self.hub.queue_kick.clear()
+
+    def _dialog_loop(self):
+        """Look for Unity dialogs on a thread of its own: the tick is held for as long as a check runs (a Unity compile
+        is the case a dialog freezes), and a look in it would wait the whole check."""
+        while not self.stopped:
+            try:
+                self._unity_dialogs()
+            except Exception as e:
+                print("sb hub: Unity dialog watch: {}: {}".format(type(e).__name__, e), file=sys.stderr, flush=True)
+            time.sleep(DIALOG_TICK)
 
     def stop(self):
         """Kill every worker's process group; their items are queued again when the hub next starts."""
@@ -4563,7 +4576,6 @@ class Supervisor:
         if not self.stopped:
             self._held_builds()
             self._unity_watch()
-            self._unity_dialogs()
             self._rechecks()
             self.hub.orphans()  # a hand-off whose chat is gone goes on before anything waits on it
             self._handoffs()
@@ -5539,7 +5551,7 @@ class Supervisor:
         now = self.hub.now()
         with self.hub._lock:
             repos = {str(i.get("repo")) for i in self.hub._data["queue"]["items"]
-                     if i.get("repo") and i["state"] in ("running", "review", "integrate", "landed")}
+                     if i.get("repo") and i["state"] in ("running", "review", "integrate", "landed", "recheck")}
             shown = [a for a in self.hub._data["agents"] if a.startswith("unity-dialog:")]
         repos = {r for r in repos if is_unity(r)}
         for a in shown:  # nothing runs there now: its row goes
