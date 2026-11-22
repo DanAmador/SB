@@ -8,11 +8,11 @@ import { useWrites } from "./hub.ts";
 
 const links = { ticket: null, map: null, board: null, report: null, log: null };
 const ticket = (key: string, state: QueueItem["state"] = "queued", extra: object = {}): QueueItem =>
-  ({ key, kind: "ticket", agent: null, state, note: "", commit: null, tries: 0, started: null, ended: null, links, ...extra }) as QueueItem;
+  ({ key, kind: "ticket", agent: null, state, note: "", commit: null, tries: 0, started: null, ended: null, links, ...extra });
 const job = (key: string, state: QueueItem["state"] = "queued"): QueueItem =>
   ({ key, kind: "job", agent: null, state, note: "", commit: null, tries: 0, started: null, ended: null, links }) as unknown as QueueItem;
 const queue = (items: QueueItem[], extra: Partial<Queue> = {}): Queue =>
-  ({ version: 7, seeded: true, paused: false, agent: null, items, maps: ["p/a", "p/b"], ...extra }) as Queue;
+  ({ version: 7, seeded: true, paused: false, agent: null, items, maps: ["p/a", "p/b"], ...extra });
 const keys = (q: Queue | null): string[] => (q?.items ?? []).map((i) => `${i.key}:${i.state}`);
 
 describe("the queue a write will most likely leave", () => {
@@ -77,12 +77,12 @@ describe("a queue write", () => {
     vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((res) => (answer = res))));
     const qc = new QueryClient();
     const q = queue([ticket("p/a#1")]);
-    qc.setQueryData(["state"], { queue: q } as unknown as State);
+    qc.setQueryData(["state"], { queue: q });
     const wrapper = ({ children }: { children: ReactNode }) => createElement(QueryClientProvider, { client: qc }, children);
     const { result } = renderHook(() => useWrites(), { wrapper });
 
     const done = result.current.queue("POST /api/queue/pause", { paused: true }, "Paused.");
-    await vi.waitFor(() => expect(qc.getQueryData<State>(["state"])?.queue.paused).toBe(true));
+    await vi.waitFor(() => { expect(qc.getQueryData<State>(["state"])?.queue.paused).toBe(true); });
     answer(new Response(JSON.stringify({ error: "no" }), { status: 500 }));
     expect(await done).toEqual({ ok: false, words: "no" });
     expect(qc.getQueryData<State>(["state"])?.queue).toEqual(q);

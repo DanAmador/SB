@@ -12,12 +12,12 @@ const row = (num: number, extra: Partial<TicketRow> = {}): TicketRow =>
     map: "p/a", num, title: `T${String(num)}`, why: "", type: "task", status: "open", priority: null, blocked_by: [], blocked_by_open: [],
     paths: [], tier: "sonnet", check: "tests", has_done_when: true, done_when: "x", question: "", out: "", checks: [], repo: "/r",
     file: "", map_title: "A", map_order: 0, claimed_by: null, queued: false, state: "ready", reason: "ready", links, ...extra,
-  }) as TicketRow;
+  });
 const route = (): MapRoute =>
   ({
     map: "p/a", title: "A", status: "open", words: "", checks: [], uri: "",
     tickets: [1, 2].map((num) => ({ num, title: "", type: "task", status: "open", state: "ready", why: "", priority: null, tier: "sonnet", place: 1, last_run: null, blocked_by: [], file: "", links })),
-  }) as MapRoute;
+  });
 const apply = (g: ReturnType<typeof guessTicket>, rows: TicketRow[]): TicketRow[] => g?.tickets?.(rows) ?? rows;
 
 describe("what a ticket action will most likely change", () => {
@@ -55,10 +55,9 @@ describe("what a ticket action will most likely change", () => {
   });
 
   it("a blocked ticket waits on an open blocker that is not queued", () => {
-    const rows = [row(1, { blocked_by_open: [2] }), row(2)];
-    expect(classify(rows[0] as TicketRow, rows)).toEqual({ state: "blocked", reason: "after T2" });
-    const queued = [row(1, { blocked_by_open: [2] }), row(2, { queued: true })];
-    expect(classify(queued[0] as TicketRow, queued).state).toBe("ready");
+    const first = row(1, { blocked_by_open: [2] });
+    expect(classify(first, [first, row(2)])).toEqual({ state: "blocked", reason: "after T2" });
+    expect(classify(first, [first, row(2, { queued: true })]).state).toBe("ready");
   });
 
   it("draws nothing for a comment", () => {
@@ -78,11 +77,11 @@ describe("a ticket action", () => {
 
     const one = result.current.ticket("done", { key: "p/a#1", text: "ok" }, "Done.");
     const two = result.current.ticket("tier", { key: "p/a#2", text: "opus" }, "Tier.");
-    await vi.waitFor(() => expect(qc.getQueryData<TicketRow[]>(["tickets"])?.map((r) => `${String(r.num)}:${r.tier}`)).toEqual(["2:opus"]));
+    await vi.waitFor(() => { expect(qc.getQueryData<TicketRow[]>(["tickets"])?.map((r) => `${String(r.num)}:${r.tier}`)).toEqual(["2:opus"]); });
     expect(answers).toHaveLength(1); // the second waits for the first
     answers[0]?.(new Response(JSON.stringify({ ok: true }), { status: 200 }));
     expect(await one).toEqual({ ok: true, words: "Done." });
-    await vi.waitFor(() => expect(answers).toHaveLength(2));
+    await vi.waitFor(() => { expect(answers).toHaveLength(2); });
     answers[1]?.(new Response(JSON.stringify({ error: "a worker is running it" }), { status: 400 }));
     expect(await two).toEqual({ ok: false, words: "a worker is running it" });
     vi.unstubAllGlobals();

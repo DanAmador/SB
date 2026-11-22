@@ -1086,6 +1086,8 @@ test.describe("Map view", () => {
   });
 
   test("a box dragged over three nodes ticks them; the bar says 3, Queue queues those three, Table shows them ticked; Escape clears", async ({ page }) => {
+    // the box runs along a row: A, B and C side by side with D below, which is the Vertical layout (Horizontal stacks them)
+    await page.addInitScript(() => { sessionStorage.setItem("vertical-test", "1"); localStorage.removeItem("sbhub.graphLayout"); });
     const before = await queuedKeys(page);
     await page.goto("/next/?project=demo&map=demo%2Fbatch");
     const graph = page.getByTestId("map-graph");

@@ -33,7 +33,10 @@ function withQueued(items: readonly QueueItem[], queued: readonly TicketItem[]):
   const out: QueueItem[] = [];
   for (const i of items) {
     if (!isQueuedTicket(i)) out.push(i);
-    else if (next.length > 0) out.push(next.shift() as TicketItem);
+    else {
+      const n = next.shift();
+      if (n !== undefined) out.push(n);
+    }
   }
   return [...out, ...next];
 }
@@ -84,8 +87,9 @@ export function predictQueue<K extends QueueRoute>(q: Queue, route: K, body: Rou
     case "POST /api/queue/pause": {
       const b = raw as Body<typeof r>;
       if (b.paused) return { ...q, paused: true };
-      const { note: _note, ...rest } = q;
-      return { ...rest, paused: false };
+      const rest: Queue = { ...q, paused: false };
+      delete rest.note;
+      return rest;
     }
     case "POST /api/queue/move": {
       const b = raw as Body<typeof r>;
@@ -98,7 +102,7 @@ export function predictQueue<K extends QueueRoute>(q: Queue, route: K, body: Rou
     }
     case "POST /api/queue/move_map": {
       const b = raw as Body<typeof r>;
-      if (q.maps === undefined || !q.maps.includes(b.map)) return null;
+      if (!q.maps?.includes(b.map)) return null;
       const maps = q.maps.filter((m) => m !== b.map);
       maps.splice(clamp(b.to, maps.length), 0, b.map);
       const place = new Map(maps.map((m, n) => [m, n]));
@@ -113,7 +117,7 @@ export function predictQueue<K extends QueueRoute>(q: Queue, route: K, body: Rou
     case "POST /api/queue/remove_job": {
       const b = raw as Body<typeof r>;
       const it = q.items.find((i) => i.key === b.key);
-      if (it === undefined || it.kind !== "job" || it.state !== "queued") return null;
+      if (it?.kind !== "job" || it.state !== "queued") return null;
       return { ...q, items: q.items.filter((i) => i !== it) };
     }
     case "POST /api/queue/stop": {
