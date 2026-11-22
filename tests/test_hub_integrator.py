@@ -106,5 +106,49 @@ class IntegratorTest(RunnerCase):
         self.until(lambda: self.state_of("repo/one#1") == "done")
 
 
+
+class TwoMapsTest(RunnerCase):
+    """Two maps of one repo, in turn: what the first map's hand-off holds back, and how a dead chat lets go."""
+    MAPS = (("repo/one", "repoA", ("A", "one/")),
+            ("repo/two", "repoT", ("C", "three/")))
+
+    def setUp(self):
+        super().setUp()
+        self.repo = self.repos["repo/one"]
+        git(self.repo, "config", "sb.parallel", "3")
+        m = next(self.vault.glob("wayfinder/repo/two/map.md"))  # the second map works in the first map's repo
+        m.write_text(m.read_text(encoding="utf-8").replace(str(self.repos["repo/two"]), str(self.repo)),
+                     encoding="utf-8")
+        self.hub.tickets()
+
+    def queue(self, *keys, by=None):
+        self.hub.queue_set(list(keys), self.hub.state()["queue"]["version"], agent=by)
+
+    def one_handed(self, to="chat-a"):
+        """repo/one#1 handed to `to`, repo/two#2 queued behind its map."""
+        self.queue("repo/one#1", "repo/two#2", by=to)
+        go(self.hub)
+        self.hub.join(to, "integrator")
+        self.until(lambda: self.state_of("repo/one#1") == "handed")
+
+    def test_a_ticket_waiting_its_maps_turn_names_the_map_and_what_holds_it(self):
+        self.one_handed()
+        for _ in range(3):
+            self.sup.tick()
+        self.assertEqual(self.state_of("repo/two#2"), "queued")
+        self.assertEqual(self.items()["repo/two#2"]["note"], "waits: one first (1 handed to chat-a)")
+        self.hub.integrate("repo/one#1", "chat-a", "land")
+        self.until(lambda: self.state_of("repo/two#2") not in ("queued",))
+        self.assertFalse(self.items()["repo/two#2"]["note"].startswith("waits: "))
+
+    def test_the_map_note_names_a_sessions_id_short_and_counts_what_it_does_not_show(self):
+        items = [{"key": "r/a#{}".format(n), "kind": "ticket", "state": s, "handed": {"to": to}}
+                 for n, s, to in ((1, "queued", None), (2, "handed", "25108735-1a2b-4c3d-8e9f-001122334455"),
+                                  (3, "running", None), (4, "unclean", None), (5, "queued", None), (6, "done", None))]
+        self.assertEqual(sbhub.map_wait_note(items, "/r", "r/a", lambda i: "/r"),
+                         "waits: a first (2 handed to 25108735…, 4 waiting for a clean checkout, 3 running, "
+                         "1 queued, 1 more)")
+
+
 if __name__ == "__main__":
     unittest.main()

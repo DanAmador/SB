@@ -3094,6 +3094,34 @@ def _vault():
     return Path(os.environ.get("SB_VAULT") or Path.home() / "Documents" / "Second Brain")
 
 
+def short_chat(chat):
+    """A chat's id as a note names it: a session's uuid cut to its first eight characters."""
+    chat = str(chat or "?")
+    return chat[:8] + "…" if re.fullmatch(r"[0-9a-f]{8}-[0-9a-f-]{20,}", chat) else chat
+
+
+MAP_WAIT_SHOWN = 4  # a map-order note names at most this many of the blocking map's items
+
+
+def map_wait_note(items, repo, mp, repo_of):
+    """The note of a queued ticket that waits for an earlier map of its repo: the map and what of it is unfinished,
+    each with its state, e.g. `waits: build-mode first (1390 handed to qt-1308, 1401 queued)`."""
+    order = {"handed": 0, "unclean": 1, "running": 2, "recheck": 3, "landed": 4, "review": 4, "queued": 5}
+    left = sorted((i for i in items if i["kind"] == "ticket" and sbqueue.map_of(i["key"]) == mp
+                   and repo_of(i) == repo and i["state"] in order), key=lambda i: order[i["state"]])
+
+    def says(i):
+        num, st = i["key"].rsplit("#", 1)[-1], i["state"]
+        return num + " " + {"handed": "handed to " + short_chat((i.get("handed") or {}).get("to")),
+                            "unclean": "waiting for a clean checkout", "running": "running",
+                            "recheck": "checking again", "landed": "in review", "review": "in review",
+                            "queued": "queued"}[st]
+    shown = [says(i) for i in left[:MAP_WAIT_SHOWN]]
+    if len(left) > MAP_WAIT_SHOWN:
+        shown.append("{} more".format(len(left) - MAP_WAIT_SHOWN))
+    return "waits: {} first{}".format(mp.rsplit("/", 1)[-1], " ({})".format(", ".join(shown)) if shown else "")
+
+
 def closed_note(key):
     """(title, words) of a ticket that left the open list: how it closed and its last comment, so a run skipped for
     it says why (dropped and merged into another, resolved elsewhere) and not only that it closed. (None, "") when
@@ -5789,6 +5817,11 @@ class Supervisor:
             cached = {sbqueue.key(t): t for t in self.hub._tcache[1] or []}
             load = self._load([i for i in q["items"] if i["state"] == "running"])
             startable, noted = [], False
+            repo_of = lambda i: (cached.get(i["key"]) or {}).get("repo") or i.get("repo")
+            try:  # the map each repo is on now, from the cached tickets: what waits its map's turn says for whom
+                current, _ = sbqueue.current_maps(q["items"], cached, q.get("maps") or [], self.hub._live_keys())
+            except (KeyError, TypeError, ValueError):
+                current = {}
             for i in q["items"]:
                 if i["state"] != "queued":
                     continue
@@ -5800,8 +5833,17 @@ class Supervisor:
                         i["note"], noted = why, True
                     continue
                 name, inst, why = self._pick(q, i, cached.get(i["key"]), load, now)
-                if name:
+                repo = repo_of(i)
+                if i["kind"] == "ticket" and repo in current and current[repo] != sbqueue.map_of(i["key"]):
+                    why = map_wait_note(q["items"], repo, current[repo], repo_of)  # it waits its map's turn, first
+                    if i.get("note") != why:
+                        i["note"], noted = why, True
+                    if name:  # the fresh tickets below judge it again
+                        startable.append(i)
+                elif name:
                     startable.append(i)
+                    if str(i.get("note") or "").startswith("waits: "):  # what it waited for went
+                        i["note"], noted = "", True
                 elif why and i.get("note") != why:  # the owner reads why it waits
                     i["note"], noted = why, True
                 elif not why and str(i.get("note") or "").startswith("waits: "):  # only busy now: the reason went
