@@ -3087,6 +3087,85 @@ def dialog_text(titles):
     return "Unity shows {}: click it".format(", ".join(titles))
 
 
+# ---- the popup watchdog: a Unity dialog that stays up POPUP_RESTART_AFTER while a night runs gets its Editor quit
+# (gracefully, then forced) and started again on the same project and version, at most POPUP_RESTARTS times per repo
+# a night. Never while a chat holds the repo's Unity lock, in Play, or with the owner at the keyboard. The Editor is
+# started through the `unity` CLI on the project and version alone: Unity Hub's launch arguments carry an access
+# token, so the hub never reads, copies or logs them.
+POPUP_RESTART_AFTER = 10 * 60
+POPUP_RESTARTS = 2
+POPUP_READY_WAIT = 10 * 60  # seconds the restarted Editor has to report `ready`
+POPUP_READY_POLL = 10
+POPUP_QUIT_WAIT = 60  # seconds `unity close` waits for a graceful quit before the forced one
+OWNER_AWAY = 15 * 60  # no key or mouse for this long: the owner is not at the keyboard
+POPUP_ASK_WAIT = 8 * 3600
+POPUP_LEAVE, POPUP_AGAIN = "leave it", "restart it once more"
+
+
+def owner_idle(run=subprocess.run):
+    """Seconds since the owner last touched the keyboard or mouse (macOS HIDIdleTime), or None when unknown."""
+    if sys.platform != "darwin":
+        return None
+    try:
+        r = run(["ioreg", "-c", "IOHIDSystem", "-d", "4"], capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    m = re.search(r'"HIDIdleTime" = (\d+)', r.stdout or "")
+    return int(m.group(1)) / 1e9 if m else None
+
+
+def unity_editor(repo, run=subprocess.run):
+    """The live Editor that has `repo` open as `unity status` lists it ({pid, version, state, ...}), or None."""
+    try:
+        r = run(["unity", "status", "--format", "json"], capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    data = _unity_json(r.stdout) or {}
+    want = os.path.realpath(str(repo))
+    for inst in (data.get("data") or {}).get("instances") or []:
+        path = (inst.get("projectPath") or inst.get("project") or "") if isinstance(inst, dict) else ""
+        if path and os.path.realpath(path) == want:
+            return inst
+    return None
+
+
+def project_version(repo):
+    """The Editor version a Unity project names in ProjectSettings/ProjectVersion.txt, or ''."""
+    try:
+        text = (Path(str(repo)) / "ProjectSettings" / "ProjectVersion.txt").read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    m = re.search(r"^m_EditorVersion:\s*(\S+)", text, re.M)
+    return m.group(1) if m else ""
+
+
+def restart_unity(repo, version, run=subprocess.run, sleep=time.sleep, clock=time.time):
+    """Quit the Editor that has `repo` open (gracefully, then forced) and start it again on `repo` and `version`,
+    then wait for `unity status` to call it ready: '' once it is, else what went wrong. The CLI's own output is never
+    logged (the start goes through Unity Hub, whose arguments carry an access token)."""
+    def call(*args, timeout=120):
+        try:
+            return run(["unity", *args], capture_output=True, text=True, timeout=timeout).returncode
+        except (OSError, subprocess.SubprocessError):
+            return -1
+    if call("close", str(repo), "--timeout", str(POPUP_QUIT_WAIT), timeout=POPUP_QUIT_WAIT + 30) != 0 \
+            or unity_editor(repo, run):
+        call("close", str(repo), "--force", "--timeout", "30", timeout=90)
+        if unity_editor(repo, run):
+            return "the Editor would not quit"
+    if call("projects", "open", str(repo), "--editor-version", version, "--non-interactive") != 0:
+        return "the Editor would not start on {} {}".format(Path(str(repo)).name, version)
+    end = clock() + POPUP_READY_WAIT
+    while True:
+        inst = unity_editor(repo, run)
+        if inst and inst.get("state") == "ready":
+            return ""
+        if clock() >= end:
+            return "the restarted Editor was not ready in {} minutes ({})".format(
+                POPUP_READY_WAIT // 60, (inst or {}).get("state") or "not listed")
+        sleep(POPUP_READY_POLL)
+
+
 def unity_unjudged(note):
     """True when a result's note says Unity was not reached: an integrator's `no unity`, or a `unity:` /
     `unity-session:` check line that could not run."""
@@ -4582,6 +4661,8 @@ class Supervisor:
         self.dialog_at = {}  # repo -> when its Unity windows were last listed (_unity_dialogs)
         self.dialog_busy = set()
         self.windows = unity_windows  # the macOS window list; a test swaps it
+        self.dialog_since = {}  # repo -> (first, last) look that saw a dialog, in a row (the popup watchdog)
+        self.unity_cmd = subprocess.run  # what the popup watchdog runs `unity` and `ioreg` through; a test swaps it
         self.unity_asking = set()  # repos whose Unity is asked editor_status again right now (_unity_watch)
         self.stopped = False
         self.unlanded = False  # the landings an earlier hub left half done are undone at the first tick
@@ -5646,7 +5727,9 @@ class Supervisor:
 
             def look(repo=repo):
                 try:
-                    self._dialog_row(repo, unity_dialogs(self.windows()))
+                    titles = unity_dialogs(self.windows())
+                    self._dialog_row(repo, titles)
+                    self._popup_watch(repo, titles)
                 except Exception as e:  # a failed look never takes the hub down
                     print("sb hub: Unity window list: {}: {}".format(type(e).__name__, e), file=sys.stderr, flush=True)
                 finally:
@@ -5669,6 +5752,128 @@ class Supervisor:
                          "state": "needs you", "note": text})
         if row is None:
             notify("sb hub: needs you", "{}: {}".format(Path(repo).name, text))
+
+    def _popup_why_not(self, repo):
+        """Why the popup watchdog may not restart this repo's Editor now, else '' (a night runs, no chat holds its
+        Unity lock, the owner is away)."""
+        with self.hub._lock:
+            night = self.hub._night_live()
+            lock = self.hub._data["locks"].get(unity_lock(repo))
+        if night is None:
+            return "no night is running"
+        if lock and not str(lock.get("by") or "").startswith("sb-hub "):
+            return "{} holds {}".format(lock.get("by"), unity_lock(repo))
+        idle = owner_idle(self.unity_cmd)
+        if idle is None or idle < OWNER_AWAY:
+            return "the owner is at the keyboard"
+        return ""
+
+    def _popup_record(self, repo, **change):
+        """(the night's id, this repo's watchdog record on the live night: {n, stopped, asked}), changed by `change`
+        and saved when given; (None, {}) with no night."""
+        with self.hub._lock:
+            night = self.hub._night_live()
+            if night is None:
+                return None, {}
+            rec = night.setdefault("unity_restarts", {}).setdefault(str(repo), {"n": 0})
+            if change:
+                rec.update(change)
+                self.hub._save()
+            return night["id"], dict(rec)
+
+    def _popup_say(self, repo, text):
+        """Say what the watchdog did, once: a row on the board, a line in the night's log (the night record's `log`,
+        kept with it once it ends) and in the hub's log."""
+        with self.hub._lock:
+            night = self.hub._night_live()
+            if night is not None:
+                night.setdefault("log", []).append({"at": self.hub.now(), "text": "{}: {}".format(Path(repo).name, text)})
+                self.hub._save()
+        print("sb hub: {}: {}".format(Path(repo).name, text), file=sys.stderr, flush=True)
+        self.hub.report({"agent": "unity-restart:" + repo, "name": "Unity restarted in " + Path(repo).name,
+                         "role": "orchestrator", "state": "idle", "note": text})
+
+    def _popup_watch(self, repo, titles):
+        """The popup watchdog, after each look: a dialog seen for POPUP_RESTART_AFTER in a row, with the Editor not
+        answering editor_status (a modal holds its main thread), gets its Editor restarted (restart_unity), at most POPUP_RESTARTS times a night per repo, then what waited on Unity is
+        checked again at once. A restarted Editor that shows a dialog again asks the owner once (default: leave it),
+        and the watchdog leaves that repo alone for the night unless the owner says restart it once more."""
+        now = self.hub.now()
+        if not titles:
+            self.dialog_since.pop(repo, None)
+            return
+        since, last = self.dialog_since.get(repo) or (now, now)
+        if now - last > 3 * DIALOG_POLL:  # looks stopped in between: the dialog may have closed and come back
+            since = now
+        self.dialog_since[repo] = (since, now)
+        if now - since < POPUP_RESTART_AFTER:
+            return
+        nid, rec = self._popup_record(repo)
+        if nid is None:
+            return
+        if rec.get("stopped"):
+            with self.hub._lock:
+                q = self.hub._data["questions"].get(rec.get("asked") or "") or {}
+            if q.get("answer") != POPUP_AGAIN:
+                return
+            nid, rec = self._popup_record(repo, stopped=False, asked=None, n=min(rec.get("n", 0), POPUP_RESTARTS - 1))
+        if rec.get("n", 0) >= POPUP_RESTARTS:
+            return
+        if self._popup_why_not(repo):
+            return
+        inst = unity_editor(repo, self.unity_cmd)
+        if not inst:
+            return  # no Editor of this project listed: nothing of ours to restart
+        if "play" in str(inst.get("state") or "").lower():
+            return
+        if not editor_answers(repo, run=self.unity_cmd):
+            return  # it answers: no modal holds its main thread (a floating window of its own, not a popup)
+        version = inst.get("editorVersion") or inst.get("version") or project_version(repo)
+        if not version:
+            return
+        n = rec.get("n", 0) + 1
+        self._popup_record(repo, n=n)
+        shown = ", ".join(titles)
+        err = restart_unity(repo, version, run=self.unity_cmd)
+        self.dialog_since.pop(repo, None)
+        again = unity_dialogs(self.windows())
+        if err or again:
+            what = "it shows {} again".format(", ".join(again)) if again else err
+            self._popup_say(repo, "Unity showed {} for {} minutes during the night, so the hub restarted the Editor "
+                            "({} of {} tonight), but {}. It restarts it no more tonight.".format(
+                                shown, POPUP_RESTART_AFTER // 60, n, POPUP_RESTARTS, what))
+            got = self.hub.ask("sb-hub", "{}'s Unity Editor was restarted after {} stayed up {} minutes, and {}. "
+                               "The hub leaves it alone for the rest of the night unless you say otherwise.".format(
+                                   Path(repo).name, shown, POPUP_RESTART_AFTER // 60, what),
+                               [POPUP_LEAVE, POPUP_AGAIN], POPUP_LEAVE, POPUP_ASK_WAIT)
+            self._popup_record(repo, stopped=True, asked=got["id"])
+            threading.Thread(target=notify, daemon=True, args=("sb hub: needs you", "{}: Unity was restarted and {}".format(
+                Path(repo).name, what))).start()
+            return
+        self._dialog_row(repo, [])
+        self._popup_say(repo, "Unity showed {} for {} minutes during the night, so the hub restarted the Editor ({} of "
+                        "{} tonight) on {}; it is ready, and what waited on Unity is checked again now.".format(
+                            shown, POPUP_RESTART_AFTER // 60, n, POPUP_RESTARTS, version))
+        self._unity_back(repo)
+
+    def _unity_back(self, repo):
+        """The repo's Editor answers again (the watchdog restarted it): it is no longer down, and each of its items
+        that waited on Unity (held while it was down, or waiting to land again) goes on at once, with no try spent."""
+        now = self.hub.now()
+        with self.hub._lock:
+            q = self.hub._data["queue"]
+            downs = q.get("unity_down") or {}
+            if str(repo) in downs:
+                del downs[str(repo)]
+                if not downs:
+                    del q["unity_down"]
+                q["version"] += 1
+                self.hub._save()
+            keys = [i["key"] for i in q["items"] if str(i.get("repo")) == str(repo)
+                    and (i.get("unity_down") or i["state"] == "recheck")]
+        for key in keys:
+            self._update(key, drop=("unity_down",), recheck_at=now, note="Unity was restarted: it lands now")
+        self.hub.queue_kick.set()
 
     def _unity_watch(self):
         """Each repo whose Unity does not answer is asked editor_status again every UNITY_DOWN_POLL, in its own
