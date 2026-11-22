@@ -3167,7 +3167,9 @@ MAP_WAIT_SHOWN = 4  # a map-order note names at most this many of the blocking m
 
 def map_wait_note(items, repo, mp, repo_of):
     """The note of a queued ticket that waits for an earlier map of its repo: the map and what of it is unfinished,
-    each with its state, e.g. `waits: build-mode first (1390 handed to qt-1308, 1401 queued)`."""
+    each with its state, e.g. `waits: build-mode first (1390 handed to qt-1308, 1401 queued)`. An `unclean` ticket
+    names the unsaved files it waits for: it holds its map until they are saved (later maps never start around it,
+    since map order is the owner's order of work, not only of paths)."""
     order = {"handed": 0, "unclean": 1, "running": 2, "recheck": 3, "landed": 4, "review": 4, "queued": 5}
     left = sorted((i for i in items if i["kind"] == "ticket" and sbqueue.map_of(i["key"]) == mp
                    and repo_of(i) == repo and i["state"] in order), key=lambda i: order[i["state"]])
@@ -3175,7 +3177,10 @@ def map_wait_note(items, repo, mp, repo_of):
     def says(i):
         num, st = i["key"].rsplit("#", 1)[-1], i["state"]
         return num + " " + {"handed": "handed to " + short_chat((i.get("handed") or {}).get("to")),
-                            "unclean": "waiting for a clean checkout", "running": "running",
+                            "unclean": "waiting for a clean checkout" + (
+                                " ({})".format(", ".join(Path(f).name for f in i["blocking"][:3]) +
+                                               (", …" if len(i["blocking"]) > 3 else ""))
+                                if i.get("blocking") else ""), "running": "running",
                             "recheck": "checking again", "landed": "in review", "review": "in review",
                             "queued": "queued"}[st]
     shown = [says(i) for i in left[:MAP_WAIT_SHOWN]]

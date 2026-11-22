@@ -145,8 +145,10 @@ class TwoMapsTest(RunnerCase):
         items = [{"key": "r/a#{}".format(n), "kind": "ticket", "state": s, "handed": {"to": to}}
                  for n, s, to in ((1, "queued", None), (2, "handed", "25108735-1a2b-4c3d-8e9f-001122334455"),
                                   (3, "running", None), (4, "unclean", None), (5, "queued", None), (6, "done", None))]
+        items[3]["blocking"] = ["web/src/SteerBlock.tsx", "web/src/TicketSheet.tsx"]
         self.assertEqual(sbhub.map_wait_note(items, "/r", "r/a", lambda i: "/r"),
-                         "waits: a first (2 handed to 25108735…, 4 waiting for a clean checkout, 3 running, "
+                         "waits: a first (2 handed to 25108735…, 4 waiting for a clean checkout (SteerBlock.tsx, TicketSheet.tsx), "
+                         "3 running, "
                          "1 queued, 1 more)")
 
 
@@ -252,6 +254,21 @@ class TwoMapsTest(RunnerCase):
             self.sup.tick()
         self.assertEqual([q for q in self.hub.state()["questions"].values() if q["agent"] == "sb-hub"], [])
         self.assertNotIn("stall", self.hub.state()["queue"])
+
+
+    def test_a_ticket_waiting_for_a_clean_checkout_holds_its_maps_turn_and_the_next_map_names_its_files(self):
+        (self.repo / "one").mkdir(exist_ok=True)
+        (self.repo / "one" / "done.txt").write_text("the owner's unsaved line\n")  # the file ticket 1's commit adds
+        self.queue("repo/one#1", "repo/two#2")
+        go(self.hub)
+        self.until(lambda: self.state_of("repo/one#1") == "unclean")
+        for _ in range(3):  # its files are not saved: the later map waits, whatever its paths (three/ here)
+            self.sup.tick()
+        self.assertEqual(self.state_of("repo/two#2"), "queued")
+        self.assertEqual(self.items()["repo/two#2"]["note"],
+                         "waits: one first (1 waiting for a clean checkout (done.txt))")
+        (self.repo / "one" / "done.txt").unlink()  # saved elsewhere: ticket 1 lands and the next map goes on
+        self.until(lambda: self.state_of("repo/two#2") != "queued")
 
 
 if __name__ == "__main__":
