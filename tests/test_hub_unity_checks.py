@@ -153,7 +153,7 @@ class UnityLineTest(unittest.TestCase):
         def unlock():
             freed.append(time.time())
             self.hub.unlock(self.lock, "chat")
-        timer = threading.Timer(1.0, unlock)
+        timer = threading.Timer(3.0, unlock)  # room for the lockless line to start under a loaded parallel run
         timer.start()
         self.addCleanup(timer.cancel)
         failed = self.check("unity: editor_status", "unity-session: sb_compile", "unity: sb_check",

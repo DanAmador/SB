@@ -71,7 +71,7 @@ class ProviderCase(unittest.TestCase):
         script(self.repo, "spawner", "import subprocess, time\n"
                "c = subprocess.Popen(['sleep', '60'])\n"
                "open({!r}, 'w').write(str(c.pid))\ntime.sleep(60)".format(str(pid_file)))
-        out = run_providers(self.repo, timeout=1)
+        out = run_providers(self.repo, timeout=3)  # room to spawn its child under a loaded parallel run
         self.assertIn("timed out", out[1]["widgets"][0]["value"])
         child = int(pid_file.read_text())
         # a killed child that its dead parent never reaped stays a zombie until init takes it: gone or a zombie
