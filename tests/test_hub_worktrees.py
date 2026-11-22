@@ -629,6 +629,23 @@ class BlameTest(RunnerCase):
         self.assertTrue((self.repo / "one" / "done.txt").exists())
         self.assertFalse(self.items()["repo/one#1"].get("fails"))
 
+    def test_a_check_that_can_never_reach_unity_from_its_worktree_fails_the_item_at_once_naming_the_line(self):
+        """Ticket 188: a check line that asks Unity from the ticket's own copy of the repo is not retried."""
+        script = self.root / "unity-from-tree.sh"
+        script.write_text("echo \"No Pipeline instance found for project: $PWD\" >&2\nexit 75\n")
+        line = "sh " + str(script)
+        self.sb("set", "repo/one", "001", "checks=" + line, "--no-sync")
+        self.only(1)
+        a = self.until(lambda: self.state_of("repo/one#1") in ("failed", "recheck", "retry", "landed") and
+                       self.items()["repo/one#1"])
+        self.assertEqual(a["state"], "failed", a.get("note"))
+        self.assertIn("set up wrong", a["note"])
+        self.assertIn("No Pipeline instance", a["note"])
+        self.assertIn(line, a["note"])
+        self.assertIn("ticket's own `checks`", a["note"])
+        self.assertEqual(len(a["fails"]), 1)  # one try: no second worker
+        self.assertEqual(sum(1 for l in self.launched if "repo/one/001" in l["brief"]), 1)
+
     def fix_jobs(self):
         return [i for i in self.items().values() if i.get("fix_build")]
 

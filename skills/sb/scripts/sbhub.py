@@ -3735,13 +3735,15 @@ class TicketRun:
         last = [(_fail_class(f["why"]) or f["why"], f["commit"]) for f in fails[-SAME_MAX:]]
         same = len(last) == SAME_MAX and len(set(last)) == 1
         stuck = UNDO_FAILED in reason  # its work is still in the checkout: another try would land on top of it
-        if len(fails) < TRIES_MAX and not same and not stuck:
+        setup = sbqueue.SETUP_WRONG in reason  # the check can never reach Unity from here: no try changes that (ticket 188)
+        if len(fails) < TRIES_MAX and not same and not stuck and not setup:
             model = item.get("model") if own else "opus" if len(fails) + 1 >= OPUS_FROM else fails[-1]["model"]
             self.release(item["key"])
             return self.result(item, "retry", "try {} of {} failed, try {} {}: {}".format(
                 len(fails), TRIES_MAX, len(fails) + 1, "on " + (model or fails[-1]["model"]), firstline(reason)), run, sha, checks,
                 retry={"model": model, "reason": reason, "fails": fails})
         why = ("its landing could not be backed out" if stuck else
+               "its check is set up wrong, so another try cannot pass" if setup else
                "the same failure {} tries in a row with no new commit".format(SAME_MAX) if same else
                "{} tries, the most it gets".format(len(fails)))
         every = "\n".join("try {} ({}): {}{}".format(n, f["model"], f["why"], ", commit " + f["commit"][:9]
