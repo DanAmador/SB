@@ -29,7 +29,7 @@ appends a JSON line to FAKE_INTEGRATE_CALLS (cwd, env, start and end time, the h
 then does what FAKE_INTEGRATE says (default works): `works` commits a fix (fix.txt), appends a line to the tracked
 file FAKE_INTEGRATE_DIRTY when set (Unity writing during Play) and writes its report with `VERDICT: works`;
 `broken` writes `VERDICT: broken`; `tried` commits the fix as `works` does, then writes `VERDICT: broken`;
-`silent` writes no report. FAKE_INTEGRATE_SLEEP: seconds it takes first.
+`silent` writes no report; `no unity` commits nothing and writes `VERDICT: no unity` (it could not reach the Editor). FAKE_INTEGRATE_SLEEP: seconds it takes first.
 
 A brief that names a review file (`Write your review to: <path>`, templates/review-brief.md) makes it the fake
 reviewer instead, whatever the mode (it names one review file per landed ticket, `<num>-review.md`). FAKE_REVIEW
@@ -151,7 +151,8 @@ def integrator(brief):
                 f.write("written by Unity during Play\n")
     if mode != "silent":
         with open(out, "w", encoding="utf-8") as f:
-            f.write("## In plain words\n\nPlayed it.\n\nVERDICT: {}\n".format("works" if mode == "works" else "broken"))
+            f.write("## In plain words\n\nPlayed it.\n\nVERDICT: {}\n".format(
+                mode if mode in ("works", "no unity") else "broken"))
     calls = os.environ.get("FAKE_INTEGRATE_CALLS")
     if calls:
         state = os.environ.get("FAKE_COMPILE_STATE")

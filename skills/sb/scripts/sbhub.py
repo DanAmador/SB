@@ -2953,6 +2953,13 @@ INTEGRATE_MODEL = "opus"
 INTEGRATE_MINUTES = 45
 UNITY_WAIT = "waits for Unity"  # a recheck note: another ticket is in its Unity stage; not a try, not counted
 UNITY_POLL = 2 * 60
+# ---- Unity not answering (ticket 189): an integrator that ended `no unity`, or a Unity check line that was not judged,
+# makes the hub ask editor_status itself. When the Editor does not answer, the repo is down (queue["unity_down"][repo]
+# = {since, at, why}): no landing and no integrator starts there, its tickets wait with no try spent, the owner gets
+# one message, and every UNITY_DOWN_POLL editor_status is asked again; the first answer frees them all.
+NO_UNITY = "the integrator could not reach the Unity Editor"
+UNITY_DOWN_POLL = 2 * 60
+UNITY_PROBE = 30  # seconds `unity command editor_status` may take before the Editor counts as not answering
 UNITY_WORKER = ("\n\n## Unity is the last stage, not yours\n\nThis is a Unity project, and you work in your own folder. "
                 "The one Unity Editor has the main folder open, so it never sees your code: any `unity` command is "
                 "refused for you, and so is starting a batch Editor or a clone. This overrides the repo's rule to "
@@ -2961,6 +2968,36 @@ UNITY_WORKER = ("\n\n## Unity is the last stage, not yours\n\nThis is a Unity pr
                 "source of every type and member you call before you use it. In your report, add a section "
                 "`## Play checks`: numbered steps that show your change working in Play, each with what should "
                 "happen and the numbers to measure.\n")
+
+
+def editor_answers(repo, run=subprocess.run):
+    """'' when the Editor that has `repo` open answers `unity command editor_status` (one compiling or in Play
+    answers too), else why it did not: its errors (EDITOR_NOT_RUNNING when no Editor has it open), no answer in
+    UNITY_PROBE seconds (a modal dialog holds its main thread), or no JSON at all."""
+    cmd = ["unity", "command", "editor_status", "--json", "--timeout", str(max(1, UNITY_PROBE // 2)),
+           "--project-path", str(repo)]
+    try:
+        r = run(cmd, cwd=str(repo), capture_output=True, text=True, timeout=UNITY_PROBE)
+    except subprocess.TimeoutExpired:
+        return "editor_status did not answer in {} s".format(UNITY_PROBE)
+    except OSError as e:
+        return "editor_status could not run: {}".format(e)
+    data = _unity_json((r.stdout or "") + (r.stderr or ""))
+    if data and data.get("success") and isinstance((data.get("data") or {}).get("result"), dict):
+        return ""
+    return _unity_errors(data) or "editor_status gave no answer (exit {})".format(r.returncode)
+
+
+def unity_unjudged(note):
+    """True when a result's note says Unity was not reached: an integrator's `no unity`, or a `unity:` /
+    `unity-session:` check line that could not run."""
+    first = firstline(note or "")
+    return NO_UNITY in first or any(sbqueue.NOT_RUN + ": " + u in first for u in (sbqueue.UNITY, sbqueue.UNITY_SESSION))
+
+
+def unity_down_note(down):
+    """What a ticket of a repo whose Unity does not answer shows."""
+    return "{}: not answering since {}".format(UNITY_WAIT, _hm(down.get("since")))
 
 
 def is_unity(repo):
@@ -3638,6 +3675,9 @@ class TicketRun:
         t = run["t"]
         tree, branch = run.get("tree"), run.get("branch")
         checks = []
+        down = None if over else self.unity_down(t["repo"])
+        if down:  # nothing is checked or landed while the repo's Unity does not answer: no try, it waits (ticket 189)
+            return self.result(item, "recheck", unity_down_note(down), run, item.get("commit"), checks)
         if over:
             passed, reason, sha = False, ran_past(self.limit), None
         elif not tree:
@@ -3830,6 +3870,9 @@ class TicketRun:
         checks, sha = [], None
         for _ in range(LAND_TRIES):
             checks = []
+            down = self.unity_down(t["repo"])
+            if down:  # no landing while the repo's Unity does not answer (ticket 189)
+                return None, "could not land yet: " + unity_down_note(down), _git(tree, "rev-parse", "HEAD") or None, checks
             locked = checkout_lock(t["repo"])
             if locked:  # before its checks run: they would only run again once the lock is gone
                 return None, "could not land yet: " + locked, _git(tree, "rev-parse", "HEAD") or None, checks
@@ -3903,8 +3946,7 @@ class TicketRun:
         checks = []
         if verdict in ("broken", "no unity"):
             why = ("the integrator ran past {} minutes".format(int(self.limit // 60)) if over else
-                   "the integrator could not make it work in Unity" if verdict == "broken" else
-                   "the integrator could not reach the Unity Editor")
+                   "the integrator could not make it work in Unity" if verdict == "broken" else NO_UNITY)
             err = undo_landing(landing, why)
             if err:  # the lock stays held, so nothing lands on top until the owner looks
                 self.build_mark(repo, broken=True, by=landing["key"])
@@ -3934,6 +3976,14 @@ class TicketRun:
             "" if verdict else " (the integrator wrote no verdict)")
         return {**self.result(item, "landed", note, run, head, checks),
                 "checked": "the integrator's verdict: {}".format(verdict or "none")}
+
+    def unity_down(self, repo):
+        """The repo's not-answering record ({since, at, why}) while its Unity does not answer, else None."""
+        if not repo:
+            return None
+        with self.hub._lock:
+            down = (self.hub._data["queue"].get("unity_down") or {}).get(str(repo))
+            return dict(down) if down else None
 
     def in_stage(self, key):
         """True while the queue item `key` is in its Unity stage (its integrator runs)."""
@@ -4398,6 +4448,7 @@ class Supervisor:
         hub.supervisor = self  # POST /api/review/now reaches the reviews through it
         self.streak = (None, 0)  # the failure class of the last failed items in a row, and how many
         self.play_wait = {}  # map -> when its review with In Play lines first found the repo's Unity lock busy
+        self.unity_asking = set()  # repos whose Unity is asked editor_status again right now (_unity_watch)
         self.stopped = False
         self.unlanded = False  # the landings an earlier hub left half done are undone at the first tick
         self.note_path = None  # wayfinder/runs/hub-now.md: `serve` sets it; tests leave the vault alone
@@ -4459,6 +4510,7 @@ class Supervisor:
         self._settle_night(False)  # a night that stops starts nothing new
         if not self.stopped:
             self._held_builds()
+            self._unity_watch()
             self._rechecks()
             self.hub.orphans()  # a hand-off whose chat is gone goes on before anything waits on it
             self._handoffs()
@@ -4959,6 +5011,17 @@ class Supervisor:
         if state == "integrate":
             self._integrate(item, res)
             return
+        repo = item.get("repo") or (res.get("t") or {}).get("repo")
+        if repo and is_unity(repo) and unity_unjudged(res.get("note")):  # Unity was not reached: is it there at all?
+            self._unity_ask(repo)
+        down = self.runner.unity_down(repo) if state == "recheck" else None
+        if down:  # not a try: it waits, unrechecked, until Unity answers (_unity_watch frees it)
+            first = firstline(res.get("note") or "")
+            self._update(key, state="recheck", ended=None, commit=res["commit"] or item.get("commit"), pid=None,
+                         pid_start=None, started=None, recheck_at=None, checked=None, unity_down=str(repo),
+                         note="{}; it lands when Unity answers, with no try spent{}".format(
+                             unity_down_note(down), "" if UNITY_WAIT in first else " ({})".format(first)))
+            return
         if state == "recheck" and UNITY_WAIT in (res.get("note") or ""):  # another ticket holds the Editor
             self._update(key, state="recheck", ended=None, commit=res["commit"], pid=None, pid_start=None, started=None,
                          recheck_at=self.hub.now() + UNITY_POLL, checked=None,
@@ -5387,6 +5450,57 @@ class Supervisor:
                     if i.get("held") and not (builds.get(i["held"]) or {}).get("held")]
         for key in free:
             self._update(key, held=None, recheck_at=now, note="the build is green again: it lands now")
+
+    def _unity_ask(self, repo):
+        """After Unity was not reached: ask editor_status now. No answer marks the repo down (queue["unity_down"]),
+        and the owner is told once; a repo already down is only noted as asked again."""
+        why = editor_answers(repo)
+        now = self.hub.now()
+        with self.hub._lock:
+            q = self.hub._data["queue"]
+            downs = q.setdefault("unity_down", {})
+            first = str(repo) not in downs
+            if why:
+                downs.setdefault(str(repo), {"since": now})
+                downs[str(repo)].update(at=now, why=why[:300])
+            elif first:
+                if not downs:
+                    del q["unity_down"]
+                return
+            else:
+                del downs[str(repo)]
+                if not downs:
+                    del q["unity_down"]
+            q["version"] += 1
+            self.hub._save()
+        if why and first:  # one message per stretch of silence, not one per ticket
+            print("sb hub: {}'s Unity does not answer: {}".format(Path(repo).name, why), file=sys.stderr, flush=True)
+            threading.Thread(target=notify, daemon=True, args=("sb hub: needs you", "{}: Unity is not answering ({}). "
+                             "Nothing lands there until it does; the hub carries on by itself once it answers.".format(
+                                 Path(repo).name, why[:120]))).start()
+
+    def _unity_watch(self):
+        """Each repo whose Unity does not answer is asked editor_status again every UNITY_DOWN_POLL, in its own
+        thread so the tick never waits on a frozen Editor; once a repo is no longer down, each ticket it held goes
+        on at once (a recheck, its worker not run), with no try spent."""
+        now = self.hub.now()
+        with self.hub._lock:
+            q = self.hub._data["queue"]
+            downs = {r: dict(d) for r, d in (q.get("unity_down") or {}).items()}
+            free = [i["key"] for i in q["items"] if i.get("unity_down") and i["unity_down"] not in downs]
+        for key in free:
+            self._update(key, drop=("unity_down",), recheck_at=now, note="Unity answers again: it lands now")
+        for repo, d in downs.items():
+            if repo in self.unity_asking or now < (d.get("at") or 0) + UNITY_DOWN_POLL:
+                continue
+            self.unity_asking.add(repo)
+
+            def ask(repo=repo):
+                try:
+                    self._unity_ask(repo)
+                finally:
+                    self.unity_asking.discard(repo)
+            threading.Thread(target=ask, daemon=True).start()
 
     def _start_fix(self, repo, b):
         """Queue the one fix run of this break, first in the queue, briefed with the check and its errors."""
@@ -6060,6 +6174,8 @@ class Supervisor:
                     continue  # an earlier map of its repo is not finished: it waits its map's turn
                 if ((q.get("builds") or {}).get(str(repo)) or {}).get("held"):
                     continue  # its repo's build is broken outside any ticket: nothing new starts on it
+                if item.get("integrate_only") and str(repo) in (q.get("unity_down") or {}):
+                    continue  # a Unity pass is an integrator: none starts while the repo's Unity does not answer
                 if first.get(repo, item["key"]) != item["key"]:
                     continue  # a failed ticket its map waits on goes again before anything else of its repo
                 if t is not None and not room(t.get("repo"), t.get("paths")):
@@ -6161,6 +6277,8 @@ class Supervisor:
                     h = q["builds"][str(repo)]["held"]
                     w = ("build", None, "{}'s build is broken in {}: nothing new starts until it builds again".format(
                         Path(repo or "").name, ", ".join(Path(f).name for f in h.get("files") or []) or "files"))
+                elif i.get("integrate_only") and str(repo) in (q.get("unity_down") or {}):
+                    w = ("unity", None, unity_down_note(q["unity_down"][str(repo)]))
                 elif t is not None and ahead(t):
                     w = ("after", ahead(t), "comes after {}, which has not landed".format(ahead(t)))
                 elif repo in current and current[repo] != sbqueue.map_of(i["key"]):

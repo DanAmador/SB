@@ -5,6 +5,8 @@ the JSON files beside it, recorded from the live Editor (Pipeline 0.8.0-exp.1, s
 - job_wait.json: `unity job wait <id> --json` of that job
 - job_wait_unknown.json: `unity job wait nope000 --json` (exit 6), the same answer as job_status_unknown.json
 - editor_status.json: `unity command editor_status --json`
+- editor_not_running.json: `unity command editor_status --json` for a project no Editor has open (exit 12), recorded
+  from the real CLI on 2026-11-22
 
 Only `command ... --detach` and `job wait` are answered. Each call is logged to FAKE_UNITY_LOG (one JSON line: argv,
 cwd, time, and the hub's locks read from FAKE_UNITY_STATE at that moment). FAKE_UNITY_WAIT is a comma list, one word
@@ -16,6 +18,8 @@ per `job wait` call in turn (the last repeats):
   error      job_wait.json with state failed and an error message (the command threw)
 FAKE_UNITY_SLEEP: seconds each `job wait` takes. FAKE_UNITY_DETACH=down: `command` answers as an Editor that is not
 running does (no JSON), exit 1.
+`command editor_status` without --detach (the hub asking whether Unity answers, ticket 189) answers editor_status.json;
+FAKE_UNITY_STATUS=down answers editor_not_running.json with exit 12 instead, as the real CLI does.
 """
 import copy
 import json
@@ -48,6 +52,12 @@ def log(argv):
 
 def main(argv):
     waits = log(argv)
+    if argv[:2] == ["command", "editor_status"] and "--detach" not in argv:
+        if os.environ.get("FAKE_UNITY_STATUS") == "down":
+            print(json.dumps(sample("editor_not_running.json"), indent=2))
+            return 12
+        print(json.dumps(sample("editor_status.json"), indent=2))
+        return 0
     if argv[:1] == ["command"] and "--detach" in argv:
         if os.environ.get("FAKE_UNITY_DETACH") == "down":
             print("Error: no Unity Editor is running for this project")

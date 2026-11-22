@@ -174,7 +174,7 @@ export type CheckRun = z.infer<typeof CheckRun>;
 
 /** What a queued item waits for. `with` names the ticket (files, after) or map (after) it waits on. */
 export const Waits = z.strictObject({
-  kind: z.enum(["files", "limit", "after", "account", "paused", "time", "build", "start"]),
+  kind: z.enum(["files", "limit", "after", "account", "paused", "time", "build", "start", "unity"]),
   with: z.string().nullable(),
   text: z.string(),
 });
@@ -218,6 +218,8 @@ const itemFields = {
   blocking: z.array(z.string()).optional(),
   /** recheck: the repo whose build is broken outside its files; it lands once that builds again (no try spent). */
   held: z.string().nullable().optional(),
+  /** recheck: the repo whose Unity does not answer; it lands once Unity answers again (no try spent, ticket 189). */
+  unity_down: z.string().optional(),
   /** job: the repo whose broken build this fix run mends (templates/fix-build.md). */
   fix_build: z.string().optional(),
   /** When it last landed (checks passed): the review timer counts from it, across hub restarts. */
@@ -385,6 +387,9 @@ export const Queue = z.strictObject({
   /** Queue key -> the landing whose after-landing checks run now (sbhub TicketRun.checking, ticket 185): with only
    * `unity:` lines it holds no lock, so a restarted hub backs it out from here. */
   checking: z.record(z.string(), Landing).optional(),
+  /** Repo -> since when its Unity Editor does not answer editor_status, when it was last asked and why it failed
+   * (ticket 189): nothing lands and no integrator starts there until it answers. */
+  unity_down: z.record(z.string(), z.strictObject({ since: Seconds, at: Seconds, why: z.string() })).optional(),
 });
 export type Queue = z.infer<typeof Queue>;
 
