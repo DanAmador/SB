@@ -24,7 +24,6 @@ export function SteerBlock({ t, running }: { t: TicketRow; running: boolean }): 
   const [text, setText] = useState("");
   const [picked, setPicked] = useState<readonly string[]>([]);
   const [confirm, setConfirm] = useState(false);
-  const [working, setWorking] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const sameMap = [...ix.byKey.values()].filter((o) => o.map === t.map && o.num !== t.num).sort((a, b) => a.num - b.num);
   const listed = new Set(sameMap.map((o) => String(o.num)));
@@ -43,15 +42,18 @@ export function SteerBlock({ t, running }: { t: TicketRow; running: boolean }): 
     setPicked(t.blocked_by.map(num).filter((b) => listed.has(b)));
   };
   const value = (f: Field): string => (f === "after" ? [...kept, ...picked].join(",") : text);
+  // the form closes at once and the page draws the change; a refusal opens it again, with what was typed and why
   const save = async (): Promise<void> => {
     if (field === null) return;
-    setWorking(true);
-    const out = await writes.ticket(field satisfies TicketAction, { key: `${t.map}#${String(t.num)}`, text: value(field) }, SAVED[field]);
-    setWorking(false);
+    const f = field;
     setConfirm(false);
+    setField(null);
+    const out = await writes.ticket(f satisfies TicketAction, { key: `${t.map}#${String(t.num)}`, text: value(f) }, SAVED[f]);
     say(out);
-    if (out.ok) setField(null);
-    else setErr(out.words);
+    if (!out.ok) {
+      setField(f);
+      setErr(out.words);
+    }
   };
   return (
     <section className="flex flex-col gap-1.5" aria-label="Steer">
@@ -110,10 +112,10 @@ export function SteerBlock({ t, running }: { t: TicketRow; running: boolean }): 
                   <div role="alert" className="flex flex-col gap-2 rounded-md bg-warn-soft p-2.5 text-sm">
                     <span>Change {NAMES[f]}? The old value stays as a comment on the ticket.</span>
                     <div className="flex gap-2">
-                      <Button type="button" size="xs" disabled={working || down} autoFocus onClick={() => void save()}>
-                        {working ? "Working…" : "Yes, save it"}
+                      <Button type="button" size="xs" disabled={down} autoFocus onClick={() => void save()}>
+                        Yes, save it
                       </Button>
-                      <Button type="button" size="xs" variant="ghost" disabled={working} onClick={() => { setConfirm(false); }}>
+                      <Button type="button" size="xs" variant="ghost" onClick={() => { setConfirm(false); }}>
                         Cancel
                       </Button>
                     </div>

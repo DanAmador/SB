@@ -31,10 +31,9 @@ export function SelectionBar({ rows }: { rows: readonly TableRow[] }): React.JSX
   const [ask, setAsk] = useState<keyof typeof ASK | null>(null);
   const [text, setText] = useState("");
   const [tier, setTier] = useState<string>("sonnet");
-  const [working, setWorking] = useState(false);
   const ticked = rows.filter((r) => keys.has(r.key));
   if (ticked.length === 0) return null;
-  const off = down || busy || working;
+  const off = down || busy;
   const skipWords = (n: number): string => (n > 0 ? `, skipped ${String(n)}` : "");
 
   const queue = async (act: "queue" | "unqueue"): Promise<void> => {
@@ -55,21 +54,23 @@ export function SelectionBar({ rows }: { rows: readonly TableRow[] }): React.JSX
     const { apply, skip } = split(act, ticked);
     const line = act === "tier" ? tier : text.trim();
     if (line === "") return;
-    setWorking(true);
-    const failed: string[] = [];
-    const worked: string[] = [];
-    for (const r of apply) {
-      const out = await writes.ticket(act, { key: r.key, text: line }, "");
-      if (out.ok) worked.push(r.key);
-      else failed.push(`${r.title} (${out.words})`);
+    // every change is drawn at once and the bar clears; the hub takes them one by one, and what it refuses is ticked again
+    const asked = ask;
+    tick(apply.map((r) => r.key), false);
+    setAsk(null);
+    setText("");
+    const outs = await Promise.all(apply.map((r) => writes.ticket(act, { key: r.key, text: line }, "")));
+    const failed = apply.filter((_, n) => !outs[n]?.ok);
+    tick(failed.map((r) => r.key), true);
+    if (failed.length > 0) {
+      setAsk(asked);
+      if (act !== "tier") setText(line);
     }
-    setWorking(false);
-    tick(worked, false);
-    if (failed.length === 0) {
-      say({ ok: true, words: `${PAST[act]} ${plural(worked.length, "ticket")}${skipWords(skip.length)}.` });
-      setAsk(null);
-      setText("");
-    } else say({ ok: false, words: `${PAST[act]} ${String(worked.length)} of ${String(apply.length)}. Failed: ${failed.join("; ")}` });
+    if (failed.length === 0) say({ ok: true, words: `${PAST[act]} ${plural(apply.length, "ticket")}${skipWords(skip.length)}.` });
+    else {
+      const why = failed.map((r) => `${r.title} (${outs[apply.indexOf(r)]?.words ?? ""})`);
+      say({ ok: false, words: `${PAST[act]} ${String(apply.length - failed.length)} of ${String(apply.length)}. Failed: ${why.join("; ")}` });
+    }
   };
 
   const press = (act: Act): void => {

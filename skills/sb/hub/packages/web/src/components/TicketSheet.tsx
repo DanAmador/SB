@@ -298,7 +298,6 @@ function TicketActions({ itemKey, mapChecks }: { itemKey: string; mapChecks: rea
   const [text, setText] = useState("");
   const [commit, setCommit] = useState("");
   const [confirm, setConfirm] = useState(false);
-  const [working, setWorking] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const available: TicketAction[] = t ? ["comment", "done", "drop", ...(t.status === "claimed" ? (["release"] as const) : []), ...(waitingChecks ? (["recheck"] as const) : []), "tier", "checks"] : ["comment"];
   const pick = (a: TicketAction): void => {
@@ -308,16 +307,19 @@ function TicketActions({ itemKey, mapChecks }: { itemKey: string; mapChecks: rea
     setCommit("");
     setText(a === "tier" ? (t?.tier ?? "sonnet") : a === "checks" ? (mapChecks ?? []).join("; ") : "");
   };
+  // the form closes at once and the page draws the change; a refusal opens it again, with what was typed and why
   const go = async (): Promise<void> => {
     if (action === null) return;
-    setWorking(true);
-    const body = action === "release" || action === "recheck" ? { key: itemKey } : action === "done" && commit.trim() ? { key: itemKey, text: text.trim(), commit: commit.trim() } : { key: itemKey, text: text.trim() };
-    const out = await writes.ticket(action, body, `Done: ${ACTS[action][1].toLowerCase()}.`);
-    setWorking(false);
+    const a = action;
+    const body = a === "release" || a === "recheck" ? { key: itemKey } : a === "done" && commit.trim() ? { key: itemKey, text: text.trim(), commit: commit.trim() } : { key: itemKey, text: text.trim() };
     setConfirm(false);
+    setAction(null);
+    const out = await writes.ticket(a, body, `Done: ${ACTS[a][1].toLowerCase()}.`);
     say(out);
-    if (out.ok) setAction(null);
-    else setErr(out.words);
+    if (!out.ok) {
+      setAction(a);
+      setErr(out.words);
+    }
   };
   return (
     <Block title="Actions">
@@ -404,10 +406,10 @@ function TicketActions({ itemKey, mapChecks }: { itemKey: string; mapChecks: rea
                 {commit.trim() ? `, commit ${commit.trim()}` : ""}?
               </span>
               <div className="flex gap-2">
-                <Button type="button" size="xs" variant={action === "drop" ? "destructive" : "default"} disabled={working || down} autoFocus onClick={() => void go()}>
-                  {working ? "Working…" : ACTS[action][2]}
+                <Button type="button" size="xs" variant={action === "drop" ? "destructive" : "default"} disabled={down} autoFocus onClick={() => void go()}>
+                  {ACTS[action][2]}
                 </Button>
-                <Button type="button" size="xs" variant="ghost" disabled={working} onClick={() => { setConfirm(false); }}>
+                <Button type="button" size="xs" variant="ghost" onClick={() => { setConfirm(false); }}>
                   Cancel
                 </Button>
               </div>

@@ -1,47 +1,100 @@
 /** The hub's data as TanStack queries, and every write as one function that refreshes what it changed. */
 import { keepPreviousData, useQueries, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import type { Queue, RouteAnswer, RouteBody, State, TicketAction } from "@sb-hub/contract";
+import type { MapRoute, Queue, RouteAnswer, RouteBody, State, TicketAction, TicketDetail, TicketRow } from "@sb-hub/contract";
 import { QueueStale } from "@sb-hub/contract";
 import { get, HubError, post, READONLY, ticketPath } from "./api.ts";
+import { predictQueue, type QueueRoute } from "./predict.ts";
+import { guessTicket, type TicketGuess } from "./ticketGuess.ts";
 
 export const STATE_MS = 2000;
 export const TRAIL_MS = 2000;
 export const TICKETS_MS = 15000;
 
-export const useHubState = () =>
-  useQuery({ queryKey: ["state"], queryFn: () => get("GET /api/state"), refetchInterval: STATE_MS, retry: 1, retryDelay: 400 });
-export const useTickets = () =>
-  useQuery({ queryKey: ["tickets"], queryFn: () => get("GET /api/tickets"), refetchInterval: TICKETS_MS, retry: 1 });
-export const useTicketDetail = (key: string | null) =>
-  useQuery({
+/** Queue writes on their way to the hub, per client: while one is, a poll keeps the queue the page drew. */
+const pending = new WeakMap<QueryClient, number>();
+const inFlight = (qc: QueryClient): number => pending.get(qc) ?? 0;
+
+export const useHubState = () => {
+  const qc = useQueryClient();
+  return useQuery({
+    queryKey: ["state"],
+    queryFn: async () => {
+      const s = await get("GET /api/state");
+      // a poll that left before the write landed would put the old queue back for a moment
+      const drawn = qc.getQueryData<State>(["state"]);
+      return inFlight(qc) > 0 && drawn !== undefined ? { ...s, queue: drawn.queue } : s;
+    },
+    refetchInterval: STATE_MS,
+    retry: 1,
+    retryDelay: 400,
+  });
+};
+/** Ticket actions on their way to the hub, per client: a read that lands meanwhile gets their guesses too. */
+const guesses = new WeakMap<QueryClient, Set<TicketGuess>>();
+const guessesOf = (qc: QueryClient): Set<TicketGuess> => {
+  let g = guesses.get(qc);
+  if (g === undefined) guesses.set(qc, (g = new Set()));
+  return g;
+};
+const withGuesses = {
+  tickets: (qc: QueryClient, rows: TicketRow[]): TicketRow[] => [...guessesOf(qc)].reduce((r, g) => g.tickets?.(r) ?? r, rows),
+  route: (qc: QueryClient, m: MapRoute): MapRoute => [...guessesOf(qc)].reduce((r, g) => (g.map === m.map ? (g.route?.(r) ?? r) : r), m),
+  detail: (qc: QueryClient, d: TicketDetail): TicketDetail => [...guessesOf(qc)].reduce((r, g) => (g.key === d.key ? (g.detail?.(r) ?? r) : r), d),
+};
+/** Ticket actions reach the hub one at a time, in the order they were made: sbmap rewrites the map's note. */
+const ticketLine = new WeakMap<QueryClient, Promise<unknown>>();
+function inLine<T>(qc: QueryClient, run: () => Promise<T>): Promise<T> {
+  const next = (ticketLine.get(qc) ?? Promise.resolve()).then(run, run);
+  ticketLine.set(qc, next.catch(() => undefined));
+  return next;
+}
+const getMap = (qc: QueryClient, map: string) => async () => withGuesses.route(qc, await get("GET /api/map", { map }));
+
+export const useTickets = () => {
+  const qc = useQueryClient();
+  return useQuery({
+    queryKey: ["tickets"],
+    queryFn: async () => withGuesses.tickets(qc, await get("GET /api/tickets")),
+    refetchInterval: TICKETS_MS,
+    retry: 1,
+  });
+};
+export const useTicketDetail = (key: string | null) => {
+  const qc = useQueryClient();
+  return useQuery({
     queryKey: ["ticket", key],
-    queryFn: () => get("GET /api/ticket", { key: key ?? "" }),
+    queryFn: async () => withGuesses.detail(qc, await get("GET /api/ticket", { key: key ?? "" })),
     enabled: key !== null && /#\d+$/.test(key),
     refetchInterval: TICKETS_MS,
   });
+};
 
 /** A map and every ticket of it, finished ones too. */
-export const useMapRoute = (map: string) =>
-  useQuery({
+export const useMapRoute = (map: string) => {
+  const qc = useQueryClient();
+  return useQuery({
     queryKey: ["map", map],
-    queryFn: () => get("GET /api/map", { map }),
+    queryFn: getMap(qc, map),
     enabled: map !== "",
     refetchInterval: TICKETS_MS,
     placeholderData: keepPreviousData,
     retry: 1,
   });
+};
 
 /** Several maps at once, read through the same cache as one map's page. */
-export const useMapRoutes = (maps: readonly string[]) =>
-  useQueries({
+export const useMapRoutes = (maps: readonly string[]) => {
+  const qc = useQueryClient();
+  return useQueries({
     queries: maps.map((map) => ({
       queryKey: ["map", map],
-      queryFn: () => get("GET /api/map", { map }),
+      queryFn: getMap(qc, map),
       refetchInterval: TICKETS_MS,
       placeholderData: keepPreviousData,
       retry: 1,
     })),
   });
+};
 
 /** One session's last actions, every 2 s; null when the hub has none for it (a session that has not acted yet). */
 export const useTrail = (agent: string) =>
@@ -75,20 +128,6 @@ export const useNight = (id: string) =>
 /** The outcome of a write, in the words the page shows. */
 export type Outcome = { ok: true; words: string } | { ok: false; words: string };
 
-type QueueRoute =
-  | "POST /api/queue/set"
-  | "POST /api/queue/move"
-  | "POST /api/queue/map"
-  | "POST /api/queue/move_map"
-  | "POST /api/queue/pause"
-  | "POST /api/queue/agents"
-  | "POST /api/queue/parallel"
-  | "POST /api/queue/options"
-  | "POST /api/queue/job"
-  | "POST /api/queue/remove_job"
-  | "POST /api/queue/stop"
-  | "POST /api/queue/item_agent";
-
 type NightRoute = "POST /api/night/start" | "POST /api/night/stop" | "POST /api/night/rename";
 
 function putQueue(qc: QueryClient, queue: Queue): void {
@@ -121,7 +160,15 @@ export function useWrites(): Writes {
   };
   return {
     async queue(route, body, done) {
-      const out = await post(route, body);
+      // draw the likely result at once; the hub's answer replaces it, and a refusal puts the old queue back
+      const before = qc.getQueryData<State>(["state"])?.queue;
+      const guess = before === undefined || READONLY ? null : predictQueue(before, route, body);
+      pending.set(qc, inFlight(qc) + 1);
+      if (guess !== null) {
+        await qc.cancelQueries({ queryKey: ["state"] });
+        putQueue(qc, guess);
+      }
+      const out = await post(route, body).finally(() => pending.set(qc, inFlight(qc) - 1));
       if (out.ok) {
         // every queue route answers with the queue (QueueAnswer, or QueueJobAnswer which extends it)
         putQueue(qc, (out.data as RouteAnswer<"POST /api/queue/pause">).queue);
@@ -133,6 +180,10 @@ export function useWrites(): Writes {
         putQueue(qc, stale.data.queue);
         return { ok: false, words: "the list changed while you were on it; try again" };
       }
+      if (guess !== null && before !== undefined) {
+        putQueue(qc, before);
+        refresh(false);
+      }
       return { ok: false, words: out.error };
     },
     async night(route, body, done) {
@@ -143,9 +194,26 @@ export function useWrites(): Writes {
       return out.ok ? { ok: true, words: done } : { ok: false, words: out.error };
     },
     async ticket(action, body, done) {
-      const out = await post("POST /api/ticket/:action", body, ticketPath(action));
+      // draw the likely result at once; the hub's answer replaces it, and a refusal puts the old answers back
+      const guess = READONLY ? null : guessTicket(action, body);
+      const keys = guess === null ? [] : [["tickets"], ["map", guess.map], ["ticket", guess.key]];
+      const before = keys.map((k) => [k, qc.getQueryData(k)] as const);
+      if (guess !== null) {
+        guessesOf(qc).add(guess);
+        await Promise.all(keys.map((k) => qc.cancelQueries({ queryKey: k, exact: true })));
+        qc.setQueryData<TicketRow[]>(["tickets"], (r) => (r && guess.tickets ? guess.tickets(r) : r));
+        qc.setQueryData<MapRoute>(["map", guess.map], (m) => (m && guess.route ? guess.route(m) : m));
+        qc.setQueryData<TicketDetail>(["ticket", guess.key], (d) => (d && guess.detail ? guess.detail(d) : d));
+      }
+      const out = await inLine(qc, () => post("POST /api/ticket/:action", body, ticketPath(action)));
+      if (guess !== null) {
+        guessesOf(qc).delete(guess);
+        // with no other action on its way, the answers as they were are right; otherwise the reads below redraw
+        if (!out.ok && guessesOf(qc).size === 0) for (const [k, v] of before) qc.setQueryData(k, v);
+      }
       refresh(true);
       void qc.invalidateQueries({ queryKey: ["ticket", body.key] });
+      if (guess !== null) void qc.invalidateQueries({ queryKey: ["map", guess.map] });
       return out.ok ? { ok: true, words: done } : { ok: false, words: out.error };
     },
     async answer(qid, answer) {
