@@ -220,5 +220,39 @@ class TwoMapsTest(RunnerCase):
             self.hub.leave("chat-a")  # nothing is left in its name
 
 
+    def test_an_hour_with_nothing_started_or_ended_asks_the_owner_once_naming_what_holds_the_queue(self):
+        self.one_handed()
+        for _ in range(3):  # chat-a stays alive (it reports) but never lands it: 75 min of nothing
+            self.clock.t += 25 * 60
+            self.hub.report({"agent": "chat-a", "state": "working", "note": "elsewhere"})
+            self.sup.tick()
+        asked = [q for q in self.hub.state()["questions"].values() if q["agent"] == "sb-hub"]
+        self.assertEqual(len(asked), 1, asked)
+        self.assertEqual((asked[0]["default"], asked[0]["options"]), ("carry on", ["carry on", "pause the queue"]))
+        self.assertIn("nothing for 75 min with 1 item queued", asked[0]["q"])
+        self.assertIn("held by repo/one#1: repo/two#2 waits: one first (1 handed to chat-a)", asked[0]["q"])
+        stall = self.hub.state()["queue"]["stall"]
+        self.assertEqual((stall["key"], stall["queued"]), ("repo/one#1", 1))
+        self.clock.t += 10 * 60
+        self.hub.report({"agent": "chat-a", "state": "working"})
+        self.sup.tick()
+        self.assertEqual(len([q for q in self.hub.state()["questions"].values() if q["agent"] == "sb-hub"]), 1)
+        self.hub.answer(stall["asked"], "pause the queue")
+        self.sup.tick()
+        self.assertTrue(self.hub.state()["queue"]["paused"])
+        self.sup.tick()
+        self.assertNotIn("stall", self.hub.state()["queue"])  # a paused queue is not a stall
+
+    def test_a_paused_queue_or_one_that_moves_is_no_stall(self):
+        self.one_handed()
+        self.hub.queue_pause(True)
+        for _ in range(3):
+            self.clock.t += 25 * 60
+            self.hub.report({"agent": "chat-a", "state": "working"})
+            self.sup.tick()
+        self.assertEqual([q for q in self.hub.state()["questions"].values() if q["agent"] == "sb-hub"], [])
+        self.assertNotIn("stall", self.hub.state()["queue"])
+
+
 if __name__ == "__main__":
     unittest.main()

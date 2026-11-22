@@ -121,6 +121,8 @@ CHAT_IDLE = 1800
 # hub. A live chat answers a hand-off within minutes (its `sbhub watch` wakes it and every tool call reports), and a
 # long review still reports; 30 min also lets the hub recover before the 60-min stall alarm (STALL_AFTER) fires.
 ORPHAN_AFTER = 30 * 60
+STALL_AFTER = 60 * 60  # the queue runs, tickets are queued, and nothing started or ended for this long: the owner is asked
+STALL_ASK_WAIT = 8 * 3600  # the owner may be asleep: with no answer the default (carry on) holds by morning
 OWNER = "owner"  # `sbhub integrate KEY land --agent owner`: the owner lands a ticket whose chat is gone
 CHAT_RUNS_KEPT = 7 * 86400
 AGENT_FIELDS = ("name", "title", "asked", "project", "role", "parent", "ticket", "map", "state", "note", "done", "total")
@@ -4463,6 +4465,7 @@ class Supervisor:
             self._settle_night(False)  # a redo or retry the steps above queued for a stopping night never starts
             self._start()
         self._set_waits()
+        self._stall()
         self._digest()
         self._settle_night()
         self._night_note()
@@ -5448,6 +5451,70 @@ class Supervisor:
                 self.hub._save()
         threading.Thread(target=notify, daemon=True, args=("sb hub: needs you", "{}: the build is broken and the "
                          "fix run could not mend it".format(name))).start()
+
+    @staticmethod
+    def _stall_blocker(items, queued):
+        """(key, why) of what holds the first queued item back: an earlier map's first unfinished ticket (a hand-off
+        first), the ticket it comes after, or the item itself; `why` is its note or what it waits for."""
+        first = queued[0]
+        w, note = first.get("waits") or {}, str(first.get("note") or "")
+        why = note if note.startswith("waits: ") else w.get("text") or note or "nothing says why"
+        held, key = w.get("with"), first["key"]
+        if w.get("kind") == "after" and held and "#" not in held:  # a map: its first unfinished ticket
+            order = ("handed", "unclean", "running", "recheck", "landed", "review", "queued")
+            left = [i for i in items if i["kind"] == "ticket" and sbqueue.map_of(i["key"]) == held and i["state"] in order]
+            if left:
+                key = min(left, key=lambda i: order.index(i["state"]))["key"]
+        elif held and "#" in held:
+            key = held
+        return key, "{} {}".format(first["key"], why)
+
+    def _stall(self):
+        """A stall is loud: the queue is not paused, items are queued for the live run, and nothing started or ended
+        for STALL_AFTER. The owner is asked once per stall (default: carry on), naming what holds it, and
+        queue["stall"] keeps it for the board until something moves; answering "pause the queue" pauses it."""
+        now, pause = self.hub.now(), False
+        with self.hub._lock:
+            q = self.hub._data["queue"]
+            night = self.hub._night_live()
+            queued = [i for i in q["items"] if i["state"] == "queued" and not self.hub._waits_start(i)
+                      and (i.get("not_before") or 0) <= now]
+            last = max([(night or {}).get("started") or 0] +
+                       [i.get(f) or 0 for i in q["items"] for f in ("started", "ended")])
+            s = q.get("stall")
+            if q["paused"] or not queued or night is None or night.get("state") != "live" or now - last < STALL_AFTER:
+                if s is not None:
+                    q.pop("stall")
+                    q["version"] += 1
+                    self.hub._save()
+                return
+            if s and s.get("since") == last:  # asked once already for this stall
+                a = self.hub._data["questions"].get(s.get("asked") or "") or {}
+                if a.get("answer") == "pause the queue" and a.get("by") != "default" and not s.get("paused"):
+                    s["paused"], pause = True, True
+                    self.hub._save()
+                else:
+                    return
+            else:
+                key, why = self._stall_blocker(q["items"], queued)
+                s = q["stall"] = {"since": last, "at": now, "key": key, "text": why, "queued": len(queued)}
+                q["version"] += 1
+                self.hub._save()
+        if pause:
+            self.hub.queue_pause(True)
+            return
+        text = ("The queue has started and ended nothing for {} min with {} queued and not paused. It is held by {}: "
+                "{}. Carry on, or pause the queue while you look?").format(
+            int((now - last) // 60), "1 item" if len(queued) == 1 else "{} items".format(len(queued)), s["key"], s["text"])
+        got = self.hub.ask("sb-hub", text, ["carry on", "pause the queue"], "carry on", STALL_ASK_WAIT)
+        with self.hub._lock:
+            cur = self.hub._data["queue"].get("stall")
+            if cur and cur.get("since") == last:
+                cur["asked"] = got["id"]
+                self.hub._data["queue"]["version"] += 1
+                self.hub._save()
+        threading.Thread(target=notify, daemon=True, args=("sb hub: the queue has stalled",
+                         "nothing started for {} min: {}".format(int((now - last) // 60), s["key"]))).start()
 
     def _unclean(self):
         """Each item waiting for a clean checkout whose blocking files are now saved or cleared (one git status on
