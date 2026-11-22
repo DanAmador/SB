@@ -2715,7 +2715,8 @@ def land(repo, sha):
     locked = checkout_lock(repo)
     if locked:
         return locked
-    rc, out, err = _git_run(repo, "merge", "--ff-only", "--quiet", sha, timeout=300)
+    with scenes_closed(repo):
+        rc, out, err = _git_run(repo, "merge", "--ff-only", "--quiet", sha, timeout=300)
     if rc == 0:
         return None
     if "index.lock" in err:  # taken since: the ticket waits for it, as for a lock that was there before
@@ -2725,48 +2726,97 @@ def land(repo, sha):
     return blocking or "git merge --ff-only into the checkout failed: " + (err or out or "no reason given")
 
 
-_DROP_UNSAVED_SCENES = r"""
-if (UnityEngine.Application.isPlaying) return "";
-var dirty = new System.Collections.Generic.List<string>();
-for (int i = 0; i < UnityEngine.SceneManagement.SceneManager.sceneCount; i++)
-{
-    var s = UnityEngine.SceneManagement.SceneManager.GetSceneAt(i);
-    if (s.isDirty) dirty.Add(string.IsNullOrEmpty(s.path) ? "(untitled)" : s.path);
-}
-if (dirty.Count == 0) return "";
-var setup = System.Array.FindAll(UnityEditor.SceneManagement.EditorSceneManager.GetSceneManagerSetup(),
-    x => !string.IsNullOrEmpty(x.path));
+# ---- the open scenes closed around every git write the hub makes in a Unity project's main folder (landing, back-out,
+# a stage's leftovers restored). A scene the Editor has open whose file git rewrites raises Unity's modal "The open
+# scene(s) have been modified externally: Reload / Ignore?" when the scene has unsaved changes, and that box holds
+# the Editor's main thread until someone clicks it (the 11-17 and 11-22 nights). Reloading dirty scenes first was not
+# enough: sk4te's Playground goes dirty again as it loads (checked in the live Editor on 2026-11-22: loaded, dirty,
+# nobody at it). So the Editor is moved to an empty untitled scene, unsaved changes dropped, for the write, and the
+# scene setup it had comes back after it. A closed scene cannot raise the box.
+SCENES_MARK = "// sb-hub: "
+_CLOSE_SCENES = SCENES_MARK + r"""close scenes
+if (UnityEngine.Application.isPlaying) return "playing";
+var rows = new System.Collections.Generic.List<string>();
+foreach (var x in UnityEditor.SceneManagement.EditorSceneManager.GetSceneManagerSetup())
+    if (!string.IsNullOrEmpty(x.path)) rows.Add((x.isLoaded ? "1" : "0") + (x.isActive ? "1" : "0") + x.path);
 UnityEditor.SceneManagement.EditorSceneManager.NewScene(
     UnityEditor.SceneManagement.NewSceneSetup.EmptyScene, UnityEditor.SceneManagement.NewSceneMode.Single);
-if (setup.Length > 0)
-{
-    if (!System.Array.Exists(setup, x => x.isActive)) setup[0].isActive = true;
-    if (!System.Array.Exists(setup, x => x.isLoaded)) setup[0].isLoaded = true;
-    UnityEditor.SceneManagement.EditorSceneManager.RestoreSceneManagerSetup(setup);
-}
-return string.Join(", ", dirty);
+return "closed\n" + string.Join("\n", rows);
 """
+_RESTORE_SCENES = SCENES_MARK + r"""restore scenes
+UnityEditor.AssetDatabase.Refresh();
+var all = new UnityEditor.SceneManagement.SceneSetup[] { %s };
+var setup = System.Array.FindAll(all, x => System.IO.File.Exists(x.path));
+if (setup.Length == 0) return "restored none";
+if (!System.Array.Exists(setup, x => x.isActive)) setup[0].isActive = true;
+foreach (var x in setup) if (x.isActive) x.isLoaded = true;
+UnityEditor.SceneManagement.EditorSceneManager.RestoreSceneManagerSetup(setup);
+return "restored " + setup.Length;
+"""
+SCENES_EVAL = 60  # seconds one scene eval may take; a frozen Editor costs the write this much, never more
 
 
-def drop_unsaved_scenes(repo):
-    """Reload every open scene with unsaved changes from disk, so a landing or a revert that rewrites a scene file
-    never stops the Editor on Unity's "scene has been modified externally" dialog, which blocks its main thread
-    until someone clicks it (2026-11-17: a night of Unity passes timed out behind one). Unsaved scene edits are
-    lost; a scripted scene change never asks. Does nothing in Play mode, outside a Unity project, or with the
-    Editor down. The scenes it dropped, or ""."""
-    if not is_unity(repo):
-        return ""
+def unity_eval(repo, code, run=subprocess.run):
+    """The string `code` (C#) returned in the Editor that has `repo` open, through `unity command eval`; None when
+    no Editor answered (none open, one held by a dialog, one that did not answer in SCENES_EVAL)."""
     try:
-        r = subprocess.run(["unity", "command", "eval", "--project-path", str(repo), "--format", "json",
-                            "--code", _DROP_UNSAVED_SCENES], capture_output=True, text=True, timeout=60)
-        out = r.stdout
-        data = json.JSONDecoder().raw_decode(out[out.find("{"):])[0] if r.returncode == 0 and "{" in out else {}
-        dropped = ((data.get("data") or {}).get("result") or {}).get("result") or ""
-    except (OSError, subprocess.TimeoutExpired, ValueError, AttributeError):
-        return ""
-    if dropped:
-        print("sb hub: dropped unsaved scenes before taking Unity: {}".format(dropped), file=sys.stderr, flush=True)
-    return str(dropped)
+        r = run(["unity", "command", "eval", "--project-path", str(repo), "--format", "json", "--code", code],
+                capture_output=True, text=True, timeout=SCENES_EVAL)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    data = _unity_json(r.stdout) if r.returncode == 0 else None
+    result = ((data or {}).get("data") or {}).get("result")
+    result = result.get("result") if isinstance(result, dict) else None
+    return result if isinstance(result, str) else None
+
+
+def close_scenes(repo, run=subprocess.run):
+    """Move the Editor that has the Unity project `repo` open to an empty untitled scene, unsaved scene changes
+    dropped: the scene setup it had, a list of (path, loaded, active), or None when nothing was closed (not a Unity
+    project, no Editor answering, or one in Play, which is never touched)."""
+    if not is_unity(repo):
+        return None
+    out = unity_eval(repo, _CLOSE_SCENES, run)
+    if not out or not out.startswith("closed"):
+        return None
+    setup = [(row[2:], row[0] == "1", row[1] == "1") for row in out.splitlines()[1:] if len(row) > 2]
+    print("sb hub: closed the open scenes in {} for a git write: {}".format(
+        Path(str(repo)).name, ", ".join(p for p, _, _ in setup) or "(untitled only)"), file=sys.stderr, flush=True)
+    return setup
+
+
+def restore_scenes(repo, setup, run=subprocess.run):
+    """After the write: the Editor refreshes its assets and opens the scene setup close_scenes kept again (scenes the
+    write deleted are left out). True when the Editor said it did."""
+    def lit(path):
+        return '@"{}"'.format(path.replace('"', '""'))
+    rows = ", ".join("new UnityEditor.SceneManagement.SceneSetup {{ path = {}, isLoaded = {}, isActive = {} }}".format(
+        lit(p), str(loaded).lower(), str(active).lower()) for p, loaded, active in setup)
+    out = unity_eval(repo, _RESTORE_SCENES % rows, run)
+    if not (out or "").startswith("restored"):
+        print("sb hub: could not open the scenes in {} again after a git write; the Editor shows an empty scene. "
+              "They were: {}".format(Path(str(repo)).name, ", ".join(p for p, _, _ in setup) or "(none)"),
+              file=sys.stderr, flush=True)
+        return False
+    return True
+
+
+class scenes_closed:
+    """`with scenes_closed(repo):` around a git write in a Unity project's main folder (close_scenes, restore_scenes).
+    Outside a Unity project, with no Editor answering, or in Play, the write goes ahead as it would have."""
+
+    def __init__(self, repo):
+        self.repo = repo
+        self.setup = None
+
+    def __enter__(self):
+        self.setup = close_scenes(self.repo)
+        return self.setup
+
+    def __exit__(self, *exc):
+        if self.setup is not None:
+            restore_scenes(self.repo, self.setup)
+        return False
 
 
 def _landing_by(landing):
@@ -3070,7 +3120,8 @@ def tidy_stage(repo, before, patch):
             Path(patch).write_text(out if rc == 0 else "", encoding="utf-8")
         except OSError:
             return []  # nothing restored when its changes could not be kept
-        _git_run(repo, "checkout", "--", *left, timeout=60)
+        with scenes_closed(repo):
+            _git_run(repo, "checkout", "--", *left, timeout=60)
     return left
 
 
@@ -3126,7 +3177,8 @@ def revert_landing(repo, before, sha, why, own=()):
     if rc != 0:
         return "git commit-tree failed: " + firstline(err), None
     checkout_lock(repo)  # a crashed git's leftover lock goes first; a live one fails the merge below
-    rc, out, err = _git_run(repo, "merge", "--ff-only", "--quiet", new.strip(), timeout=300)
+    with scenes_closed(repo):
+        rc, out, err = _git_run(repo, "merge", "--ff-only", "--quiet", new.strip(), timeout=300)
     if rc != 0:
         return "git merge --ff-only of the revert failed: " + firstline(err or out), None
     return None, new.strip()
@@ -4049,7 +4101,6 @@ class TicketRun:
         while True:
             got = self.hub.lock(key, by, landing=landing)
             if got.get("ok"):
-                drop_unsaved_scenes(landing["repo"])
                 return None
             other = str(got.get("held_by") or "")[len("sb-hub landing "):]
             if other and str(got.get("held_by")).startswith("sb-hub landing ") and self.in_stage(other):
@@ -5310,7 +5361,6 @@ class Supervisor:
             self._update(key, state="queued", started=None, note="{}: {} holds the Editor".format(
                 UNITY_WAIT, got.get("held_by")))
             return
-        drop_unsaved_scenes(repo)
         rc, out, err = self.runner.sbmap("claim", t["map"], nnn, "--by", "hub " + name)
         if rc != 0:
             self.hub.unlock(unity_lock(repo), _landing_by(landing))
@@ -5836,7 +5886,6 @@ class Supervisor:
         got = self.hub.lock(key, by)
         if got.get("ok"):
             self.play_wait.pop(m, None)
-            drop_unsaved_scenes(repo)
             return {"lock": key, "by": by, "held": True}
         first = self.play_wait.setdefault(m, self.hub.now())
         if self.hub.now() - first < REVIEW_LOCK_WAIT:

@@ -203,5 +203,87 @@ class UnityDownTest(RunnerCase):
         self.until(lambda: len(self.stages()) == stages + 1, timeout=120)
 
 
+class ScenesClosedTest(unittest.TestCase):
+    """Every git write the hub makes in a Unity project's main folder (a landing, a back-out, a stage's leftovers
+    restored) runs with the Editor on an empty untitled scene, so a rewritten scene file can never raise Unity's
+    "modified externally: Reload / Ignore?" box (the 11-17 and 11-22 nights); the scene setup comes back after it.
+    The fake `unity` answers the evals in the live Editor's shape and logs the project's HEAD at each."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name).resolve()
+        self.repo = self.root / "game"
+        self.repo.mkdir()
+        git(self.repo, "init", "-q", "-b", "main")
+        git(self.repo, "config", "user.email", "t@example.com")
+        git(self.repo, "config", "user.name", "T")
+        (self.repo / "ProjectSettings").mkdir()
+        (self.repo / "ProjectSettings" / "ProjectVersion.txt").write_text("m_EditorVersion: 6000.5.5f1\n")
+        (self.repo / "Assets").mkdir()
+        (self.repo / "Assets" / "Main.unity").write_text("scene v1\n")
+        git(self.repo, "add", ".")
+        git(self.repo, "commit", "-q", "-m", "a unity project")
+        self.before = git(self.repo, "rev-parse", "HEAD")
+        (self.repo / "Assets" / "Main.unity").write_text("scene v2\n")
+        git(self.repo, "commit", "-q", "-am", "the landing")
+        self.sha = git(self.repo, "rev-parse", "HEAD")
+        git(self.repo, "reset", "-q", "--hard", self.before)
+        fake_unity_on_path(self.root / "bin")
+        self.ulog = self.root / "unity.jsonl"
+        env = mock.patch.dict(os.environ, PATH="{}:{}".format(self.root / "bin", os.environ["PATH"]),
+                              FAKE_UNITY_LOG=str(self.ulog), FAKE_UNITY_STATE=str(self.root / "none.json"))
+        env.start()
+        self.addCleanup(env.stop)
+        os.environ.pop("FAKE_UNITY_SCENES", None)
+
+    def evals(self):
+        rows = [json.loads(l) for l in self.ulog.read_text().splitlines()] if self.ulog.exists() else []
+        return [(r["argv"][r["argv"].index("--code") + 1], r["head"]) for r in rows if r["argv"][:2] == ["command", "eval"]]
+
+    def test_a_landing_closes_the_open_scenes_writes_then_refreshes_and_opens_them_again(self):
+        os.environ["FAKE_UNITY_SCENES"] = "10Assets/Scenes/Persistent.unity\n11Assets/Scenes/Play\"ground.unity"
+        self.assertIsNone(sbhub.land(self.repo, self.sha))
+        self.assertEqual(git(self.repo, "rev-parse", "HEAD"), self.sha)
+        [(close, at_close), (restore, at_restore)] = self.evals()
+        self.assertIn("close scenes", close)
+        self.assertIn("NewSceneSetup.EmptyScene", close)  # an empty untitled scene, unsaved changes dropped
+        self.assertIn("isPlaying", close)
+        self.assertEqual(at_close, self.before)  # closed before the merge
+        self.assertEqual(at_restore, self.sha)  # opened again after it
+        self.assertLess(restore.index("AssetDatabase.Refresh()"), restore.index("RestoreSceneManagerSetup"))
+        self.assertIn('path = @"Assets/Scenes/Persistent.unity", isLoaded = true, isActive = false', restore)
+        self.assertIn('path = @"Assets/Scenes/Play""ground.unity", isLoaded = true, isActive = true', restore)
+
+    def test_a_back_out_and_a_stages_leftovers_are_written_with_the_scenes_closed_too(self):
+        sbhub.land(self.repo, self.sha)
+        self.ulog.unlink()
+        err, new = sbhub.revert_landing(self.repo, self.before, self.sha, "no unity")
+        self.assertIsNone(err)
+        [(close, at_close), (restore, at_restore)] = self.evals()
+        self.assertEqual((at_close, at_restore), (self.sha, new))
+        self.ulog.unlink()
+        (self.repo / "Assets" / "Main.unity").write_text("Unity wrote this in Play\n")
+        self.assertEqual(sbhub.tidy_stage(self.repo, [], self.root / "left.patch"), ["Assets/Main.unity"])
+        self.assertEqual([("close scenes" in c, "restore scenes" in c) for c, _ in self.evals()],
+                         [(True, False), (False, True)])
+
+    def test_in_play_or_with_no_editor_nothing_is_closed_and_the_write_goes_ahead(self):
+        for scenes in ("playing", "down"):
+            git(self.repo, "reset", "-q", "--hard", self.before)
+            os.environ["FAKE_UNITY_SCENES"] = scenes
+            self.assertIsNone(sbhub.land(self.repo, self.sha))
+            self.assertEqual(git(self.repo, "rev-parse", "HEAD"), self.sha)
+        self.assertEqual([("close scenes" in c) for c, _ in self.evals()], [True, True])  # no restore after either
+
+    def test_a_folder_that_is_not_a_unity_project_asks_unity_nothing(self):
+        (self.repo / "ProjectSettings" / "ProjectVersion.txt").unlink()
+        self.assertIsNone(sbhub.land(self.repo, self.sha))
+        self.assertEqual(self.evals(), [])
+
+    def test_the_old_reload_of_dirty_scenes_is_gone(self):
+        self.assertFalse(hasattr(sbhub, "drop_unsaved_scenes"))
+
+
 if __name__ == "__main__":
     unittest.main()
