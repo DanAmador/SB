@@ -3205,6 +3205,27 @@ def undo_landing(landing, why):
     return replay_tree(landing.get("tree"), landing["before"], head) if head else None
 
 
+def main_backed_out(landing):
+    """True when the main folder no longer holds the landing: its revert (revert_landing's `Undoes-landing:` line) is on
+    the checkout's branch after it, or it never reached the branch. undo_landing can fail after that, replaying the work
+    in its worktree (2026-11-22, sk4te/build-mode#1390): the main folder is clean of it then, so a lock kept for a broken
+    main folder has nothing left to guard."""
+    repo, before, sha = landing["repo"], landing["before"], landing["sha"]
+    head = _git(repo, "rev-parse", "HEAD")
+    if not head:
+        return False
+    if _git_run(repo, "merge-base", "--is-ancestor", sha, head)[0] != 0:
+        return True
+    if before == sha and not landing.get("own"):
+        return True
+    return bool(_git(repo, "log", "--format=%H", "--fixed-strings", "--grep=Undoes-landing: {}..{}".format(before, sha),
+                     "{}..{}".format(sha, head)))
+
+
+REPLAY_FAILED = ("the main folder is backed out, but its work could not be replayed in its worktree ({}): {}\nThe {} "
+                 "lock was given back, as the main folder no longer holds the work.")
+
+
 # a compiler's error line names its file: "Assets/Tests/X.cs(49,92): error CS0117: ..." (C#, tsc --pretty false)
 ERROR_LINE = re.compile(r"^\s*([^\s(:][^(:]*?\.\w+)\(\d+,\d+\): error\b.*$", re.M)
 
@@ -4051,6 +4072,10 @@ class TicketRun:
             why = ("the integrator ran past {} minutes".format(int(self.limit // 60)) if over else
                    "the integrator could not make it work in Unity" if verdict == "broken" else NO_UNITY)
             err = undo_landing(landing, why)
+            if err and verdict == "no unity" and not over and main_backed_out(landing):  # Unity was out of reach
+                self.hub.unlock(unity_lock(repo), _landing_by(landing))
+                return self.fail(item, run, "{}; {}{}".format(why, REPLAY_FAILED.format(
+                    landing.get("tree") or "none kept", err, unity_lock(repo)), tell), head, checks)
             if err:  # the lock stays held, so nothing lands on top until the owner looks
                 self.build_mark(repo, broken=True, by=landing["key"])
                 threading.Thread(target=notify, daemon=True, args=("sb hub: needs you", "{}: {} could not be backed "
@@ -4141,6 +4166,10 @@ class TicketRun:
             why = "{}\nIt landed on {} as {}; the hub backed it out.".format(
                 failed, Path(repo).name, landing["sha"][:9])
             err = undo_landing(landing, failed.splitlines()[0])
+            if err and failed.startswith(sbqueue.NOT_RUN) and main_backed_out(landing):  # Unity was out of reach
+                return False, "after landing, {}\nIt landed on {} as {}; {}".format(
+                    failed, Path(repo).name, landing["sha"][:9], REPLAY_FAILED.format(
+                        landing.get("tree") or "none kept", err, unity_lock(repo)))
             if err:  # the checkout keeps the broken work: nothing lands on it, and the owner must see it
                 keep = True
                 self.hub.lock(unity_lock(repo), _landing_by(landing), landing=_landing_kept(landing))  # held again

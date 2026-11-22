@@ -202,6 +202,31 @@ class UnityDownTest(RunnerCase):
         self.clock.t += sbhub.UNITY_DOWN_POLL
         self.until(lambda: len(self.stages()) == stages + 1, timeout=120)
 
+    def test_a_landing_unity_could_not_reach_gives_the_lock_back_once_main_is_backed_out(self):
+        # 2026-11-22, sk4te/build-mode#1390: the revert landed, replaying the work in its worktree failed, and the
+        # Unity lock stayed held until a person freed it
+        os.environ["FAKE_INTEGRATE"] = "no unity"
+        before = git(self.repo, "rev-parse", "HEAD")
+        with mock.patch.object(sbhub, "replay_tree", lambda *a: "git rebase of its worktree onto the revert failed: "
+                                                                 "Rebasing (1/1)"):
+            self.only(1)
+            self.until(lambda: self.state_of("repo/one#1") == "failed", timeout=120)
+        self.assertEqual(git(self.repo, "diff", before, "HEAD"), "")  # the main folder is backed out
+        self.assertNotIn(sbhub.unity_lock(self.repo), self.hub.state()["locks"])
+        note = self.items()["repo/one#1"]["note"]
+        self.assertIn(sbhub.NO_UNITY, note)
+        self.assertIn("The {} lock was given back".format(sbhub.unity_lock(self.repo)), note)
+        self.assertNotIn(sbhub.UNDO_FAILED, note)
+
+    def test_a_landing_whose_revert_itself_failed_still_keeps_the_lock(self):
+        os.environ["FAKE_INTEGRATE"] = "no unity"
+        with mock.patch.object(sbhub, "revert_landing", lambda *a, **k: ("git merge --ff-only of the revert failed: "
+                                                                         "boom", None)):
+            self.only(1)
+            self.until(lambda: self.state_of("repo/one#1") == "failed", timeout=120)
+        self.assertIn(sbhub.unity_lock(self.repo), self.hub.state()["locks"])  # main still holds it: nothing lands on top
+        self.assertIn(sbhub.UNDO_FAILED, self.items()["repo/one#1"]["note"])
+
 
 class ScenesClosedTest(unittest.TestCase):
     """Every git write the hub makes in a Unity project's main folder (a landing, a back-out, a stage's leftovers
@@ -280,6 +305,14 @@ class ScenesClosedTest(unittest.TestCase):
         (self.repo / "ProjectSettings" / "ProjectVersion.txt").unlink()
         self.assertIsNone(sbhub.land(self.repo, self.sha))
         self.assertEqual(self.evals(), [])
+
+    def test_main_is_backed_out_once_the_revert_is_on_the_branch_or_the_landing_never_got_there(self):
+        landing = {"repo": str(self.repo), "before": self.before, "sha": self.sha}
+        self.assertTrue(sbhub.main_backed_out(landing))  # not landed
+        sbhub.land(self.repo, self.sha)
+        self.assertFalse(sbhub.main_backed_out(landing))
+        sbhub.revert_landing(self.repo, self.before, self.sha, "no unity")
+        self.assertTrue(sbhub.main_backed_out(landing))
 
     def test_the_old_reload_of_dirty_scenes_is_gone(self):
         self.assertFalse(hasattr(sbhub, "drop_unsaved_scenes"))
