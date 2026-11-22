@@ -2988,6 +2988,53 @@ def editor_answers(repo, run=subprocess.run):
     return _unity_errors(data) or "editor_status gave no answer (exit {})".format(r.returncode)
 
 
+# ---- a Unity dialog waiting for a click (ticket 190): while anything in a Unity repo runs, the hub lists Unity's
+# on-screen windows once a minute through the macOS window list (CoreGraphics, via osascript's JavaScript bridge; it
+# needs no Accessibility permission) and names any dialog on the board and the phone. It never clicks one.
+DIALOG_POLL = 60
+WINDOW_LIST_JS = (
+    "ObjC.import('CoreGraphics');"
+    "var o=ObjC.castRefToObject($.CGWindowListCopyWindowInfo($.kCGWindowListOptionOnScreenOnly|"
+    "$.kCGWindowListExcludeDesktopElements,0));var out=[];"
+    "for(var i=0;i<o.count;i++){var w=ObjC.deepUnwrap(o.objectAtIndex(i));var b=w.kCGWindowBounds||{};"
+    "out.push({owner:w.kCGWindowOwnerName||'',name:w.kCGWindowName||'',layer:w.kCGWindowLayer,"
+    "w:b.Width,h:b.Height});}JSON.stringify(out)")
+UNITY_MAIN_TITLE = re.compile(r"\bUnity \d|<(Metal|DX\d+|OpenGL|Vulkan)|- Unity\s*$", re.I)
+
+
+def unity_windows(run=subprocess.run):
+    """Unity's on-screen windows as the macOS window list gives them: [{owner, name, layer, w, h}]. [] off macOS,
+    when osascript fails, or when the answer is not a list."""
+    if sys.platform != "darwin":
+        return []
+    try:
+        r = run(["osascript", "-l", "JavaScript", "-e", WINDOW_LIST_JS], capture_output=True, text=True, timeout=20)
+        got = json.loads(r.stdout or "[]") if r.returncode == 0 else []
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return []
+    return [w for w in got if isinstance(w, dict) and w.get("owner") == "Unity"] if isinstance(got, list) else []
+
+
+def unity_dialogs(windows):
+    """The titles of the dialogs among Unity's windows: ordinary-layer windows that are not the editor's main window
+    (its title names the Unity version or the graphics API) and are far smaller than the largest one. A window the
+    list gives no title (the process may lack screen-recording rights) is named "a window", and counts only beside
+    a larger one: a lone window cannot be told from the editor itself."""
+    wins = [w for w in windows if w.get("owner") == "Unity" and not w.get("layer")]
+    area = lambda w: (w.get("w") or 0) * (w.get("h") or 0)
+    big = max([area(w) for w in wins] or [0])
+    found = []
+    for w in wins:
+        name = str(w.get("name") or "").strip()
+        if area(w) < big * 0.4 and area(w) > 0 and not UNITY_MAIN_TITLE.search(name):
+            found.append(name or "a window")
+    return list(dict.fromkeys(found))
+
+
+def dialog_text(titles):
+    return "Unity shows {}: click it".format(", ".join(titles))
+
+
 def unity_unjudged(note):
     """True when a result's note says Unity was not reached: an integrator's `no unity`, or a `unity:` /
     `unity-session:` check line that could not run."""
@@ -4450,6 +4497,9 @@ class Supervisor:
         hub.supervisor = self  # POST /api/review/now reaches the reviews through it
         self.streak = (None, 0)  # the failure class of the last failed items in a row, and how many
         self.play_wait = {}  # map -> when its review with In Play lines first found the repo's Unity lock busy
+        self.dialog_at = {}  # repo -> when its Unity windows were last listed (_unity_dialogs)
+        self.dialog_busy = set()
+        self.windows = unity_windows  # the macOS window list; a test swaps it
         self.unity_asking = set()  # repos whose Unity is asked editor_status again right now (_unity_watch)
         self.stopped = False
         self.unlanded = False  # the landings an earlier hub left half done are undone at the first tick
@@ -4513,6 +4563,7 @@ class Supervisor:
         if not self.stopped:
             self._held_builds()
             self._unity_watch()
+            self._unity_dialogs()
             self._rechecks()
             self.hub.orphans()  # a hand-off whose chat is gone goes on before anything waits on it
             self._handoffs()
@@ -5480,6 +5531,53 @@ class Supervisor:
             threading.Thread(target=notify, daemon=True, args=("sb hub: needs you", "{}: Unity is not answering ({}). "
                              "Nothing lands there until it does; the hub carries on by itself once it answers.".format(
                                  Path(repo).name, why[:120]))).start()
+
+    def _unity_dialogs(self):
+        """Once a minute per Unity repo with anything running (a worker, check or review, the integrator), list Unity's
+        windows in a thread of its own; a dialog among them is a "needs you" row on the board and one phone message,
+        gone once the dialog is. Only finds and names it."""
+        now = self.hub.now()
+        with self.hub._lock:
+            repos = {str(i.get("repo")) for i in self.hub._data["queue"]["items"]
+                     if i.get("repo") and i["state"] in ("running", "review", "integrate", "landed")}
+            shown = [a for a in self.hub._data["agents"] if a.startswith("unity-dialog:")]
+        repos = {r for r in repos if is_unity(r)}
+        for a in shown:  # nothing runs there now: its row goes
+            if a[len("unity-dialog:"):] not in repos:
+                with self.hub._lock:
+                    self.hub._remove(a)
+                    self.hub._save()
+        for repo in repos:
+            if repo in self.dialog_busy or now < self.dialog_at.get(repo, 0) + DIALOG_POLL:
+                continue
+            self.dialog_at[repo] = now
+            self.dialog_busy.add(repo)
+
+            def look(repo=repo):
+                try:
+                    self._dialog_row(repo, unity_dialogs(self.windows()))
+                except Exception as e:  # a failed look never takes the hub down
+                    print("sb hub: Unity window list: {}: {}".format(type(e).__name__, e), file=sys.stderr, flush=True)
+                finally:
+                    self.dialog_busy.discard(repo)
+            threading.Thread(target=look, daemon=True).start()
+
+    def _dialog_row(self, repo, titles):
+        agent = "unity-dialog:" + repo
+        with self.hub._lock:
+            row = self.hub._data["agents"].get(agent)
+            if not titles:
+                if row is not None:
+                    self.hub._remove(agent)
+                    self.hub._save()
+                return
+            text = dialog_text(titles)
+            if row is not None and row.get("note") == text:
+                return
+        self.hub.report({"agent": agent, "name": "Unity dialog in " + Path(repo).name, "role": "orchestrator",
+                         "state": "needs you", "note": text})
+        if row is None:
+            notify("sb hub: needs you", "{}: {}".format(Path(repo).name, text))
 
     def _unity_watch(self):
         """Each repo whose Unity does not answer is asked editor_status again every UNITY_DOWN_POLL, in its own
