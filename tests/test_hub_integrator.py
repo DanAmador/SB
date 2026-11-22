@@ -183,5 +183,42 @@ class TwoMapsTest(RunnerCase):
         self.assertTrue((self.repo / "one" / "done.txt").exists())
 
 
+    def test_a_joined_integrator_or_the_owner_lands_what_a_gone_chat_held_and_a_quiet_one_is_waited_for(self):
+        self.one_handed()
+        self.hub.join("chat-b", "integrator")
+        self.hub.join("builder", "implementer")
+        with self.assertRaisesRegex(ValueError, "chat-a still looks after it"):
+            self.hub.integrate("repo/one#1", "chat-b", "land")  # chat-a is alive: it is still chat-a's
+        with self.hub._lock:  # chat-a's session ended between two ticks of the hub
+            self.hub._remove("chat-a")
+        with self.assertRaisesRegex(ValueError, "only a joined integrator or the owner"):
+            self.hub.integrate("repo/one#1", "builder", "land")  # an implementer does not stand in
+        self.hub.integrate("repo/one#1", "chat-b", "land", "reads well")
+        item = self.items()["repo/one#1"]
+        self.assertEqual((item["handed"]["to"], item["handed"]["from"], item["orphaned_from"]),
+                         ("chat-b", "chat-a", ["chat-a"]))
+        self.assertEqual(item["note"], "chat-a is not in the run; chat-b asked to land it")
+        self.until(lambda: self.state_of("repo/one#1") == "done")
+        self.assertTrue((self.repo / "one" / "done.txt").exists())
+
+    def test_the_owner_sends_back_what_a_gone_chat_held(self):
+        self.one_handed()
+        with self.hub._lock:
+            self.hub._remove("chat-a")
+        self.hub.integrate("repo/one#1", sbhub.OWNER, "back", "name the file after the ticket")
+        self.until(lambda: len(self.launched) >= 2)
+        self.assertIn("sent back by owner: name the file after the ticket", self.launched[-1]["brief"])
+
+    def test_leaving_as_a_chat_that_never_joined_still_lets_go_of_what_was_handed_to_it(self):
+        self.one_handed()
+        with self.hub._lock:  # as on 2026-11-20: its row is gone, the hand-off is still in its name
+            self.hub._remove("chat-a")
+        self.hub.join("chat-b", "integrator")
+        self.hub.leave("chat-a")
+        self.assertEqual(self.items()["repo/one#1"]["handed"]["to"], "chat-b")
+        with self.assertRaisesRegex(ValueError, "not joined the run and nothing is handed to it"):
+            self.hub.leave("chat-a")  # nothing is left in its name
+
+
 if __name__ == "__main__":
     unittest.main()

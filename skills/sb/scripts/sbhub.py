@@ -30,11 +30,13 @@ and never fail a session when it is down.
   sbhub.py night join --agent X [--role integrator|implementer]
                                       this chat joins the live run: the board shows it, the hub keeps its hooks
   sbhub.py night leave --agent X      it leaves; what was handed to it goes to another integrator or the hub
+                                      (also for a chat that never joined or whose session ended)
   sbhub.py watch --chat X [--timeout S]
                                       wait (in the background) for a finished ticket handed to chat X; exits 0
                                       with how to land it, 3 when X has joined no live run
   sbhub.py integrate KEY land|back --agent X [--note N]
-                                      land a ticket handed to X after reviewing it, or send it back with a note
+                                      land a ticket handed to X after reviewing it, or send it back with a note;
+                                      a joined integrator or `--agent owner` may when the chat it went to is gone
   sbhub.py take KEY --agent X         joined chat X builds a queued ticket itself: prints its worktree, branch and
                                       brief; no worker runs it
   sbhub.py done KEY --agent X [--note N] [--wait S]
@@ -119,6 +121,7 @@ CHAT_IDLE = 1800
 # hub. A live chat answers a hand-off within minutes (its `sbhub watch` wakes it and every tool call reports), and a
 # long review still reports; 30 min also lets the hub recover before the 60-min stall alarm (STALL_AFTER) fires.
 ORPHAN_AFTER = 30 * 60
+OWNER = "owner"  # `sbhub integrate KEY land --agent owner`: the owner lands a ticket whose chat is gone
 CHAT_RUNS_KEPT = 7 * 86400
 AGENT_FIELDS = ("name", "title", "asked", "project", "role", "parent", "ticket", "map", "state", "note", "done", "total")
 ALERT_STATES = ("needs you", "blocked")
@@ -459,17 +462,24 @@ class Hub:
             return {"ok": True, "agent": agent, "joined": dict(a["joined"])}
 
     def leave(self, agent):
-        """A chat leaves the run: the board stops showing it and the hub drops its hook events again."""
+        """A chat leaves the run: the board stops showing it and the hub drops its hook events again. What was handed
+        to it or taken by it is let go even when it is not joined (it never joined, or its row went with its session):
+        refused only when there is nothing to let go."""
         with self._lock:
             agent = self._resolve(str(agent or ""))
             a = self._data["agents"].get(agent)
-            if a is None or not a.pop("joined", None):
-                raise ValueError("that chat has not joined the run")
+            joined = a is not None and bool(a.pop("joined", None))
+            mine = [i for i in self._data["queue"]["items"]
+                    if i.get("state") == "handed" and (i.get("handed") or {}).get("to") == agent
+                    and not i.get("integrate_ask")
+                    or i.get("state") == "running" and i.get("runner") == CHAT_RUNNER and i.get("agent") == agent]
+            if not joined and not mine:
+                raise ValueError("that chat has not joined the run and nothing is handed to it")
             freed = []
-            for i in self._data["queue"]["items"]:  # what waited for it goes to another integrator, or the hub lands it
-                if i.get("state") == "handed" and (i.get("handed") or {}).get("to") == agent and not i.get("integrate_ask"):
+            for i in mine:  # what waited for it goes to another integrator, or the hub lands it
+                if i["state"] == "handed":
                     self._rehand(i)
-                elif i.get("state") == "running" and i.get("runner") == CHAT_RUNNER and i.get("agent") == agent:
+                else:
                     self._untake(i, "its chat left; a worker goes on from the chat's branch", kept=True)
                     freed.append(i["key"])
             self._data["queue"]["version"] += 1
@@ -658,14 +668,26 @@ class Hub:
             item = next((i for i in q["items"] if i["key"] == key), None)
             if item is None or item.get("state") != "handed":
                 raise ValueError("{} is not waiting for an integrator".format(key))
-            who, to = self._resolve(str(by or "")), (item.get("handed") or {}).get("to")
-            if who != to:
-                raise ValueError("{} is handed to {}, not {}".format(key, to, who))
             if item.get("integrate_ask"):
                 raise ValueError("{} is already being {}".format(key, "landed" if item["integrate_ask"]["action"] == "land"
                                                                   else "sent back"))
+            who, h = str(by or "").strip(), item.get("handed") or {}
+            who, to = (who if who == OWNER else self._resolve(who)), h.get("to")
+            if who != to:  # another chat may take it only from a chat that is gone (Hub._chat_gone)
+                gone, night = self._chat_gone(to, h.get("at")), self._night_live()
+                j = (self._data["agents"].get(who) or {}).get("joined") or {}
+                stands_in = who == OWNER or night is not None and j.get("night") == night["id"] and j.get("role") == "integrator"
+                if not stands_in:
+                    raise ValueError("{} is handed to {}, not {}: only a joined integrator or the owner (--agent {}) "
+                                     "takes a ticket whose chat is gone".format(key, to, who, OWNER))
+                if not gone:
+                    raise ValueError("{} is handed to {}, not {}; {} still looks after it (it goes free once it has "
+                                     "said nothing for {} min)".format(key, to, who, short_chat(to), ORPHAN_AFTER // 60))
+                item["orphaned_from"] = list(dict.fromkeys((item.get("orphaned_from") or []) + [to]))
+                item["handed"] = {"to": who, "at": self.now(), "from": to}
             item["integrate_ask"] = {"action": action, "by": who, "note": note, "at": self.now()}
-            item["note"] = "{} asked to {}".format(who, "land it" if action == "land" else "send it back: " + note)
+            item["note"] = "{}{} asked to {}".format(
+                "{}; ".format(gone) if who != to else "", who, "land it" if action == "land" else "send it back: " + note)
             q["version"] += 1
             self._save()
             self.queue_kick.set()
