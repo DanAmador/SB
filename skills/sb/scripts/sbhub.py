@@ -115,6 +115,10 @@ JOIN_ROLES = ("integrator", "implementer")
 # the `runner` of a queue item a joined chat took to build itself (ticket 173): no worker runs it
 CHAT_RUNNER = "chat"
 CHAT_IDLE = 1800
+# a chat handed a finished ticket that says nothing for this long has let it lie: it goes to another integrator or the
+# hub. A live chat answers a hand-off within minutes (its `sbhub watch` wakes it and every tool call reports), and a
+# long review still reports; 30 min also lets the hub recover before the 60-min stall alarm (STALL_AFTER) fires.
+ORPHAN_AFTER = 30 * 60
 CHAT_RUNS_KEPT = 7 * 86400
 AGENT_FIELDS = ("name", "title", "asked", "project", "role", "parent", "ticket", "map", "state", "note", "done", "total")
 ALERT_STATES = ("needs you", "blocked")
@@ -575,8 +579,8 @@ class Hub:
         night = self._night_live()
         if night is None:
             return None
-        agents = self._data["agents"]
-        on = lambda who: ((agents.get(who) or {}).get("joined") or {}).get("night") == night["id"]
+        agents, gone = self._data["agents"], set(item.get("orphaned_from") or [])  # never back to a chat that let it lie
+        on = lambda who: who not in gone and ((agents.get(who) or {}).get("joined") or {}).get("night") == night["id"]
         by = self._resolve(item["by"]) if item.get("by") else None
         if by and on(by):
             return by
@@ -594,17 +598,51 @@ class Hub:
         with self._lock:
             return self._integrator_for(item)
 
-    def _rehand(self, item):
-        """(the lock is held) A handed ticket whose chat left: to the next integrator, or, with none, a recheck that
-        lands it the hub's way (its checks again, then its map's review)."""
+    def _rehand(self, item, why="its chat left"):
+        """(the lock is held) A handed ticket whose chat left or let it lie (`why`, which starts its note): to the next
+        integrator, or, with none, a recheck that lands it the hub's way (its checks again, then its map's review)."""
         item.pop("handed", None)
         to = self._integrator_for(item)
         if to:
             item["handed"] = {"to": to, "at": self.now()}
-            item["note"] = "its chat left; waits for {} to review and land it".format(to)
+            item["note"] = "{}; waits for {} to review and land it".format(why, to)
         else:
             item.update(state="recheck", recheck_at=self.now(), rechecks=None, checked=None,
-                        note="its chat left and no integrator is joined: the hub lands it")
+                        note="{} and no other integrator is joined: the hub lands it".format(why))
+
+    def _chat_gone(self, chat, since):
+        """(the lock is held) Why chat `chat` no longer looks after a ticket handed to it at `since`, or None while it
+        does: it is not joined to the live run (it never joined, it left, or its session ended and took its row), or
+        it has said nothing since the hand-off for ORPHAN_AFTER."""
+        night = self._night_live()
+        a = self._data["agents"].get(chat)
+        joined = (a or {}).get("joined") or {}
+        if night is None or joined.get("night") != night["id"]:
+            return "{} is not in the run".format(short_chat(chat))
+        last = max(a.get("at") or 0, joined.get("at") or 0, since or 0)
+        if self.now() - last >= ORPHAN_AFTER:
+            return "{} has said nothing for {} min".format(short_chat(chat), int((self.now() - last) // 60))
+        return None
+
+    def orphans(self):
+        """Each handed ticket whose chat is gone or quiet (Hub._chat_gone) goes to another joined integrator, or with
+        none to the hub's own landing; its note says so once. The chat it left is never handed it again. The keys."""
+        moved = []
+        with self._lock:
+            for i in self._data["queue"]["items"]:
+                if i.get("kind") != "ticket" or i.get("state") != "handed" or i.get("integrate_ask"):
+                    continue
+                h = i.get("handed") or {}
+                why = self._chat_gone(h.get("to"), h.get("at"))
+                if why:
+                    i["orphaned_from"] = list(dict.fromkeys((i.get("orphaned_from") or []) + [h.get("to")]))
+                    self._rehand(i, why)
+                    moved.append(i["key"])
+            if moved:
+                self._data["queue"]["version"] += 1
+                self._save()
+                self.queue_kick.set()
+        return moved
 
     def integrate(self, key, by, action, note=""):
         """The chat a finished ticket was handed to lands it (`land`) or sends it back to be built again with a
@@ -4393,6 +4431,7 @@ class Supervisor:
         if not self.stopped:
             self._held_builds()
             self._rechecks()
+            self.hub.orphans()  # a hand-off whose chat is gone goes on before anything waits on it
             self._handoffs()
             self._chat_dones()
             self._unclean()

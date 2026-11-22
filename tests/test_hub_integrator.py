@@ -150,5 +150,38 @@ class TwoMapsTest(RunnerCase):
                          "1 queued, 1 more)")
 
 
+    def test_a_chat_that_ended_lets_go_at_once_and_the_hub_lands_it_so_the_next_map_starts(self):
+        self.one_handed()
+        self.hub.report({"agent": "chat-a", "state": "gone"})  # its session ended, never to come back
+        self.until(lambda: self.state_of("repo/one#1") in ("landed", "review", "done"))
+        self.assertTrue((self.repo / "one" / "done.txt").exists())
+        self.until(lambda: self.state_of("repo/two#2") != "queued")  # its map's turn came
+        self.assertEqual(self.items()["repo/one#1"]["orphaned_from"], ["chat-a"])
+
+    def test_a_quiet_chat_keeps_it_30_minutes_then_it_goes_to_another_integrator_then_to_the_hub(self):
+        self.one_handed()
+        self.hub.join("chat-b", "integrator")
+        self.clock.t += 20 * 60
+        self.hub.report({"agent": "chat-a", "state": "working", "note": "reading the diff"})
+        self.clock.t += 20 * 60  # 40 min since the hand-off, 20 since it last spoke: still its
+        self.sup.tick()
+        self.assertEqual(self.items()["repo/one#1"]["handed"]["to"], "chat-a")
+        self.clock.t += 11 * 60
+        self.hub.report({"agent": "chat-b", "state": "working"})
+        self.sup.tick()
+        item = self.items()["repo/one#1"]
+        self.assertEqual((item["state"], item["handed"]["to"]), ("handed", "chat-b"))
+        self.assertEqual(item["note"], "chat-a has said nothing for 31 min; waits for chat-b to review and land it")
+        self.clock.t += 31 * 60  # chat-b lets it lie too; chat-a is never handed it again
+        self.hub.report({"agent": "chat-a", "state": "working"})
+        self.sup.tick()
+        item = self.items()["repo/one#1"]
+        self.assertEqual(item["orphaned_from"], ["chat-a", "chat-b"])
+        self.assertTrue(item["note"].startswith("chat-b has said nothing for 31 min and no other integrator is joined"),
+                        item["note"])
+        self.until(lambda: self.state_of("repo/one#1") in ("landed", "review", "done"))
+        self.assertTrue((self.repo / "one" / "done.txt").exists())
+
+
 if __name__ == "__main__":
     unittest.main()
