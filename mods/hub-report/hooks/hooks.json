@@ -6,7 +6,8 @@
           {
             "type": "command",
             "command": "python3 \"$HOME/.agents/skills/sb/scripts/sbhub.py\" hook",
-            "timeout": 10
+            "timeout": 10,
+            "async": true
           }
         ]
       }
@@ -29,7 +30,8 @@
           {
             "type": "command",
             "command": "python3 \"$HOME/.agents/skills/sb/scripts/sbhub.py\" hook",
-            "timeout": 10
+            "timeout": 10,
+            "async": true
           }
         ]
       }
@@ -53,7 +55,8 @@
           {
             "type": "command",
             "command": "python3 \"$HOME/.agents/skills/sb/scripts/sbhub.py\" hook",
-            "timeout": 10
+            "timeout": 10,
+            "async": true
           }
         ]
       }
@@ -64,7 +67,8 @@
           {
             "type": "command",
             "command": "python3 \"$HOME/.agents/skills/sb/scripts/sbhub.py\" hook",
-            "timeout": 10
+            "timeout": 10,
+            "async": true
           }
         ]
       }
@@ -86,7 +90,8 @@
           {
             "type": "command",
             "command": "python3 \"$HOME/.agents/skills/sb/scripts/sbhub.py\" hook",
-            "timeout": 10
+            "timeout": 10,
+            "async": true
           }
         ]
       }
@@ -108,7 +113,8 @@
           {
             "type": "command",
             "command": "python3 \"$HOME/.agents/skills/sb/scripts/sbhub.py\" hook",
-            "timeout": 10
+            "timeout": 10,
+            "async": true
           }
         ]
       }
