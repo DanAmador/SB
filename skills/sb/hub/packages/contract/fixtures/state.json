@@ -206,6 +206,7 @@
           "note": "",
           "started": null,
           "state": "queued",
+          "title": "E",
           "tries": 0,
           "waits": {
             "kind": "paused",
@@ -223,6 +224,7 @@
           "note": "",
           "started": null,
           "state": "queued",
+          "title": "F",
           "tries": 0,
           "waits": {
             "kind": "paused",
@@ -240,6 +242,7 @@
           "note": "",
           "started": null,
           "state": "queued",
+          "title": "C",
           "tries": 0,
           "waits": {
             "kind": "paused",
@@ -262,6 +265,7 @@
           ],
           "started": null,
           "state": "queued",
+          "title": "B",
           "tries": 0,
           "waits": {
             "kind": "paused",
