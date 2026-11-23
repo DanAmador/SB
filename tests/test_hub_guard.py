@@ -221,5 +221,33 @@ class RefusalCountsOnTheRun(unittest.TestCase):
             self.assertEqual(run["refused_lines"][0], "refused: Bash: `sbmap resolve` is refused for a worker")
 
 
+class UnityTestRunRefusalTest(RefusedTest):
+    """A test run in the live Editor is refused to every hub session: Unity's Test Runner first asks to save modified
+    scenes, and that box froze the 2026-11-23 night for 5.5 hours."""
+    # copied from the 2026-11-22 night's integrator logs (wayfinder/sk4te/runs/2026-11-22-level-popit/*.log)
+    REAL = ("cd /Users/danamador/Documents/Coding/sk4te; unity command run_tests --mode editor --filter MousePickTests "
+            "--timeout 300 --format json 2>&1 | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d)'")
+
+    def test_a_test_run_is_refused_to_an_integrator_a_review_and_a_worker(self):
+        for env in (INTEGRATOR, {"SB_HUB_AGENT": "review-1"}, {}):
+            for c in (self.REAL, "unity test Assets/Tests --mode EditMode", "unity command run_tests",
+                      "unity command eval --code 'var api = ScriptableObject.CreateInstance<TestRunnerApi>(); api.Execute(s);'"):
+                self.deny(bash(c, env=env), "written and compiles")
+        self.deny(bash(self.REAL, env={"SB_HUB_UNITY": "off"}), "last stage")  # a worker: no unity at all, as before
+
+    def test_an_eval_file_that_starts_the_test_runner_is_refused_and_another_is_not(self):
+        with tempfile.TemporaryDirectory() as d:
+            runner, probe = Path(d) / "run_tests.cs", Path(d) / "probe.cs"
+            runner.write_text("var api = UnityEngine.ScriptableObject.CreateInstance<UnityEditor.TestTools.TestRunner.Api.TestRunnerApi>();")
+            probe.write_text("return UnityEngine.Application.isPlaying;")
+            self.deny(bash("unity command eval_file --file run_tests.cs --format json", cwd=d, env=INTEGRATOR), "save the open scenes")
+            self.assertIsNone(bash("unity command eval_file --file {} --format json".format(probe), env=INTEGRATOR))
+
+    def test_reading_test_state_and_the_checks_stay_allowed(self):
+        for c in ("unity command test_status --format json", "unity command list_tests --mode EditMode | wc -c",
+                  "unity command sb_check", "tools/compile", "grep -rn TestRunnerApi Assets/Tests"):
+            self.assertIsNone(bash(c, env=INTEGRATOR), c)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -14,7 +14,9 @@ and every other ticket waits for it. So work steadily, and end once it works or 
 
 1. **The Editor.** `unity command editor_status --format json`. If it is in Play, stop Play (`unity command editor_stop`).
    If it is compiling or reloading, wait. If it does not answer within 5 minutes, write the report with the verdict
-   `VERDICT: no unity` and end.
+   `VERDICT: no unity` and end. If its `status` is `blocked_by_dialog`, a box is waiting for a click that no command
+   can give: write the dialog's title and buttons in the report, end at once with `VERDICT: no unity`, and do not retry.
+   The hub restarts the Editor or tells the owner.
 2. **Compile.** Follow the repo's AGENTS.md, and check with the project's own command, never a hand-written
    poll (the guard refuses `recompile_status`, and `unity command` in a loop or next to `sleep`): `unity command sb_check`,
    or the repo's `tools/compile` when it has one; a repo with neither writes the check as a `[CliCommand]` tagged
@@ -30,6 +32,9 @@ and every other ticket waits for it. So work steadily, and end once it works or 
 5. **Never** do any of the following:
    - stash, reset, rebase, check out a branch, amend, push or tag;
    - start a second Editor, a batch Editor or a clone;
+   - start a test run (`unity command run_tests`, `unity test`, or a script that calls the Test Runner): Unity first
+     asks to save the open scenes, and that box holds the Editor until a person clicks it, which stops every ticket of
+     the night. A test the ticket asks for is met when it is written and compiles; say so, and the owner runs it;
    - take or free `{lock}` (it is yours until you end);
    - resolve the ticket (the hub does).
 

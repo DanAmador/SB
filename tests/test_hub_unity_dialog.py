@@ -64,6 +64,8 @@ class DialogWatchTest(RunnerCase):
             self.looks.append(self.clock())
             return list(self.shown)
         self.sup.windows = windows
+        self.reported = []  # the dialog editor_status reports (blocked_by_dialog)
+        self.sup.editor_dialogs = lambda repo: list(self.reported)
         with self.hub._lock:
             self.hub._data["queue"]["items"].append({"key": "repo/one#9", "kind": "ticket", "state": "running",
                                                      "repo": str(self.repo), "note": "", "runner": sbhub.CHAT_RUNNER})
@@ -114,6 +116,14 @@ class DialogWatchTest(RunnerCase):
             self.sup.stopped = True
             gate.set()
 
+    def test_a_dialog_the_editor_reports_is_named_with_the_screen_locked(self):
+        self.shown = []  # a locked or sleeping screen lists no window at all
+        self.reported = ["Scene(s) Have Been Modified"]
+        self.look()
+        [row] = self.rows().values()
+        self.assertEqual(row["note"], "Unity shows Scene(s) Have Been Modified: click it")
+        self.assertEqual(len(self.told), 1)
+
     def test_nothing_running_in_the_repo_means_no_listing(self):
         self.look("queued")
         self.assertEqual(self.looks, [])
@@ -139,12 +149,14 @@ class PopupWatchdogTest(DialogWatchTest):
     test_the_watcher_looks_while_the_tick_is_held_by_a_running_check = None
     test_nothing_running_in_the_repo_means_no_listing = None
     test_a_repo_that_is_not_a_unity_project_is_never_listed = None
+    test_a_dialog_the_editor_reports_is_named_with_the_screen_locked = None
 
     def setUp(self):
         super().setUp()
         self.calls, self.idle, self.editor, self.state, self.graceful = [], 3600, True, "ready", True
         self.after_open = [MAIN]
         self.answers = False  # True: the Editor answers editor_status, whatever windows it shows
+        self.real = False  # True: a blocked Editor answers as the pipeline does, success with blocked_by_dialog
         self.sup.unity_cmd = self.cmd
         with self.hub._lock:
             self.night = self.hub._night_start()["id"]
@@ -163,6 +175,11 @@ class PopupWatchdogTest(DialogWatchTest):
             out = json.dumps({"success": not blocked, "data": {"result": {} if not blocked else None},
                               "errors": [{"message": "EDITOR_BLOCKED_BY_DIALOG"}] if blocked else []})
             rc = 1 if blocked else 0
+            if blocked and self.real:
+                dialog = {"id": 7, "source": "NativeMessageBox", "title": "Scene(s) Have Been Modified",
+                          "buttons": ["Save", "Cancel", "Don't Save"], "dismissedAt": None}
+                out = json.dumps({"success": True, "data": {"result": {"status": "blocked_by_dialog", "dialog": dialog}}})
+                rc = 0
         elif argv[:2] == ["unity", "close"]:
             if "--force" in argv or self.graceful:
                 self.editor = False
@@ -283,3 +300,29 @@ class PopupWatchdogTest(DialogWatchTest):
         self.popup_for(10)
         self.assertTrue(self.calls)
         self.assertEqual({c[0] for c in self.calls}, {"ioreg", "unity"})  # no ps, no lsof: nothing reads its command line
+
+    def test_an_editor_that_answers_blocked_by_dialog_is_restarted(self):
+        self.real = True  # what the pipeline really answers under a modal (the 2026-11-23 night): not "answers"
+        self.popup_for(10)
+        self.assertEqual(self.unity_calls(), [["close"], ["projects", "open"]])
+
+
+class StatusDialogTest(unittest.TestCase):
+    """editor_status answers while a modal is up, with status blocked_by_dialog: that answer is not a working Editor."""
+
+    def answer(self, result, rc=0):
+        out = json.dumps({"success": True, "data": {"result": result}})
+        return lambda argv, **kw: subprocess.CompletedProcess(argv, rc, out, "")
+
+    def test_blocked_by_dialog_is_named_and_is_not_an_answer(self):
+        run = self.answer({"status": "blocked_by_dialog", "dialog": {"title": "Scene(s) Have Been Modified",
+                                                                     "message": "Save changes to Playground?"}})
+        self.assertEqual(sbhub.editor_dialogs("/x", run), ["Scene(s) Have Been Modified"])
+        self.assertIn("Scene(s) Have Been Modified", sbhub.editor_answers("/x", run))
+        self.assertEqual(sbhub.status_dialog({"status": "blocked_by_dialog"}), "a dialog")
+        self.assertEqual(sbhub.status_dialog({"status": "blocked_by_dialog", "dialog": {"message": "Reimport?"}}), "Reimport?")
+
+    def test_a_ready_editor_answers_and_shows_no_dialog(self):
+        run = self.answer({"status": "ready", "compiling": False, "playMode": "stopped"})
+        self.assertEqual(sbhub.editor_answers("/x", run), "")
+        self.assertEqual(sbhub.editor_dialogs("/x", run), [])

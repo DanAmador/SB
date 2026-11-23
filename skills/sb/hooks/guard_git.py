@@ -8,6 +8,8 @@ Reads one Claude Code hook event on stdin and denies:
         the hub closes the ticket); `rm`, `mv` or a `>` redirect aimed inside a `.git` folder;
         with SB_HUB_UNITY=off (a ticket worker of a Unity project), any `unity` command: the Unity stage is the
         integrator's, on the main folder, after the work lands.
+        For every worker, integrator and review: a test run in the Unity Editor (`unity test`, `unity command
+        run_tests`, an eval or eval_file that calls the Test Runner), whose save-scenes box freezes the night.
   Write, Edit, MultiEdit, NotebookEdit  a file outside the worker's repo or worktree, its run folder
         (SB_HUB_RUN) and the system temp folder.
 Anything else is allowed; a hook that cannot read its event allows too (exit 0, no output).
@@ -46,6 +48,10 @@ UNITY_WAY_OUT = ("Unity is the ticket's last stage, not yours: after you commit,
 UNITY_POLL_WAY_OUT = ("Do not poll Unity by hand: it keeps the Editor and its lock busy longer than the check needs. Run "
                       "the project's check in one command: `unity command sb_check`, or the repo's `tools/compile` when "
                       "it has one; when the repo has neither, write the check as a `[CliCommand]` tagged `sb/check`.")
+UNITY_TEST_WAY_OUT = ("Never start a test run in the Unity Editor: Unity first asks to save the open scenes (Save / "
+                      "Cancel / Don't Save), and that box holds the Editor until a person clicks it, which stops every "
+                      "ticket of the night (2026-11-23: 5.5 hours). A test the ticket asks for is done when it is "
+                      "written and compiles: say so under its check, and the owner runs the suite.")
 LOOPS = {"while", "until", "for"}
 
 
@@ -129,6 +135,33 @@ def unity_refusal(command, env=os.environ):
     return None
 
 
+def _file_text(path, cwd):
+    try:
+        with open(path if os.path.isabs(path) else os.path.join(cwd or ".", path), encoding="utf-8") as f:
+            return f.read()
+    except (OSError, ValueError):
+        return ""
+
+
+def unity_test_refusal(command, cwd=None):
+    """Any hub session: a test run in the live Editor is refused (`unity test`, `unity command run_tests`, and an eval
+    or eval_file whose code calls the Test Runner). Unity's Test Runner asks to save modified scenes first, and that
+    native box freezes the Editor's main thread until someone clicks it."""
+    for toks in segments(command):
+        toks = _bare(toks)
+        if not toks or toks[0].rsplit("/", 1)[-1] != "unity":
+            continue
+        words = [t for t in toks[1:] if not t.startswith("-")]
+        if words[:1] == ["test"] or (words[:1] == ["command"] and "run_tests" in words[1:2]):
+            return "`{}` is refused. {}".format(" ".join(toks[:3]), UNITY_TEST_WAY_OUT)
+        if words[:1] == ["command"] and words[1:2] == ["eval_file"] and "--file" in toks[:-1]:
+            if "TestRunnerApi" in _file_text(toks[toks.index("--file") + 1], cwd):
+                return "An eval_file that starts the Test Runner is refused. " + UNITY_TEST_WAY_OUT
+    if re.search(r"\bunity\b[^\n]*\bcommand\s+eval\b", command) and "TestRunnerApi" in command:
+        return "An eval that starts the Test Runner is refused. " + UNITY_TEST_WAY_OUT
+    return None
+
+
 def unity_poll_refusal(command, env=os.environ):
     """An integrator (SB_HUB_UNITY=integrator) checks Unity with one command: a hand-written poll is refused.
 
@@ -159,7 +192,8 @@ def unity_poll_refusal(command, env=os.environ):
 
 def refusal(command, cwd, main=in_main_checkout, env=os.environ):
     """The reason to refuse this command line, or None."""
-    other = other_refusal(command) or unity_refusal(command, env) or unity_poll_refusal(command, env)
+    other = (other_refusal(command) or unity_refusal(command, env) or unity_test_refusal(command, cwd)
+             or unity_poll_refusal(command, env))
     if other:
         return other
     for where, sub, args in git_calls(command):

@@ -3042,25 +3042,61 @@ UNITY_WORKER = ("\n\n## Unity is the last stage, not yours\n\nThis is a Unity pr
                 "integrator compiles it and plays it there, one ticket at a time. You cannot compile, so read the "
                 "source of every type and member you call before you use it. In your report, add a section "
                 "`## Play checks`: numbered steps that show your change working in Play, each with what should "
-                "happen and the numbers to measure.\n")
+                "happen and the numbers to measure. A test the ticket asks for is met when it is written and compiles: "
+                "nobody runs a test in the night, because Unity's save-scenes box would freeze the Editor.\n")
 
 
-def editor_answers(repo, run=subprocess.run):
-    """'' when the Editor that has `repo` open answers `unity command editor_status` (one compiling or in Play
-    answers too), else why it did not: its errors (EDITOR_NOT_RUNNING when no Editor has it open), no answer in
-    UNITY_PROBE seconds (a modal dialog holds its main thread), or no JSON at all."""
+BLOCKED_BY_DIALOG = "blocked_by_dialog"
+
+
+def status_dialog(result):
+    """The dialog an editor_status result says holds the Editor's main thread, as its title (else its message, else
+    "a dialog"), or '' when none does. The pipeline answers editor_status even while a modal is up, with
+    {"status": "blocked_by_dialog", "dialog": {"id", "title", "message", "buttons", ...}}: a successful answer that
+    means the Editor can do nothing (the 2026-11-23 night: "Scene(s) Have Been Modified" for 5.5 hours)."""
+    if not isinstance(result, dict) or result.get("status") != BLOCKED_BY_DIALOG:
+        return ""
+    d = result.get("dialog")
+    d = d[0] if isinstance(d, list) and d else d
+    if isinstance(d, dict):
+        return str(d.get("title") or d.get("message") or "a dialog").strip() or "a dialog"
+    return "a dialog"
+
+
+def _editor_status(repo, run=subprocess.run):
+    """(editor_status's result, '') when the Editor that has `repo` open answers, else (None, why it did not)."""
     cmd = ["unity", "command", "editor_status", "--json", "--timeout", str(max(1, UNITY_PROBE // 2)),
            "--project-path", str(repo)]
     try:
         r = run(cmd, cwd=str(repo), capture_output=True, text=True, timeout=UNITY_PROBE)
     except subprocess.TimeoutExpired:
-        return "editor_status did not answer in {} s".format(UNITY_PROBE)
+        return None, "editor_status did not answer in {} s".format(UNITY_PROBE)
     except OSError as e:
-        return "editor_status could not run: {}".format(e)
+        return None, "editor_status could not run: {}".format(e)
     data = _unity_json((r.stdout or "") + (r.stderr or ""))
     if data and data.get("success") and isinstance((data.get("data") or {}).get("result"), dict):
-        return ""
-    return _unity_errors(data) or "editor_status gave no answer (exit {})".format(r.returncode)
+        return data["data"]["result"], ""
+    return None, _unity_errors(data) or "editor_status gave no answer (exit {})".format(r.returncode)
+
+
+def editor_answers(repo, run=subprocess.run):
+    """'' when the Editor that has `repo` open answers `unity command editor_status` and can work (one compiling or
+    in Play answers too), else why not: its errors (EDITOR_NOT_RUNNING when no Editor has it open), no answer in
+    UNITY_PROBE seconds, no JSON at all, or a dialog holding its main thread (status blocked_by_dialog), which is an
+    answer but not a working Editor."""
+    result, why = _editor_status(repo, run)
+    if why:
+        return why
+    shown = status_dialog(result)
+    return "a Unity dialog holds the Editor: {}".format(shown) if shown else ""
+
+
+def editor_dialogs(repo, run=subprocess.run):
+    """The dialog the Editor itself reports through editor_status, as [title], else []. Unlike the window list it
+    works with the screen locked or asleep, which is when a night runs."""
+    result, why = _editor_status(repo, run)
+    shown = "" if why else status_dialog(result)
+    return [shown] if shown else []
 
 
 # ---- a Unity dialog waiting for a click (ticket 190): while anything in a Unity repo runs, the hub lists Unity's
@@ -4689,6 +4725,8 @@ class Supervisor:
         self.windows = unity_windows  # the macOS window list; a test swaps it
         self.dialog_since = {}  # repo -> (first, last) look that saw a dialog, in a row (the popup watchdog)
         self.unity_cmd = subprocess.run  # what the popup watchdog runs `unity` and `ioreg` through; a test swaps it
+        # the dialog the Editor reports itself (editor_status), for when the window list sees nothing: a locked screen
+        self.editor_dialogs = lambda repo: editor_dialogs(repo, self.unity_cmd)
         self.unity_asking = set()  # repos whose Unity is asked editor_status again right now (_unity_watch)
         self.stopped = False
         self.unlanded = False  # the landings an earlier hub left half done are undone at the first tick
@@ -5790,7 +5828,7 @@ class Supervisor:
 
             def look(repo=repo):
                 try:
-                    titles = unity_dialogs(self.windows())
+                    titles = unity_dialogs(self.windows()) or self.editor_dialogs(repo)
                     self._dialog_row(repo, titles)
                     self._popup_watch(repo, titles)
                 except Exception as e:  # a failed look never takes the hub down
@@ -5899,7 +5937,7 @@ class Supervisor:
         shown = ", ".join(titles)
         err = restart_unity(repo, version, run=self.unity_cmd)
         self.dialog_since.pop(repo, None)
-        again = unity_dialogs(self.windows())
+        again = unity_dialogs(self.windows()) or self.editor_dialogs(repo)
         if err or again:
             what = "it shows {} again".format(", ".join(again)) if again else err
             self._popup_say(repo, "Unity showed {} for {} minutes during the night, so the hub restarted the Editor "
