@@ -98,6 +98,12 @@ describe("sidebarTree", () => {
     expect(t.projects.find((p) => p.project === "sb")?.queued).toBe(1);
     expect(t.all.queued).toBe(1);
   });
+
+  it("leaves out the waiting morning close-off, and shows it while it runs", () => {
+    const off = (st: "queued" | "running"): QueueItem => item("job-off", st, { kind: "job", project: "/hub/close-off", close_off: true });
+    expect(sidebarTree(state([off("queued")]), tickets, none).projects.find((p) => p.project === "close-off")).toBeUndefined();
+    expect(sidebarTree(state([off("running")]), tickets, none).projects.find((p) => p.project === "close-off")?.queued).toBe(1);
+  });
 });
 
 describe("activeOnly", () => {

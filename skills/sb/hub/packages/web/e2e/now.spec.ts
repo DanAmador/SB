@@ -14,7 +14,7 @@ async function between(page: Page): Promise<void> {
       {
         key: "job:close-off", kind: "job", agent: null, state: "queued", note: "waits until 09:00", commit: null, tries: 0, started: null, ended: null,
         model: "sonnet", project: "/demo", repo: "/demo", prompt: "close the night", hash: "abc", name: "close-off", title: "Close off the night", close_off: true,
-        created: s.now - 3000, waits: { kind: "time", with: null, text: "starts at 09:00" }, links,
+        created: s.now - 3000, not_before: s.now + 3600, waits: { kind: "time", with: null, text: "starts at 09:00" }, links,
       },
     ];
     await route.fulfill({ response: res, json: s });
@@ -37,14 +37,16 @@ test("with no run live, the Now panel still shows the queued job and today's run
   await between(page);
   await page.goto("/next/");
   await expect(page.getByTestId("run-head")).toContainText("No run is live");
-  await expect(page.getByTestId("outside-run")).toHaveText("Also in the queue: Close off the night.");
+  // the waiting close-off is nearly always there: the run head does not name it
+  await expect(page.getByTestId("outside-run")).toHaveCount(0);
   const panel = page.getByRole("complementary", { name: "Now and next" });
   await expect(panel.getByRole("region", { name: "Running" })).toContainText("No worker is running.");
   const queued = panel.getByRole("region", { name: "Queued" });
-  await expect(queued.getByRole("listitem")).toHaveCount(2);
+  // the close-off is one quiet line under the queue, not an item in it
+  await expect(queued.getByRole("listitem")).toHaveCount(1);
   await expect(queued.getByRole("listitem").first()).toContainText("waits for Start");
-  await expect(queued).toContainText("Close off the night");
-  await expect(queued).toContainText("job · waits: starts at 09:00");
+  await expect(queued).not.toContainText("Close off the night");
+  await expect(queued.getByTestId("close-off-next")).toHaveText(/^Morning note at /);
   const clock = panel.getByTestId("today-clock");
   await expect(clock.locator("[data-outcome=done]")).toHaveCount(1);
   await expect(clock.locator("[data-outcome=failed]")).toHaveCount(1);
@@ -62,8 +64,8 @@ test("with no run live, the Now panel still shows the queued job and today's run
   await panel.getByRole("button", { name: "Hide Now" }).click();
   await expect(panel.getByRole("region", { name: "Queued" })).toHaveCount(0);
   await page.reload();
-  await panel.getByRole("button", { name: "Show Now: 2 queued" }).click();
-  await expect(panel.getByRole("region", { name: "Queued" })).toContainText("Close off the night");
+  await panel.getByRole("button", { name: "Show Now: 1 queued" }).click();
+  await expect(panel.getByRole("region", { name: "Queued" })).toContainText("Morning note at");
 });
 
 test("on a phone the Now panel is a fold above the view", async ({ page }) => {
@@ -72,8 +74,8 @@ test("on a phone the Now panel is a fold above the view", async ({ page }) => {
   await page.goto("/next/");
   await expect(page.getByRole("complementary", { name: "Now and next" })).toHaveCount(0);
   const fold = page.getByTestId("now-panel");
-  await expect(fold.locator("summary")).toContainText("Now2 queued");
-  await expect(fold.getByRole("region", { name: "Queued" })).toContainText("Close off the night");
+  await expect(fold.locator("summary")).toContainText("Now1 queued");
+  await expect(fold.getByRole("region", { name: "Queued" })).toContainText("Morning note at");
   await fold.locator("summary").click();
   await expect(fold.getByRole("region", { name: "Queued" })).toBeHidden();
   await page.screenshot({ path: test.info().outputPath("now-375.png"), fullPage: true });

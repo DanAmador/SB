@@ -8,14 +8,17 @@ const run = (key: string, started: number | null, ended: number | null, more: Pa
   ({ key, title: `Run ${key}`, project: "p", map: "p/a", outcome: "done", reason: "", account: "main", model: null, started, ended, commit: null, tries: 1, refused: 0, refused_lines: [], pictures: [], ...more }) as unknown as Run;
 
 describe("nowNext", () => {
-  it("keeps what runs or is in checks and what is queued, in order, with or without a live run", () => {
+  it("keeps what runs or is in checks and what is queued, in order, and sets the waiting close-off apart", () => {
     const items = [
       item("p/a#1", "done"), item("p/a#2", "running"), item("p/a#3", "landed"), item("p/a#4", "review"),
-      item("job:close-off", "queued", { kind: "job" }), item("p/a#5", "queued"), item("p/a#6", "failed"),
+      item("job:close-off", "queued", { kind: "job", close_off: true }), item("job:hub", "queued", { kind: "job", hub: true }), item("p/a#5", "queued"), item("p/a#6", "failed"),
     ];
     const n = nowNext(items);
     expect(n.running.map((i) => i.key)).toEqual(["p/a#2", "p/a#3", "p/a#4"]);
-    expect(n.queued.map((i) => i.key)).toEqual(["job:close-off", "p/a#5"]);
+    expect(n.queued.map((i) => i.key)).toEqual(["job:hub", "p/a#5"]);
+    expect(n.closeOff?.key).toBe("job:close-off");
+    expect(nowNext([item("job:close-off", "running", { kind: "job", close_off: true })]).running).toHaveLength(1);
+    expect(nowNext([]).closeOff).toBeNull();
   });
 });
 

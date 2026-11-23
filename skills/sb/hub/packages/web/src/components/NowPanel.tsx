@@ -164,6 +164,11 @@ function Body(): React.JSX.Element {
             ))}
           </ol>
         )}
+        {n.closeOff !== null && (
+          <p data-testid="close-off-next" className="text-xs text-muted-foreground">
+            {n.closeOff.not_before != null ? `Morning note at ${hm(n.closeOff.not_before)}` : "Morning note next"}
+          </p>
+        )}
       </section>
       <Today running={n.running} titleOf={titleOf} />
     </div>

@@ -79,6 +79,8 @@ export function sidebarTree(state: State, tickets: readonly TicketRow[] | null, 
   const jobsRun = new Map<string, number>();
   for (const i of items) {
     if (i.state !== "queued" && i.state !== "running") continue;
+    // the morning close-off waits for its hour nearly all the time: it is no project of the owner's until it runs
+    if (i.state === "queued" && i.kind === "job" && i.close_off === true) continue;
     const map = itemMapKey(i);
     const project = map === "" ? jobProject(i) : projOf(map);
     see(project, map);

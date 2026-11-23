@@ -40,7 +40,8 @@ export function RunHead(): React.JSX.Element | null {
 function NoRun({ last }: { last: Night | null }): React.JSX.Element {
   const { state, ix, writes, down, busy } = useBoard();
   const waiting = state.queue.items.filter((i) => i.state === "queued" && !i.night && !(i.kind === "job" && (i.close_off === true || i.hub === true))).length;
-  // what runs or waits outside any run, a close-off job say, which the count above leaves out: it still runs
+  // what runs or waits outside any run, a hub job say, which the count above leaves out: it still runs. The waiting
+  // morning close-off is not named: it is nearly always queued, and the Now panel gives it its own line
   const n = nowNext(state.queue.items);
   const outside = [...n.running, ...n.queued.filter((i) => i.kind === "job" && (i.close_off === true || i.hub === true))];
   return (

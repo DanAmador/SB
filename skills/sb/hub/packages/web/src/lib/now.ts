@@ -9,13 +9,22 @@ const BUSY: readonly string[] = ["running", "landed", "review", "recheck"];
 
 export interface NowNext {
   readonly running: readonly QueueItem[];
-  /** In the order they start. */
+  /** In the order they start, without the waiting close-off job. */
   readonly queued: readonly QueueItem[];
+  /**
+   * The morning close-off job while it waits for its hour. The hub queues the next one as soon as the last has run,
+   * so it is nearly always there: the panel gives it one quiet line, not a place in the queue.
+   */
+  readonly closeOff: JobItem | null;
 }
+
+type JobItem = Extract<QueueItem, { kind: "job" }>;
+const waitingCloseOff = (i: QueueItem): i is JobItem => i.state === "queued" && i.kind === "job" && i.close_off === true;
 
 export const nowNext = (items: readonly QueueItem[]): NowNext => ({
   running: items.filter((i) => BUSY.includes(i.state)),
-  queued: items.filter((i) => i.state === "queued"),
+  queued: items.filter((i) => i.state === "queued" && !waitingCloseOff(i)),
+  closeOff: items.find(waitingCloseOff) ?? null,
 });
 
 export interface DayBlock {
