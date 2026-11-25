@@ -699,6 +699,36 @@ export type TicketDetail = z.infer<typeof TicketDetail>;
 /** A worker's report or log: plain text. */
 export const ItemText = z.string();
 
+/** One event of a worker's live feed, read from its log (sbruns.feed_events). */
+export const FeedEvent = z.discriminatedUnion("k", [
+  /** A sentence the worker wrote. */
+  z.strictObject({ k: z.literal("say"), text: z.string() }),
+  /** A tool call; its result follows with the same id. */
+  z.strictObject({ k: z.literal("tool"), id: z.string(), name: z.string(), arg: z.string() }),
+  z.strictObject({ k: z.literal("result"), id: z.string(), ok: z.boolean(), text: z.string() }),
+  /** A message from the owner a hook handed it. */
+  z.strictObject({ k: z.literal("owner"), text: z.string() }),
+  z.strictObject({ k: z.literal("start"), model: z.string() }),
+  z.strictObject({ k: z.literal("end"), ok: z.boolean(), text: z.string() }),
+  /** A line that is not Claude's stream-json: Codex, agy or stderr. */
+  z.strictObject({ k: z.literal("line"), text: z.string() }),
+]);
+export type FeedEvent = z.infer<typeof FeedEvent>;
+
+/** What a queue item's log gained since `after`. Served by GET /api/item/feed?key=&after=&log=. */
+export const ItemFeed = z.strictObject({
+  /** The log's file name; null while it has none. A new name (its integrate, a new try) starts the feed afresh. */
+  log: z.string().nullable(),
+  /** Pass it back as `after`, with `log`, to get only what comes next. */
+  offset: z.number().int().nonnegative(),
+  events: z.array(FeedEvent),
+  /** A worker runs on it now. */
+  live: z.boolean(),
+  /** The read opened on the log's end: earlier lines were left out. */
+  cut: z.boolean(),
+});
+export type ItemFeed = z.infer<typeof ItemFeed>;
+
 export const MEDIA_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp", "video/mp4", "video/webm"] as const;
 export const MediaType = z.enum(MEDIA_TYPES);
 

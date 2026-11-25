@@ -1,0 +1,9 @@
+{
+  "body": {
+    "error": "no such item",
+    "ok": false
+  },
+  "contentType": "application/json",
+  "route": "GET /api/item/feed",
+  "status": 404
+}

@@ -136,6 +136,8 @@ class ContractFixturesTest(unittest.TestCase):
     def stable(self, text):
         for k, v in sorted(self.subs.items(), key=lambda kv: -len(kv[0])):
             text = text.replace(k, v)
+        # a local path the hub cut short (a feed event's first 600 characters) is past every whole-path substitution
+        text = re.sub(re.escape(str(Path(__file__).resolve().parents[1])[:24]) + r'[^"\s]*?(?:\u2026|\\u2026)', "/fixture/\u2026", text)
         text = re.sub(r"\b\d+(?:\.\d+)? s\b", "0.0 s", text)  # a check's seconds in a report
         return re.sub(r"\(\d+ \w+ ago\)", "(1 minute ago)", text)  # git's relative commit time
 
@@ -354,6 +356,8 @@ class ContractFixturesTest(unittest.TestCase):
         self.record("ticket-unknown", "/api/ticket?key=" + quote("repo/one#99"), status=404)
         self.record("item-report", "/api/item/report?key=" + quote("repo/one#1"))
         self.record("item-log", "/api/item/log?key=" + quote("repo/one#1"))
+        self.record("item-feed", "/api/item/feed?key=" + quote("repo/one#1"))
+        self.record("item-feed-unknown", "/api/item/feed?key=nope", status=404)
         self.record("item-report-unknown", "/api/item/report?key=nope", status=404)
         self.record("media", "/api/media?key={}&name=board.png".format(quote("repo/one#1")))
         self.record("question", "/api/question/" + waiting)

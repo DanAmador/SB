@@ -1398,6 +1398,37 @@ class Hub:
             raise KeyError(key)
         return path, _tail(path, 0, LOG_SERVED) if what == "log" else Path(path).read_text(encoding="utf-8", errors="replace")
 
+    def feed(self, key, after=None, log=None):
+        """The live feed of a queue item's worker: {log, offset, events, live, cut}. It reads only the bytes its log
+        gained since `after` (the `offset` the last answer gave) while `log` names the same file; a first read, or one
+        after the worker moved on to another log (its integrate or a new try), opens on the end of the current one.
+        It writes nothing and runs only when a page asks. KeyError for an item the hub does not know."""
+        sup = self.supervisor
+        run = sup.procs.get(key) if sup is not None else None
+        with self._lock:
+            item = next((i for i in self._ever(self._data["queue"]) if i["key"] == key), None)
+        if item is None and run is None:
+            raise KeyError(key)
+        if run and run.get("log"):
+            path, start = run["log"], run.get("start") or 0
+        else:
+            path, start = (item or {}).get("log"), (item or {}).get("log_start") or 0
+        if not path or not os.path.isfile(path):
+            return {"log": None, "offset": 0, "events": [], "live": run is not None, "cut": False}
+        name = os.path.basename(path)
+        with open(path, "rb") as f:
+            size = f.seek(0, os.SEEK_END)
+            fresh = log != name or after is None or not start <= after <= size
+            begin = max(start, size - FEED_FIRST) if fresh else after
+            f.seek(begin)
+            data = f.read(min(size - begin, FEED_STEP))
+        cut = fresh and begin > start
+        skip = data.find(b"\n") + 1 if cut else 0  # opened inside a line: it starts at the next one
+        end = data.rfind(b"\n") + 1  # a line still being written waits for the next read
+        body = data[skip:end] if end > skip else b""
+        return {"log": name, "offset": begin + max(end, skip), "live": run is not None, "cut": cut,
+                "events": sbruns.feed_events(body.decode("utf-8", "replace"))}
+
     def _run_items(self):
         with self._lock:
             q = self._data["queue"]
@@ -1779,6 +1810,8 @@ SEEN_KEPT = 2000  # runs marked seen that the hub remembers; older marks drop of
 CLEARED_KEPT = 300  # finished items cleared off the queue list that the page's log still shows
 QUIET_FOR = 2 * 3600  # a row idle or on "your turn" this long is quiet (agents_clear_quiet)
 LOG_SERVED = 1 << 20  # the end of a worker's log the page can open
+FEED_FIRST = 96 << 10  # the end of a worker's log the live feed opens on
+FEED_STEP = 512 << 10  # the most of a log one feed read takes
 # a worker's pictures and clips, in <run folder>/<num>-media/: the kinds the board shows, how many, how big
 MEDIA_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif",
                ".webp": "image/webp", ".mp4": "video/mp4", ".webm": "video/webm"}
@@ -7205,6 +7238,15 @@ def make_handler(hub):
                               "text/plain; charset=utf-8")
                 except KeyError:
                     self.send(404, {"ok": False, "error": "no such file for that item"})
+            elif path == "/api/item/feed":
+                from urllib.parse import parse_qs, urlsplit
+                qs = parse_qs(urlsplit(self.path).query)
+                after = (qs.get("after") or [""])[0]
+                try:
+                    self.send(200, hub.feed((qs.get("key") or [""])[0], int(after) if after.isdigit() else None,
+                                            (qs.get("log") or [None])[0]))
+                except (KeyError, OSError):
+                    self.send(404, {"ok": False, "error": "no such item"})
             elif path == "/api/media":
                 from urllib.parse import parse_qs, urlsplit
                 qs = parse_qs(urlsplit(self.path).query)

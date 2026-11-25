@@ -198,6 +198,98 @@ def readable(text):
     return "\n".join(out)
 
 
+OWNER_SAYS = "Message from the owner, sent from the sb hub page:\n"  # sbhub.delivery's lead line
+FEED_TEXT = 600  # the most of one sentence or tool result a feed event carries
+FEED_ARG = 200  # the most of a tool's input a feed event carries
+
+
+def _first(text, size):
+    text = (text or "").strip()
+    return text if len(text) <= size else text[:size].rstrip() + "…"
+
+
+def _tool_arg(name, inp):
+    """The one input of a tool call a person reads: a command, a path, a pattern, else the first plain value."""
+    if not isinstance(inp, dict):
+        return ""
+    for k in ("command", "file_path", "path", "pattern", "url", "query", "description", "prompt"):
+        if isinstance(inp.get(k), str) and inp[k].strip():
+            return _first(inp[k].strip().splitlines()[0], FEED_ARG)
+    v = next((str(v) for v in inp.values() if isinstance(v, (str, int)) and str(v).strip()), "")
+    return _first(v.splitlines()[0] if v else "", FEED_ARG)
+
+
+def _result_text(content):
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
+    return ""
+
+
+def feed_events(text):
+    """A worker's log as the live feed's events, oldest first. Each is a dict with `k`:
+    say (the worker's own sentence), tool (a call: id, name, arg), result (id, ok, text), owner (a message from the
+    owner it was handed), start (model), end (ok, text), line (anything not Claude's stream-json: Codex, agy, stderr).
+    Empty thinking, pacing lines and heartbeats are left out."""
+    out = []
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        try:
+            d = json.loads(line)
+        except ValueError:
+            out.append({"k": "line", "text": _first(line, FEED_TEXT)})
+            continue
+        if not isinstance(d, dict):
+            out.append({"k": "line", "text": _first(line, FEED_TEXT)})
+            continue
+        t = d.get("type")
+        if t == "assistant":
+            for b in (d.get("message") or {}).get("content") or []:
+                if not isinstance(b, dict):
+                    continue
+                if b.get("type") == "text" and (b.get("text") or "").strip():
+                    out.append({"k": "say", "text": _first(b["text"], FEED_TEXT)})
+                elif b.get("type") == "tool_use":
+                    out.append({"k": "tool", "id": b.get("id") or "", "name": b.get("name") or "tool",
+                                "arg": _tool_arg(b.get("name"), b.get("input"))})
+        elif t == "user":
+            content = (d.get("message") or {}).get("content")
+            for b in content if isinstance(content, list) else []:
+                if isinstance(b, dict) and b.get("type") == "tool_result":
+                    out.append({"k": "result", "id": b.get("tool_use_id") or "", "ok": not b.get("is_error"),
+                                "text": _first(_result_text(b.get("content")), FEED_TEXT)})
+        elif t == "system" and d.get("subtype") == "init":
+            out.append({"k": "start", "model": d.get("model") or ""})
+        elif t == "system" and d.get("subtype") == "hook_response":
+            said = (d.get("stdout") or d.get("output") or "")
+            if OWNER_SAYS.strip() in said:
+                try:
+                    o = json.loads(said)
+                    said = (o.get("hookSpecificOutput") or {}).get("additionalContext") or o.get("reason") or said
+                except (ValueError, AttributeError):
+                    pass
+                for part in said.split(OWNER_SAYS)[1:]:
+                    out.append({"k": "owner", "text": _first(part, FEED_TEXT)})
+        elif t == "result":
+            res = d.get("result") if isinstance(d.get("result"), str) else ""
+            out.append({"k": "end", "ok": d.get("subtype") == "success" and not d.get("is_error"),
+                        "text": _first(res, FEED_TEXT)})
+        elif t == "item.completed" and isinstance(d.get("item"), dict):  # codex exec --json
+            it = d["item"]
+            if it.get("type") == "agent_message" and (it.get("text") or "").strip():
+                out.append({"k": "say", "text": _first(it["text"], FEED_TEXT)})
+            elif it.get("type") == "command_execution":
+                out.append({"k": "tool", "id": it.get("id") or "", "name": "Bash",
+                            "arg": _first(str(it.get("command") or ""), FEED_ARG)})
+                out.append({"k": "result", "id": it.get("id") or "", "ok": it.get("exit_code") in (0, None),
+                            "text": _first(str(it.get("aggregated_output") or ""), FEED_TEXT)})
+        elif isinstance(d.get("error"), str):
+            out.append({"k": "line", "text": _first("error: " + d["error"], FEED_TEXT)})
+    return out
+
+
 def find(vault, items, key):
     """(Run, folder, report text, log path) of one run, or None."""
     for r in _all(vault, items):

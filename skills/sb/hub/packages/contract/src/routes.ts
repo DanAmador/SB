@@ -27,6 +27,7 @@ export const ROUTES = {
   "GET /api/ticket": json({ 200: s.TicketDetail, 404: s.ApiError }),
   "GET /api/item/report": text({ 200: s.ItemText, 404: s.ApiError }),
   "GET /api/item/log": text({ 200: s.ItemText, 404: s.ApiError }),
+  "GET /api/item/feed": json({ 200: s.ItemFeed, 404: s.ApiError }),
   "GET /api/media": { kind: "media" as const, answers: { 200: s.MediaType, 206: s.MediaType, 404: z.literal(""), 416: z.literal("") } },
   "GET /api/question/:id": json({ 200: s.Question, 404: s.ApiError }),
 
