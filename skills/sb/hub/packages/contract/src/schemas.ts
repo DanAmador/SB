@@ -39,6 +39,9 @@ export const AgentRow = z.strictObject({
   map: z.string().optional(),
   /** A queue worker's row: the id of the live session in charge of its map, when there is one. */
   in_charge: z.string().optional(),
+  /** A queue worker's row: why it looks stuck and since when (the same command 3 times in a row, 3 failed tool calls
+   * in a row, no file changed for 15 minutes, context past 70%), else null (ticket 195). */
+  stuck: z.strictObject({ why: z.string(), since: Seconds }).nullable().optional(),
   state: AgentState.optional(),
   note: z.string().optional(),
   done: Count.optional(),

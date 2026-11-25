@@ -231,6 +231,15 @@ describe("runs", () => {
     expect(rows.map((r) => r.tone)).toEqual(["blocked", "quiet", "ok", "ok"]);
   });
 
+  it("flag a worker the hub reads as stuck, with its reason, beside the silent ones", () => {
+    const why = { why: "3 failed tool calls in a row", since: NOW - 120 };
+    const stuck = { ...s, agents: { ...s.agents, "m/a#4": agent("m/a#4", { role: "worker", parent: "queue", note: "Bash", at: NOW - 5, stuck: why }) } };
+    const out = runRows(stuck, ticketIndex([], stuck));
+    expect(out.map((r) => [r.item.key, r.tone])).toEqual([["m/a#3", "blocked"], ["m/a#2", "quiet"], ["m/a#4", "stuck"], ["m/a#1", "ok"]]);
+    expect(out.find((r) => r.item.key === "m/a#4")?.stuck).toEqual(why);
+    expect(rows.every((r) => r.stuck === null)).toBe(true);
+  });
+
   it("carry the title, map, account, minutes and the last action with its time", () => {
     const one = rows.find((r) => r.item.key === "m/a#1");
     expect(one).toMatchObject({ title: "Ship it", mapName: "a", project: "m", account: "work", runFor: 600, last: "running the tests", lastAt: NOW - 20 });

@@ -13,6 +13,7 @@ import { dayStart, hm, itemTitle, mapTitle, plural } from "@/lib/board.ts";
 import { useRuns } from "@/lib/hub.ts";
 import { setLink } from "@/lib/link.ts";
 import { dayBlocks, nowNext, type DayBlock } from "@/lib/now.ts";
+import { StuckFlag } from "./StuckFlag.tsx";
 import { waitWords } from "@/lib/night.ts";
 import { Store } from "@/lib/store.ts";
 import { cn } from "@/lib/utils";
@@ -137,6 +138,7 @@ function Body(): React.JSX.Element {
                   <span className="block truncate text-xs text-muted-foreground">
                     {[i.kind === "job" ? "job" : "", i.state === "running" ? (i.runner ?? i.agent ?? "") : i.state === "review" ? "second pass" : "in checks", i.started != null ? `${String(Math.floor((state.now - i.started) / 60))} min` : ""].filter(Boolean).join(" · ")}
                   </span>
+                  <StuckFlag item={i} />
                 </span>
               </li>
             ))}

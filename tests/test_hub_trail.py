@@ -73,5 +73,86 @@ class TrailTest(unittest.TestCase):
         self.assertEqual(self.h.trail("a")["ctx"], 42)
 
 
+
+class StuckTest(unittest.TestCase):
+    """A queue worker's row in /api/state carries `stuck` ({why, since}) when its trail shows it going in circles
+    (ticket 195), else null."""
+    KEY = "repo/one#1"
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.t = 1000.0
+        self.h = Hub(Path(self._tmp.name), now=lambda: self.t)
+
+    def act(self, kind, tool, label="", dt=10, ctx=None):
+        self.t += dt
+        d = {"agent": self.KEY, "role": "worker", "parent": "queue", "state": "working",
+             "trail": {"kind": kind, "tool": tool, "label": label}}
+        self.h.report({**d, "ctx": ctx} if ctx is not None else d)
+
+    def call(self, tool, label="", ok=True, ctx=None):
+        self.act("pre", tool, label, ctx=ctx)
+        self.act("post" if ok else "fail", tool, label, dt=5)
+
+    def stuck(self):
+        return self.h.state()["agents"][self.KEY]["stuck"]
+
+    def test_a_normal_run_is_not_stuck(self):
+        for _ in range(4):
+            self.call("Read", "/a.py")
+            self.call("Bash", "pnpm test")
+            self.call("Edit", "/a.py", ctx=40)
+            self.call("Bash", "pnpm test", ok=False)  # a failing test now and then is work, not a loop
+        self.assertIsNone(self.stuck())
+
+    def test_the_same_command_three_times_in_a_row(self):
+        self.call("Edit", "/a.py")
+        self.call("Bash", "pnpm vitest run src/a.test.ts")
+        start = self.t + 10
+        for _ in range(3):
+            self.call("Bash", "pnpm vitest run src/a.test.ts --reporter dot")
+        self.assertEqual(self.stuck(), {"why": "ran the same command 3 times in a row: pnpm vitest run src/a.test.ts "
+                                               "--reporter dot", "since": start})
+        self.call("Read", "/a.py")
+        self.assertIsNone(self.stuck())
+
+    def test_three_failed_tool_calls_in_a_row(self):
+        self.call("Read", "/a.py")
+        self.call("Read", "/missing.py", ok=False)
+        first = self.t
+        self.call("Grep", "nothing", ok=False)
+        self.assertIsNone(self.stuck())
+        self.call("Bash", "make", ok=False)
+        self.assertEqual(self.stuck(), {"why": "3 failed tool calls in a row", "since": first})
+
+    def test_no_file_changed_for_fifteen_minutes(self):
+        self.call("Edit", "/a.py")
+        edited = self.t  # its Write ended then
+        for i in range(80):
+            self.call("Read", "/{}.py".format(i))  # 15 s a call: 20 minutes of reading
+            if self.t - edited < 15 * 60:
+                self.assertIsNone(self.stuck())
+        self.assertEqual(self.stuck(), {"why": "changed no file for 20 minutes", "since": edited})
+        self.call("Write", "/b.py")
+        self.assertIsNone(self.stuck())
+
+    def test_context_past_seventy_percent(self):
+        self.call("Edit", "/a.py", ctx=69)
+        self.assertIsNone(self.stuck())
+        self.call("Read", "/a.py", ctx=72)
+        over = self.t - 5  # its pre carried the 72
+        self.call("Read", "/b.py", ctx=74)
+        self.assertEqual(self.stuck(), {"why": "context at 74%", "since": over})
+
+    def test_a_chat_session_and_a_finished_worker_carry_no_flag(self):
+        self.h.report({"agent": "chat-1", "state": "working", "trail": {"kind": "pre", "tool": "Read", "label": ""},
+                       "ctx": 95})
+        self.assertNotIn("stuck", self.h.state()["agents"]["chat-1"])
+        for _ in range(3):
+            self.call("Bash", "make")
+        self.h.report({"agent": self.KEY, "state": "done"})
+        self.assertIsNone(self.stuck())
+
 if __name__ == "__main__":
     unittest.main()

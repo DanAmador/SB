@@ -21,12 +21,14 @@ import { MapView } from "./MapView.tsx";
 import { NightGraph } from "./NightGraph.tsx";
 import { TickedBar, TicketTable } from "./TicketTable.tsx";
 import { useBoard } from "./context.tsx";
+import { StuckFlag } from "./StuckFlag.tsx";
 import { useTrail } from "@/lib/hub.ts";
 import { actionWords } from "@/lib/sessions.ts";
 
 const DOT: Readonly<Record<RunTone, [string, string]>> = {
   ok: ["bg-ok", "running"],
   quiet: ["bg-warn", "no report for 5 minutes or more"],
+  stuck: ["bg-warn", "looks stuck"],
   blocked: ["bg-destructive", "blocked"],
 };
 
@@ -239,7 +241,7 @@ function RunLine({ r }: { r: RunRow }): React.JSX.Element {
   const bare = r.last === "starting" || /^[A-Za-z]+$/.test(r.last);
   const last = r.tone === "blocked" || doing === null || !bare ? r.last : doing;
   return (
-    <li className={cn("group relative flex items-start gap-3 px-4 py-3 first:rounded-t-xl last:rounded-b-xl hover:bg-accent/40", r.tone === "blocked" && "bg-destructive/5", r.tone === "quiet" && "bg-warn-soft/50")}>
+    <li className={cn("group relative flex items-start gap-3 px-4 py-3 first:rounded-t-xl last:rounded-b-xl hover:bg-accent/40", r.tone === "blocked" && "bg-destructive/5", (r.tone === "quiet" || r.tone === "stuck") && "bg-warn-soft/50")}>
       <span role="img" aria-label={word} title={word} className={cn("mt-1.5 size-2.5 shrink-0 rounded-full", dot, r.tone === "ok" && "motion-safe:animate-pulse")} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1">
@@ -247,10 +249,11 @@ function RunLine({ r }: { r: RunRow }): React.JSX.Element {
             {r.title}
           </TicketTitle>
         </div>
-        <p className={cn("truncate text-sm", r.tone === "ok" ? "text-muted-foreground" : r.tone === "quiet" ? "text-warn" : "text-destructive")} title={last}>
+        <p className={cn("truncate text-sm", r.tone === "ok" || r.tone === "stuck" ? "text-muted-foreground" : r.tone === "quiet" ? "text-warn" : "text-destructive")} title={last}>
           {last}
           <span className="text-muted-foreground"> · {ago(state.now, r.lastAt)}</span>
         </p>
+        <StuckFlag item={r.item} className="mt-0.5 text-sm" />
         <div className="relative z-10 mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
           <span>
             {`${r.project} · `}

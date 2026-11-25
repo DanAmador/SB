@@ -92,6 +92,22 @@ test("Run is the landing page: one row per worker run, the silent one amber, nev
   expect(errors).toEqual([]);
 });
 
+test("a stuck worker's run row and Now card show the amber dot and the reason; a click opens its Live block", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(String(e)));
+  await page.goto("/next/?rt=now");
+  const row = page.getByRole("list", { name: "Running now" }).getByRole("listitem").filter({ hasText: "writing the copy" });
+  await expect(row.getByRole("img", { name: "looks stuck" })).toBeVisible();
+  await expect(row.getByTestId("stuck")).toHaveText("Stuck: ran the same command 3 times in a row: pnpm build");
+  const card = page.getByRole("complementary", { name: "Now and next" }).getByRole("region", { name: "Running" });
+  await expect(card.getByTestId("stuck")).toHaveCount(1);
+  await expect(card.getByTestId("stuck")).toContainText("ran the same command 3 times in a row");
+  await row.getByTestId("stuck").click();
+  await expect(page).toHaveURL(/[?&]t=other%2Fsite%233/);
+  await expect(page.getByRole("dialog").getByRole("region", { name: "Live" })).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
 test("the panel's Stop asks why, confirms and calls the stop route; no message is sent", async ({ page }) => {
   // a retry after a slow first try finds the earlier stop still recorded
   await page.request.post("/api/__restore");

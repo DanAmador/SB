@@ -11,6 +11,7 @@
         "role": "worker",
         "since": 1794528000.0,
         "state": "done",
+        "stuck": null,
         "ticket": "A"
       },
       "repo/one#2": {
@@ -21,6 +22,7 @@
         "parent": "queue",
         "ref": "repo/one#2",
         "role": "worker",
+        "stuck": null,
         "ticket": "B"
       },
       "sess-1": {

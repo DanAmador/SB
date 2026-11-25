@@ -133,6 +133,12 @@ SILENT_LOCK_LIMIT = 1800  # a lock whose holder has not reported this long is le
 NOTE_EVERY = 300  # hub-now.md is rewritten at most this often while something runs
 TRAIL_KEPT = 40  # actions kept per agent for the Sessions view
 TRAIL_LIMIT = 600  # an ended agent's trail goes this long after it ended
+# ---- a stuck queue worker (ticket 195), read off its trail: the board flags it with the first that holds
+STUCK_SAME = 3  # the same command this many times in a row
+STUCK_FAILS = 3  # this many failed tool calls in a row
+STUCK_NO_EDIT = 15 * 60  # no file changed for this long
+STUCK_CTX = 70  # context past this percent
+EDIT_TOOLS = frozenset(("Edit", "Write", "MultiEdit", "NotebookEdit"))
 DONE_WORKER_LIMIT = 600  # a finished worker stays on its session's row this long
 DECIDED_KEPT = 50
 SENT_KEPT = 30  # finished messages kept for the page's log
@@ -159,8 +165,9 @@ class Hub:
         self.queued = set()
         self._roots = {}  # a folder an agent reported from -> the checkout it belongs to (see project_root)
         self.changed = threading.Event()
-        # agent -> {"ring": the last TRAIL_KEPT actions, "ctx": context percent or None, "ended": when or None}.
-        # Held in memory only, and kept out of api/state
+        # agent -> {"ring": the last TRAIL_KEPT actions, "ctx": context percent or None, "ended": when or None,
+        # "start": its first event, "edit": its last Edit or Write or None, "ctx_over": since when ctx > STUCK_CTX}.
+        # Held in memory only, and kept out of api/state (only the `stuck` it reads goes there)
         self._trails = {}
         self.queue_kick = threading.Event()  # set by every queue write: the supervisor ticks at once
         # aliases: session id -> the agent id that session reports as (`report --agent X`)
@@ -295,12 +302,16 @@ class Hub:
     def _trail_add(self, agent, tr, ctx):
         """Fold one hook event (`tr`: kind, tool, label) into the agent's ring of actions."""
         now = self.now()
-        t = self._trails.setdefault(agent, {"ring": [], "ctx": None, "ended": None})
+        t = self._trails.setdefault(agent, {"ring": [], "ctx": None, "ended": None, "start": now, "edit": None,
+                                            "ctx_over": None})
         t["ended"] = None
         ring, kind = t["ring"], tr.get("kind")
         tool, label = str(tr.get("tool") or "")[:60], str(tr.get("label") or "")[:140]
         if isinstance(ctx, (int, float)) and not isinstance(ctx, bool):
             t["ctx"] = max(0, min(100, ctx))
+            t["ctx_over"] = (t.get("ctx_over") or now) if t["ctx"] > STUCK_CTX else None
+        if tool in EDIT_TOOLS and kind in ("pre", "post"):
+            t["edit"] = now
 
         def open_one(sub, name=None):
             return next((a for a in reversed(ring) if a["end"] is None and a["sub"] == sub
@@ -332,6 +343,30 @@ class Hub:
                         a["end"], a["ok"] = now, True
             action(end=now, ok=True)
         del ring[:-TRAIL_KEPT]
+
+    def _stuck(self, agent):
+        """Why a queue worker looks stuck, from its trail ({why, since}), or None: the same command STUCK_SAME
+        times in a row, STUCK_FAILS failed tool calls in a row, no file changed for STUCK_NO_EDIT, or context past
+        STUCK_CTX, the first of these that holds. Call with the lock held."""
+        t = self._trails.get(agent)
+        if t is None or t["ended"] is not None:
+            return None
+        now = self.now()
+        acts = [a for a in t["ring"] if not a["sub"] and a["tool"] not in ("prompt", "stop")]
+        same = acts[-STUCK_SAME:]
+        if len(same) == STUCK_SAME and all(a["tool"] == "Bash" and a["label"] and a["label"] == same[0]["label"]
+                                            for a in same):
+            return {"why": "ran the same command {} times in a row: {}".format(STUCK_SAME, same[0]["label"][:80]),
+                    "since": same[0]["start"]}
+        ended = [a for a in acts if a["end"] is not None][-STUCK_FAILS:]
+        if len(ended) == STUCK_FAILS and all(a["ok"] is False for a in ended):
+            return {"why": "{} failed tool calls in a row".format(STUCK_FAILS), "since": ended[0]["end"]}
+        last = t.get("edit") or t.get("start") or now
+        if now - last >= STUCK_NO_EDIT:
+            return {"why": "changed no file for {} minutes".format(int((now - last) // 60)), "since": last}
+        if t.get("ctx_over") is not None:
+            return {"why": "context at {}%".format(int(round(t["ctx"]))), "since": t["ctx_over"]}
+        return None
 
     def _refused(self, agent, tr):
         """A refusal of the guard hook lands on the queue item of that worker: a count and the last few lines."""
@@ -829,6 +864,7 @@ class Hub:
                     v["map"] = sbqueue.map_of(k)
                     if charge.get(v["map"]) in out["agents"]:
                         v["in_charge"] = charge[v["map"]]
+                    v["stuck"] = None if v.get("state") == "done" else self._stuck(k)
             out = {**out, "now": self.now(), "providers": dict(self.providers)}
             if self.queue_lock is not None:
                 out["queue_lock"] = dict(self.queue_lock)

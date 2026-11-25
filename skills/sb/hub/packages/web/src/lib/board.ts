@@ -503,7 +503,7 @@ export const CHAT_RUNNER = "chat";
 /** The session that works on a running item: a queue worker goes by the item's key, a chat by its own id. */
 export const sessionOf = (i: QueueItem): string => (i.runner === CHAT_RUNNER && i.agent !== null ? i.agent : i.key);
 
-export type RunTone = "ok" | "quiet" | "blocked";
+export type RunTone = "ok" | "quiet" | "stuck" | "blocked";
 export interface RunRow {
   readonly item: QueueItem;
   readonly ticket: TicketRow | undefined;
@@ -519,11 +519,14 @@ export interface RunRow {
   readonly last: string;
   readonly lastAt: number;
   readonly tone: RunTone;
+  /** Why its worker looks stuck (the hub reads it off the worker's trail), or null. */
+  readonly stuck: { readonly why: string; readonly since: number } | null;
 }
 
-const TONE_ORDER: Readonly<Record<RunTone, number>> = { blocked: 0, quiet: 1, ok: 2 };
+// stuck and silent are both amber: both ask for a look, the longer-running first
+const TONE_ORDER: Readonly<Record<RunTone, number>> = { blocked: 0, stuck: 1, quiet: 1, ok: 2 };
 
-/** One row per worker run: blocked first, then the silent ones, then by how long they have run. */
+/** One row per worker run: blocked first, then the stuck and the silent ones, then the rest; each by how long it has run. */
 export function runRows(state: State, ix: TicketIndex): RunRow[] {
   return state.queue.items
     .filter((i) => i.state === "running")
@@ -532,7 +535,8 @@ export function runRows(state: State, ix: TicketIndex): RunRow[] {
       const a = agentOf(state, sessionOf(i));
       const started = i.started ?? state.now;
       const lastAt = Math.max(a?.at ?? started, started);
-      const tone: RunTone = a !== null && rank(a) === 0 ? "blocked" : state.now - lastAt >= SILENT ? "quiet" : "ok";
+      const stuck = a?.stuck ?? null;
+      const tone: RunTone = a !== null && rank(a) === 0 ? "blocked" : stuck !== null ? "stuck" : state.now - lastAt >= SILENT ? "quiet" : "ok";
       const map = t?.map ?? itemMap(i);
       return {
         item: i,
@@ -546,6 +550,7 @@ export function runRows(state: State, ix: TicketIndex): RunRow[] {
         last: (a?.note ?? firstLine(i.note)) || "starting",
         lastAt,
         tone,
+        stuck,
       };
     })
     .sort((x, y) => TONE_ORDER[x.tone] - TONE_ORDER[y.tone] || y.runFor - x.runFor);

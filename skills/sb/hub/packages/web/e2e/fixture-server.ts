@@ -240,7 +240,8 @@ function state(): State {
       "h-1": { agent: "h-1", name: "scout", title: "Scout the tests", role: "worker", parent: "s-1", project: "/demo", state: "working", note: "reading specs", at: now() - 40 },
       "h-2": { agent: "h-2", name: "notes", title: "Skim the notes", role: "worker", parent: "s-2", project: "/other", state: "working", at: now() - 60 },
       "demo/board#5": { agent: "demo/board#5", role: "worker", parent: "queue", project: "/demo", state: "working", note: "running the tests", at: now() - 20 },
-      "other/site#3": { agent: "other/site#3", role: "worker", parent: "queue", project: "/other", state: "working", note: "writing the copy", at: now() - 15 },
+      // the hub reads it as stuck (ticket 195): the same command three times in a row
+      "other/site#3": { agent: "other/site#3", role: "worker", parent: "queue", project: "/other", state: "working", note: "writing the copy", at: now() - 15, stuck: { why: "ran the same command 3 times in a row: pnpm build", since: now() - 200 } },
       "demo/board#8": { agent: "demo/board#8", role: "worker", parent: "queue", project: "/demo", state: "working", note: "reading the usage file", at: start - 400 },
     },
     locks: {}, aliases: {}, charge: { "demo/board": "s-1" }, messages, providers: {},
