@@ -2301,6 +2301,9 @@ GIT_RULE = ("\n\nGit rule: never run git stash, stash pop/apply, checkout or res
             "like, an empty or amended commit, push, tag, reset, rm or mv inside .git, and a Write or Edit outside the repo, "
             "the run folder and temp. To compare with a clean tree, make a "
             "throwaway worktree (git worktree add --detach /tmp/clean-tree HEAD), run there, then remove it.\n")
+# the owner reads a worker's log live on the page (Hub.feed): a sentence per step is what makes it readable
+NARRATE = ("\n\nThe owner can watch your run live and message you. Before each new step, write one short sentence: what "
+           "you are about to do and why. A message from the owner comes first: answer it in one sentence, then act on it.\n")
 # a Codex worker gets no PreToolUse hook: the same rule, kept by the worker alone (its sandbox is the hard line)
 GIT_RULE_CODEX = GIT_RULE.replace("a hook refuses them, as it refuses", "these are not allowed, and neither are")
 
@@ -2328,6 +2331,7 @@ def launch(agent, brief, repo, model, env, log, resume=None):
     entry names (default workspace-write, with the network, the repo's git folder and the run folder writable)."""
     full = worker_env(repo, env)
     brief += GIT_RULE_CODEX if agent.get("kind") == "codex" else GIT_RULE
+    brief += NARRATE
     session = None
     if agent.get("kind") == "agy":
         cmd = [_exe("agy", full), "-p", brief] + (["--model", model] if model else []) + ["--output-format", "json"]
