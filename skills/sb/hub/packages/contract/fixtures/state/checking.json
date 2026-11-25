@@ -51,6 +51,7 @@
     "first_base": "0000000000000000000000000000000000000000",
     "key": "repo/one#1",
     "kind": "ticket",
+    "layer": null,
     "log": "/tmp/sb/Vault/wayfinder/repo/runs/2026-11-13-one/1.log",
     "log_start": 0,
     "map": "repo/one",

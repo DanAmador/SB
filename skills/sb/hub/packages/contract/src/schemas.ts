@@ -281,6 +281,8 @@ export const TicketItem = z.strictObject({
   branch: z.string().nullable().optional(),
   /** Its paths while it runs in a worktree: another ticket whose paths meet these waits. */
   paths: z.array(z.string()).nullable().optional(),
+  /** The stack layer (git branch) it is built on and lands on (ticket 194); null for a ticket of the checkout. */
+  layer: z.string().nullable().optional(),
   /** Its last Claude try's session id and the config dir it ran under: a stop, a restart or the review's one more
    * try resumes it (`claude --resume`); dropped when that resume fails or the try ran on agy. */
   session: z.string().optional(),
@@ -598,6 +600,10 @@ export const TicketRow = z.strictObject({
   blocked_by_open: z.array(z.union([z.number().int(), z.string()])),
   paths: z.array(z.string()),
   tier: z.string(),
+  /** Its stack layer (a git branch of its map's `stack`) and that stack, bottom to top (ticket 194); optional while
+   * an older hub runs. */
+  layer: z.string().nullable().optional(),
+  stack: z.array(z.string()).optional(),
   /** Who can tell it is done: "tests" (a worker's checks) or "owner" (a ticket the owner checks; never run). */
   check: z.enum(["tests", "owner"]),
   has_done_when: z.boolean(),
