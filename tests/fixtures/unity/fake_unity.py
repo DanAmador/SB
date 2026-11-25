@@ -24,6 +24,8 @@ FAKE_UNITY_STATUS=down answers editor_not_running.json with exit 12 instead, as 
 2026-11-22 (data.result.result is the code's returned string). The close answers FAKE_UNITY_SCENES (default: one
 scene, Assets/Scenes/Main.unity, loaded and active; `playing` for an Editor in Play; `down` for no Editor, exit 12);
 the restore answers "restored 1". Each eval's log line carries `head`, the project's HEAD at that moment.
+FAKE_UNITY_RESTORE is a comma list, one word per restore eval in turn (the last repeats): `ok` (the default) answers
+"restored 1"; `lost` answers nothing, exit 1, as when the eval's budget ran out or a reload dropped the reply.
 """
 import copy
 import json
@@ -81,6 +83,13 @@ def main(argv):
         if scenes == "down":
             print(json.dumps(sample("editor_not_running.json"), indent=2))
             return 12
+        if "restore scenes" in code:
+            with open(os.environ["FAKE_UNITY_LOG"]) as f:
+                tries = sum(1 for line in f if "restore scenes" in line)
+            modes = (os.environ.get("FAKE_UNITY_RESTORE") or "ok").split(",")
+            if modes[min(tries - 1, len(modes) - 1)] == "lost":
+                print("Error: the command timed out")
+                return 1
         answer = ("playing" if scenes == "playing" else "closed\n" + scenes) if "close scenes" in code else \
             "restored 1" if "restore scenes" in code else ""
         print(json.dumps({"success": True, "command": "command", "data": {

@@ -314,6 +314,31 @@ class ScenesClosedTest(unittest.TestCase):
         sbhub.revert_landing(self.repo, self.before, self.sha, "no unity")
         self.assertTrue(sbhub.main_backed_out(landing))
 
+    def test_a_scene_eval_gets_a_budget_past_the_five_seconds_eval_gives_by_default(self):
+        sbhub.land(self.repo, self.sha)
+        rows = [json.loads(l)["argv"] for l in self.ulog.read_text().splitlines()]
+        evals = [a for a in rows if a[:2] == ["command", "eval"]]
+        self.assertEqual(len(evals), 2)
+        for argv in evals:
+            cli, own = argv[:argv.index("--")], argv[argv.index("--") + 1:]
+            self.assertGreaterEqual(int(cli[cli.index("--timeout") + 1]), 60)  # the CLI's wait, in seconds
+            self.assertGreaterEqual(int(own[own.index("--timeout") + 1]), 60000)  # eval's own budget, in ms
+            self.assertIn("--code", own)
+
+    def test_a_restore_with_no_answer_is_tried_again_once_the_editor_answers(self):
+        os.environ["FAKE_UNITY_RESTORE"] = "lost,ok"
+        with mock.patch.object(sbhub, "SCENES_RESTORE_WAIT", 0):
+            self.assertIsNone(sbhub.land(self.repo, self.sha))
+        self.assertEqual([("close scenes" in c, "restore scenes" in c) for c, _ in self.evals()],
+                         [(True, False), (False, True), (False, True)])
+
+    def test_a_restore_that_never_answers_stops_after_its_tries(self):
+        os.environ["FAKE_UNITY_RESTORE"] = "lost"
+        with mock.patch.object(sbhub, "SCENES_RESTORE_WAIT", 0):
+            self.assertIsNone(sbhub.land(self.repo, self.sha))  # the write itself still lands
+        restores = [c for c, _ in self.evals() if "restore scenes" in c]
+        self.assertEqual(len(restores), sbhub.SCENES_RESTORE_TRIES)
+
     def test_the_old_reload_of_dirty_scenes_is_gone(self):
         self.assertFalse(hasattr(sbhub, "drop_unsaved_scenes"))
 

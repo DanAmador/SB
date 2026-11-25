@@ -2778,15 +2778,23 @@ foreach (var x in setup) if (x.isActive) x.isLoaded = true;
 UnityEditor.SceneManagement.EditorSceneManager.RestoreSceneManagerSetup(setup);
 return "restored " + setup.Length;
 """
-SCENES_EVAL = 60  # seconds one scene eval may take; a frozen Editor costs the write this much, never more
+SCENES_EVAL = 120  # seconds one scene eval may take; a frozen Editor costs the write this much, never more
+# The eval's own main-thread budget defaults to 5000 ms (Pipeline's CodeEvalCommand) and the CLI's own wait to 30 s.
+# A restore runs AssetDatabase.Refresh() after a landing and then opens Playground, which takes far more than 5 s, so
+# the eval died half-run and the Editor stayed on the empty scene (68 of 105 restores on the 11-23 night). Both are
+# set here: the CLI's --timeout (seconds) before `--`, the command's own --timeout (milliseconds) after it.
+SCENES_RESTORE_TRIES = 3
+SCENES_RESTORE_WAIT = 5 * 60  # seconds a failed restore waits for the Editor to answer again before the next try
+SCENES_RESTORE_POLL = 10
 
 
 def unity_eval(repo, code, run=subprocess.run):
     """The string `code` (C#) returned in the Editor that has `repo` open, through `unity command eval`; None when
     no Editor answered (none open, one held by a dialog, one that did not answer in SCENES_EVAL)."""
+    cmd = ["unity", "command", "eval", "--project-path", str(repo), "--format", "json",
+           "--timeout", str(SCENES_EVAL), "--", "--code", code, "--timeout", str(SCENES_EVAL * 1000)]
     try:
-        r = run(["unity", "command", "eval", "--project-path", str(repo), "--format", "json", "--code", code],
-                capture_output=True, text=True, timeout=SCENES_EVAL)
+        r = run(cmd, capture_output=True, text=True, timeout=SCENES_EVAL + 30)
     except (OSError, subprocess.TimeoutExpired):
         return None
     data = _unity_json(r.stdout) if r.returncode == 0 else None
@@ -2810,20 +2818,30 @@ def close_scenes(repo, run=subprocess.run):
     return setup
 
 
-def restore_scenes(repo, setup, run=subprocess.run):
+def restore_scenes(repo, setup, run=subprocess.run, sleep=time.sleep, clock=time.time):
     """After the write: the Editor refreshes its assets and opens the scene setup close_scenes kept again (scenes the
-    write deleted are left out). True when the Editor said it did."""
+    write deleted are left out). True when the Editor said it did. An eval that gets no answer (the refresh started a
+    compile and its reload dropped the reply, or the Editor was busy) is tried again, up to SCENES_RESTORE_TRIES
+    times, each once the Editor answers editor_status again (at most SCENES_RESTORE_WAIT): an Editor left on the
+    empty untitled scene is what raised 'Scene(s) Have Been Modified' on the next build of the 11-23 night."""
     def lit(path):
         return '@"{}"'.format(path.replace('"', '""'))
     rows = ", ".join("new UnityEditor.SceneManagement.SceneSetup {{ path = {}, isLoaded = {}, isActive = {} }}".format(
         lit(p), str(loaded).lower(), str(active).lower()) for p, loaded, active in setup)
-    out = unity_eval(repo, _RESTORE_SCENES % rows, run)
-    if not (out or "").startswith("restored"):
-        print("sb hub: could not open the scenes in {} again after a git write; the Editor shows an empty scene. "
-              "They were: {}".format(Path(str(repo)).name, ", ".join(p for p, _, _ in setup) or "(none)"),
-              file=sys.stderr, flush=True)
-        return False
-    return True
+    for n in range(SCENES_RESTORE_TRIES):
+        if n:
+            end = clock() + SCENES_RESTORE_WAIT
+            while editor_answers(repo, run) and clock() < end:
+                sleep(SCENES_RESTORE_POLL)
+        if (unity_eval(repo, _RESTORE_SCENES % rows, run) or "").startswith("restored"):
+            if n:
+                print("sb hub: opened the scenes in {} again after a git write, on try {}".format(
+                    Path(str(repo)).name, n + 1), file=sys.stderr, flush=True)
+            return True
+    print("sb hub: could not open the scenes in {} again after a git write ({} tries); the Editor shows an empty "
+          "scene. They were: {}".format(Path(str(repo)).name, SCENES_RESTORE_TRIES,
+                                        ", ".join(p for p, _, _ in setup) or "(none)"), file=sys.stderr, flush=True)
+    return False
 
 
 class scenes_closed:
