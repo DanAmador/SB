@@ -16,6 +16,7 @@ import { setLink, useLink } from "@/lib/link.ts";
 import { say } from "@/lib/notice.ts";
 import { cn } from "@/lib/utils";
 import { Checks, Pictures, StateIcon } from "./bits.tsx";
+import { LiveFeed } from "./LiveFeed.tsx";
 import { SteerBlock } from "./SteerBlock.tsx";
 import { AccountPicker } from "./AccountPicker.tsx";
 import { useBoard } from "./context.tsx";
@@ -114,6 +115,7 @@ function TicketPanel({ itemKey }: { itemKey: string }): React.JSX.Element {
           </Block>
         )}
         {t?.checks.length === 0 && <p className="text-sm text-warn">It has no checks, so it cannot be queued until its map has some.</p>}
+        {i !== null && (i.state === "running" || i.state === "review") && <LiveFeed itemKey={itemKey} paths={t?.paths ?? []} running={i.state === "running"} />}
         <QueueActions itemKey={itemKey} />
         {t && !isJob && <SteerBlock t={t} running={i?.state === "running" || i?.state === "review"} />}
         {!isJob && <TicketActions itemKey={itemKey} mapChecks={d?.map_checks ?? null} />}

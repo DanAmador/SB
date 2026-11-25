@@ -7,7 +7,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { QueueAgentsBody, QueueItemAgentBody, QueueOptionsBody, QueueParallelBody, QueueMapBody, QueueMoveBody, QueueMoveMapBody, QueueSetBody, QueueStopBody, NightRenameBody, NightStopBody, NightStartBody, NightsAnswer, NightDetail, TicketActionBody, RunDetail, RunSeenBody, MapRoute, RunsPage, SendBody, State, Tickets, Trail, addLinks, type LinkContext, type Message, type QueueItem, type TicketRow } from "@sb-hub/contract";
+import { QueueAgentsBody, QueueItemAgentBody, QueueOptionsBody, QueueParallelBody, QueueMapBody, QueueMoveBody, QueueMoveMapBody, QueueSetBody, QueueStopBody, NightRenameBody, NightStopBody, NightStartBody, NightsAnswer, NightDetail, TicketActionBody, RunDetail, RunSeenBody, MapRoute, RunsPage, SendBody, State, Tickets, Trail, ItemFeed, addLinks, type FeedEvent, type LinkContext, type Message, type QueueItem, type TicketRow } from "@sb-hub/contract";
 
 /** Every file the fixtures name exists; the server's own vault lookup is covered by the server's tests. */
 const ctx: LinkContext = { exists: () => true, real: (p) => p, findTicket: (map, num) => `/vault/${map}/issues/${String(num)}.md`, runs: {} };
@@ -187,6 +187,16 @@ const syncMaps = (): void => {
   queue.maps = [...kept, ...[...new Set(live)].filter((m) => !kept.includes(m))];
 };
 const messages: Record<string, Message> = {};
+const FEED: FeedEvent[] = [
+  { k: "start", model: "claude-opus-5-5" },
+  { k: "say", text: "Reading the ticket and the board's tests first." },
+  { k: "tool", id: "t1", name: "Bash", arg: "pnpm vitest run src/board.test.ts" },
+  { k: "result", id: "t1", ok: false, text: "1 failed: the board draws no row for a cleared job" },
+  { k: "say", text: "Fixing the cleared-job row, then running the tests again." },
+  { k: "tool", id: "t2", name: "Edit", arg: "/demo/src/board.ts" },
+  { k: "result", id: "t2", ok: true, text: "The file /demo/src/board.ts has been updated successfully." },
+];
+const MORE: FeedEvent[] = [{ k: "tool", id: "t3", name: "Bash", arg: "pnpm vitest run" }];
 const seen: string[] = [];
 
 // ---- History: runs the queue and the vault's run folders know of, and the pictures of two of them ----
@@ -278,6 +288,23 @@ createServer((req, res) => {
       const actions = TRAILS[agent];
       if (actions === undefined) send(res, 404, { ok: false, error: "no trail for that agent" });
       else send(res, 200, Trail.parse({ agent, ctx: agent === "demo/board#5" ? 72 : null, ended: null, actions }));
+      return;
+    }
+    if (req.method === "GET" && path === "/api/item/feed") {
+      // a worker that adds one line per read and answers a message it was handed, as the hub's log reader would show it
+      const u = new URL(req.url ?? "", "http://x").searchParams;
+      const key = u.get("key") ?? "";
+      if (!queue.items.some((i) => i.key === key)) { send(res, 404, { ok: false, error: "no such item" }); return; }
+      const after = u.get("log") === "5.log" ? Number(u.get("after") ?? "0") : 0;
+      const events: FeedEvent[] = after === 0 ? [...FEED] : [];
+      if (after > 0 && after <= MORE.length) events.push(MORE[after - 1] as FeedEvent);
+      for (const m of Object.values(messages)) {
+        if (m.to !== key || m.delivered !== null) continue;
+        m.delivered = now();
+        m.how = "PostToolUse";
+        events.push({ k: "owner", text: m.text }, { k: "say", text: "Got it: wrapping up after this test run." });
+      }
+      send(res, 200, ItemFeed.parse({ log: "5.log", offset: after + 1, events, live: true, cut: false }));
       return;
     }
     if (req.method === "GET" && path === "/api/runs") {
