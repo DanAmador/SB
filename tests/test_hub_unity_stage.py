@@ -95,6 +95,16 @@ class UnityStageTest(RunnerCase):
         self.assertEqual(self.compiles(), [])  # nothing compiled a stage the integrator called broken
         self.until(lambda: self.hub.state()["locks"] == {})
 
+    def test_the_first_unity_stage_runs_on_sonnet_and_the_stage_after_a_failed_one_on_opus(self):
+        os.environ["FAKE_INTEGRATE"] = "broken"
+        self.only(1)
+        self.until(lambda: len(self.workers()) == 2)
+        os.environ["FAKE_INTEGRATE"] = "works"
+        self.until(lambda: self.state_of("repo/one#1") == "done")
+        integrators = [l["model"] for l in self.launched if l["brief"].startswith("# Bring ")]
+        self.assertEqual(integrators, ["sonnet", "opus"])
+        self.assertEqual([w["model"] for w in self.workers()], ["sonnet", "sonnet"])  # the worker's own tier stays
+
     def chat_commit(self):
         """Someone else's commit on main while a Unity stage holds the Editor (sk4te 2026-11-17 18:38: a chat
         session's tools/play and pen fix)."""

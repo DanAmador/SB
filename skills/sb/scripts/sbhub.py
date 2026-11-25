@@ -3097,6 +3097,20 @@ def landing_lock(repo):
     return "land:" + Path(str(repo)).name
 
 
+def unity_failed(res):
+    """A result from TicketRun.again for a failed Unity stage: its newest fail is marked `unity`, so the ticket's next
+    stage runs on INTEGRATE_RETRY_MODEL."""
+    for f in ((res.get("retry") or {}).get("fails") or res.get("fails") or [])[-1:]:
+        f["unity"] = True
+    return res
+
+
+def integrate_model(item):
+    """The integrator's model: Sonnet, or Opus once one of the ticket's earlier Unity stages failed (ticket 196, as
+    OPUS_FROM moves a worker's retries)."""
+    return INTEGRATE_RETRY_MODEL if any(f.get("unity") for f in item.get("fails") or []) else INTEGRATE_MODEL
+
+
 def unity_lock(repo):
     """The lock a repo's one Unity editor goes by: chat sessions take it with sb_lock, the hub while it lands."""
     return "unity:" + Path(str(repo)).name
@@ -3262,7 +3276,8 @@ def add_to_checklist(path, t, lines):
 # ---- the Unity stage: a Unity project's workers never drive the Editor; each landed ticket gets an integrator run
 # in the main folder, holding the repo's Unity lock until it ends, one ticket at a time (templates/integrate.md)
 INTEGRATE = Path(__file__).resolve().parents[1] / "templates" / "integrate.md"
-INTEGRATE_MODEL = "opus"
+INTEGRATE_MODEL = "sonnet"  # a ticket's first Unity stage (ticket 196)...
+INTEGRATE_RETRY_MODEL = "opus"  # ...and every stage after one of its stages failed (`unity` on its fails)
 INTEGRATE_MINUTES = 45
 UNITY_WAIT = "waits for Unity"  # a recheck note: another ticket is in its Unity stage; not a try, not counted
 UNITY_POLL = 2 * 60
@@ -4549,7 +4564,8 @@ class TicketRun:
                                  stage["sha"], checks)
             if verdict == "no unity":
                 return self.result(item, "recheck", why + "; backed out, it lands again", run, stage["sha"], checks)
-            return self.again(item, run, "{}; its landing was backed out.{}".format(why, tell), stage["sha"], checks)
+            return unity_failed(self.again(item, run, "{}; its landing was backed out.{}".format(why, tell),
+                                           stage["sha"], checks))
         failed = self.after_landing(landing, sbqueue.after_landing(t["checks"]), checks)
         if failed:
             passed, reason = failed
@@ -4557,7 +4573,7 @@ class TicketRun:
                 return self.fail(item, run, "the Unity pass: " + reason + tell, stage["sha"], checks)
             if passed is None:
                 return self.result(item, "recheck", reason.splitlines()[0], run, stage["sha"], checks)
-            return self.again(item, run, reason + tell, stage["sha"], checks)
+            return unity_failed(self.again(item, run, reason + tell, stage["sha"], checks))
         if stage.get("tree"):
             drop_tree(repo, stage["tree"], stage.get("branch") or "")
         run["landed_on"] = stage["before"]
@@ -5869,7 +5885,7 @@ class Supervisor:
                    "SB_HUB_RUN": str(folder), "SB_HUB_UNITY": "integrator"}
             if self.runner.stopping():
                 raise OSError("the hub is stopping")
-            run["p"] = self.hub.launcher(inst, brief, repo, INTEGRATE_MODEL, env, stage["log"])
+            run["p"] = self.hub.launcher(inst, brief, repo, integrate_model(item), env, stage["log"])
         except (OSError, ValueError, KeyError, subprocess.SubprocessError) as e:
             print("sb hub queue: {}: no integrator ({}); judged on its checks".format(key, e), file=sys.stderr,
                   flush=True)

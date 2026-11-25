@@ -297,7 +297,8 @@ createServer((req, res) => {
       if (!queue.items.some((i) => i.key === key)) { send(res, 404, { ok: false, error: "no such item" }); return; }
       const after = u.get("log") === "5.log" ? Number(u.get("after") ?? "0") : 0;
       const events: FeedEvent[] = after === 0 ? [...FEED] : [];
-      if (after > 0 && after <= MORE.length) events.push(MORE[after - 1] as FeedEvent);
+      const more = after > 0 ? MORE[after - 1] : undefined;
+      if (more) events.push(more);
       for (const m of Object.values(messages)) {
         if (m.to !== key || m.delivered !== null) continue;
         m.delivered = now();
