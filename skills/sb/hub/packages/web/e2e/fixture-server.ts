@@ -503,6 +503,15 @@ createServer((req, res) => {
       }
       if (b.text === "fail") { send(res, 400, { ok: false, error: "refused for the test" }); return; }
       actions.push({ action: path.slice("/api/ticket/".length), key: b.key, text: b.text ?? "" });
+      // as the hub: Comment, Done when or Files on a running ticket is saved and its worker told (ticket 197)
+      const act = path.slice("/api/ticket/".length);
+      if (queue.items.some((i) => i.key === b.key && i.state === "running") && ["comment", "done_when", "paths"].includes(act)) {
+        const id = `m${String(Object.keys(messages).length + 1)}`;
+        const what = act === "comment" ? "commented on your ticket" : act === "paths" ? "changed your ticket's files" : "changed your ticket's Done when";
+        messages[id] = { to: b.key, text: `The owner ${what} (already saved on the ticket; work to it from now on):\n${(b.text ?? "").trim()}`, at: now(), delivered: null, how: null };
+        send(res, 200, { ok: true, told: id });
+        return;
+      }
       if (path.endsWith("/checks") && b.key.startsWith("demo/bare#")) bareChecks = (b.text ?? "").split(";").map((c) => c.trim()).filter((c) => c !== "");
       send(res, 200, { ok: true });
       return;

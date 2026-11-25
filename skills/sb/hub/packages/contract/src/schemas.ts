@@ -836,6 +836,9 @@ export const TicketActionBody = z.strictObject({
 // ---- POST answers ----
 
 export const Ok = z.strictObject({ ok: z.literal(true) });
+/** POST /api/ticket/:action: ok; `told` only for Comment, Done when or Files on a ticket whose worker runs: the id of
+ * the message that tells the worker, or null when the worker had not joined the hub yet (the edit is saved anyway). */
+export const TicketActionOut = z.strictObject({ ok: z.literal(true), told: z.string().nullable().optional() });
 /** Every 400, 403, 404 and 500 with a body. */
 export const ApiError = z.strictObject({ ok: z.literal(false), error: z.string() });
 export type ApiError = z.infer<typeof ApiError>;

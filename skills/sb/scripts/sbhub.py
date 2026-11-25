@@ -1512,8 +1512,11 @@ class Hub:
                 "map_uri": obsidian_uri(_vault() / "wayfinder" / name / "map.md")}
 
     def ticket_action(self, action, key, text=None, commit=None):
-        """Done, Drop, Release, Comment, Tier or Checks on one ticket through sbmap; refused while a queue worker
-        runs it. A failed sbmap raises ValueError with sbmap's message; a done one refreshes the ticket list."""
+        """Done, Drop, Release, Comment, Tier or Checks on one ticket through sbmap. While a queue worker runs it, only
+        WHILE_RUNNING is taken: saved as at any time, then sent to the worker as a message naming the change (the
+        answer's `told`: the message id, or None when it could not be queued); the rest is refused, and everything
+        while its Opus review runs. A failed sbmap raises ValueError with sbmap's message; a done one refreshes the
+        ticket list."""
         if action not in TICKET_ACTIONS:
             raise ValueError("unknown action: {}".format(action))
         key = self._moved(key)
@@ -1522,7 +1525,7 @@ class Hub:
         with self._lock:
             busy = next((i["state"] for i in self._data["queue"]["items"]
                          if i["key"] == key and i["state"] in ("running", "review")), None)
-        if busy:
+        if busy and not (busy == "running" and action in WHILE_RUNNING):
             raise ValueError("a worker is running it; wait until it ends" if busy == "running" else
                              "its Opus review is running; wait until it ends")
         try:
@@ -1576,7 +1579,27 @@ class Hub:
             if rc != 0:
                 raise ValueError(err or out or "sbmap failed")
         self._fresh_tickets()
+        if busy:
+            return {"ok": True, "told": self._tell_worker(key, action, text)}
         return {"ok": True}
+
+    def _tell_worker(self, key, action, text):
+        """The message a running worker gets when the owner changed its ticket (ticket_action, WHILE_RUNNING): what
+        changed and its new value. Its id, or None when the worker has not joined the hub yet."""
+        if action == "comment":
+            head, value = "The owner commented on your ticket", " ".join(str(text or "").split())
+        elif action == "paths":
+            files = [p.strip() for p in str(text or "").splitlines() if p.strip()]
+            head, value = "The owner changed your ticket's files", "\n".join("- " + f for f in files) or "none"
+        else:
+            head, value = "The owner changed your ticket's Done when", str(text or "").strip()
+        words = "{} (already saved on the ticket; work to it from now on):\n{}".format(head, value)
+        if len(words) > MESSAGE_MAX:
+            words = words[:MESSAGE_MAX - 40].rstrip() + "\n(cut: read the ticket for the rest)"
+        try:
+            return self.send(key, words)["id"]
+        except ValueError:
+            return None
 
     def queue_integrate(self, keys):
         """A Unity pass for failed tickets of a Unity project whose work is in the checkout already: each is queued
@@ -1875,6 +1898,7 @@ def hub_checks_section(passed, reason, sha, checks, report_text, stamp):
 TICKET_ACTIONS = ("done", "drop", "release", "comment", "rule", "tier", "checks", "recheck", "done_when", "paths", "after")
 # the steering fields: action -> (what the comment calls it, the ticket row's key for its old value)
 STEER = {"done_when": ("Done when", "done_when"), "paths": ("files", "paths"), "after": ("what it comes after", "blocked_by")}
+WHILE_RUNNING = ("comment", "done_when", "paths")  # saved while its worker runs, and the worker is told (ticket 197)
 
 
 def sbmap_call(*args):

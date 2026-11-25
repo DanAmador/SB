@@ -484,19 +484,60 @@ class TicketActionTest(unittest.TestCase):
             self.h.ticket_action("after", "repo/one#1", "97")
         self.assertEqual(self.text(1), before)
 
-    def test_a_ticket_a_worker_runs_is_left_alone_and_empty_words_are_refused(self):
+    def running(self, state="running", joined=True):
+        """Ticket 1 in the queue in `state`, its worker joined to the hub (as its hooks do) unless not `joined`."""
         with self.h._lock:
-            self.h._data["queue"]["items"].append({**Hub._item("repo/one#1"), "state": "running"})
+            self.h._data["queue"]["items"].append({**Hub._item("repo/one#1"), "state": state})
+            if joined:
+                self.h._data["agents"]["repo/one#1"] = {"role": "worker", "parent": "queue", "status": "running"}
+
+    def messages(self, to="repo/one#1"):
+        return [m["text"] for m in self.h.state()["messages"].values() if m["to"] == to]
+
+    def test_comment_done_when_and_files_on_a_running_ticket_are_saved_and_its_worker_is_told_each(self):
+        self.running()
+        out = self.h.ticket_action("done_when", "repo/one#1", "It works\nand is tested.")
+        self.assertEqual(self.row(1)["done_when"], "It works\nand is tested.")
+        self.assertTrue(out["told"])
+        out = self.h.ticket_action("paths", "repo/one#1", "src/a.py\n docs/\n")
+        self.assertEqual(self.row(1)["paths"], ["src/a.py", "docs/"])
+        self.h.ticket_action("comment", "repo/one#1", "Keep the old  name.")
+        self.assertIn("Keep the old name.", self.text(1))
+        self.assertEqual(self.messages(), [
+            "The owner changed your ticket's Done when (already saved on the ticket; work to it from now on):\n"
+            "It works\nand is tested.",
+            "The owner changed your ticket's files (already saved on the ticket; work to it from now on):\n"
+            "- src/a.py\n- docs/",
+            "The owner commented on your ticket (already saved on the ticket; work to it from now on):\n"
+            "Keep the old name."])
+        self.assertEqual(self.h.ticket_action("comment", "repo/one#2", "idle ticket"), {"ok": True})  # nobody to tell
+
+    def test_an_edit_before_the_worker_joined_is_saved_and_says_nobody_was_told(self):
+        self.running(joined=False)
+        self.assertEqual(self.h.ticket_action("done_when", "repo/one#1", "Later."), {"ok": True, "told": None})
+        self.assertEqual(self.row(1)["done_when"], "Later.")
+
+    def test_a_ticket_a_worker_runs_refuses_the_rest_and_empty_words_are_refused(self):
+        self.running()
         before = self.text(1)
-        for action in ("done", "drop", "release", "comment", "tier", "checks", "done_when", "paths", "after"):
+        for action in ("done", "drop", "release", "tier", "checks", "after", "rule"):
             with self.assertRaisesRegex(ValueError, "a worker is running it", msg=action):
                 self.h.ticket_action(action, "repo/one#1", "opus")
         self.assertEqual(self.text(1), before)
+        self.assertEqual(self.messages(), [])
         for action in ("done", "drop", "comment", "checks"):
             with self.assertRaises(ValueError, msg=action):
                 self.h.ticket_action(action, "repo/one#2", "  ")
         with self.assertRaises(ValueError):
             self.h.ticket_action("explode", "repo/one#2", "x")
+
+    def test_while_its_review_runs_every_action_is_refused(self):
+        self.running("review")
+        before = self.text(1)
+        for action in ("done", "drop", "release", "comment", "tier", "checks", "done_when", "paths", "after"):
+            with self.assertRaisesRegex(ValueError, "its Opus review is running", msg=action):
+                self.h.ticket_action(action, "repo/one#1", "opus")
+        self.assertEqual((self.text(1), self.messages()), (before, []))
 
 
 class ScanTest(unittest.TestCase):

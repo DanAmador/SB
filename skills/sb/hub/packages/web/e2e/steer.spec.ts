@@ -75,11 +75,24 @@ test("a loop in the order is refused with sbmap's words and the note is left as 
   expect(await noteOf(page, 2)).toBe(before);
 });
 
-test("a running ticket's three fields are read-only and say Stop it first", async ({ page }) => {
+test("a running ticket's Done when changes and its worker is told; the order waits until it stops", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(String(e)));
   await page.goto("/next/?t=demo%2Fboard%235");
-  const steer = page.getByRole("dialog").getByRole("region", { name: "Steer" });
-  await expect(steer).toContainText("Stop it first");
-  for (const name of ["Edit Done when", "Edit Files", "Edit Comes after"]) await expect(steer.getByRole("button", { name })).toBeDisabled();
+  const sheet = page.getByRole("dialog");
+  const steer = sheet.getByRole("region", { name: "Steer" });
+  await expect(steer).toContainText("a change to Done when or Files is saved and sent to it");
+  await expect(steer.getByRole("button", { name: "Edit Comes after" })).toBeDisabled();
+  await expect(steer.getByRole("button", { name: "Edit Files" })).toBeEnabled();
+  await steer.getByRole("button", { name: "Edit Done when" }).click();
+  await steer.getByRole("textbox").fill("The cleared-job row shows in the board test.");
+  await steer.getByRole("button", { name: "Save…" }).click();
+  await expect(steer.getByRole("alert")).toContainText("Its worker gets the new one as a message.");
+  await steer.getByRole("button", { name: "Yes, save it" }).click();
+  const told = sheet.getByRole("region", { name: "Live" }).getByRole("list", { name: "Your messages to it" });
+  await expect(told).toContainText("changed your ticket's Done when");
+  await expect(told).toContainText("The cleared-job row shows in the board test.");
+  expect(errors).toEqual([]);
 });
 
 test("Steer fits a phone: no sideways scroll at 375 px, in light and dark", async ({ page }) => {

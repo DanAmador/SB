@@ -1,8 +1,10 @@
 /**
  * Steer: the three words of a ticket that fix a worker which drifted. Done when, its files and what it comes after,
  * each with Edit, a field, and Save with a confirmation. The hub writes them through sbmap and leaves a dated comment
- * with the old value; a loop in the order or an unknown ticket comes back as sbmap's own words. Read-only while the
- * ticket's worker runs. Title and why stay in Obsidian.
+ * with the old value; a loop in the order or an unknown ticket comes back as sbmap's own words. While its worker runs,
+ * Done when and Files still change, and the hub sends the worker the new value (ticket 197; the message shows under
+ * the Live block's "Your messages to it"); what it comes after waits until it stops. All three wait while its Opus
+ * review runs. Title and why stay in Obsidian.
  */
 import { IconPencil } from "@tabler/icons-react";
 import { useState } from "react";
@@ -18,8 +20,15 @@ const NAMES: Readonly<Record<Field, string>> = { done_when: "Done when", paths: 
 const SAVED: Readonly<Record<Field, string>> = { done_when: "Done when changed.", paths: "Files changed.", after: "Order changed." };
 const num = (b: number | string): string => String(b);
 
+/** The fields its running worker can be told about; the order is not one of them. */
+const LIVE: ReadonlySet<Field> = new Set<Field>(["done_when", "paths"]);
+
 export function SteerBlock({ t, running }: { t: TicketRow; running: boolean }): React.JSX.Element {
-  const { ix, writes, down } = useBoard();
+  const { ix, writes, down, state } = useBoard();
+  const key = `${t.map}#${String(t.num)}`;
+  // `running` is on while its worker or its review runs; only a worker can be told
+  const worker = running && state.queue.items.some((i) => i.key === key && i.state === "running");
+  const locked = (f: Field): boolean => running && !(worker && LIVE.has(f));
   const [field, setField] = useState<Field | null>(null);
   const [text, setText] = useState("");
   const [picked, setPicked] = useState<readonly string[]>([]);
@@ -48,7 +57,7 @@ export function SteerBlock({ t, running }: { t: TicketRow; running: boolean }): 
     const f = field;
     setConfirm(false);
     setField(null);
-    const out = await writes.ticket(f satisfies TicketAction, { key: `${t.map}#${String(t.num)}`, text: value(f) }, SAVED[f]);
+    const out = await writes.ticket(f satisfies TicketAction, { key, text: value(f) }, worker ? `${SAVED[f]} The worker is told.` : SAVED[f]);
     say(out);
     if (!out.ok) {
       setField(f);
@@ -58,21 +67,27 @@ export function SteerBlock({ t, running }: { t: TicketRow; running: boolean }): 
   return (
     <section className="flex flex-col gap-1.5" aria-label="Steer">
       <h3 className="text-xs font-medium text-muted-foreground">Steer</h3>
-      {running && <p className="text-sm text-warn">Stop it first: its worker is running, so these cannot change now.</p>}
+      {running && (
+        <p className="text-sm text-warn">
+          {worker
+            ? "Its worker is running: a change to Done when or Files is saved and sent to it. The order waits until it stops."
+            : "Its review is running, so these cannot change now."}
+        </p>
+      )}
       <ul className="flex flex-col gap-2">
         {(["done_when", "paths", "after"] as const).map((f) => (
           <li key={f} className="flex flex-col gap-1 rounded-lg border bg-card p-2.5" data-field={f}>
             <div className="flex items-center justify-between gap-2">
               <span className="text-xs font-medium">{NAMES[f]}</span>
-              <Button size="xs" variant="outline" disabled={running || down} aria-label={`Edit ${NAMES[f]}`} onClick={() => { open(f); }}>
+              <Button size="xs" variant="outline" disabled={locked(f) || down} aria-label={`Edit ${NAMES[f]}`} onClick={() => { open(f); }}>
                 <IconPencil aria-hidden />
-                {running ? "Stop it first" : "Edit"}
+                {locked(f) ? (worker ? "Stop it first" : "Wait for the review") : "Edit"}
               </Button>
             </div>
             <p className="line-clamp-3 whitespace-pre-line break-words text-sm text-muted-foreground" data-testid={`steer-${f}`}>
               {current[f] || "none"}
             </p>
-            {field === f && !running && (
+            {field === f && !locked(f) && (
               <form
                 className="mt-1 flex flex-col gap-2"
                 onSubmit={(ev) => {
@@ -110,7 +125,7 @@ export function SteerBlock({ t, running }: { t: TicketRow; running: boolean }): 
                 {err !== null && <p role="alert" className="text-sm text-destructive">{err}</p>}
                 {confirm ? (
                   <div role="alert" className="flex flex-col gap-2 rounded-md bg-warn-soft p-2.5 text-sm">
-                    <span>Change {NAMES[f]}? The old value stays as a comment on the ticket.</span>
+                    <span>Change {NAMES[f]}? The old value stays as a comment on the ticket.{worker ? " Its worker gets the new one as a message." : ""}</span>
                     <div className="flex gap-2">
                       <Button type="button" size="xs" disabled={down} autoFocus onClick={() => void save()}>
                         Yes, save it

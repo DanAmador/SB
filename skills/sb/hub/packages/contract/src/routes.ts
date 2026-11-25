@@ -66,7 +66,7 @@ export const ROUTES = {
   "POST /api/agents/clear-quiet": post(s.EmptyBody, { 200: s.ClearQuietAnswer }),
   "POST /api/agents/scan": post(s.EmptyBody, { 200: s.ScanAnswer }),
   "POST /api/review/now": post(s.EmptyBody, { 200: s.ReviewNowAnswer }),
-  "POST /api/ticket/:action": post(s.TicketActionBody, { 200: s.Ok }),
+  "POST /api/ticket/:action": post(s.TicketActionBody, { 200: s.TicketActionOut }),
 } as const satisfies Record<string, RouteSpec>;
 
 export type RouteName = keyof typeof ROUTES;
