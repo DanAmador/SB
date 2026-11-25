@@ -113,6 +113,8 @@ class LayerTest(RunnerCase):
         item = self.items()["repo/one#1"]
         sha = item["commit"]
         self.assertEqual(tip(self.repo, "L1"), sha)  # fast-forwarded in its worktree
+        self.assertIn("landed on the stack layer `L1`", self.reviewed[-1]["brief"])  # the review reads the layer
+        self.assertIn("show L1:<path>", self.reviewed[-1]["brief"])
         self.assertEqual(parents(self.repo, sha), [before["L1"]])
         self.assertEqual((own1 / "one" / "done.txt").read_text(), "work for repo/one/001\n")
         for b in ("L2", "L3"):
@@ -235,6 +237,67 @@ class MergeUpTest(unittest.TestCase):
         self.assertIsNone(sbqueue.lower_layer_first(t, items, by))
         self.assertEqual(sbqueue.layers_above({"layer": "L1", "stack": list(STACK)}), ["L2", "L3"])
         self.assertIn("not in its map's stack", sbqueue.layer_problem({"layer": "L9", "stack": list(STACK)}))
+
+
+class ReadyTreeTest(unittest.TestCase):
+    """A hub worktree gets the main folder's node_modules linked in and the repo's husky hooks made there."""
+
+    def setUp(self):
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        self.repo = Path(d.name).resolve() / "r"
+        make_repo(self.repo)
+        (self.repo / ".gitignore").write_text("node_modules/\n")  # a trailing slash: a link is not ignored by it
+        (self.repo / ".husky").mkdir()
+        (self.repo / ".husky" / "pre-commit").write_text("exit 0\n")
+        (self.repo / "apps" / "web").mkdir(parents=True)
+        (self.repo / "apps" / "web" / "x.txt").write_text("x\n")
+        git(self.repo, "add", ".")
+        git(self.repo, "commit", "-q", "-m", "app")
+        for nm in (self.repo / "node_modules", self.repo / "apps" / "web" / "node_modules"):
+            (nm / "pkg" / "node_modules" / "deep").mkdir(parents=True)
+            (nm / "pkg" / "index.js").write_text("ok\n")
+        husky = self.repo / "node_modules" / ".bin" / "husky"
+        husky.parent.mkdir()
+        husky.write_text("#!/bin/sh\nmkdir -p .husky/_ && echo \"*\" > .husky/_/.gitignore && pwd > .husky/_/made-in\n")
+        husky.chmod(0o755)
+
+    def test_a_new_worktree_links_node_modules_runs_husky_and_drops_cleanly(self):
+        tree = self.repo.parent / "home" / "t1"
+        self.assertIsNone(sbhub.make_tree(str(self.repo), str(tree), "sb/t1", "HEAD"))
+        for rel in ("node_modules", "apps/web/node_modules"):
+            self.assertTrue((tree / rel).is_symlink(), rel)
+            self.assertEqual(os.path.realpath(tree / rel), str(self.repo / rel))
+        self.assertFalse((tree / "node_modules" / "pkg" / "node_modules").is_symlink())  # none inside another
+        self.assertEqual((tree / ".husky" / "_" / "made-in").read_text().strip(), str(tree))
+        self.assertEqual(git(tree, "status", "--porcelain"), "")  # the links are never unsaved work
+        self.assertEqual(sbhub.unsaved(str(tree)), [])
+        sbhub.drop_tree(str(self.repo), str(tree), "sb/t1")
+        self.assertFalse(tree.exists())
+        self.assertEqual((self.repo / "node_modules" / "pkg" / "index.js").read_text(), "ok\n")
+        self.assertEqual((self.repo / "apps" / "web" / "node_modules" / "pkg" / "index.js").read_text(), "ok\n")
+
+    def test_sb_node_modules_names_another_checkout_to_link_from(self):
+        other = self.repo.parent / "other"
+        (other / "node_modules" / "theirs").mkdir(parents=True)
+        (other / "apps" / "web" / "node_modules").mkdir(parents=True)
+        git(self.repo, "config", "sb.nodeModules", str(other / "node_modules"))  # its node_modules or the checkout
+        tree = self.repo.parent / "home" / "t3"
+        self.assertIsNone(sbhub.make_tree(str(self.repo), str(tree), "sb/t3", "HEAD"))
+        self.assertEqual(os.path.realpath(tree / "node_modules"), str(other / "node_modules"))
+        self.assertEqual(os.path.realpath(tree / "apps" / "web" / "node_modules"), str(other / "apps" / "web" / "node_modules"))
+        self.assertFalse((tree / ".husky" / "_").exists())  # the other checkout has no husky: none ran
+        sbhub.drop_tree(str(self.repo), str(tree), "sb/t3")
+        git(self.repo, "config", "sb.nodeModules", str(self.repo.parent / "missing"))
+        self.assertEqual(sbhub.modules_source(str(self.repo)), str(self.repo))  # a folder without packages: main's
+
+    def test_a_repo_without_husky_or_packages_gets_a_plain_worktree(self):
+        bare = self.repo.parent / "plain"
+        make_repo(bare)
+        tree = self.repo.parent / "home" / "t2"
+        self.assertIsNone(sbhub.make_tree(str(bare), str(tree), "sb/t2", "HEAD"))
+        self.assertFalse(os.path.lexists(tree / "node_modules"))
+        self.assertEqual(git(tree, "status", "--porcelain"), "")
 
 
 if __name__ == "__main__":

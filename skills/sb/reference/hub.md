@@ -180,8 +180,16 @@ the vault. Only the running hub writes the queue (`$SB_HUB_HOME/state.json`); CL
     of its stack, in its repo, is queued or at work (running, recheck, unclean, handed); its card says
     `comes after <key> on the lower layer <branch>`. While layer tickets run, no other ticket of the repo
     starts, and the other way round.
-  - **Not done**: the Opus review reads the ticket's commit (`git show`) from the main folder, whose files are not
-    the layer's.
+  - **Review**: the Opus review gets the ticket's diff as for any ticket, and its section says the ticket is on
+    its layer: it reads files with `git show <layer>:<path>`, never the main folder's, which is on another branch.
+- **Hub worktrees are ready to build** (any worktree ticket, layer or not): the main folder's `node_modules` (up to
+  two levels down) are linked in, so checks and git hooks run with no install (a monorepo's install may need a
+  package token). When the main folder's branch needs other packages than the worktrees' (a stack built beside
+  it), name a checkout that has the right ones: `git -C <repo> config sb.nodeModules <checkout or its
+  node_modules>`; a path with no `node_modules` falls back to the main folder's. A link the repo's `.gitignore` does not ignore (`node_modules/` with a slash does not match a
+  link) is added to `<git dir>/info/exclude`, so it is never committed nor unsaved. A repo that uses husky
+  (`.husky/` and `node_modules/.bin/husky`) gets `husky` run in the worktree, so `.husky/_` and its hooks exist
+  there. Removing the worktree removes the links, never the packages.
 - **Jobs**: a one-off prompt for any agent, in a wayfinder project or any git checkout by path
   (`sbhub queue job …`, or the page's New job form). No claim, no verdict: exit 0 is done.
 

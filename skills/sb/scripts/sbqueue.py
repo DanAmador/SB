@@ -620,12 +620,24 @@ def _clean_copy(repo, sha, run):
             capture_output=True, text=True)
     if r.returncode != 0:
         return None
-    repo = Path(repo)
-    for nm in [repo / "node_modules", *repo.glob("*/node_modules"), *repo.glob("*/*/node_modules")]:
-        target = d / nm.relative_to(repo)
-        if nm.is_dir() and target.parent.is_dir() and not target.exists():
-            target.symlink_to(nm, target_is_directory=True)
+    link_modules(repo, d)
     return d
+
+
+def link_modules(src, dst):
+    """Link `src`'s installed packages (node_modules up to two levels down, none inside another node_modules) into
+    the tree `dst` where its folder exists and nothing is there yet: checks and hooks run with no install. The links
+    made, as paths relative to `dst`."""
+    src, dst, made = Path(src), Path(dst), []
+    for nm in [src / "node_modules", *src.glob("*/node_modules"), *src.glob("*/*/node_modules")]:
+        rel = nm.relative_to(src)
+        if "node_modules" in rel.parts[:-1]:
+            continue
+        target = dst / rel
+        if nm.is_dir() and not nm.is_symlink() and target.parent.is_dir() and not os.path.lexists(target):
+            target.symlink_to(nm, target_is_directory=True)
+            made.append(str(rel))
+    return made
 
 
 def _drop_clean_copy(repo, d, run):

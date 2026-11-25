@@ -2715,7 +2715,49 @@ def make_tree(repo, tree, branch, base):
     _git_run(repo, "worktree", "prune")
     Path(tree).parent.mkdir(parents=True, exist_ok=True)
     rc, out, err = _git_run(repo, "worktree", "add", "--quiet", "-B", branch, tree, base)
-    return None if rc == 0 else (err or out or "git worktree add failed")
+    if rc != 0:
+        return err or out or "git worktree add failed"
+    ready_tree(repo, tree)
+    return None
+
+
+def modules_source(repo):
+    """The checkout whose installed packages a hub worktree of `repo` links in: `git config sb.nodeModules <path>`
+    (a checkout, or its node_modules folder) when it names a folder, else the repo's main folder. The main folder
+    may be on a branch whose packages do not match the worktrees' (the monorepo's annotation stack)."""
+    raw = _git(repo, "config", "--get", "sb.nodeModules")
+    if raw:
+        p = Path(os.path.expanduser(raw))
+        p = p if p.is_absolute() else Path(repo) / p
+        p = p.parent if p.name == "node_modules" else p
+        if (p / "node_modules").is_dir():
+            return str(p)
+        print("sb hub: sb.nodeModules of {} names {}, which has no node_modules; the main folder's are linked".format(
+            repo, raw), file=sys.stderr, flush=True)
+    return str(repo)
+
+
+def ready_tree(repo, tree):
+    """A new worktree made ready to build and commit like the main folder: the installed node_modules linked in, the
+    main folder's or those of `git config sb.nodeModules` (modules_source)
+    (sbqueue.link_modules; a link git does not ignore is added to the repo's info/exclude, so it is never committed
+    nor counted as unsaved), and, in a repo that uses husky, `husky` run there so its git hooks exist in the tree
+    (`.husky/_` is not tracked). A full install would need the repo's package tokens; nothing here installs."""
+    made = sbqueue.link_modules(modules_source(repo), tree)
+    loose = [m for m in made if _git_run(tree, "check-ignore", "-q", m)[0] != 0]
+    if loose:
+        rc, path, _ = _git_run(repo, "rev-parse", "--path-format=absolute", "--git-common-dir", timeout=10)
+        if rc == 0 and path:
+            exclude = Path(path) / "info" / "exclude"
+            exclude.parent.mkdir(parents=True, exist_ok=True)
+            with open(exclude, "a", encoding="utf-8") as f:
+                f.write("".join("/{}\n".format(m) for m in loose))
+    husky = Path(tree) / "node_modules" / ".bin" / "husky"
+    if (Path(tree) / ".husky").is_dir() and os.path.exists(husky):
+        try:
+            subprocess.run([str(husky)], cwd=str(tree), capture_output=True, text=True, timeout=120, env=GIT_ENV)
+        except (OSError, subprocess.SubprocessError):
+            pass  # the commit then runs without the repo's hooks, as before
 
 
 def landing_failed(item):
@@ -3246,6 +3288,10 @@ LAYER_BRIEF = ("\n\n## Your stack layer\n\nThis ticket is on the layer `{layer}`
                "commits onto `{layer}`, moves `{layer}` to them and merges it up into every branch above it. Never "
                "switch, rebase, merge or push any branch yourself, and never touch the main folder.\n")
 
+LAYER_REVIEW = ("\n\nThis ticket landed on the stack layer `{layer}`, not on the branch the main folder {repo} has "
+                "checked out, so the files there are not this ticket's. Read every file from the layer: "
+                "`git -C {repo} show {layer}:<path>` (or `git -C {repo} grep <text> {layer}`); its commit {sha} is on "
+                "`{layer}`. Never check out, switch or change a branch.\n")
 
 BLOCKED_BY_DIALOG = "blocked_by_dialog"
 
@@ -4879,6 +4925,9 @@ class TicketRun:
                 shown if rc == 0 else "", t["repo"], shas, diff, report, report_text, review, redo=redo or None,
                 second=sha, diff_max=cap, play=sbqueue.play_lines(t.get("done_when")),
                 media=folder / "{}-media".format(int(t["num"]))))
+            layer = sbqueue.layer_of(t) or item.get("layer")
+            if layer:  # the main folder is on another branch: its files are not this ticket's
+                sections[-1] += LAYER_REVIEW.format(layer=layer, repo=t["repo"], sha=sha[:12] if sha else "its commit")
         if unity is None and any(sbqueue.play_lines(run["t"].get("done_when")) for _, run, _ in entries):
             unity = {"lock": unity_lock(t0["repo"]), "held": False}  # outside the queue: no lock, nothing played
         brief = sbqueue.review_brief(sections, t0["repo"], unity=unity)
