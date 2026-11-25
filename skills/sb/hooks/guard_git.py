@@ -51,7 +51,7 @@ UNITY_POLL_WAY_OUT = ("Do not poll Unity by hand: it keeps the Editor and its lo
 UNITY_TEST_WAY_OUT = ("Never start a test run in the Unity Editor: Unity first asks to save the open scenes (Save / "
                       "Cancel / Don't Save), and that box holds the Editor until a person clicks it, which stops every "
                       "ticket of the night (2026-11-23: 5.5 hours). A test the ticket asks for is done when it is "
-                      "written and compiles: say so under its check, and the owner runs the suite.")
+                      "written and compiles; to run EditMode tests, `unity command sb_tests --filter <name>` asks nothing.")
 LOOPS = {"while", "until", "for"}
 
 

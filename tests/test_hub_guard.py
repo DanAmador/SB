@@ -233,6 +233,7 @@ class UnityTestRunRefusalTest(RefusedTest):
             for c in (self.REAL, "unity test Assets/Tests --mode EditMode", "unity command run_tests",
                       "unity command eval --code 'var api = ScriptableObject.CreateInstance<TestRunnerApi>(); api.Execute(s);'"):
                 self.deny(bash(c, env=env), "written and compiles")
+                self.deny(bash(c, env=env), "`unity command sb_tests --filter <name>`")  # the way out, by name
         self.deny(bash(self.REAL, env={"SB_HUB_UNITY": "off"}), "last stage")  # a worker: no unity at all, as before
 
     def test_an_eval_file_that_starts_the_test_runner_is_refused_and_another_is_not(self):
@@ -245,7 +246,8 @@ class UnityTestRunRefusalTest(RefusedTest):
 
     def test_reading_test_state_and_the_checks_stay_allowed(self):
         for c in ("unity command test_status --format json", "unity command list_tests --mode EditMode | wc -c",
-                  "unity command sb_check", "tools/compile", "grep -rn TestRunnerApi Assets/Tests"):
+                  "unity command sb_check", "tools/compile", "unity command sb_tests --filter SbChecksTests",
+                  "grep -rn TestRunnerApi Assets/Tests"):
             self.assertIsNone(bash(c, env=INTEGRATOR), c)
 
 
