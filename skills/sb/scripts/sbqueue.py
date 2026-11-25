@@ -159,6 +159,54 @@ def order(tickets, queued, maps=()):
 
 HOLDING = ("running", "landed", "review", "recheck", "unclean", "handed")  # at work or not judged yet: its map stays current
 
+# ---- stack layers (ticket 194): a map's `stack` names its git branches bottom to top, each merged into the next; a
+# ticket's `layer` is the one it is built on. The hub cuts its worktree from the layer's tip, lands it on the layer,
+# then merges the layer up into every branch above it. A layer ticket that is queued or in one of OFF_LAYER has not
+# reached its layer yet: tickets of higher layers of its stack wait for it.
+OFF_LAYER = ("queued", "running", "recheck", "unclean", "handed")
+
+
+def stack_of(t):
+    """The ticket's map's stack, bottom to top ([] when it has none)."""
+    return [str(b) for b in (t or {}).get("stack") or [] if str(b).strip()]
+
+
+def layer_of(t):
+    """The branch a ticket is built on and lands on, or None: an ordinary ticket of the checkout's branch."""
+    return str((t or {}).get("layer") or "").strip() or None
+
+
+def layer_problem(t):
+    """Why a layer ticket cannot run (its layer is not in its map's stack), or None."""
+    layer, stack = layer_of(t), stack_of(t)
+    if layer and stack and layer not in stack:
+        return "its layer {} is not in its map's stack ({})".format(layer, ", ".join(stack))
+    return None
+
+
+def layers_above(t):
+    """The branches above the ticket's layer in its stack, bottom to top: what its landing merges the layer into."""
+    layer, stack = layer_of(t), stack_of(t)
+    return stack[stack.index(layer) + 1:] if layer in stack else []
+
+
+def lower_layer_first(t, items, by, repo_of=None):
+    """(key, layer) of a ticket of a lower layer of `t`'s stack, in its repo, that has not reached its layer yet
+    (queued or at work), or None: a higher layer starts only once every lower one landed. `items` are the queue's,
+    `by` the fresh rows by key; an item's own `layer` (set when it started) wins over its row's."""
+    stack, layer = stack_of(t), layer_of(t)
+    if layer not in stack:
+        return None
+    mine = stack.index(layer)
+    repo_of = repo_of or (lambda i: (by.get(i["key"]) or {}).get("repo") or i.get("repo"))
+    for i in items:
+        if i.get("kind") != "ticket" or i["key"] == key(t) or i["state"] not in OFF_LAYER:
+            continue
+        other = i.get("layer") or layer_of(by.get(i["key"]))
+        if other in stack and stack.index(other) < mine and repo_of(i) == t.get("repo"):
+            return i["key"], other
+    return None
+
 
 def map_queueable(tickets, name, live):
     """(keys, left_out) for queueing every open ticket of map `name`: what waits on an earlier ticket of the map

@@ -68,8 +68,10 @@ Bases see the whole route. It answers what an agent should never compute or type
                                         those sections; options= one a line, the recommended one ➡️)
                                         ticket properties (status, type, claimed_by, ...)
     sbmap.py mapset   <map> key=value ...
-                                        map properties (checks="cmd one; cmd two"); `set` also takes
-                                        tier=sonnet|opus and checks="..." on a ticket
+                                        map properties (checks="cmd one; cmd two"; stack="base,mid,top": a
+                                        stack of git branches, bottom to top, each merged into the next);
+                                        `set` also takes tier=sonnet|opus, checks="..." and layer=<branch>
+                                        (one of the map's stack; empty: none) on a ticket
     sbmap.py claim    <map> <NNN> --by "<session or harness/model>" [--no-sync]
     sbmap.py block    <map> <NNN> <refs, comma separated: numbers, map folder names, or none> [--no-sync]
     sbmap.py move     <map> <NNN> --to <map> [--no-sync]
@@ -163,8 +165,8 @@ SHAPES = {  # mermaid node shape per ticket type
 TICKET_KEYS = ["wayfinder", "operonId", "number", "title", "why", "project", "aliases", "status", "type",
                "priority", "tier", "check", "ruling", "created", "filed_during", "completed", "review", "review_note",
                "map", "blocked_by", "claimed_by", "bundle", "bundle_position",
-               "paths", "repo", "commit", "ref", "pr", "github", "tags"]
-MAP_KEYS = ["wayfinder", "project", "status", "aliases", "repo", "github", "tags"]
+               "paths", "layer", "repo", "commit", "ref", "pr", "github", "tags"]
+MAP_KEYS = ["wayfinder", "project", "status", "aliases", "repo", "stack", "github", "tags"]
 # Operon's priorities are letters, S highest, C its default; sbmap takes either the letter or a word
 OPERON_PRIORITIES = ("S", "A", "B", "C", "D", "E", "F")
 PRIORITY_WORDS = {"urgent": "S", "critical": "S", "high": "A", "normal": "C", "medium": "C", "low": "E",
@@ -549,6 +551,12 @@ def split_list(value):
 
 def split_checks(value):
     return [x.strip() for x in str(value).split(";") if x.strip()]
+
+
+def stack_of(m):
+    """A map's stack: its git branches bottom to top (`mapset stack=a,b,c`), [] when it has none."""
+    raw = m.props.get("stack") or []
+    return [str(x).strip() for x in (raw if isinstance(raw, list) else split_list(raw)) if str(x).strip()]
 
 
 def opt(args, name, default=None):
@@ -1512,6 +1520,14 @@ def cmd_set(args):
             one_of("review", v, REVIEWS)
         if k == "checks":
             v = split_checks(v)
+        if k == "layer":
+            v = v.strip()
+            stack = stack_of(m)
+            if v and stack and v not in stack:
+                sys.exit(f"sbmap: layer {v} is not in the map's stack ({', '.join(stack)})")
+            if not v:
+                props.pop("layer", None)
+                continue
         props[k] = v
     curr_wf = OPERON_TO_WF_STATUS.get(str(props.get("status", "")).lower(), str(props.get("status", "")).lower())
     if curr_wf != "claimed":
@@ -2651,7 +2667,9 @@ def cmd_mapset(args):
     props = dict(m.props)
     for kv in args[1:]:
         k, _, v = kv.partition("=")
-        props[k] = split_checks(v) if k == "checks" else v
+        props[k] = split_checks(v) if k == "checks" else split_list(v) if k == "stack" else v
+        if k == "stack" and not props[k]:
+            del props[k]
     m.save(props, m.body)
     print(f"{m.folder.name}: " + ", ".join(args[1:]))
 
@@ -2740,6 +2758,7 @@ def cmd_tickets(args):
                 "blocked_by": [b for b, _ in blockers],
                 "blocked_by_open": [b for b, cleared in blockers if not cleared],
                 "paths": t.paths, "tier": str(t.props.get("tier") or "sonnet"),
+                "layer": str(t.props.get("layer") or "").strip() or None, "stack": stack_of(m),
                 "check": str(t.props.get("check") or "tests"),
                 "has_done_when": bool(sec.get("Done when")), "done_when": sec.get("Done when", ""),
                 "question": sec.get("Question", ""), "out": sec.get("Not this ticket", ""),

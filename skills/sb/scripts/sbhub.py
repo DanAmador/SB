@@ -2733,9 +2733,9 @@ def drop_tree(repo, tree, branch):
     _git_run(repo, "branch", "-D", branch)
 
 
-def rebase_tree(tree, onto):
-    """Replay the worktree's commits onto `onto`, the checkout's newest commit: None, or why not (the rebase is
-    undone, so the worktree stays as the worker left it)."""
+def rebase_tree(tree, onto, where="the checkout's branch"):
+    """Replay the worktree's commits onto `onto`, the newest commit of `where` (the checkout's branch, or a stack
+    layer's): None, or why not (the rebase is undone, so the worktree stays as the worker left it)."""
     if _git_run(tree, "merge-base", "--is-ancestor", onto, "HEAD")[0] == 0:
         return None  # already on top of it
     rc, out, err = _git_run(tree, "rebase", "--autostash", onto, timeout=300)
@@ -2744,8 +2744,8 @@ def rebase_tree(tree, onto):
     clash = _git(tree, "diff", "--name-only", "--diff-filter=U").split()
     _git_run(tree, "rebase", "--abort")
     if clash:
-        return "its commits conflict with {} on the checkout's branch in {}".format(
-            onto[:9], ", ".join(clash[:5]) + (" and {} more".format(len(clash) - 5) if len(clash) > 5 else ""))
+        return "its commits conflict with {} on {} in {}".format(
+            onto[:9], where, ", ".join(clash[:5]) + (" and {} more".format(len(clash) - 5) if len(clash) > 5 else ""))
     return "git rebase onto {} failed: {}".format(onto[:9], firstline(err or out))
 
 
@@ -2786,6 +2786,147 @@ def land(repo, sha):
     changed = _git(repo, "diff", "--name-only", "-z", head, sha).split("\0")
     blocking = sorted(set(unsaved(repo) or ()) & {n for n in changed if n})
     return blocking or "git merge --ff-only into the checkout failed: " + (err or out or "no reason given")
+
+
+# ---- stack layers (ticket 194): a ticket with a `layer` (one branch of its map's `stack`, bottom to top) is built in
+# its own worktree cut from the layer's tip, rebased onto that tip and checked, then lands by moving only the layer
+# branch: a fast-forward in the worktree that has it checked out, else the ref itself after an ancestor check. The
+# layer is then merged up into each branch above it, merge commits only, none rebased, nothing pushed. The main
+# folder never changes: a layer or a branch above it checked out there stops the landing. One landing per layer at
+# a time, across processes: a file lock in the repo's git folder.
+LAYER_PARALLEL = 4  # layer tickets of one layer at once when the repo sets no `sb.parallel`
+LAYER_LOCK_WAIT = 600  # seconds a landing waits for another landing on its layer before it is held for a recheck
+LAYER_LOCK_POLL = 0.5
+
+
+def layer_tip(repo, branch):
+    """The commit a local branch points at, or None when there is no such branch."""
+    return _git(repo, "rev-parse", "--verify", "--quiet", "refs/heads/" + branch) or None
+
+
+def layer_parallel(repo):
+    """How many tickets of one layer may run at once: `git config sb.parallel` when set, else LAYER_PARALLEL."""
+    return parallel_of(repo) if _git(repo, "config", "--get", "sb.parallel") else LAYER_PARALLEL
+
+
+def _same_dir(a, b):
+    try:
+        return os.path.realpath(str(a)) == os.path.realpath(str(b))
+    except OSError:
+        return False
+
+
+def checked_out(repo, branch):
+    """The folder of the worktree that has `branch` checked out (the main folder is one), or None."""
+    path = None
+    for line in _git(repo, "worktree", "list", "--porcelain").splitlines():
+        if line.startswith("worktree "):
+            path = line[len("worktree "):]
+        elif line == "branch refs/heads/" + branch:
+            return path
+    return None
+
+
+class layer_lock:
+    """`with layer_lock(repo, layer) as held:` one landing on a layer at a time, also across hub processes and
+    `run-ticket`. `held` is False when another held it for LAYER_LOCK_WAIT seconds (the landing waits for a
+    recheck)."""
+
+    def __init__(self, repo, layer, wait=None):
+        self.repo, self.layer, self.f = repo, layer, None
+        self.wait = LAYER_LOCK_WAIT if wait is None else wait
+
+    def __enter__(self):
+        rc, common, _ = _git_run(self.repo, "rev-parse", "--path-format=absolute", "--git-common-dir", timeout=10)
+        folder = Path(common) if rc == 0 and common else Path(self.repo) / ".git"
+        name = "sb-layer-" + re.sub(r"[^A-Za-z0-9._-]+", "-", self.layer) + ".lock"
+        self.f = open(folder / name, "a")
+        end = time.time() + self.wait
+        while True:
+            try:
+                fcntl.flock(self.f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return True
+            except OSError:
+                if time.time() >= end:
+                    self.f.close()
+                    self.f = None
+                    return False
+                time.sleep(LAYER_LOCK_POLL)
+
+    def __exit__(self, *exc):
+        if self.f is not None:
+            fcntl.flock(self.f, fcntl.LOCK_UN)
+            self.f.close()
+        return False
+
+
+def move_layer(repo, layer, old, sha):
+    """Move the branch `layer` from `old` to `sha` (a descendant of it): None when done, MOVED when the layer gained
+    commits since the rebase (rebase again), a list of files when the worktree that has the layer checked out holds
+    unsaved changes the move would touch, else why not. The main folder is never changed."""
+    tip = layer_tip(repo, layer)
+    if tip != old:
+        return MOVED if tip else "its layer branch {} is gone".format(layer)
+    if _git_run(repo, "merge-base", "--is-ancestor", old, sha)[0] != 0:
+        return MOVED
+    where = checked_out(repo, layer)
+    if where and _same_dir(where, project_root(repo)):
+        return "its layer branch {} is checked out in the main folder {}, which the hub never changes".format(
+            layer, where)
+    if where:  # its own worktree: fast-forwarded there, so its files follow the branch
+        rc, out, err = _git_run(where, "merge", "--ff-only", "--quiet", sha, timeout=300)
+        if rc == 0:
+            return None
+        changed = _git(where, "diff", "--name-only", "-z", old, sha).split("\0")
+        blocking = sorted(set(unsaved(where) or ()) & {n for n in changed if n})
+        return blocking or "git merge --ff-only of {} in {} failed: {}".format(layer, where, firstline(err or out))
+    rc, out, err = _git_run(repo, "update-ref", "-m", "sb hub: landed on its layer", "refs/heads/" + layer, sha, old)
+    if rc == 0:
+        return None
+    return MOVED if layer_tip(repo, layer) != old else "git update-ref of {} failed: {}".format(layer, firstline(err or out))
+
+
+def merge_up(repo, branches):
+    """Merge each branch of `branches` (bottom to top) into the next with a merge commit: ([upper branches it merged
+    into], None), or (those, why) at the first that could not be merged, naming it. A branch that already holds the
+    one below is left as it is. A branch checked out in a worktree is merged there (its hooks run); one checked out
+    nowhere gets its merge commit written without a checkout (`git merge-tree`) and its ref moved after a check;
+    one checked out in the main folder stops it, as a conflict does (a merge in a worktree is aborted)."""
+    merged, root = [], project_root(repo)
+    for low, up in zip(branches, branches[1:]):
+        lt, ut = layer_tip(repo, low), layer_tip(repo, up)
+        if not lt or not ut:
+            return merged, "the stack's branch {} is gone".format(low if not lt else up)
+        if _git_run(repo, "merge-base", "--is-ancestor", lt, ut)[0] == 0:
+            continue  # it holds the one below already
+        msg = "Merge branch '{}' into {}".format(low, up)
+        where = checked_out(repo, up)
+        if where and _same_dir(where, root):
+            return merged, "could not merge {} into {}: {} is checked out in the main folder {}, which the hub never " \
+                           "changes".format(low, up, up, where)
+        if where:
+            rc, out, err = _git_run(where, "merge", "--no-ff", "--no-edit", "-m", msg, low, timeout=600)
+            if rc != 0:
+                clash = _git(where, "diff", "--name-only", "--diff-filter=U").split()
+                _git_run(where, "merge", "--abort")
+                return merged, ("merging {} into {} conflicts in {}".format(low, up, ", ".join(clash[:5])) if clash else
+                                "could not merge {} into {} in {}: {}".format(low, up, where, firstline(err or out)))
+            merged.append(up)
+            continue
+        rc, out, err = _git_run(repo, "merge-tree", "--write-tree", "--name-only", "--no-messages", ut, lt, timeout=600)
+        lines = out.splitlines()
+        if rc == 1:
+            return merged, "merging {} into {} conflicts in {}".format(low, up, ", ".join(lines[1:6]) or "its files")
+        if rc != 0 or not lines:
+            return merged, "could not merge {} into {}: {}".format(low, up, firstline(err or out))
+        rc, new, err = _git_run(repo, "commit-tree", lines[0], "-p", ut, "-p", lt, "-m", msg)
+        if rc != 0 or not new:
+            return merged, "could not write the merge of {} into {}: {}".format(low, up, firstline(err))
+        rc, out, err = _git_run(repo, "update-ref", "-m", "sb hub: " + msg, "refs/heads/" + up, new, ut)
+        if rc != 0:
+            return merged, "could not move {} to its merge of {}: {}".format(up, low, firstline(err or out))
+        merged.append(up)
+    return merged, None
 
 
 # ---- the open scenes closed around every git write the hub makes in a Unity project's main folder (landing, back-out,
@@ -3099,6 +3240,11 @@ UNITY_WORKER = ("\n\n## Unity is the last stage, not yours\n\nThis is a Unity pr
                 "`## Play checks`: numbered steps that show your change working in Play, each with what should "
                 "happen and the numbers to measure. A test the ticket asks for is met when it is written and compiles: "
                 "nobody runs a test in the night, because Unity's save-scenes box would freeze the Editor.\n")
+
+LAYER_BRIEF = ("\n\n## Your stack layer\n\nThis ticket is on the layer `{layer}` of a stack of branches. Your branch "
+               "`{branch}` starts from the tip of `{layer}`; commit there. Once your checks pass, the hub rebases your "
+               "commits onto `{layer}`, moves `{layer}` to them and merges it up into every branch above it. Never "
+               "switch, rebase, merge or push any branch yourself, and never touch the main folder.\n")
 
 
 BLOCKED_BY_DIALOG = "blocked_by_dialog"
@@ -3910,14 +4056,23 @@ class TicketRun:
         """(run, None) once the worker runs, or (None, result) when it could not start: the board, the base
         commit, the worktree, the claim or the launch failed. `item["model"]` is the model it runs on."""
         key, nnn = item["key"], "{:03d}".format(int(t["num"]))
-        board = board if board is not None else self.board(t["map"])
+        layer = sbqueue.layer_of(t)
         tree, branch = item.get("tree"), item.get("branch")
+        if layer and not tree:  # a layer ticket always gets its own worktree (`run-ticket` too)
+            tree, branch = tree_of(self.hub.home, t["repo"], t["map"], t["num"])
         bare = {"t": t, "agent": name, "inst": inst, "tree": tree, "branch": branch}
+        if layer and (sbqueue.layer_problem(t) or not layer_tip(t["repo"], layer)):
+            return None, self.result(item, "failed", "could not start: " + (
+                sbqueue.layer_problem(t) or "its layer branch {} does not exist".format(layer)), bare)
+        board = board if board is not None else self.board(t["map"])
         # a later try (cut off by a limit, or after a failed one) goes on in the worktree it had
         reuse = bool(tree) and bool(item.get("resume") or item.get("tries") or item.get("from_chat")) and Path(tree).is_dir()
         where = tree if tree else t["repo"]
-        # a try after one cut off by a limit or a logout keeps its base: the verdict sees all of the ticket's commits
-        base = item.get("resume") and item.get("base_sha") or _git(where if reuse else t["repo"], "rev-parse", "HEAD")
+        # a try after one cut off by a limit or a logout keeps its base: the verdict sees all of the ticket's commits;
+        # a layer ticket's first try starts from its layer's tip, never the checkout's
+        base = item.get("resume") and item.get("base_sha") or (
+            _git(tree, "rev-parse", "HEAD") if reuse else layer_tip(t["repo"], layer) if layer else
+            _git(t["repo"], "rev-parse", "HEAD"))
         if board is None or not base:
             return None, self.result(item, "failed", "could not start: " + (
                 "sbmap run failed" if board is None else "the repo has no commit to start from"), bare)
@@ -3946,6 +4101,8 @@ class TicketRun:
         else:
             brief = sbqueue.brief(t, _plain_words(t), str(folder), where, branch or
                                   _git(t["repo"], "rev-parse", "--abbrev-ref", "HEAD") or "the current branch")
+            if layer:
+                brief += LAYER_BRIEF.format(layer=layer, branch=branch)
         if item.get("retry") and not sid:
             prev = Path(item["run"]) / "{}.md".format(int(t["num"])) if item.get("run") else None
             brief += retry_brief(item, tree, branch, item.get("first_base") or base,
@@ -4021,6 +4178,8 @@ class TicketRun:
                     "blocking": run["blocking"]}
         if passed is None:
             return self.result(item, "recheck", reason.splitlines()[0], run, sha, checks)
+        if run.get("stack_failed"):  # its work is on its layer: no try can undo that, the owner merges up by hand
+            return self.fail(item, run, reason, sha, checks)
         if tree and not passed:
             reason += "\nIts work stays on branch {} in {}.".format(branch, tree)
         if passed:  # a worker that did the work lands, whatever it printed afterwards; its map's second pass judges it
@@ -4093,8 +4252,10 @@ class TicketRun:
         checkout's newest commit and its checks run there, in its worktree; nothing lands."""
         report = Path(run["log"]).parent / "{}.md".format(int(t["num"])) if run.get("log") else None
         checks = []
-        head = _git(t["repo"], "rev-parse", "HEAD")
-        why = rebase_tree(tree, head) if head else "the checkout has no commit"
+        layer = sbqueue.layer_of(t)
+        head = layer_tip(t["repo"], layer) if layer else _git(t["repo"], "rev-parse", "HEAD")
+        why = (rebase_tree(tree, head, "its layer " + layer if layer else "the checkout's branch") if head else
+               "its layer branch {} is gone".format(layer) if layer else "the checkout has no commit")
         if why:
             return False, "could not hand it over: " + why, None, checks
         passed, reason, sha = sbqueue.verdict({**t, "checks": sbqueue.before_landing(t["checks"])}, tree, head,
@@ -4114,6 +4275,8 @@ class TicketRun:
             why = firstline(reason) if passed is None else "the checkout has unsaved changes to " + ", ".join(run["blocking"])
             return {**self.result(item, "handed", "not landed yet ({}); ask again".format(why), run, sha, checks),
                     "checked": reason, "to": ask["by"]}
+        if run.get("stack_failed"):
+            return self.fail(item, run, reason, sha, checks)
         if not passed:
             return self.again(item, run, reason, sha, checks)
         said = "{} reviewed it and landed it{}".format(ask["by"], ": " + ask["note"] if ask.get("note") else "")
@@ -4130,7 +4293,12 @@ class TicketRun:
         tree, branch = ((item["tree"], item["branch"]) if item.get("tree") and item.get("branch")
                         else tree_of(self.hub.home, t["repo"], t["map"], t["num"]))
         reuse = bool(item.get("tries") or item.get("from_chat")) and Path(tree).is_dir()
-        base = (item.get("base_sha") if reuse else None) or _git(tree if reuse else t["repo"], "rev-parse", "HEAD")
+        layer = sbqueue.layer_of(t)
+        if layer and (sbqueue.layer_problem(t) or not layer_tip(t["repo"], layer)):
+            return None, None, sbqueue.layer_problem(t) or "its layer branch {} does not exist".format(layer)
+        base = (item.get("base_sha") if reuse else None) or (
+            _git(tree, "rev-parse", "HEAD") if reuse else layer_tip(t["repo"], layer) if layer else
+            _git(t["repo"], "rev-parse", "HEAD"))
         if not base:
             return None, None, "the repo has no commit to start from"
         if not reuse:
@@ -4146,7 +4314,8 @@ class TicketRun:
         fields = {"repo": t["repo"], "map": t["map"], "title": t["title"], "tree": tree, "branch": branch,
                   "paths": list(t.get("paths") or []), "base_sha": base, "first_base": item.get("first_base") or base,
                   "run": str(folder), "log": str(folder / "{}.log".format(int(t["num"]))), **frozen_of(t)}
-        return fields, sbqueue.brief(t, _plain_words(t), str(folder), tree, branch), None
+        brief = sbqueue.brief(t, _plain_words(t), str(folder), tree, branch)
+        return fields, brief + (LAYER_BRIEF.format(layer=layer, branch=branch) if layer else ""), None
 
     def chat_done(self, item, run, to):
         """The result of a ticket a chat built and said is done (ticket 173), judged as a worker's would be: `handed`
@@ -4165,6 +4334,8 @@ class TicketRun:
             return {**self.result(item, "unclean", "landed on its branch {}, waiting for a clean checkout: unsaved "
                                   "changes to {}".format(run.get("branch"), ", ".join(run["blocking"])), run, sha, checks),
                     "blocking": run["blocking"]}
+        if run.get("stack_failed"):
+            return self.fail(item, run, reason, sha, checks)
         if passed:
             return {**self.result(item, "landed", "built by {}, landed, not judged yet: the Opus review judges it when its "
                                   "map's run ends".format(chat), run, sha, checks), "checked": reason}
@@ -4173,9 +4344,58 @@ class TicketRun:
     def land(self, t, run, tree):
         self.rebuild.landing_in(t["repo"], 1)
         try:
-            return self._land(t, run, tree)
+            return (self._land_layer if sbqueue.layer_of(t) else self._land)(t, run, tree)
         finally:
             self.rebuild.landing_in(t["repo"], -1)
+
+    def _land_layer(self, t, run, tree):
+        """(passed, reason, sha, checks) of a layer ticket (ticket 194), under its layer's lock: its commits rebased
+        onto the layer's tip and judged there by its checks, then the layer branch moved to them (move_layer) and
+        merged up the stack (merge_up). The main folder never changes; after-landing and Unity check lines, which
+        run in the main folder, are not run. A merge up that fails sets run["stack_failed"]: the ticket's work is on
+        its layer, so it fails for the owner with the branch named, never tried again."""
+        repo, layer = t["repo"], sbqueue.layer_of(t)
+        report = Path(run["log"]).parent / "{}.md".format(int(t["num"])) if run.get("log") else None
+        first = {**t, "checks": sbqueue.before_landing(t["checks"])}
+        skipped = sbqueue.after_landing(t["checks"])
+        checks, sha = [], None
+        with layer_lock(repo, layer) as held:
+            if not held:
+                return None, "could not land yet: another landing holds the lock of the layer {}".format(layer), \
+                    _git(tree, "rev-parse", "HEAD") or None, checks
+            for _ in range(LAND_TRIES):
+                checks = []
+                tip = layer_tip(repo, layer)
+                why = rebase_tree(tree, tip, "its layer " + layer) if tip else "its layer branch {} is gone".format(layer)
+                if why:
+                    return False, "could not land: " + why, None, checks
+                passed, reason, sha = sbqueue.verdict(first, tree, tip, run=_recording(checks), report=report,
+                                                        first_base=run.get("first_base"))
+                if not passed:
+                    return passed, reason, sha, checks
+                why = move_layer(repo, layer, tip, sha) if sha else None
+                if why == MOVED:
+                    continue  # the layer gained a commit meanwhile: on top of it, and checked again
+                if isinstance(why, list):  # unsaved edits in the layer's own worktree: it lands once they are gone
+                    return None, "could not land yet: the worktree {} of the layer {} has unsaved changes to {}".format(
+                        checked_out(repo, layer), layer, ", ".join(why)), sha, checks
+                if why:
+                    return False, "could not land: " + why, sha, checks
+                if sha:
+                    run["landed_on"] = tip
+                above = sbqueue.layers_above(t)
+                merged, why = merge_up(repo, [layer] + above) if sha else ([], None)
+                note = "landed on its layer {}".format(layer) + (
+                    "; merged up into " + ", ".join(merged) if merged else "") + (
+                    "; its after-landing check lines were not run (they run in the main folder, which a layer "
+                    "ticket never changes): " + "; ".join(skipped) if skipped else "")
+                drop_tree(repo, tree, run.get("branch") or "")
+                if why:
+                    run["stack_failed"] = True
+                    return False, "{}, but the stack stopped: {}. Nothing above it was merged; merge it by hand, " \
+                                  "then resolve the ticket.".format(note, why), sha, checks
+                return passed, "{}\n{}".format(reason, note), sha, checks
+        return False, "could not land: the layer {} kept gaining commits ({} tries)".format(layer, LAND_TRIES), sha, checks
 
     def _land(self, t, run, tree):
         """(passed, reason, sha, checks) of a worktree ticket: its commits rebased onto the checkout's newest commit,
@@ -6585,6 +6805,32 @@ class Supervisor:
         return None, None, "waits: " + " · ".join(whys) if whys and not busy else ""
 
     @staticmethod
+    def _layer_hold(t, items, by):
+        """(kind, with, text) of what keeps a layer ticket from starting now (ticket 194), or None: a ticket of a lower
+        layer of its stack that has not landed yet; a ticket outside the stack or of another layer running in its
+        repo; a running ticket of its layer whose named paths meet its own; or its layer's limit at once
+        (layer_parallel). Tickets of one layer naming no path, or paths apart, run side by side."""
+        low = sbqueue.lower_layer_first(t, items, by)
+        if low:
+            return "after", low[0], "comes after {} on the lower layer {}, which has not landed".format(*low)
+        layer, repo = sbqueue.layer_of(t), t.get("repo")
+        here = [i for i in items if i["state"] == "running" and i["key"] != sbqueue.key(t)
+                and ((by.get(i["key"]) or {}).get("repo") or i.get("repo")) == repo]
+        for r in here:
+            other = r.get("layer") if r["kind"] == "ticket" else None
+            if not other:
+                return "limit", r["key"], "{} runs {}, which is not on a stack layer".format(
+                    Path(repo or "").name or "the repo", r["key"])
+            if other != layer:
+                return "after", r["key"], "the layer {} runs now ({})".format(other, r["key"])
+            if r.get("paths") and t.get("paths") and paths_overlap(r["paths"], t["paths"]):
+                return "files", r["key"], "shares {} with {}, which is running".format(
+                    shared_path(r["paths"], t["paths"]), r["key"])
+        if len(here) >= layer_parallel(repo):
+            return "limit", None, "{} tickets of the layer {} already run at once".format(len(here), layer)
+        return None
+
+    @staticmethod
     def _retry_first(items, by):
         """{repo: key} of the first queued ticket on a later try that a queued ticket of its map waits on: nothing
         else of its repo starts before it goes again."""
@@ -6687,8 +6933,9 @@ class Supervisor:
             load, par = self._load(running), {}
             busy = {}  # repo -> the paths of each worktree ticket running in it; None for one in the checkout itself
             first = self._retry_first(q["items"], by)
-            for i in running:
-                busy.setdefault(i.get("repo"), []).append(list(i.get("paths") or []) if i.get("tree") else None)
+            for i in running:  # a layer ticket holds its repo against every ticket outside the stack (None)
+                busy.setdefault(i.get("repo"), []).append(
+                    list(i.get("paths") or []) if i.get("tree") and not i.get("layer") else None)
 
             def parallel(repo):
                 if repo not in par:
@@ -6731,7 +6978,10 @@ class Supervisor:
                     continue  # a Unity pass is an integrator: none starts while the repo's Unity does not answer
                 if first.get(repo, item["key"]) != item["key"]:
                     continue  # a failed ticket its map waits on goes again before anything else of its repo
-                if t is not None and not room(t.get("repo"), t.get("paths")):
+                if t is not None and sbqueue.layer_of(t):
+                    if self._layer_hold(t, q["items"], by):
+                        continue  # a lower layer first, another layer at work, or its layer's limit
+                elif t is not None and not room(t.get("repo"), t.get("paths")):
                     continue  # its repo is busy: it is not about to start, so it is not judged yet
                 name, inst, need = self._pick(q, item, t, load, now)
                 if name is None:
@@ -6756,7 +7006,8 @@ class Supervisor:
                     continue  # a blocker is queued ahead of it: it waits for it (one that landed does not hold it)
                 model = (item.get("model") if item.get("tries") or item.get("model") else
                          inst.get("model") if inst.get("kind") in OWN_MODEL else t.get("tier") or "sonnet")
-                if parallel(t["repo"]) > 1 or is_unity(t["repo"]) or item.get("from_chat"):  # its own worktree; a later
+                layer = sbqueue.layer_of(t)
+                if layer or parallel(t["repo"]) > 1 or is_unity(t["repo"]) or item.get("from_chat"):  # its own worktree; a later
                     # try keeps it, and so does one a chat left, which goes on from the chat's work
                     tree, branch = ((item["tree"], item["branch"]) if item.get("tree") and item.get("branch")
                                     else tree_of(self.hub.home, t["repo"], t["map"], t["num"]))
@@ -6765,9 +7016,9 @@ class Supervisor:
                     tree, branch, paths = None, None, None
                 item.update(state="running", runner=name, repo=t["repo"], map=t["map"], title=t["title"],
                             model=model, started=now, ended=None, note="starting", tree=tree, branch=branch,
-                            paths=paths, **frozen_of(t))
+                            paths=paths, layer=layer, **frozen_of(t))
                 take(name, need)
-                busy.setdefault(t["repo"], []).append(paths if tree else None)
+                busy.setdefault(t["repo"], []).append(paths if tree and not layer else None)
                 picks.append((dict(item), t, name, dict(inst)))
                 changed = True
             if changed:
@@ -6838,6 +7089,10 @@ class Supervisor:
                     w = ("after", current[repo], "comes after the map {}".format(current[repo]))
                 elif i["kind"] == "ticket" and first.get(repo, i["key"]) != i["key"]:
                     w = ("after", first[repo], "comes after the next try of {}, which its map waits on".format(first[repo]))
+                elif t is not None and sbqueue.layer_of(t):
+                    w = self._layer_hold(t, items, by)
+                elif here and i["kind"] == "ticket" and any(r.get("layer") for r in here):
+                    w = ("limit", None, "{} runs tickets of a stack layer".format(Path(repo or "").name or "the repo"))
                 elif here and i["kind"] == "ticket":
                     for r in here:
                         shared = shared_path(r.get("paths"), (t or {}).get("paths")) if r.get("tree") else None

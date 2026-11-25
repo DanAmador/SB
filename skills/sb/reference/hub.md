@@ -152,6 +152,36 @@ the vault. Only the running hub writes the queue (`$SB_HUB_HOME/state.json`); CL
   `wayfinder/<repo>/runs/<date>-validate.md` (one checkbox per ticket: what to do in Play and its link); the
   morning note links it under **Play these**. A look that fails: the owner reopens the ticket. A ticket with any other item
   `not met` gets its one more try as before.
+- **Stack layers** (ticket 194): for work on a stack of branches, each merged into the next, built and landed
+  layer by layer without touching the main folder.
+  - **Set it up**: the map's stack, bottom to top: `sbmap mapset <map> stack="layer-a,layer-b,layer-c"`. Each
+    ticket's layer: `sbmap set <map> <NNN> layer=layer-b` (refused when it is not in the stack; `layer=` clears
+    it). A ticket with no layer is an ordinary ticket of the checkout's branch.
+  - **Build**: a layer ticket always gets its own worktree, on `sb/<map>-<NNN>` cut from the layer's tip, never
+    from the checkout's HEAD. Its brief names the layer and tells the worker never to switch, rebase, merge or
+    push a branch.
+  - **Land**, under a lock per layer (`<git dir>/sb-layer-<layer>.lock`, also held across hub processes and
+    `run-ticket`): its commits are rebased onto the layer's tip, its checks run in its worktree, then only the
+    layer branch moves: a fast-forward in the worktree that has it checked out, else `git update-ref` after an
+    ancestor check. A layer that gained commits meanwhile is rebased onto again (3 tries). Unsaved changes in the
+    layer's worktree that the move would touch hold it for a recheck, no try spent. `after-landing:` and Unity
+    check lines are not run for a layer ticket: they run in the main folder.
+  - **Merge up**: the layer is then merged into each branch above it, in order, up to the top, merge commits only
+    (`Merge branch 'low' into up`); a branch that already holds the one below is left alone. A branch checked out
+    in a worktree is merged there (its git hooks run); one checked out nowhere gets its merge commit written
+    without a checkout (`git merge-tree`) and its ref moved. Nothing is rebased or pushed. A conflict stops it:
+    the ticket **fails for the owner**, naming the branch and the files, with its work already on its layer and
+    the branches below the conflict merged; it is never tried again. Merge up by hand, then resolve it.
+  - **The main folder never changes**: a layer or a branch above it checked out in the main folder stops the
+    landing with that said.
+  - **Order**: tickets of one layer run side by side, each in its own worktree (up to `git config sb.parallel`
+    when the repo sets it, else 4; two whose named paths meet wait for each other, a ticket naming no path
+    meets none), and land one at a time. A ticket of a higher layer starts only once no ticket of a lower layer
+    of its stack, in its repo, is queued or at work (running, recheck, unclean, handed); its card says
+    `comes after <key> on the lower layer <branch>`. While layer tickets run, no other ticket of the repo
+    starts, and the other way round.
+  - **Not done**: the Opus review reads the ticket's commit (`git show`) from the main folder, whose files are not
+    the layer's.
 - **Jobs**: a one-off prompt for any agent, in a wayfinder project or any git checkout by path
   (`sbhub queue job …`, or the page's New job form). No claim, no verdict: exit 0 is done.
 
