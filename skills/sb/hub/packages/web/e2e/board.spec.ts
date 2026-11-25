@@ -1496,7 +1496,7 @@ test.describe("Run tab: why it waits, how many at once, which account and model"
   }
 });
 
-test("Review finished now: off while no ticket waits for a review, on with the count and the next look once one has landed", async ({ page, request }) => {
+test("Review finished now: off while no ticket waits for a review, on with the count once one has landed, and says the review comes at the map's end", async ({ page, request }) => {
   await request.post("/api/__restore");
   await page.setViewportSize({ width: 375, height: 800 });
   await page.goto("/next/?rt=maps");
@@ -1505,7 +1505,7 @@ test("Review finished now: off while no ticket waits for a review, on with the c
   await request.post("/api/__between");
   const one = page.getByRole("button", { name: "Review 1 finished now" });
   await expect(one).toBeEnabled({ timeout: 10_000 });
-  await expect(page.getByTestId("review-now")).toContainText("The next timed look is at");
+  await expect(page.getByTestId("review-now")).toContainText("reviewed once, when their map's run ends");
   const dir = process.env.SB_SHOTS;
   if (dir !== undefined) await page.screenshot({ path: `${dir}/126-phone.png` });
   await request.post("/api/__restore");

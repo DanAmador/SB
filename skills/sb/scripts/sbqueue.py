@@ -442,11 +442,32 @@ PLAY_VERDICT = ("A line `{}` counts neither for nor against the ticket: when eve
                 "finished, and the hub puts the ticket on the owner's list of checks to play.").format(NOT_PLAYED)
 
 
-def review_brief(sections, repo, unity=None):
+FIT = """## How the tickets fit together
+
+These {count} tickets are one map's work, reviewed together once its run ended. After the review files, write one
+more file, on how they fit together:
+
+Write how they fit to: {path}
+
+One `- ` line per place where they do not fit: one undoes, repeats or contradicts another, they disagree on a name,
+a format or a file, or together they miss something the map needs that no single Done when names. Name every
+ticket a line is about as `#<its number>`, and say what to change. When they fit, write the one line
+`- They fit together: nothing to change.` This file closes and reopens no ticket: the verdicts stay in the review
+files, judged on each ticket alone."""
+
+
+def fit_findings(text):
+    """The `- ` lines of a map review's fit file, each with the ticket numbers it names (`#12`, `#012`):
+    [(line, {12, ...})]."""
+    return [(l, {int(n) for n in re.findall(r"#0*(\d+)", l)}) for l in review_findings(text)]
+
+
+def review_brief(sections, repo, unity=None, fit=None):
     """The second pass's prompt for one map's run: templates/review-brief.md with each landed ticket's
     `review_section` in it, one review file per ticket. `unity`: {lock, held, who} when a ticket has In Play lines:
     `held`, the hub holds the repo's Unity lock for the review, which plays them; else `who` holds it, and the review
-    marks them not played yet (no `who`: it runs outside the hub's queue and holds no lock)."""
+    marks them not played yet (no `who`: it runs outside the hub's queue and holds no lock). `fit`: the file the
+    review writes how the tickets fit together to (FIT; the hub passes it for two tickets or more)."""
     sections = list(sections)
     play = ""
     if unity:
@@ -456,7 +477,8 @@ def review_brief(sections, repo, unity=None):
         play = "\n" + (PLAY_HELD if unity.get("held") else PLAY_BUSY).format(
             lock=unity.get("lock"), repo=repo, why=why, not_played=NOT_PLAYED)
     values = {"repo": str(repo), "count": str(len(sections)), "s": "" if len(sections) == 1 else "s",
-              "tickets": "\n\n".join(sections), "play": play, "play_verdict": PLAY_VERDICT if unity else ""}
+              "tickets": "\n\n".join(sections), "play": play, "play_verdict": PLAY_VERDICT if unity else "",
+              "fit": FIT.format(count=len(sections), path=fit) if fit else ""}
     return _fill(REVIEW_TEMPLATE, values)
 
 

@@ -251,8 +251,6 @@ function state(): State {
     },
     seen: [...seen],
     now: now(),
-    // the timer looks 25 minutes after the oldest landed ticket landed; none landed, none to look at
-    review_next_at: queue.items.some((i) => i.kind === "ticket" && i.state === "landed") ? now() + 600 : null,
     queue: (addLinks("GET /api/state", { queue }, ctx) as { queue: unknown }).queue,
   });
 }

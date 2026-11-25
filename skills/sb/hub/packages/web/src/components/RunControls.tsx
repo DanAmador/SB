@@ -330,7 +330,6 @@ export function ReviewNow(): React.JSX.Element {
   const [pending, setPending] = useState(false);
   const [said, setSaid] = useState("");
   const waiting = state.queue.items.filter((i) => i.kind === "ticket" && i.state === "landed").length;
-  const next = state.review_next_at ?? null;
   const off = down || busy || pending || waiting === 0;
   // busy is on for the read-only phone page and chat card
   const nameOf = (map: string): string => {
@@ -351,7 +350,7 @@ export function ReviewNow(): React.JSX.Element {
         {waiting === 0 ? "Review finished now" : `Review ${String(waiting)} finished now`}
       </Button>
       <span className="text-muted-foreground">
-        {waiting === 0 ? "No finished ticket waits for a review." : next !== null ? `The next timed look is at ${hm(next)}.` : "Finished tickets are reviewed when their map ends."}
+        {waiting === 0 ? "No finished ticket waits for a review." : "Finished tickets are reviewed once, when their map's run ends."}
       </span>
       {said !== "" && <span>{said}</span>}
     </div>

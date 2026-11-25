@@ -829,8 +829,7 @@ class Hub:
                     v["map"] = sbqueue.map_of(k)
                     if charge.get(v["map"]) in out["agents"]:
                         v["in_charge"] = charge[v["map"]]
-            out = {**out, "now": self.now(), "providers": dict(self.providers),
-                   "review_next_at": review_next_at(out["queue"]["items"])}
+            out = {**out, "now": self.now(), "providers": dict(self.providers)}
             if self.queue_lock is not None:
                 out["queue_lock"] = dict(self.queue_lock)
             return out
@@ -1921,26 +1920,6 @@ TICKETS_FAILED_FOR = 5  # after a failed sbmap, no new try for this long
 WORKER_LIMIT = 90 * 60  # a worker still running after this long has its process group killed
 TICK_EVERY = 5
 RECHECK_EVERY = 10 * 60  # a ticket whose check could not run (exit 75): its checks run again this often
-REVIEW_EVERY_MIN = 25  # a landed ticket waits at most this long for its review while its map still runs
-
-
-def review_every():
-    """Seconds a landed ticket waits before the timer reviews it on a busy map (env SB_REVIEW_EVERY_MIN overrides)."""
-    try:
-        return float(os.environ.get("SB_REVIEW_EVERY_MIN") or REVIEW_EVERY_MIN) * 60
-    except ValueError:
-        return REVIEW_EVERY_MIN * 60
-
-
-def review_next_at(items):
-    """When the timer next looks at a busy map: the oldest landed ticket's landing plus review_every(), over maps
-    with no review running (their items in state `review`); None when nothing waits."""
-    held = {sbqueue.map_of(i["key"]) for i in items if i["kind"] == "ticket" and i["state"] == "review"}
-    at = [i.get("landed_at") or 0 for i in items
-          if i["kind"] == "ticket" and i["state"] == "landed" and sbqueue.map_of(i["key"]) not in held]
-    return min(at) + review_every() if at else None
-
-
 RECHECKS_MAX = 6  # ...this many times, then it waits for the Recheck button
 REVIEW_BASE, REVIEW_EACH = 10 * 60, 5 * 60  # a map's second pass may run 10 minutes plus 5 per ticket, then it is killed
 
@@ -4244,8 +4223,7 @@ class TicketRun:
         if tree and not passed:
             reason += "\nIts work stays on branch {} in {}.".format(branch, tree)
         if passed:  # a worker that did the work lands, whatever it printed afterwards; its map's second pass judges it
-            wait = "landed, not judged yet: the Opus review judges it when its map's run ends, or once it waited {} " \
-                   "minutes".format(int(review_every() // 60))
+            wait = "landed, not judged yet: the Opus review judges it when its map's run ends"
             return {**self.result(item, "landed", wait, run, sha, checks), "checked": reason}
         # a failed run whose own output (not an earlier try's) names a usage limit or a logout is tried again
         if not over and not recheck:
@@ -4946,8 +4924,11 @@ class TicketRun:
                 sections[-1] += LAYER_REVIEW.format(layer=layer, repo=t["repo"], sha=sha[:12] if sha else "its commit")
         if unity is None and any(sbqueue.play_lines(run["t"].get("done_when")) for _, run, _ in entries):
             unity = {"lock": unity_lock(t0["repo"]), "held": False}  # outside the queue: no lock, nothing played
-        brief = sbqueue.review_brief(sections, t0["repo"], unity=unity)
         folder = Path(run0["folder"])
+        fit = folder / "review-fit.md" if len(entries) > 1 else None  # how the map's tickets fit together
+        if fit:
+            fit.unlink(missing_ok=True)
+        brief = sbqueue.review_brief(sections, t0["repo"], unity=unity, fit=fit)
         log = str(folder / ("{}-review.log".format(int(t0["num"])) if len(entries) == 1 else "review.log"))
         try:
             start = os.path.getsize(log)
@@ -4960,7 +4941,8 @@ class TicketRun:
                "SB_HUB_RUN": str(folder)}
         p = self.hub.launcher(inst, brief, t0["repo"], REVIEW_MODEL, env, log)
         return {"p": p, "agent": name, "inst": inst, "log": log, "start": start, "files": files,
-                "keys": [i["key"] for i, _, _ in entries], "limit": review_limit(len(entries))}
+                "keys": [i["key"] for i, _, _ in entries], "limit": review_limit(len(entries)),
+                "fit": str(fit) if fit else None}
 
     def review_end(self, item, run, sha, checked, checks, rv, over=False):
         """The result once the second pass ended: `finished` resolves the ticket with its commit; `partly` and `not
@@ -6512,8 +6494,8 @@ class Supervisor:
             self.runner.rebuild_after(row["repo"], run.get("landed_on") or run.get("base"), res["commit"])
 
     def _reviews(self):
-        """A map's second pass: one per map at a time, started when the map's run has ended, when its oldest landed
-        ticket waited review_every(), or on the owner's Review now, judging the landed tickets no review holds
+        """A map's second pass: one per map at a time, started when the map's run has ended or on the owner's Review
+        now (ticket 096: once per map, no timer), judging the landed tickets no review holds
         (`_start_reviews`); once it ended or ran past its limit, each ticket is judged: resolved, left open with
         the findings, or `recheck` when its review could not run (`_review_end`). A review is a process like a worker:
         the tick never waits for it, and it holds no repo and no agent slot, so other tickets start meanwhile."""
@@ -6582,8 +6564,8 @@ class Supervisor:
                 "review": None, "note": "review could not run: " + why}
 
     def review_now(self):
-        """POST /api/review/now and `sbhub review-now`: start, at once, the review the timer would start for every map
-        with landed tickets no review holds, busy or not. The maps started, sorted."""
+        """POST /api/review/now and `sbhub review-now`: start, at once, the review a map's end would start for every
+        map with landed tickets no review holds, busy or not. The maps started, sorted."""
         if self.stopped:
             return []
         return self._start_reviews(now=True)
@@ -6592,10 +6574,11 @@ class Supervisor:
         """Start ONE second pass per map over its landed tickets: those in state `landed`, and any in state `review`
         that no running second pass holds (a hub that restarted, or one that saved the old state). A map gets it when
         its run has ended (no item of it queued, running or in checks; a paused queue's queued items do not count),
-        or, still busy, once its oldest such ticket landed review_every() ago (`landed_at`, kept in the queue file, so
-        a restart does not reset the clock), or at once with `now` (the owner's Review now). One review at a time per
-        map: a map with one running waits for it, and a running review's tickets are never taken again. The map-end
-        review is the same call, so it takes only the leftovers. Returns the maps started."""
+        or at once with `now` (the owner's Review now), or when one of them is left in `review` by a hub that
+        stopped while that review ran. A busy map is never reviewed on a timer (ticket 096: the
+        Opus pass runs once per map). One review at a time per map: a map with one running waits for it, and a
+        running review's tickets are never taken again, so a map-end review after a Review now takes only the
+        leftovers. Returns the maps started."""
         with self.review_lock:
             return self._start_reviews_locked(now)
 
@@ -6613,9 +6596,9 @@ class Supervisor:
                     groups.setdefault(m, []).append(dict(i))
                 elif st in ("running", "handed") or st == "queued" and not q["paused"] and i.get("night") or st == "recheck" and i.get("checked") is None:
                     busy.add(m)
-            due = self.hub.now() - review_every()
+            # a ticket left in `review` (its review was running when the hub stopped) has its review started again
             groups = {m: g for m, g in groups.items() if m not in self.reviews and (
-                now or m not in busy or min(i.get("landed_at") or 0 for i in g) <= due)}
+                now or m not in busy or any(i["state"] == "review" for i in g))}
         started = []
         if not groups:
             return started
@@ -6688,7 +6671,43 @@ class Supervisor:
                 "tree": item.get("tree"), "branch": item.get("branch")}
 
     def _review_end(self, rv, over):
-        """Each ticket the ended second pass held is judged from its own review file."""
+        """Each ticket the ended second pass held is judged from its own review file; then how they fit together
+        goes on the run board and on each ticket it names (`_fit_end`)."""
+        try:
+            self._judge_reviewed(rv, over)
+        finally:
+            if not over:
+                self._fit_end(rv)
+
+    def _fit_end(self, rv):
+        """A map review's fit file (sbqueue.FIT): its lines go on the map's run board under one heading, and each
+        line naming a ticket the review held goes on that ticket as one comment. Changes no ticket's status."""
+        try:
+            text = Path(rv["fit"]).read_text(encoding="utf-8", errors="replace") if rv.get("fit") else ""
+        except OSError:
+            text = ""
+        found = sbqueue.fit_findings(text)
+        if not found:
+            return
+        m = sbqueue.map_of(rv["keys"][0])
+        stamp = datetime.fromtimestamp(self.hub.now()).strftime("%Y-%m-%d %H:%M")
+        board = self._board(m)
+        if board:
+            try:
+                with open(board, "a", encoding="utf-8") as f:
+                    f.write("\n## How the tickets fit together, {}\n\n{}\n\nReview: {}\n".format(
+                        stamp, "\n".join(l for l, _ in found), rv["fit"]))
+            except OSError as e:
+                print("sb hub queue: fit for {}: {}".format(m, e), file=sys.stderr, flush=True)
+        held = {int(k.rsplit("#", 1)[1]) for k in rv["keys"]}
+        for num in sorted(held):
+            lines = [l for l, nums in found if num in nums]
+            if lines:
+                self.sbmap("comment", m, "{:03d}".format(num), "--text",
+                           "The Opus review of the map's tickets together found:\n  {}\n  Review: {}".format(
+                               "\n  ".join(lines), rv["fit"]))
+
+    def _judge_reviewed(self, rv, over):
         for key in rv["keys"]:
             with self.hub._lock:
                 item = next((dict(i) for i in self.hub._data["queue"]["items"]

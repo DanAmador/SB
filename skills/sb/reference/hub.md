@@ -133,13 +133,14 @@ the vault. Only the running hub writes the queue (`$SB_HUB_HOME/state.json`); CL
   and the last report. No session kept, its file missing or older than a day, or a resume that ends
   with an error before any turn: the try starts afresh with the whole brief and the old log's path.
 - **Review**: a ticket whose checks pass lands (`landed`, with `landed_at`) and waits for its map's Opus
-  review, one per map at a time, which judges every landed ticket no review holds. It starts when the map's run
-  ends, or, while the map still runs, once its oldest landed ticket waited 25 minutes (`SB_REVIEW_EVERY_MIN`),
-  counted from `landed_at` in the queue file, so a restart does not reset it; the map-end review then takes only the
-  leftovers. `POST /api/review/now {}` (`sbhub review-now`) starts the review the timer would for every map with
-  landed tickets, busy or not, and answers `{ok, started: [maps]}`; a map whose review runs starts nothing new.
-  `/api/state`'s `review_next_at` is when the timer next looks (null: nothing waits). No review starts while the
-  hub rebuilds its own code. A review running when the hub stops is started afresh, once, by the next hub.
+  review, once per map (ticket 096: no timer), which judges every landed ticket no review holds. It starts when
+  the map's run ends. `POST /api/review/now {}` (`sbhub review-now`, the page's Review now) starts it at once for
+  every map with landed tickets, busy or not, and answers `{ok, started: [maps]}`; a map whose review runs starts
+  nothing new, and the map-end review then takes only the leftovers. A review of two tickets or more also writes
+  how they fit together (`<run>/review-fit.md`); the hub appends its lines to the map's run board and comments
+  each line on the tickets it names (`#<num>`). It closes and reopens nothing. No review starts while the hub
+  rebuilds its own code. A review running when the hub stops is started afresh, once, by the next hub, even on a
+  busy map.
 - **In Play lines**: a Done when item that starts `In Play` is checked in the Unity Editor. The worker's brief
   lists it as "played by the review, leave it" and the worker is not judged on it. A map's review whose tickets
   have such lines takes the repo's Unity lock (`unity:<repo>`, held by `sb-hub review <map>`) before it starts,

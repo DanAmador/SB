@@ -578,9 +578,6 @@ export const State = z.strictObject({
   providers: z.record(z.string(), z.array(ProviderPanel)),
   /** Who holds ~/.sb-hub/queue.lock: `mine` is false on a hub that serves read-only beside another that runs the queue. */
   queue_lock: z.strictObject({ mine: z.boolean(), holder: z.string() }).optional(),
-  /** When the review timer next looks: the oldest landed ticket's landing plus SB_REVIEW_EVERY_MIN (25) minutes,
-   * over maps with no review running; null when no landed ticket waits (absent from a hub older than this). */
-  review_next_at: Seconds.nullable().optional(),
 });
 export type State = z.infer<typeof State>;
 

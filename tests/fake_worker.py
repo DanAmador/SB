@@ -45,6 +45,8 @@ A ticket whose section lists In Play lines (`### Its In Play lines`) gets one it
 `met: played on main` when the brief says the hub took the Unity lock for it, else `not played yet`.
 
 Every review it runs appends a line to FAKE_REVIEW_CALLS when that is set: each file's name and mode.
+A brief that also names a fit file (`Write how they fit to: <path>`, two tickets or more) gets FAKE_FIT written
+there, its lines split on `|` (default `- They fit together: nothing to change.`).
 
 Printed as `claude -p --output-format stream-json` does: the result is the last line. FAKE_WORKER_USAGE="0.30>0.45"
 adds a rate_limit_event with 5-hour use 0.30 at the start and 0.45 just before the result (resetsAt from
@@ -128,6 +130,10 @@ def reviewer(paths, brief=""):
             lines += ["", "Verdict: " + mode]
         with open(path, "w", encoding="utf-8") as f:
             f.write("\n".join(lines) + "\n")
+    for fit in re.findall(r"^Write how they fit to: (.+)$", brief, re.M):
+        with open(fit.strip(), "w", encoding="utf-8") as f:
+            f.write("\n".join((os.environ.get("FAKE_FIT") or "- They fit together: nothing to change.").split("|"))
+                    + "\n")
     if crashed:
         print(json.dumps({"type": "result", "is_error": True, "result": "crashed"}), flush=True)
         return 1

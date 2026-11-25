@@ -1,6 +1,6 @@
 <!-- The prompt of a map's second pass, which the hub fills once the map's run has finished and every ticket it
-     landed passed its checks (`sbqueue.review_brief`, one `review_section` per ticket), and runs on Opus whichever
-     model did the work. A line whose value is empty is dropped. This comment is not sent. A name the hub cannot
+     landed passed its checks (`sbqueue.review_brief`, one `review_section` per ticket, and the fit section for two
+     tickets or more), and runs on Opus whichever model did the work. A line whose value is empty is dropped. This comment is not sent. A name the hub cannot
      fill is an error, so add none. -->
 You are the second pass on {count} ticket{s} of an unattended night run, in {repo}. A worker did each ticket; the
 hub checked that its commit carries the ticket's name and that every check exited 0. You decide, ticket by ticket,
@@ -40,4 +40,5 @@ Verdict: not met
 finished: every item is met. partly: some are met, some not. not met: none is, or the change does something
 else.
 {play_verdict}
+{fit}
 Say nothing along the way. Your last message, one line per ticket: its verdict and its review file's path.

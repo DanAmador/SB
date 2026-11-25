@@ -7,13 +7,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLink } from "@/lib/link.ts";
 import { Board } from "./Board.tsx";
 
-const NEXT = 1794528060 + 600;
 /** The contract's state fixture with `landed` of its queued tickets finished and not yet reviewed. */
 const stateWith = (landed: number): unknown => {
-  const fx = JSON.parse(readFileSync(join(import.meta.dirname, "../../../contract/fixtures/state.json"), "utf8")) as { route: string; body: { queue: { items: { kind: string; state: string }[] }; review_next_at: number | null } };
+  const fx = JSON.parse(readFileSync(join(import.meta.dirname, "../../../contract/fixtures/state.json"), "utf8")) as { route: string; body: { queue: { items: { kind: string; state: string }[] } } };
   let n = 0;
   for (const i of fx.body.queue.items) if (i.kind === "ticket" && n < landed && ++n) i.state = "landed";
-  fx.body.review_next_at = landed > 0 ? NEXT : null;
   return addLinks(fx.route as "GET /api/state", fx.body, { exists: () => false, real: (p) => p, findTicket: () => null, runs: {} });
 };
 const json = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -41,11 +39,11 @@ const app = (landed: number, posts: string[] = []): void => {
 };
 
 describe("the Review finished now button", () => {
-  it("counts the finished, unreviewed tickets and names the next timed look", async () => {
+  it("counts the finished, unreviewed tickets and says they are reviewed at their map's end", async () => {
     app(2);
     const b = await screen.findByRole("button", { name: "Review 2 finished now" });
     expect((b as HTMLButtonElement).disabled).toBe(false);
-    expect(screen.getByText(/The next timed look is at/)).not.toBeNull();
+    expect(screen.getByText("Finished tickets are reviewed once, when their map's run ends.")).not.toBeNull();
   });
 
   it("is off when nothing waits", async () => {

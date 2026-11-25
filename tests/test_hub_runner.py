@@ -1077,10 +1077,10 @@ class MapReviewTest(RunnerCase):
         self.assertNotIn(1, self.open_tickets())
 
 
-class TimedReviewTest(RunnerCase):
-    """A busy map's landed tickets get their review once the oldest waited review_every() (25 minutes), counted from
-    `landed_at` in the queue file; the map-end review takes only the leftovers; POST /api/review/now starts the same
-    review at once for every map with landed tickets, busy or not."""
+class OncePerMapReviewTest(RunnerCase):
+    """The Opus second pass runs once per map (ticket 096): a busy map's landed tickets wait, however long, until its
+    run ends, and then one review takes them all, with a section on how they fit together that goes on the run
+    board and on each ticket it names. POST /api/review/now starts a map's review at once, busy or not."""
     MAPS = (("repo/one", "repoA", ("A", "one/"), ("B", "two/"), ("C", "three/")),
             ("repo/two", "repoB", ("D", "four/"), ("E", "five/")))
 
@@ -1106,39 +1106,51 @@ class TimedReviewTest(RunnerCase):
         self.until(lambda: [self.state_of("repo/one#{}".format(n)) for n in (1, 2, 3)] == ["landed", "landed", "running"])
         self.assertEqual(self.reviewed, [])
 
-    def test_two_tickets_landed_26_minutes_ago_get_one_review_while_the_third_runs_and_it_alone_at_the_maps_end(self):
+    def ticket_text(self, num):
+        f = next(iter(sorted((self.vault / "wayfinder" / "repo/one" / "issues").glob("**/{:03d}*.md".format(num)))))
+        return f.read_text(encoding="utf-8")
+
+    def test_a_busy_map_is_not_reviewed_however_long_its_tickets_wait_and_its_end_reviews_all_of_them_once(self):
         self.modes = {"repo/one#3": "slow"}
         os.environ["FAKE_WORKER_SLEEP"] = "4"
         self.addCleanup(os.environ.pop, "FAKE_WORKER_SLEEP", None)
         self.two_landed_and_one_running()
-        self.landed_ago(26, "repo/one#1", "repo/one#2")
-        self.until(lambda: self.reviewed)
-        self.assertEqual(self.state_of("repo/one#3"), "running")  # the map is still busy
-        self.assertEqual([x["keys"] for x in self.reviewed], [["repo/one#1", "repo/one#2"]])
+        self.landed_ago(120, "repo/one#1", "repo/one#2")  # two hours: the old 25-minute timer would have fired
+        for _ in range(5):
+            self.sup.tick()
+        self.assertEqual((self.reviewed, self.sup.reviews), ([], {}))
+        self.assertNotIn("review_next_at", self.hub.state())
         self.until(lambda: self.state_of("repo/one#3") == "done")
-        self.assertEqual([x["keys"] for x in self.reviewed], [["repo/one#1", "repo/one#2"], ["repo/one#3"]])
+        self.assertEqual([x["keys"] for x in self.reviewed], [["repo/one#1", "repo/one#2", "repo/one#3"]])
+        self.assertEqual([x["model"] for x in self.reviewed], ["opus"])
         self.assertEqual([self.state_of("repo/one#{}".format(n)) for n in (1, 2)], ["done", "done"])
 
-    def test_a_ticket_landed_10_minutes_ago_waits_and_the_clock_counts_from_its_landing_across_a_restart(self):
-        self.modes = {"repo/one#3": "hang"}
-        self.two_landed_and_one_running()
-        self.landed_ago(10, "repo/one#1", "repo/one#2")
-        landed = self.items()["repo/one#1"]["landed_at"]
-        for _ in range(5):
-            self.sup.tick()
-        self.assertEqual((self.reviewed, self.sup.reviews), ([], {}))  # 10 minutes: not yet
-        self.assertEqual(self.hub.state()["review_next_at"], landed + 25 * 60)
-        self.restart()  # the landing time is in the queue file: a restart does not reset the clock
-        on_disk = json.loads((self.root / "hub" / "state.json").read_text(encoding="utf-8"))["queue"]["items"]
-        self.assertEqual(next(i["landed_at"] for i in on_disk if i["key"] == "repo/one#1"), landed)
-        self.until(lambda: self.state_of("repo/one#3") == "running")  # the worker the restart killed runs again
-        for _ in range(5):
-            self.sup.tick()
-        self.assertEqual(self.reviewed, [])
-        self.clock.t += 16 * 60  # 26 minutes since the landing, 16 since the restart
+    def test_the_one_review_writes_how_the_tickets_fit_to_the_run_board_and_each_ticket_it_names_closing_nothing(self):
+        os.environ["FAKE_FIT"] = ("- #1 and #3 both add a `size` setting, with different defaults: keep one"
+                                  "|- #002 names the file Two.md, the map's notes call it two.md")
+        self.addCleanup(os.environ.pop, "FAKE_FIT", None)
+        self.verdicts = {"repo/one#1": "partly"}
+        self.only(1, 2, 3)
+        self.until(lambda: self.reviewed and "repo/one" not in self.sup.reviews and self.state_of("repo/one#1") != "review")
+        [rv] = self.reviewed
+        self.assertIn("## How the tickets fit together", rv["brief"])
+        fit = re.search(r"^Write how they fit to: (.+)$", rv["brief"], re.M).group(1)
+        board = Path(self.hub.state()["queue"]["runs"]["repo/one"]).read_text(encoding="utf-8")
+        self.assertIn("## How the tickets fit together", board)
+        self.assertIn("- #1 and #3 both add a `size` setting", board)
+        self.assertIn("Review: " + fit, board)
+        self.assertIn("both add a `size` setting", self.ticket_text(1))
+        self.assertIn("both add a `size` setting", self.ticket_text(3))
+        self.assertIn("names the file Two.md", self.ticket_text(2))
+        self.assertNotIn("names the file Two.md", self.ticket_text(1))
+        # the verdicts stay each ticket's own: 2 and 3 finished despite the fit lines, 1 gets its one more try
+        self.assertEqual([self.state_of("repo/one#{}".format(n)) for n in (2, 3)], ["done", "done"])
+        self.assertNotEqual(self.state_of("repo/one#1"), "done")
+
+    def test_a_review_of_one_ticket_asks_for_no_fit_file(self):
+        self.only(1)
         self.until(lambda: self.reviewed)
-        self.assertEqual([x["keys"] for x in self.reviewed], [["repo/one#1", "repo/one#2"]])
-        self.assertEqual(self.hub.state()["review_next_at"], None)  # nothing landed waits outside the review
+        self.assertNotIn("Write how they fit to:", self.reviewed[0]["brief"])
 
     def test_a_review_running_when_the_hub_restarts_is_started_once_by_the_new_hub(self):
         self.modes = {"repo/one#3": "hang"}
@@ -1146,7 +1158,7 @@ class TimedReviewTest(RunnerCase):
         os.environ["FAKE_REVIEW_SLEEP"] = "30"
         self.addCleanup(os.environ.pop, "FAKE_REVIEW_SLEEP", None)
         self.two_landed_and_one_running()
-        self.landed_ago(26, "repo/one#1", "repo/one#2")
+        self.assertEqual(self.sup.review_now(), ["repo/one"])  # the owner's Review now, the map still busy
         self.until(lambda: "repo/one" in self.sup.reviews)
         self.restart()  # the review was killed; its tickets stay `review` in the queue file
         self.assertEqual([self.state_of("repo/one#{}".format(n)) for n in (1, 2)], ["review", "review"])
@@ -1168,7 +1180,7 @@ class TimedReviewTest(RunnerCase):
         go(self.hub)
         want = {"repo/one#1": "landed", "repo/one#2": "running", "repo/two#4": "landed", "repo/two#5": "running"}
         self.until(lambda: {k: self.state_of(k) for k in want} == want)
-        self.assertEqual(self.reviewed, [])  # both maps are busy and nothing waited 25 minutes
+        self.assertEqual(self.reviewed, [])  # both maps are busy: no review until Review now
         self.restart()  # the new hub reads the queue file the running one wrote
         server = http.server.ThreadingHTTPServer(("127.0.0.1", free_port()), sbhub.make_handler(self.hub))
         threading.Thread(target=server.serve_forever, daemon=True).start()
